@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 NOW = tick.LEASE_MS + 1_000
 
 
-class _AckError(Exception):
+class _AckError(tick.SpawnError):
     """A collect error the fake tick seam reads as a pending hive acknowledgement."""
 
 
@@ -70,29 +70,51 @@ def _seams(monkeypatch: pytest.MonkeyPatch, pending: set[str], waiting: set[str]
     monkeypatch.setattr(
         readiness, "tick_launches", lambda engine, row: seen.append(("ready", engine)) or row.get("ready", True)
     )
-    monkeypatch.setattr(tick, "_acknowledging", lambda slug, store, agent: agent.name in waiting)
+    monkeypatch.setattr(
+        tick, "_acknowledging", lambda slug, store, agent: seen.append(("ack", slug, store)) or agent.name in waiting
+    )
     monkeypatch.setattr(tick, "_acknowledging_error", lambda exc: isinstance(exc, _AckError))
     monkeypatch.setattr(tick, "placed_record", lambda agent, placed: ("record", agent.name, placed))
-    monkeypatch.setattr(codex, "admit_legacy", lambda store, slug, record, runtime: ("launched", slug, record))
-    monkeypatch.setattr(tick, "_finished_launch", lambda slug, store, doc, agent: f"finished {slug} {agent.name}")
+    monkeypatch.setattr(
+        codex,
+        "admit_legacy",
+        lambda store, slug, record, runtime: seen.append(("admit", store, runtime)) or ("launched", slug, record),
+    )
+    monkeypatch.setattr(
+        tick,
+        "_finished_launch",
+        lambda slug, store, doc, agent: seen.append(("finished", store, doc)) or f"finished {slug} {agent.name}",
+    )
     monkeypatch.setattr(
         tick,
         "_started",
-        lambda slug, config, store, ledger, doc, started, now_ms: [
-            f"started {slug} {ledger} {started.record.name} {started.task['id']} {started.placed} {started.launched} {now_ms}"
-        ],
+        lambda slug, config, store, ledger, doc, started, now_ms: (
+            seen.append(("started", config, store, doc))
+            or [
+                f"started {slug} {ledger} {started.record.name} {started.task['id']} {started.placed} {started.launched} {now_ms}"
+            ]
+        ),
     )
     monkeypatch.setattr(
         tick,
         "_spawn_failed",
-        lambda slug, store, ledger, runtime, rows, failed, now_ms: [
-            f"failed {slug} {ledger} {sorted(rows)} {failed.record.name} {failed.task['id']} {failed.error} {now_ms}"
-        ],
+        lambda slug, store, ledger, runtime, rows, failed, now_ms: (
+            seen.append(("failed", store, runtime))
+            or [
+                f"failed {slug} {ledger} {sorted(rows)} {failed.record.name} {failed.task['id']} {failed.error} {now_ms}"
+            ]
+        ),
     )
     monkeypatch.setattr(
-        tick, "_expire_launch", lambda config, runtime, agent, error: runtime.expire(config, agent.lane, agent.name, {})
+        tick,
+        "_expire_launch",
+        lambda config, runtime, agent, error: runtime.expire(config, agent.lane, agent.name, {"error": str(error)}),
     )
     return seen
+
+
+def _args(seen: list[tuple[Any, ...]], tag: str) -> list[tuple[Any, ...]]:
+    return [entry[1:] for entry in seen if entry[0] == tag]
 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
@@ -150,10 +172,18 @@ def test_collected_acknowledgements_start_finish_fail_or_wait_each_launch(
         "collect",
         ("pass", ("sw", config, store, "ledger", runtime, {t["id"]: t for t in tasks}, doc, NOW)),
     )
-    assert set(seen[1:]) == {("ready", "tick")}
+    assert set(_args(seen, "ready")) == {("tick",)}
+    assert set(_args(seen, "ack")) == {("sw", store)}
+    assert _args(seen, "admit") == [(store, runtime), (store, runtime)]
+    assert _args(seen, "finished") == [(store, doc)]
+    assert _args(seen, "started") == [(config, store, doc), (config, store, doc)]
+    assert _args(seen, "failed") == [(store, runtime)] * 3
     assert [call[2] for call in runtime.collected] == ["a1", "a2", "a6", "a7", "a8", "a9", "a10", "a11", "a12"]
     assert runtime.collected[0] == (config, "eng", "a1", {"id": "task-a1", "seat": "seat-a1", tick.ACK_LATER: True})
-    assert [call[2] for call in runtime.expiring] == ["a8", "a11"]
+    assert runtime.expiring == [
+        (config, "eng", "a8", {"error": "lost"}),
+        (config, "eng", "a11", {"error": "still pending"}),
+    ]
     assert store.refreshed == [
         ("sw", "task-a6", "a6", tick.LEASE_MS),
         ("sw", "task-a9", "a9", tick.LEASE_MS),
@@ -173,5 +203,6 @@ def test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its
     assert actions == [
         f"started sw ledger a1 task-a1 placed-a1 ('launched', 'sw', ('record', 'a1', 'placed-a1')) {NOW}"
     ]
-    assert seen == [("ready", EVENTS_ENGINE)]
+    assert _args(seen, "ready") == [(EVENTS_ENGINE,)]
+    assert _args(seen, "collect") == []
     assert runtime.collected == [(config, "eng", "a1", {"id": "task-a1", "seat": "seat-a1", tick.ACK_LATER: True})]

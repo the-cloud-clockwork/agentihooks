@@ -43,14 +43,14 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
     monkeypatch.setattr(
         tick,
         "_acknowledging",
-        lambda slug, store, agent: seen.append(("ack", slug, agent.name)) or agent.name == "acking",
+        lambda slug, store, agent: seen.append(("ack", slug, store, agent.name)) or agent.name == "acking",
     )
     monkeypatch.setattr(
         tick, "_ended", lambda agent, rows: seen.append(("ended", agent.name, rows)) or agent.name == "ended"
     )
 
     def follow(slug: str, store: Any, runtime: Any, agent: Any, rebound: Any) -> tuple[Any, list[str]]:
-        seen.append(("follow", slug, agent.name, rebound))
+        seen.append(("follow", slug, store, runtime, agent.name, rebound))
         return (None, [f"gone {agent.name}"]) if agent.name == "gone" else (agent, [f"followed {agent.name}"])
 
     monkeypatch.setattr(tick, "_follow", follow)
@@ -66,7 +66,7 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
         tick,
         "_drop",
         lambda slug, store, ledger, rows, agent, refund: (
-            seen.append(("drop", slug, ledger, agent.name, refund)) or " and dropped"
+            seen.append(("drop", slug, store, ledger, rows, agent.name, refund)) or " and dropped"
         ),
     )
     return seen
@@ -91,17 +91,17 @@ def test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_
         "retired drifted after mismatched pane and dropped",
     ]
     assert [entry for entry in seen if entry[0] == "ack"] == [
-        ("ack", "sw", name) for name in ("acking", "ended", "gone", "steady", "drifted")
+        ("ack", "sw", store, name) for name in ("acking", "ended", "gone", "steady", "drifted")
     ]
     assert [entry for entry in seen if entry[0] == "ended"] == [
         ("ended", name, rows) for name in ("ended", "gone", "steady", "drifted")
     ]
     assert [entry for entry in seen if entry[0] == "follow"] == [
-        ("follow", "sw", "gone", None),
-        ("follow", "sw", "steady", None),
-        ("follow", "sw", "drifted", "r1"),
+        ("follow", "sw", store, runtime, "gone", None),
+        ("follow", "sw", store, runtime, "steady", None),
+        ("follow", "sw", store, runtime, "drifted", "r1"),
     ]
-    assert [entry for entry in seen if entry[0] == "drop"] == [("drop", "sw", "ledger", "drifted", True)]
+    assert [entry for entry in seen if entry[0] == "drop"] == [("drop", "sw", store, "ledger", rows, "drifted", True)]
     assert calls[0][0] == "bindings" and [agent.name for agent in calls[0][1][0]] == [a.name for a in agents[1:]]
     assert ("redis.hset", ("sw:launch-assignments", "task-drifted", '{"task": "task-drifted"}'), {}) in calls
 
@@ -137,7 +137,9 @@ def _check_seams(monkeypatch: pytest.MonkeyPatch, waiting: dict[str, Any]) -> li
     monkeypatch.setattr(
         tick,
         "_failed_launch",
-        lambda slug, store, ledger, runtime, rows, miss, now_ms: f"failed {slug} {ledger} {runtime} {miss} {now_ms}",
+        lambda slug, store, ledger, runtime, rows, miss, now_ms: (
+            seen.append(("failed", store, rows)) or f"failed {slug} {ledger} {runtime} {miss} {now_ms}"
+        ),
     )
     return seen
 
@@ -148,7 +150,8 @@ def test_launch_checks_pass_fail_or_wait_each_pending_agent(monkeypatch: pytest.
     seen = _check_seams(monkeypatch, waiting)
     store = SimpleNamespace(agents=lambda slug: [_agent("ok"), _agent("late"), _agent("early")])
     runtime = SimpleNamespace(bindings=lambda agents: {})
-    actions = observe._launch_checks("sw", store, "ledger", runtime, {}, {}, 20_000)
+    rows: dict[str, Any] = {"task-late": {}}
+    actions = observe._launch_checks("sw", store, "ledger", runtime, rows, {}, 20_000)
     assert actions == [
         "ok passed its launch check in 8 seconds",
         f"failed sw ledger {runtime} ('miss', 'late', {{'pane': 1}}, True) 20000",
@@ -160,6 +163,7 @@ def test_launch_checks_pass_fail_or_wait_each_pending_agent(monkeypatch: pytest.
         ("forget", "ok"),
         ("clear", "task-ok"),
         ("settle", "sw", runtime, "ok"),
+        ("failed", store, rows),
     ]
 
 
