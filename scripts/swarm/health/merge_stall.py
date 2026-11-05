@@ -9,7 +9,6 @@ from datetime import datetime
 from scripts.swarm import github_reads, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
-from scripts.tick.adapters import github as _github
 
 DEADLINE = ContextVar("merge_observation_deadline", default=None)
 HOUR_MS = 3_600_000
@@ -37,19 +36,20 @@ def request(repo: str, args: list[str]) -> dict:
     remaining = 20 if DEADLINE.get() is None else DEADLINE.get() - time.monotonic()
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
+    cwd = None if REMOTE.match(repo) else repo
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
         try:
             result = github_reads.rest(
                 "swarm.merge_stall",
                 args,
                 subprocess.run,
-                cwd=None if REMOTE.match(repo) else repo,
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 timeout=min(20, remaining),
             )
         except FileNotFoundError as exc:
-            if exc.filename != _github.command([])[0]:
+            if exc.filename == cwd:
                 raise
             result = None
     if result is None:

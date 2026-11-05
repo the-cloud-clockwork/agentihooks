@@ -164,7 +164,7 @@ def _spared(row: RepositoryRun, branches: set[str]) -> bool:
         row.status not in ACTIVE
         or row.event in (MERGE_QUEUE, RELEASE_EVENT)
         or row.branch in branches
-        or RELEASE_TAG.fullmatch(row.branch or "") is not None
+        or RELEASE_TAG.fullmatch(str(row.branch)) is not None
     )
 
 
