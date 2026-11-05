@@ -161,8 +161,9 @@ def test_the_retried_uploads_keep_their_names_paths_and_retention(job, name, giv
 
 
 def test_the_aggregator_outlasts_a_report_upload_that_uses_every_attempt():
-    action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
-    worst = 3 * (int(action["inputs"]["attempt-seconds"]["default"]) + 10) + 10 + 20
+    inputs = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())["inputs"]
+    settles = 2 * int(inputs["settle-seconds"]["default"])
+    worst = 3 * (int(inputs["attempt-seconds"]["default"]) + 10) + 10 + 20 + settles
     assert _jobs()["mutation"]["timeout-minutes"] * 60 > worst + 2 * 30
 
 

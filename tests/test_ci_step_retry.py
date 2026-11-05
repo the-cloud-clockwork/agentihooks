@@ -249,16 +249,26 @@ def test_every_attempt_is_armed_before_and_released_after_its_upload():
     assert steps[uploads[2] + 1]["if"] == "always() && steps.second.outcome == 'failure'"
 
 
-def test_every_absorbed_upload_failure_waits_and_warns_before_the_next_attempt():
+def test_every_absorbed_upload_failure_settles_waits_and_warns_before_the_next_attempt():
     steps = _upload_action()["runs"]["steps"]
     uploads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/upload-artifact@")]
-    for before, after, wait in zip(uploads, uploads[1:], ("sleep 10", "sleep 20")):
-        waits = steps[before + 2 : after]
-        assert len(waits) == 1
-        assert waits[0]["if"] == steps[after]["if"]
-        assert "::warning title=Retried upload::" in waits[0]["run"]
-        assert wait in waits[0]["run"]
-        assert "${{" not in waits[0]["run"]
+    for attempt, (before, after, wait) in enumerate(zip(uploads, uploads[1:], ("sleep 10", "sleep 20")), 1):
+        between = steps[before + 2 : after]
+        assert len(between) == 2
+        settle, waits = between
+        assert settle["name"] == f"Settle attempt {attempt}"
+        assert settle["if"] == waits["if"] == steps[after]["if"]
+        assert settle["continue-on-error"] is True
+        assert settle["uses"] == "actions/github-script@v7"
+        assert settle["env"] == {
+            "ARTIFACT": "${{ inputs.name }}",
+            "SETTLE_SECONDS": "${{ inputs.settle-seconds }}",
+            "SETTLE_SCRIPT": "${{ github.action_path }}/settle.py",
+        }
+        assert "process.env.SETTLE_SCRIPT" in settle["with"]["script"]
+        assert "::warning title=Retried upload::" in waits["run"]
+        assert wait in waits["run"]
+        assert "${{" not in waits["run"]
 
 
 def test_a_missing_file_stays_red_by_default_only_where_the_caller_asks():
