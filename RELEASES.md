@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.650 · 2026-11-05
+
+### 2026-11-05 · 139f184f2ae6 · #9754 · @nestorcolt
+
+**Read each test file once per mutation plan and count mutants on one parse**
+
+This change makes the mutation planner read each test file once per plan instead of reparsing it for every selection, and counts changed-line mutants from that single parse's metadata rather than rebuilding wrapper objects and repeating position passes per changed file. It also avoids a second module visit for possible mutants except when a graded visit refused a class, and logs the plan's CPU seconds for visibility. On the same runner, this cut plan CPU from a mean of 22.9s to 12.1s and wall time from 24-32s down to 13-19s, directly speeding up pull request checks.
+
+### 2026-11-05 · be325b7e383c · #9760 · @nestorcolt
+
+**Fetch dev on every selected unit leg**
+
+This change fixes a CI reliability bug where the origin/dev fetch step on unit-selected legs was incorrectly gated behind the early collection download succeeding. Since 3.11 legs skip the collection step entirely, and any missing collection on other legs left dev unresolved in the shallow checkout, selected tests relying on origin/dev, like the tick load base budget test, would fail even on unrelated pull requests. The fetch now runs unconditionally on every selected leg, while reuse grading remains correctly gated on the collection inside the adopt step. Verified green across all selected legs post-fix.
+
 ## v2.17.649 · 2026-11-05
 
 ### 2026-11-05 · 28b6c43890eb · #9711 · @nestorcolt
