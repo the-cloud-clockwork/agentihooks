@@ -135,7 +135,7 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
     plan = json.loads((stats.folder / "plan.json").read_text())
     early = probe_plan(plan, shard)
     owned = {name for name, assignment in early["assignments"].items() if holds(assignment, shard[0])}
-    rows = {}
+    rows: dict[str, str] = {}
     if owned:
         output = root / ".mutation-probe" / str(shard[0])
         output.mkdir(parents=True, exist_ok=True)

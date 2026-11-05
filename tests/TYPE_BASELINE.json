@@ -234,7 +234,7 @@
   "scripts/ci_mutation/merge.py": 76,
   "scripts/ci_mutation/mutant_shards.py": 32,
   "scripts/ci_mutation/plan.py": 224,
-  "scripts/ci_mutation/probe.py": 58,
+  "scripts/ci_mutation/probe.py": 57,
   "scripts/ci_mutation/replay.py": 47,
   "scripts/ci_mutation/report.py": 60,
   "scripts/ci_mutation/reuse.py": 29,

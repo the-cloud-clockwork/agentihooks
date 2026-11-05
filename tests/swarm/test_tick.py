@@ -771,16 +771,16 @@ def test_every_refused_hive_order_in_one_pass_reports_its_failure(store):
 
 
 def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch, capsys):
-    from scripts.swarm import tick as tick_module
     from scripts.swarm.tick import LEASE_MS
     from scripts.swarm_v2.runtime import codex
+    from scripts.tick.steps import place
 
     admitted, admit = [], codex.admit_legacy
     monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args) or admit(*args))
     refreshed, refresh = [], store.refresh
     monkeypatch.setattr(store, "refresh", lambda *args: refreshed.append(args) or refresh(*args))
-    started, start = [], tick_module._started
-    monkeypatch.setattr(tick_module, "_started", lambda *args: started.append(args) or start(*args))
+    started, start = [], place._started
+    monkeypatch.setattr("scripts.swarm.tick._started", lambda *args: started.append(args) or start(*args))
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = runtime.ordered[0]
