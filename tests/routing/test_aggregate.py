@@ -358,3 +358,13 @@ def test_dashed_and_underscore_spellings_of_one_account_read_as_one_quota_row(re
     ]
     assert [(row.sessions, row.five_left, row.week_left) for row in rows] == [(3, 80, 70)]
     assert aggregate.counts("claude", 100) == {"nestor_coltatgmail_com": 3}
+
+
+def test_an_account_holding_a_colon_keeps_every_part_in_its_key_and_count(redis, monkeypatch):
+    from scripts.routing import reservation
+
+    assert reservation.LaunchSlots(redis).reserve("codex:tenant_x:one_y", "pending", 1, 1000)
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    assert aggregate.name("codex:tenant_x:one_y") == "codex:tenant-x:one-y"
+    assert list(aggregate.read(redis, 100)) == ["codex:tenant-x:one-y"]
+    assert aggregate.counts("codex", 100) == {"tenant_x:one_y": 1}
