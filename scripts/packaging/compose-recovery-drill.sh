@@ -267,8 +267,8 @@ printf 'JetStream restored from the backup, losing every write after it\n'
 lap 'restore'
 
 printf 'hive heartbeat resumed: %s\n' "$(drill beat)"
-printf 'state after the first hub pass: %s\n' "$(drill pass)"
 printf 'agents died after the restore: %s\n' "$(drill die t2 t4)"
+printf 'state after the first hub pass: %s\n' "$(drill pass)"
 settle '"t2": {"ledger": "open"' '"t4": {"ledger": "open"'
 lap 'reopen'
 printf 'hive took the open and reopened tasks: %s\n' "$(drill take 3)"
