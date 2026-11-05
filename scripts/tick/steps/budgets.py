@@ -115,6 +115,7 @@ FLOORS: dict[str, Timing] = {
     "prompt backlog": Timing(2.0, WIDE_S),
     "command runner": Timing(2.0, CRITICAL_S),
     "urgent hold": Timing(2.0, CRITICAL_S),
+    "dependency audit": Timing(2.0, CRITICAL_S),
     "planning and phase pass": Timing(12.0, CRITICAL_S),
     "planning after phase": Timing(12.0, CRITICAL_S),
     "refresh job": Timing(2.0, SLOW_S),
