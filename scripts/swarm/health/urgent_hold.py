@@ -20,7 +20,7 @@ def read(store, slug: str) -> dict:
 
 def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[str, Any]:
     before = read(store, slug).get("tasks", {})
-    graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug).repo)
+    graph, released = hierarchy.project(doc)[0], release_wait.checker(store.config(slug))
     fix = freeze.fix_phase(store.config(slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
