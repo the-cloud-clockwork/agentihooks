@@ -6,6 +6,7 @@ permalink: /docs/hooks/worker-mode/
 ---
 
 # Worker Mode
+{: .no_toc }
 
 A headless worker run is a Claude Code or Codex session started unattended to
 answer one input, with no operator and no swarm seat watching it. Its hooks run
@@ -61,7 +62,7 @@ The command prints one JSON line with `status` (`ok`, `failed`, `invalid` or
 `timeout`), `output`, `session`, `exit_code`, `transcript` and `run_dir`, and
 exits `0` only when `status` is `ok`.
 
-To give a hand started session the same hook behaviour, set the flag in its
+To give a hand started session the same hook behavior, set the flag in its
 environment:
 
 ```bash
@@ -77,7 +78,7 @@ AGENTIHOOKS_WORKER_RUN=1 claude -p "List the open TODOs in this repo"
 | Broadcasts the brain adapter publishes on a feed refresh | Injected into that tool call | Not injected |
 | Fleet broadcast claim from the swarm control API | Claimed into the local store each prompt | Not claimed, so the run consumes no fleet delivery |
 | `SWARM REFOCUS` block for a session bound to a swarm task | On the first prompt, after compaction, on change and every `AGENTIHOOKS_REFOCUS_EVERY` calls | Never |
-| Swarm ledger hook (operator events, the stop block for unhandled events) | Runs on tool and stop events | Skipped; a worker run is never held at Stop for ledger events |
+| Swarm ledger hook (operator events, the stop block for unhandled events) | Runs on session start, prompt, tool and stop events | Skipped; a worker run is never held at Stop for ledger events |
 | `SWARM WAIT` nudge on a native `sleep` or `wait` in an `eng` or `ci` lane | Injected when no declared wait holds | Never |
 | Claim watch (ends a lane worker whose task claim moved to another agent) | Checked at each tool call | Skipped |
 | `LEDGER DECISION` directive after an accepted plan in a ledger bound session | Injected once per session | Never |
