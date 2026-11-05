@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.663 · 2026-11-05
+
+### 2026-11-05 · d33a41d2f8e8 · #9853 · @nestorcolt
+
+**Document the tick pass step and fan out executors**
+
+This change adds documentation for the tick engine's pass executors to docs/reference/tick-engine-steps.md, covering the step and fan out executors, worker limits, thread naming, shutdown and queued future cancellation, the handed off wait rule with SETTLE_S, the refusal of never ending needs, and a usage example, along with a new test table entry for tests/tick/test_executors.py and two troubleshooting rows. It closes out the documentation task for pull request #9741, ensuring operators understand how the one-executor-per-pass behavior works and can troubleshoot related issues, keeping the reference docs in sync with delivered tick engine behavior.
+
 ## v2.17.659 · 2026-11-05
 
 ### 2026-11-05 · e4f4b5c7fd90 · #9840 · @nestorcolt
