@@ -950,7 +950,7 @@
   "scripts/swarm_v2/ledger_writer.py": 23,
   "scripts/swarm_v2/master_fence.py": 307,
   "scripts/swarm_v2/master_fill.py": 113,
-  "scripts/swarm_v2/master_scale.py": 335,
+  "scripts/swarm_v2/master_scale.py": 333,
   "scripts/swarm_v2/master_seat_alarm.py": 76,
   "scripts/swarm_v2/masters.py": 119,
   "scripts/swarm_v2/masters_channel.py": 20,

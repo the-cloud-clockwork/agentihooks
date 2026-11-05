@@ -326,7 +326,13 @@ def _stuck_seat_two(store: RedisStore, started_at: int) -> tuple[AgentRecord, st
 
     MasterSeats(store.redis).set_count("sw", 2)
     stuck = AgentRecord(
-        "master@a1b2c3-0009", MASTER, "master-2", started_at=started_at, state="starting", seat="master-2@sw"
+        "master@a1b2c3-0009",
+        MASTER,
+        "master-2",
+        started_at=started_at,
+        state="starting",
+        seat="master-2@sw",
+        launched_at=started_at,
     )
     store.put_agent("sw", stuck)
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "master-2@sw", "a question for seat two")
@@ -339,7 +345,7 @@ def test_a_seat_two_master_starting_with_no_pane_past_its_deadline_is_retired_an
     from scripts.inbox.store import InboxStore
     from scripts.swarm import master_start
 
-    stuck, item_id = _stuck_seat_two(store, 0)
+    stuck, item_id = _stuck_seat_two(store, 1)
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng")), runtime, master_start.DEADLINE_MS + 1)
     assert stuck.name not in {a.name for a in masters(store) if a.state != "finished"}
@@ -352,8 +358,8 @@ def test_a_seat_two_master_starting_with_no_pane_past_its_deadline_is_retired_an
 def test_a_seat_two_master_starting_with_no_pane_inside_its_deadline_keeps_its_seat(store: RedisStore) -> None:
     from scripts.inbox.store import InboxStore
 
-    stuck, item_id = _stuck_seat_two(store, 0)
-    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    stuck, item_id = _stuck_seat_two(store, 1)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 2)
     held = [(a.name, a.state) for a in masters(store) if a.seat == "master-2@sw"]
     assert held == [(stuck.name, "starting")]
     assert item_id in {item.id for item in InboxStore(store.redis).inbox("master-2@sw")}
