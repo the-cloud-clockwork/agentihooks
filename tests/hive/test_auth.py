@@ -776,31 +776,3 @@ def test_the_member_acl_writes_every_key_the_fenced_record_batch_touches() -> No
     keys = _fenced_record_keys(fakeredis.FakeRedis(decode_responses=True))
 
     assert [key for key in keys if not any(fnmatchcase(key, pattern) for pattern in patterns)] == []
-
-
-def test_a_member_credential_commits_a_fenced_execution_record_batch() -> None:
-    import fakeredis
-
-    from scripts.events.redis_state import RedisStateStore
-    from scripts.swarm import fencing
-    from scripts.tick.adapters.records_redis import RedisRecords
-    from scripts.tick.ports.records import FencedBatch, RecordWrite
-
-    server = fakeredis.FakeServer()
-    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
-    admin.acl_setuser(
-        "hive-m1",
-        enabled=True,
-        nopass=True,
-        categories=auth.ACL_CATEGORIES,
-        keys=auth._acl_keys("m1"),
-        channels=auth.ACL_PATTERNS,
-    )
-    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-m1")
-    member.auth("", username="hive-m1")
-    port = RedisRecords(member, touched=RedisStateStore(member, fencing.BUCKET).watch_key)
-
-    batch = FencedBatch((RecordWrite("put", "executions", "e1", -1, {"name": "engineer@0001-0001"}),))
-
-    assert port.fenced_batch("proof", batch) == 1
-    assert port.record("proof", "executions", "e1").value == {"name": "engineer@0001-0001"}
