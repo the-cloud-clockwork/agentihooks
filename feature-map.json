@@ -99,7 +99,52 @@
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
-        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
+        "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_one_runs_every_pass",
+        "tests/tick/test_intervals.py::test_a_skipped_step_counts_as_ended_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_handed_off_slow_lane_step_in_a_parallel_pass_rests_inside_its_interval",
+        "tests/tick/test_intervals.py::test_a_failed_run_records_its_end_and_a_late_run_does_not",
+        "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
+        "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
+        "tests/tick/test_intervals.py::test_nothing_rests_with_a_swarm_but_no_store",
+        "tests/tick/test_intervals.py::test_a_pass_of_critical_steps_reads_no_step_ends",
+        "tests/tick/test_intervals.py::test_a_step_at_one_cron_minute_never_rests",
+        "tests/tick/test_intervals.py::test_a_step_end_storage_failure_is_reported",
+        "tests/tick/test_intervals.py::test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused",
+        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_scenario_runs_each_wide_step_once_and_rests_it_once",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios"
+      ]
+    },
+    {
+      "id": "swarm-tick-live-budgets",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g5",
+      "behaviour": "Each tick pass resolves every step's budget from the last sixty walls the tick recorded for it: the p95 with fifty percent headroom in whole seconds, never under the step's floor, and the floor alone until sixty walls exist; spawn's latest start is computed on floors.",
+      "seam": "scripts.tick.steps.budgets.resolve and budget_of, read through CallStep.budget_s, with walls pushed by scripts.swarm.timing.append_step",
+      "tests": [
+        "tests/tick/test_budgets.py::test_sixty_walls_give_the_p95_with_headroom_above_the_floor",
+        "tests/tick/test_budgets.py::test_a_live_p95_under_the_floor_keeps_the_floor",
+        "tests/tick/test_budgets.py::test_fifty_nine_walls_give_the_floor",
+        "tests/tick/test_budgets.py::test_the_window_keeps_the_last_sixty_walls",
+        "tests/tick/test_budgets.py::test_a_planted_floor_only_budget_goes_red",
+        "tests/tick/test_budgets.py::test_a_missing_window_is_rebuilt_from_the_steps_stream",
+        "tests/tick/test_budgets.py::test_a_step_budget_reads_the_live_budget_of_its_pass",
+        "tests/tick/test_budgets.py::test_a_write_step_budget_follows_its_live_budget",
+        "tests/tick/test_budgets.py::test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere",
+        "tests/tick/test_budgets.py::test_spawn_starts_on_floors_by_forty_seconds_whatever_the_live_budgets",
+        "tests/tick/test_budgets.py::test_an_unknown_step_still_has_no_budget",
+        "tests/tick/test_budgets.py::test_a_budgeted_step_lands_on_the_steps_stream_trimmed_to_its_history",
+        "tests/tick/test_budgets.py::test_a_failed_steps_pipeline_reports_the_steps_stream",
+        "tests/tick/test_budgets.py::test_the_rebuild_marker_holds_one_rebuild_per_slow_interval",
+        "tests/tick/test_budgets.py::test_full_windows_leave_no_rebuild_marker",
+        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps",
+        "tests/tick/test_budgets.py::test_every_walls_pipeline_runs_without_a_transaction",
+        "tests/tick/test_budgets.py::test_a_window_caught_between_its_push_and_trim_still_reads_sixty_walls"
       ]
     },
     {
@@ -142,6 +187,49 @@
         "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
         "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
         "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
+      ]
+    },
+    {
+      "id": "swarm-tick-launch-cluster",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h11",
+      "behaviour": "The launch check and acknowledgement helpers live in the observe step module and the spawn outcome and admission helpers in the place step module; the swarm tick module re-exports each one and the moved code reaches names the tick module defines through the tick module, so a patched tick seam still applies, and imports the modules it calls directly.",
+      "seam": "scripts.tick.steps.observe and scripts.tick.steps.place, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
+        "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
+        "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane",
+        "tests/tick/steps/test_launch_cluster.py::test_a_started_launch_records_its_claim_launch_spend_and_chain",
+        "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
+        "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
+        "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
+        "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
+        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id",
+        "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
+        "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
+        "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
+        "tests/tick/steps/test_place_outcomes.py::test_a_pending_launch_waits_for_its_hive_acknowledgement",
+        "tests/tick/steps/test_place_outcomes.py::test_a_refused_launch_waits_for_room_or_fails",
+        "tests/tick/steps/test_verify_checks.py::test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_drifted_one",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_pass_fail_or_wait_each_pending_agent",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_retires_reports_and_drops_its_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_launch_check_on_a_working_agent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
+        "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
+        "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
+        "tests/tick/steps/test_place_waits.py::test_a_failed_room_wait_reads_a_spawn_error_as_no_wait",
+        "tests/tick/steps/test_place_waits.py::test_a_settled_launch_activates_its_held_reservation",
+        "tests/tick/steps/test_place_waits.py::test_a_full_reservation_read_without_accounts_reports_none",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_that_cannot_retire_retries_next_tick",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_after_its_relaunch_is_spent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_that_cannot_retire_retries_next_tick"
       ]
     },
     {
@@ -1451,6 +1539,29 @@
         "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
         "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
+      ]
+    },
+    {
+      "id": "overrun-no-wall-time-handoff",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "Wall time on a claimed task only reports the agent to the master once; it never asks the agent to hand off, never retires it and never reopens its task. Only the context limit triggers a handoff.",
+      "seam": "The overrun step of the swarm tick",
+      "semgrep_rule": "feature-overrun-no-wall-time-handoff",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end"
+      ]
+    },
+    {
+      "id": "stale-nudge-cache-warm",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
+      "seam": "The idle watch of the swarm tick through the stale nudge",
+      "tests": [
+        "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
       ]
     }
   ],

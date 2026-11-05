@@ -26,7 +26,7 @@ PATIENT_S = 30.0
 def patient_steps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise every registered tick step's budget to at least PATIENT_S for the test."""
     for step in step_registry.steps():
-        monkeypatch.setattr(step, "budget_s", max(step.budget_s, PATIENT_S))
+        monkeypatch.setattr(step, "floor_s", max(step.budget_s, PATIENT_S))
 
 
 @pytest.mark.parametrize("record", ["stale", "missing"])

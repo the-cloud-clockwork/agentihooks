@@ -72,6 +72,55 @@ def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) ->
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": stream}))
 
 
+WALLS = "tick:walls:"
+WINDOW = 60
+
+
+def append_step(store: Any, slug: str, record: dict[str, Any]) -> None:
+    """Append a step ``record`` to the steps stream and, for a budgeted step, push its wall to the step's window of
+    the last ``WINDOW`` walls in the same pipeline."""
+    if "budget_s" not in record or "wall_s" not in record:
+        append_record(store, slug, "tick:steps", record)
+        return
+    from redis.exceptions import RedisError
+
+    walls = store.key(slug, WALLS + record["step"])
+    try:
+        pipe = store.redis.pipeline(transaction=False)
+        pipe.xadd(
+            store.key(slug, "tick:steps"), {"record": json.dumps(record)}, maxlen=HISTORY_LIMIT, approximate=False
+        )
+        pipe.lpush(walls, repr(record["wall_s"]))
+        pipe.ltrim(walls, 0, WINDOW - 1)
+        pipe.execute()
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": "tick:steps"}))
+
+
+STEP_RAN = "tick:step-ran"
+
+
+def step_ends(store: Any, slug: str) -> dict[str, float]:
+    """Return the end time of each step's last ok or failed run for swarm ``slug``, empty when Redis fails."""
+    from redis.exceptions import RedisError
+
+    try:
+        found = store.redis.hgetall(store.key(slug, STEP_RAN))
+    except RedisError:
+        return {}
+    return {name: float(ended) for name, ended in found.items()}
+
+
+def step_ended(store: Any, slug: str, name: str, ended: float) -> None:
+    """Record ``ended`` as the end time of step ``name``'s last run for swarm ``slug``."""
+    from redis.exceptions import RedisError
+
+    try:
+        store.redis.hset(store.key(slug, STEP_RAN), name, repr(ended))
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": STEP_RAN}))
+
+
 @contextmanager
 def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     if store is None:
@@ -141,10 +190,11 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         outcome = "stopped"
         raise
     except BaseException as exc:
-        outcome = "error"
+        waits = getattr(exc, "waiting", None)
+        outcome = "waiting" if callable(waits) and waits() else "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
         record.update(getattr(exc, "step_fields", dict)())
-        if report and (record_failure := ON_FAILURE.get()):
+        if outcome == "error" and report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
     finally:
@@ -160,10 +210,10 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         )
         emit(sys.stderr, json.dumps(record))
         tick_metrics.step_finished(slug, record)
-        if outcome != "success" and (current := PASS.get()) is not None:
+        if outcome not in ("success", "waiting") and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
-            append_record(store, slug, "tick:steps", record)
+            append_step(store, slug, record)
 
 
 def keep() -> None:

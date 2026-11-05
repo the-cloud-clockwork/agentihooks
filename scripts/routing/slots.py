@@ -31,3 +31,8 @@ class SlotSource(Protocol):
     def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]: ...
 
     def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]: ...
+
+
+def account_key(account: str) -> str:
+    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
+    return account.replace("_", "-")

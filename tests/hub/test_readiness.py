@@ -348,7 +348,7 @@ def test_snapshot_preserves_swarm_scope_and_admission_arguments(monkeypatch):
     view = readiness.Source(store, ledger).snapshot("rig")
     store.config.assert_called_once_with("rig")
     store.agents.assert_called_once_with("rig")
-    release_factory.assert_called_once_with(store.config.return_value.repo)
+    release_factory.assert_called_once_with(store.config.return_value)
     apply_factory.assert_called_once_with(store.config.return_value, {"task-a": row})
     assert view.fix == ""
     assert view.claimed("task-a") is False

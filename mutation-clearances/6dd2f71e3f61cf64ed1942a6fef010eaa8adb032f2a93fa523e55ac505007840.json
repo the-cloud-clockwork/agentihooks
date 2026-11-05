@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/budgets.py:scripts.tick.steps.budgets.x__walls:0edf293744763eb0f2703e65d77f5398d6d87a842b97fc1501a53bcb8a198254": {
+    "reader": "standards_reader",
+    "reason": "The walls pipeline queues exactly one lrange per name and nothing else, so names and results always have equal length and the strict flag never changes the result."
+  }
+}
