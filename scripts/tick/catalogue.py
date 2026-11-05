@@ -100,7 +100,7 @@ def row(step: Step) -> str:
         step.name,
         step.group,
         step.lane,
-        f"{step.budget_s:g}",
+        f"{getattr(step, 'floor_s', step.budget_s):g}",
         f"{step.interval_s:g}",
         names(step.needs),
         names(step.effects),

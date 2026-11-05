@@ -862,7 +862,8 @@ python -m scripts.tick.new_step "example" --group "task passes" --lane tick --in
   --effects ledger --feature swarm-tick-example --module tasks
 ```
 
-It writes five artefacts and refuses a name any of them already holds:
+It writes five artefacts, adds a new module to `scripts.tick.steps.MODULES`, and refuses a name any of them already
+holds:
 
 | Artefact | Where |
 | --- | --- |
