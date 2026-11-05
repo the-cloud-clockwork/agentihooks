@@ -435,3 +435,12 @@ def test_a_checkout_without_remote_metadata_matches_a_hive_advertising_its_origi
     checkout.mkdir()
     hives = [hive("pods", repos=["/home/worker/dev/agentihooks", "github.com/the-cloud-clockwork/agentihooks"])]
     assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == "pods"
+
+
+def test_repository_matching_reports_no_path_for_an_unrelated_repository(tmp_path: Path) -> None:
+    checkout = tmp_path / "unrelated"
+    record = hive("pods", repos=["/home/worker/dev/agentihooks"])
+    assert placement.repository(record, str(checkout)) == ""
+    assert place("eng", "claude", "acct", "subscription", str(checkout), [record], NOW) == Wait(
+        f"no hive for eng lists the repo {checkout}"
+    )

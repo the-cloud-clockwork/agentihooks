@@ -180,7 +180,7 @@ def _matched_origin(hives: list[dict[str, Any]], hive: str, repo: str) -> str | 
     found = next((found for found in hives if found["id"] == hive), None)
     if found is None:
         return placement.Wait(f"hive {hive} is not in the hive listing for {origin(Path(repo)) or repo}")
-    matched = found.get(orders.ORIGIN, "") or placement.repository(found, repo)
+    matched = found.get(orders.ORIGIN) or placement.repository(found, repo)
     return matched if matched != repo else ""
 
 
