@@ -19,6 +19,7 @@ _SETTINGS = (
     f"lint.pylint.max-statements={RULES['PLR0915']}",
     f"target-version='py{sys.version_info.major}{sys.version_info.minor}'",
 )
+Measured = dict[str, dict[str, int]]
 _MEASURED = re.compile(r"\((\d+) > \d+\)")
 # -I keeps a ruff module in the graded tree from shadowing the real one.
 _RUFF = (sys.executable, "-I", "-m", "ruff")
@@ -130,9 +131,9 @@ def write(tree: Path) -> None:
     (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
 
 
-def grade(base: dict, head: dict, recorded: dict | None, tree: Path | None = None) -> list[str]:
+def grade(base: Measured, head: Measured, recorded: Measured | None, tree: Path | None = None) -> list[str]:
     """Return every head unit over a limit beyond its base allowance, a moved unit keeping the allowance it had."""
-    errors = []
+    errors: list[str] = []
     claimed: set[str] = set()
     for unit, rules in sorted(head.items()):
         source = unit
@@ -150,7 +151,7 @@ def grade(base: dict, head: dict, recorded: dict | None, tree: Path | None = Non
     return errors
 
 
-def moved_from(unit: str, base: dict, head: dict, tree: Path | None) -> str:
+def moved_from(unit: str, base: Measured, head: Measured, tree: Path | None) -> str:
     """Return the one base allowlist key with the unit's name in another file that no longer holds it, else ''."""
     path, _, name = unit.partition("::")
     if tree is None or not name:
@@ -172,7 +173,7 @@ def _holds(tree: Path, key: str) -> bool:
     return name in {unit for unit, _ in functions(source.read_text()).values()}
 
 
-def _base(args) -> dict:
+def _base(args: argparse.Namespace) -> Measured:
     base = load(args.base)
     if base is None:
         raise GradeError(f"the base has no {ALLOWLIST}, so the head cannot be graded")
