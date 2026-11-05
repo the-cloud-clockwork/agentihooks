@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.645 · 2026-11-05
+
+### 2026-11-05 · ef6820fceeb2 · #9766 · @nestorcolt
+
+**Profile choice falls back to the lane profile when no decision backend answers**
+
+This change fixes a bug where tasks would stall indefinitely with "profile classification is unavailable" whenever no decision backend responded, requiring manual intervention to assign a profile before work could proceed. Now, when the classifier is unreachable, the claim automatically falls back to the lane's default profile, recording the source as "lane default" with the unavailability noted as the reason—mirroring the existing below-floor fallback behavior. Refused or unresolved classifier responses still block as before, preserving the safeguard against silent engineer fallbacks. Note that the controller's actual connectivity to the decision backend remains a separate deployment concern.
+
 ## v2.17.644 · 2026-11-05
 
 ### 2026-11-05 · dbe60ff9538d · #9763 · @nestorcolt
