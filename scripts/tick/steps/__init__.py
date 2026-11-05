@@ -55,7 +55,7 @@ class CallStep:
     @property
     def budget_s(self) -> float:
         """Return the step's budget this pass: its live budget, never under its floor."""
-        return budgets.budget_of(self.name)
+        return max(self.floor_s, budgets.LIVE.get().get(self.name, 0.0))
 
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""
