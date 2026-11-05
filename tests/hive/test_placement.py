@@ -375,3 +375,19 @@ def test_the_spill_names_the_best_ranked_hive_even_when_it_is_the_busiest():
     hives[0] = ranked("worker", 4, agents=3, prefer={"eng": 1}, draining="yes")
     found = choose("eng", "claude", "acct", "subscription", REPO, hives, NOW)
     assert (found.hive, found.spill.record()) == ("second", {"preferred": "worker", "refusal": "it is draining"})
+
+
+@pytest.mark.parametrize("route_kind", ["subscription", "interactive", "master-login"])
+def test_a_hive_advertising_the_token_slug_takes_a_route_named_by_the_secret_key(route_kind: str) -> None:
+    slug = "nestorcolt_smatgmail_com"
+    hives = [
+        hive(
+            "pods",
+            ui="no",
+            excluded=["master"],
+            slots=[{"harness": "claude", "account": slug, "kind": "subscription", "cap": 4}],
+            interactive={"claude": slug, "codex": ""},
+            master_login={"claude": slug},
+        )
+    ]
+    assert place("eng", "claude", "nestorcolt-smatgmail-com", route_kind, REPO, hives, NOW) == "pods"

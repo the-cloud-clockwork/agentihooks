@@ -422,7 +422,7 @@
   "scripts/hive/nats_grant.py": 42,
   "scripts/hive/nats_trust.py": 67,
   "scripts/hive/orders.py": 154,
-  "scripts/hive/placement.py": 160,
+  "scripts/hive/placement.py": 146,
   "scripts/hive/placement_waits.py": 50,
   "scripts/hive/quota_refresh.py": 2,
   "scripts/hive/redis_acl.py": 28,
