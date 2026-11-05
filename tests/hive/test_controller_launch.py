@@ -168,6 +168,30 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
     )
 
 
+def test_placement_carries_the_hive_checkout_path_into_launch(setup: SimpleNamespace) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import placement
+    from scripts.hive.orders import ORIGIN
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Status
+
+    setup.config = replace(setup.config, repo="/home/iamroot/dev/tcc-ecosystem/agentihooks")
+    setup.store.create(setup.config)
+    write_hive(setup, repos=["/home/worker/dev/agentihooks"])
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    selected = setup.launcher.select(request)
+    assert not isinstance(selected, placement.Wait)
+    assert selected.hive == "remote"
+    assert selected.origin == "/home/worker/dev/agentihooks"
+    setup.launcher.opening = Mock(return_value="opening")
+    assert setup.launcher.spawn(request).status == Status.PENDING
+    assert setup.launcher.opening.call_args.args[0].config.repo == "/home/worker/dev/agentihooks"
+    order = setup.launcher.orders_for(request.task["id"])
+    assert json.loads(setup.store.redis.get(order.prompt_ref))[ORIGIN] == "/home/worker/dev/agentihooks"
+
+
 def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
     from scripts.hive import admission, launch, placement_waits
     from scripts.hive.orders import Orders

@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.hive import registry
+from scripts.hive import placement, registry
 from scripts.hive.placement import Wait, place
 
 NOW = 10_000_000
@@ -391,3 +391,12 @@ def test_a_hive_advertising_the_token_slug_takes_a_route_named_by_the_secret_key
         )
     ]
     assert place("eng", "claude", "nestorcolt-smatgmail-com", route_kind, REPO, hives, NOW) == "pods"
+
+
+@pytest.mark.parametrize(
+    "repo", ["/home/iamroot/dev/tcc-ecosystem/agentihooks", "github.com/the-cloud-clockwork/agentihooks"]
+)
+def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
+    assert [item["id"] for item in placement.round_robin(hives, 1, repo, NOW)] == ["pods"]
