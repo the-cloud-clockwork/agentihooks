@@ -247,7 +247,7 @@ default `dev`. The base copy grades when it carries
 `scripts/tick/catalogue.py`. The step has no `if` and no `continue-on-error`,
 so any error from the grader fails the job.
 
-It differs from the lint job in two ways:
+It differs from the lint job in three ways:
 
 | | Lint job, `Hold the tick step pattern` | Tick equivalence, `Hold the tick step pattern from the base grader copy` |
 | --- | --- | --- |
@@ -265,7 +265,8 @@ job, selects the run. Its `inputs` job diffs the pull request head against its
 merge base with the base branch and sets `tick` to `true` when any changed
 path matches one entry of `TICK_INPUTS`. Its `tick` job then calls
 `Tick equivalence`. `Gate — Required` needs `writer-lock`, so a red tick
-equivalence run blocks the pull request. The `tick` job runs only on the `pull_request` event, so a merge group run does not repeat it.
+equivalence run blocks the pull request. The `tick` job runs only on the
+`pull_request` event, so a merge group run does not repeat it.
 
 The entries the pattern gate added to `TICK_INPUTS`:
 
@@ -279,8 +280,8 @@ set through `scripts.size_limits.files`. The list already held
 `scripts/tick/*`, `scripts/swarm/tick*.py`, the tick scenarios and the two
 workflow files. Entries match as bash patterns inside `[[ ]]`, where `*` also
 matches `/`, so `tests/tick/*` selects `tests/tick/steps/test_common.py`.
-`profiles/package/rules/delivery-tiers.md` and
-`tests/test_tick_pattern_other.py` match nothing and leave the run off.
+A path such as `profiles/package/rules/delivery-tiers.md` or
+`tests/test_tick_pattern_other.py` matches no entry and leaves the run off.
 
 To run it by hand against any base:
 
@@ -380,7 +381,7 @@ and a padded one red; a changed file keeping an offence its base held; and a
 budgets change grading the step files whose measurement it moves.
 
 `tests/test_ci_tick_guards.py` holds the CI wiring: each new `TICK_INPUTS`
-entry selects the tick run and two unrelated paths do not, and the tick
+entry selects the tick run and five unrelated paths do not, and the tick
 equivalence step runs the grader from the base copy with the head fallback,
 next to the catalogue `check` step, with neither step carrying an `if` or
 `continue-on-error`.
@@ -405,6 +406,6 @@ tree, and each printed its error above.
 | A file you did not touch is listed red | Its measurement moved, usually through a budgets row change, or the head allowlist adds an offence to its record |
 | `::error::cannot parse <file>` with no summary | Fix the syntax error in that graded file |
 | `TICK_PATTERN_ALLOWLIST.json is missing from the base` | The merge base lacks the allowlist: merge current `dev` into the branch, or restore the allowlist on `dev` through its own pull request first; adding it only on the head does not help |
-| Lint passes the tick pattern step, `Tick equivalence` fails it | The tick equivalence run grades against the tip of the base branch, the lint job against the merge base; merge current `dev` into the branch so both name the same base |
-| No `Hold the tick step pattern from the base grader copy` step in the run | The pull request touched no `TICK_INPUTS` path, so `Writer lock` skipped its `tick` job; the lint job still grades |
+| Lint passes the tick pattern step, `Tick equivalence` fails it | The tick equivalence run grades against the tip of the base branch, the lint job against the merge base; merge current `dev` into the branch so both name the same base until `dev` moves again |
+| No `Tick equivalence` run for the pull request | The pull request touched no `TICK_INPUTS` path, so `Writer lock` skipped its `tick` job; the lint job still grades |
 | `dev carries no scripts/tick_pattern.py, so nothing trusted can grade.` | The protected copy at the pull request base lacks the grader; restore `scripts/tick_pattern.py` on `dev`, then close and reopen the pull request so its base names that `dev` |
