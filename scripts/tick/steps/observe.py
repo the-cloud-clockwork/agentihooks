@@ -380,7 +380,7 @@ def _acknowledging(slug: str, store: Any, agent: Any) -> bool:
     return bool(raw) and json.loads(raw).get("state") in (tick.ACKNOWLEDGING, "launching")
 
 
-def _expire_launch(config: Any, runtime: Any, agent: Any, error: Exception) -> Exception:
+def _expire_launch(config: SwarmConfig, runtime: Any, agent: Any, error: Exception) -> Exception:
     try:
         kept = runtime.expire(
             config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, tick.ACK_LATER: True}
@@ -402,7 +402,7 @@ def _finished_launch(slug: str, store: Any, doc: dict[str, Any], agent: Any) -> 
 
 
 def _collect_acks(
-    slug: str, config: Any, store: Any, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
+    slug: str, config: SwarmConfig, store: Any, ledger: Any, runtime: Any, doc: dict[str, Any], now_ms: int
 ) -> list[str]:
     from scripts.swarm import launch_job
     from scripts.swarm_v2.runtime import codex

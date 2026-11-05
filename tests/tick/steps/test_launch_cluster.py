@@ -1,5 +1,6 @@
 """The launch cluster lives in the observe and place step modules and the swarm tick module re-exports each name."""
 
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -48,9 +49,7 @@ def test_tick_reexports_the_moved_launch_name(module: ModuleType, name: str) -> 
 
 @pytest.mark.feature("swarm-tick-launch-cluster")
 def test_the_tick_module_holds_no_launch_definition() -> None:
-    source = (tick.__file__ or "").replace(".pyc", ".py")
-    with open(source) as handle:
-        text = handle.read()
+    text = Path(str(tick.__file__)).read_text(encoding="utf-8")
     assert [name for _, name in MOVED if f"\ndef {name}(" in text or f"\nclass {name}:" in text] == []
 
 
