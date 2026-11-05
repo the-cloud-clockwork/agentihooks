@@ -764,6 +764,11 @@ by the engine and does not leave the pass.
 
 ## Adding a step to a group
 
+[`python -m scripts.tick.new_step`](tick-step-scaffold.md) writes the step
+stub, its budget row, feature test, scenario index row and feature map entry,
+and lists a new module in `scripts.tick.steps.MODULES`; then fill in the call
+and its declarations as below.
+
 1. Write the call as a function `(tick, get) -> actions` in a module under
    `scripts/tick/steps/`, reading its arguments with `get`.
 2. Add the step name to `budgets.MEASURED` with its measured p95 (or

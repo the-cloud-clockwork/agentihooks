@@ -257,7 +257,9 @@ exclusive and one of them is required.
 
 ## Adding a step that passes
 
-A new step adds no offence when it has a budget row with an interval from the
+[`python -m scripts.tick.new_step`](tick-step-scaffold.md) writes a step
+that passes, with its budget row, feature test, scenario index row and feature
+map entry. A new step adds no offence when it has a budget row with an interval from the
 set, passes all six fields, and lives in a module that imports no banned
 module. The row in `MEASURED`:
 
