@@ -1,7 +1,12 @@
+import json
+
 import pytest
 
 from hooks.context import account_sessions
 from scripts import session_bands
+from scripts.hive import launch, registry
+from scripts.hive.placement import account_key
+from scripts.routing import aggregate
 from scripts.swarm import capacity
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmConfig
@@ -110,9 +115,11 @@ def _observe(store, account, five_used=10.0, week_used=10.0, week_reset=NOW_MS /
     store.redis.hset(quota.latest_key("claude"), account, quota.encode(observation))
 
 
-def _route(keys, held=None):
+def _route(keys, held=None, advertised=None, harness="claude"):
     store, observations = _quota()
-    route = approved.AccountRoute(lambda: frozenset(keys), observations, lambda: dict(held or {}), "claude")
+    route = approved.AccountRoute(
+        lambda: frozenset(keys), observations, lambda: dict(held or {}), harness, advertised or (lambda now: {})
+    )
     return store, route
 
 
@@ -236,6 +243,110 @@ def test_an_exhausted_key_is_a_closed_row():
     assert (row.state, row.cap) == ("CLOSED", 0)
 
 
+CLOSED_SLOT, OPEN_KEY = "nestorcolt_smatgmail_com", "thecloudclockworkatgmail-com"
+WEEK_RESET = NOW_MS // 1000 + 5 * HOUR
+
+
+def _reading(week_used, five_used=None, observed_at=NOW_MS / 1000, five_reset=None, week_reset=WEEK_RESET):
+    return {
+        "five_hour": {"used": five_used, "resets_at": five_reset},
+        "seven_day": {"used": week_used, "resets_at": week_reset},
+        "observed_at": observed_at,
+    }
+
+
+def _hives(reading, slot=CLOSED_SLOT):
+    seen = []
+
+    def advertised(now):
+        seen.append(now)
+        return {account_key(slot): reading}
+
+    return advertised, seen
+
+
+def test_a_closed_account_a_hive_advertises_gets_no_placement():
+    advertised, seen = _hives(_reading(97.0))
+    _, route = _route({account_key(CLOSED_SLOT), OPEN_KEY}, advertised=advertised)
+    rows = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account("claude", account_key(CLOSED_SLOT), "CLOSED", 0, None, 3.0, 0, WEEK_RESET),
+        capacity.Account("claude", OPEN_KEY, "OPEN", 0, None, None, 1),
+    ]
+    assert seen == [NOW_MS / 1000]
+    assert [row.name for row in launch._open_rows(rows)] == [OPEN_KEY]
+    assert route.choose(1, planned=account_key(CLOSED_SLOT)) == OPEN_KEY
+
+
+def test_an_open_account_a_hive_advertises_keeps_its_band_under_the_launch_cap_with_its_windows():
+    reading = _reading(30.0, five_used=50.0, five_reset=NOW_MS // 1000 + HOUR)
+    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(reading)[0])
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert row == capacity.Account(
+        "claude",
+        account_key(CLOSED_SLOT),
+        "OPEN",
+        0,
+        50.0,
+        70.0,
+        4,
+        WEEK_RESET,
+        five_resets_at=NOW_MS // 1000 + HOUR,
+    )
+
+
+def test_a_codex_account_a_hive_advertises_is_banded_by_its_week_alone():
+    _, route = _route({"codexkey"}, advertised=_hives(_reading(30.0, five_used=99.0), "codexkey")[0], harness="codex")
+    [row] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.harness, row.state, row.cap) == ("codex", "OPEN", 6)
+
+
+def test_an_advertised_reading_without_a_week_keeps_the_launch_cap():
+    _, route = _route({account_key(CLOSED_SLOT)}, advertised=_hives(_reading(None))[0])
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.week_left) == ("OPEN", 2, None)
+
+
+def test_a_fleet_reading_outranks_what_the_hives_advertise():
+    store, route = _route({"akey"}, advertised=_hives(_reading(97.0), "akey")[0])
+    _observe(store, "akey")
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 2)
+
+
+def _hive(store, hive_id, heartbeat_ms, quotas):
+    record = {**registry._default(hive_id), "heartbeat_at": heartbeat_ms}
+    store.redis.hset(
+        registry.key(hive_id), mapping={key: registry._encode(key, value) for key, value in record.items()}
+    )
+    store.redis.sadd(registry.INDEX, hive_id)
+    store.redis.set(f"{registry.key(hive_id)}:quota", json.dumps(quotas))
+
+
+def test_hives_advertise_each_account_by_its_controller_key_with_the_newest_fresh_reading():
+    store, _ = _quota()
+    now = NOW_MS / 1000
+    stale = now - session_bands.FRESH_SECONDS - 1
+    _hive(
+        store,
+        "one",
+        NOW_MS,
+        {
+            f"claude:{CLOSED_SLOT}": _reading(97.0, observed_at=now - 60),
+            f"codex:{CLOSED_SLOT}": _reading(10.0),
+            "claude:stale_slot": _reading(50.0, observed_at=stale),
+            "claude:unread_slot": _reading(None, observed_at=None),
+        },
+    )
+    _hive(store, "two", NOW_MS, {f"claude:{CLOSED_SLOT}": _reading(40.0, observed_at=now - 120)})
+    _hive(store, "three", NOW_MS, {f"claude:{CLOSED_SLOT}": _reading(90.0, observed_at=now - 90)})
+    _hive(store, "gone", NOW_MS - registry.LIVE_MS - 1, {"claude:gone_slot": _reading(10.0)})
+    assert aggregate.advertised(store.redis, "claude", now) == {
+        account_key(CLOSED_SLOT): _reading(97.0, observed_at=now - 60)
+    }
+    assert aggregate.advertised(store.redis, "codex", now) == {account_key(CLOSED_SLOT): _reading(10.0)}
+
+
 def _sizing(runtime):
     runtime.host = lambda: None
     config = SwarmConfig(SLUG, "agentihooks", max_eng=2, max_ci=1)
@@ -280,7 +391,9 @@ def test_a_runtime_with_a_fleet_source_sees_a_slot_a_launch_took_after_its_sizin
     monkeypatch.setattr(capacity, "accounts", local)
     held = {"akey": 1}
     _, observations = _quota()
-    route = approved.AccountRoute(lambda: frozenset({"akey"}), observations, lambda: dict(held), "claude")
+    route = approved.AccountRoute(
+        lambda: frozenset({"akey"}), observations, lambda: dict(held), "claude", lambda now: {}
+    )
     herdr = HerdrRuntime(choose=local)
     herdr.quota_accounts = approved.FleetAccounts(route, 2)
     _sizing(herdr)
