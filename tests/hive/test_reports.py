@@ -465,6 +465,33 @@ def test_verify_keeps_a_hive_placed_engineer_whose_heartbeat_is_fresh_when_its_b
     assert remote.store.claimant("fixture", "task") == remote.agent.name
 
 
+@pytest.mark.parametrize(
+    ("lane", "target", "hive", "placed"),
+    [
+        ("eng", {"host_id": HIVE}, HIVE, True),
+        ("ci", {"host_id": HIVE}, "", True),
+        ("eng", {}, HIVE, True),
+        ("eng", {}, "controller", False),
+        ("eng", {}, "", False),
+        ("eng", {"host_id": "controller"}, HIVE, False),
+        ("master", {"host_id": HIVE}, HIVE, False),
+        ("master", {}, HIVE, False),
+    ],
+)
+def test_only_a_lane_agent_on_another_hive_with_a_fresh_heartbeat_counts_as_placed(
+    remote: SimpleNamespace, lane: str, target: dict, hive: str, placed: bool
+) -> None:
+    from scripts.swarm import held_elsewhere, idle
+
+    agent = replace(remote.agent, lane=lane, runtime_target=target, hive=hive)
+    assert held_elsewhere.placed("fixture", remote.store, agent, 100) is False
+    idle.beat(remote.redis, "fixture", agent.name, idle.WORKING, 100)
+    assert held_elsewhere.placed("fixture", remote.store, agent, 100) is placed
+    assert held_elsewhere.unseen("fixture", remote.store, agent, {"process": True}, 100) is False
+    assert held_elsewhere.unseen("fixture", remote.store, agent, {}, 100) is False
+    assert held_elsewhere.unseen("fixture", remote.store, agent, {"process": False}, 100) is placed
+
+
 def test_one_tick_releases_every_missing_hive_worker_and_keeps_each_action(remote):
     from scripts.tick.steps import agents as agent_steps
 

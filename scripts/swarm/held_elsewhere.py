@@ -1,4 +1,4 @@
-"""Keep a master another hive runs live in a tick that cannot see that hive's panes or processes."""
+"""Keep a master or lane agent another hive runs live in a tick that cannot see that hive's panes or processes."""
 
 from dataclasses import replace
 from typing import Any
@@ -28,6 +28,27 @@ def keep(slug: str, store: Any, agent: AgentRecord, listed: dict[str, set[str]],
         return False
     beat: dict[str, Any] | None = idle.heartbeat(store.redis, slug, agent.name)  # pyright: ignore[reportUnknownMemberType]
     if beat is None or now_ms - beat["at"] > reports.LOST_MS:
+        return False
+    if agent.state == "retiring":
+        store.put_agent(slug, replace(agent, state="working"))
+    return True
+
+
+def placed(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
+    """True for a lane agent placed on another hive whose own heartbeat is younger than the hive lost window."""
+    from scripts.swarm.commands import hive_id
+
+    target: dict[str, Any] = agent.runtime_target  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    other = reports.host(agent) or (not target and agent.hive and agent.hive != hive_id())
+    if agent.lane == MASTER or not other:
+        return False
+    beat: dict[str, Any] | None = idle.heartbeat(store.redis, slug, agent.name)  # pyright: ignore[reportUnknownMemberType]
+    return beat is not None and now_ms - beat["at"] <= reports.LOST_MS
+
+
+def unseen(slug: str, store: Any, agent: AgentRecord, fact: dict[str, Any], now_ms: int) -> bool:
+    """Keep a placed lane agent live, back from retiring, when this tick reads no process for it."""
+    if fact.get("process") is not False or not placed(slug, store, agent, now_ms):
         return False
     if agent.state == "retiring":
         store.put_agent(slug, replace(agent, state="working"))
