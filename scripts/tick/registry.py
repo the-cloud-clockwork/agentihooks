@@ -47,6 +47,7 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
     stale = catalogue.unmapped - {step.name for step in steps}
     return errors + [f"Unmapped step {name} is not registered; drop it" for name in sorted(stale)]
 
+
 PASS_BOX = "pass:"
 PASS_BOX_INTERVAL_S = 60.0
 
