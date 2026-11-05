@@ -66,10 +66,10 @@ until it passes them explicitly, even as `frozenset()`.
 
 ### Budget rows
 
-Budget rows come from the `MEASURED` dictionary in
+Budget rows come from the `FLOORS` dictionary in
 `scripts/tick/steps/budgets.py`, read from the source without importing it.
 Each row's interval is the second positional argument of its
-`Timing(p95_s, interval_s)` call, and it must be one of the names `CRITICAL_S`,
+`Timing(floor_s, interval_s)` call, and it must be one of the names `CRITICAL_S`,
 `WIDE_S` or `SLOW_S`. A literal number or a keyword `interval_s=` is recorded
 as outside the set. When the tree has no budgets file, every step has no
 budget row.
@@ -328,10 +328,10 @@ exclusive and one of them is required.
 
 A new step adds no offence when it has a budget row with an interval from the
 set, passes all six fields, and lives in a module that imports no banned
-module. The row in `MEASURED`:
+module. The row in `FLOORS`:
 
 ```python
-"example": Timing(UNMEASURED_S, CRITICAL_S),
+"example": Timing(2.0, CRITICAL_S),
 ```
 
 The registration:
@@ -398,7 +398,7 @@ tree, and each printed its error above.
 | Symptom | Check |
 | --- | --- |
 | `<file> adds step <name>: no effects` (or another field) | Pass the field by keyword in the registration, even when its value is the default |
-| `<file> adds step <name>: no budget row` | Add the exact step name to `MEASURED` in `scripts/tick/steps/budgets.py`; a budgets change that renames or removes a row also turns the step's file red |
+| `<file> adds step <name>: no budget row` | Add the exact step name to `FLOORS` in `scripts/tick/steps/budgets.py`; a budgets change that renames or removes a row also turns the step's file red |
 | `interval outside CRITICAL_S, WIDE_S, SLOW_S` | Pass the interval as the second positional argument of `Timing`, using one of the three names |
 | `<file> adds import scripts...` | Use the port in `ctx.tools`; only `scripts/tick/adapters/` may import the adapted module |
 | `scripts/swarm/tick.py adds def <name>` | Put new code in a step module under `scripts/tick/steps/`; the tick module only shrinks |
