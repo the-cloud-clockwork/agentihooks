@@ -1392,20 +1392,31 @@ def test_a_master_another_hive_reports_with_a_fresh_heartbeat_stays_live_when_it
         assert json.loads(report)["differences"] == {"process": {"expected": True, "actual": False}}
 
 
-def test_an_agent_with_a_host_target_is_judged_even_when_another_hive_lists_it(
-    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("lane", "target", "holders", "kept"),
+    [
+        ("master", {}, {"root"}, True),
+        ("master", {}, {"root", "controller"}, True),
+        ("master", {}, {"controller"}, False),
+        ("master", {}, set(), False),
+        ("master", {"host_id": "stable"}, {"stable"}, False),
+        ("master", {"host_id": "controller"}, {"root"}, False),
+        ("eng", {}, {"root"}, False),
+    ],
+)
+def test_only_an_untargeted_master_another_hive_lists_is_kept_unjudged(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch, lane: str, target: dict, holders: set, kept: bool
 ) -> None:
-    from scripts.hive import reports
     from scripts.swarm import commands, idle
-    from scripts.swarm.tick import _kept_elsewhere
+    from scripts.swarm.tick import _keep_elsewhere
 
     store, _, _ = ticking
     monkeypatch.setattr(commands, "hive_id", lambda: "controller")
-    agent = AgentRecord("worker@zz", "eng", "two", runtime_target={"host_id": "stable"})
+    agent = AgentRecord("held@zz", lane, "two", state="working", runtime_target=target)
     idle.beat(store.redis, "sw", agent.name, idle.WORKING, 100)
-    assert reports.host(agent) == "stable"
-    assert _kept_elsewhere("sw", store, agent, {agent.name: "stable"}, 100) is False
-    assert _kept_elsewhere("sw", store, replace(agent, runtime_target={}), {agent.name: "stable"}, 100) is True
+    listed = {agent.name: holders} if holders else {}
+    assert _keep_elsewhere("sw", store, agent, listed, 100) is kept
+    assert agent.name not in {a.name for a in store.agents("sw")}
 
 
 def test_a_kept_master_does_not_skip_later_agents(ticking):
