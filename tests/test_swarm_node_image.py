@@ -749,7 +749,9 @@ def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("recovers", [True, False])
-def test_tool_download_abandons_a_trickling_body_at_its_deadline(locked, tmp_path, monkeypatch, recovers):
+def test_tool_download_abandons_a_trickling_body_at_its_deadline(
+    locked: tuple[Path, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovers: bool
+) -> None:
     _, lock, payloads = locked
     tool = lock["tools"]["herdr"]
     now = [0.0]
