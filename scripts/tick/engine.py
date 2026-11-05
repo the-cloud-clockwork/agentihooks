@@ -359,6 +359,23 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     return record
 
 
+def _expire(
+    running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
+    dropped: set[str],
+    records: dict[str, StepRecord],
+    found: pool.Pass,
+    clock: Callable[[], float],
+) -> None:
+    """Abandon every running step whose lane expired, recording it dropped and ended on the pass."""
+    for future, (step, started, lane) in list(running.items()):
+        if lane.expired:
+            running.pop(future)
+            dropped.add(step.name)
+            _abandoned(step)
+            left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+            records[step.name] = _ended(found, left)
+
+
 def _eager(
     ordered: tuple[Step, ...], ctx: Context, found: pool.Pass, apply: Appliers, rest: frozenset[str] = frozenset()
 ) -> tuple[StepRecord, ...]:
@@ -409,13 +426,7 @@ def _eager(
             for future in done:
                 step, _, _ = running.pop(future)
                 records[step.name] = _ended(found, _applied(future.result(), apply))
-            for future, (step, started, lane) in list(running.items()):
-                if lane.expired:
-                    running.pop(future)
-                    dropped.add(step.name)
-                    _abandoned(step)
-                    left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
-                    records[step.name] = _ended(found, left)
+            _expire(running, dropped, records, found, clock)
     finally:
         for future in submitted:
             future.cancel()
