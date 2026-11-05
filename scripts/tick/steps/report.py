@@ -268,7 +268,7 @@ STEPS = (
     CallStep("metrics record", "wrapper metrics", held(_metrics), FOUND, pass_domains("found", "view"), lane=SLOW),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
     CallStep("inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents")),
-    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job)),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=frozenset()),
     CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
     CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
     CallStep(
