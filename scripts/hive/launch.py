@@ -111,20 +111,15 @@ def loaded_hives(store: RedisStore) -> list[dict]:
     return hives
 
 
-def _key(account: str) -> str:
-    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
-    return account.replace("_", "-")
-
-
 def _master_logins(hives: list[dict], front: bool) -> list[dict]:
     if not front:
         return hives
     rejected = {
-        _key(result.account)
+        placement.account_key(result.account)
         for _, result in balancer.cached_observations()
         if result.provider_status in ("revoked", "rejected")
     }
-    return [hive for hive in hives if _key(hive["master_login"].get("claude", "")) not in rejected]
+    return [hive for hive in hives if placement.account_key(hive["master_login"].get("claude", "")) not in rejected]
 
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
@@ -375,9 +370,11 @@ class HiveLaunch:
         )
 
     def _master_selection(self, config, decision, hives, now, rows, front):
-        accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
+        accounts = {
+            placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
+        }
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]}
+            {**hive, "slots": [slot for slot in hive["slots"] if placement.account_key(slot["account"]) in accounts]}
             for hive in _master_logins(hives, front)
         ]
         selected = placement.place_master("claude", "", config.repo, available, now, front)
@@ -388,7 +385,7 @@ class HiveLaunch:
         elif selected.route_kind == "interactive":
             account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
-            row = accounts[_key(selected.account)]
+            row = accounts[placement.account_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
         matched = _matched_origin(hives, selected.hive, config.repo)
         if isinstance(matched, placement.Wait):

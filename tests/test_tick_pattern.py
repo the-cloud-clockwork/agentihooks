@@ -211,7 +211,11 @@ def test_grading_needs_a_base(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         tick_pattern.main([])
     assert raised.value.code == 2
-    assert capsys.readouterr().err.splitlines()[-1].endswith(": error: one of the arguments --base --write is required")
+    assert (
+        capsys.readouterr()
+        .err.splitlines()[-1]
+        .endswith(": error: one of the arguments --base --write --tree is required")
+    )
 
 
 def test_grading_defaults_the_head_to_the_working_folder(
@@ -313,3 +317,54 @@ def test_an_offence_only_the_base_allowlist_holds_is_allowed() -> None:
 def test_the_allowlist_is_sorted_json() -> None:
     text = (_ROOT / tick_pattern.ALLOWLIST).read_text()
     assert text == json.dumps(json.loads(text), indent=1, sort_keys=True) + "\n"
+
+
+def test_the_whole_tree_matching_its_allowlist_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    files = {STEP: FULL.replace('"beat"', '"lost"'), "scripts/tick/steps/two.py": 'steps.CallStep("beat", "g", call)\n'}
+    tree = _recorded(tmp_path, files)
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 0
+    assert capsys.readouterr().out == "7 tick pattern offences in 2 files, 0 drifts\n"
+
+
+def test_whole_tree_drift_in_an_untouched_file_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tree = _recorded(tmp_path, {STEP: FULL})
+    (tree / STEP).write_text(FULL + FULL.replace('"beat"', '"lost"'))
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "1 tick pattern offences in 1 files, 1 drifts",
+        f"::error::{STEP} measures step lost: no budget row; {tick_pattern.ALLOWLIST} does not record it",
+    ]
+
+
+def test_drift_names_stale_records_padded_records_and_a_missing_allowlist() -> None:
+    held = {"a.py": ["def one"], "b.py": ["def two", "def zero"]}
+    allowlist = tick_pattern.ALLOWLIST
+    assert tick_pattern.drift(held, held) == []
+    assert tick_pattern.drift(held, {"a.py": ["def one"], "b.py": ["def zero"]}) == [
+        f"b.py no longer measures def two; {allowlist} still records it"
+    ]
+    assert tick_pattern.drift({}, {"a.py": ["def one", "def two"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"a.py measures def two; {allowlist} does not record it",
+    ]
+    assert tick_pattern.drift({"a.py": ["def one"]}, {"a.py": ["def two"]}) == [
+        f"a.py measures def two; {allowlist} does not record it",
+        f"a.py no longer measures def one; {allowlist} still records it",
+    ]
+    assert tick_pattern.drift({"b.py": ["def two"]}, {"a.py": ["def one"]}) == [
+        f"a.py measures def one; {allowlist} does not record it",
+        f"b.py no longer measures def two; {allowlist} still records it",
+    ]
+    assert tick_pattern.drift({"gone.py": ["def x"]}, {}) == [
+        f"gone.py no longer measures def x; {allowlist} still records it"
+    ]
+    assert tick_pattern.drift(None, {}) == [
+        f"{tick_pattern.ALLOWLIST} is missing; run python -m scripts.tick_pattern --write"
+    ]
+
+
+def test_the_tree_mode_reports_a_file_that_does_not_parse(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    tree = _recorded(tmp_path, {STEP: FULL})
+    (tree / STEP).write_text("def (\n")
+    assert tick_pattern.main(["--tree", "--head", str(tree)]) == 1
+    assert capsys.readouterr().out.startswith(f"::error::cannot parse {STEP}")
