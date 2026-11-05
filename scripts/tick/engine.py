@@ -454,7 +454,7 @@ def cadence_breaches(cadence: float) -> list[str]:
     checks = {
         "delivery guard": scheduled_tick.FRESH_S >= missed_s,
         "heartbeat limit": tick_heartbeat.LIMIT_MS / 1000 >= missed_s,
-        "lease TTL": lease.ttl_ms() / 1000 >= 2 * CRON_S,
+        "lease TTL": lease.ttl_ms() >= 2 * lease.tick_ms(),
         "stale watcher": tick_watch.PASS_S + tick_watch.SLUG_PASS_S <= tick_heartbeat.LIMIT_MS / 1000 - cadence,
     }
     return [name for name, held in checks.items() if not held]

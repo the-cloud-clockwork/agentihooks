@@ -4474,7 +4474,7 @@ pass in its own thread; a swarm whose tick runs long never makes another swarm t
 every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
 cadence, and leaves critical lane steps at their own interval. Every guard must outlast one missed slow pass, so
 `scripts.tick.engine.cadence_s` refuses a cadence when twice it exceeds the 690 second delivery guard or the ten minute
-heartbeat limit, when the lease TTL is below two cron minutes, or when the stale watcher's pass and slug window no
+heartbeat limit, when the lease TTL is below two controller ticks, or when the stale watcher's pass and slug window no
 longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
 limit. No step is skipped on its interval yet, so the setting is validated but does not change a pass today.
 

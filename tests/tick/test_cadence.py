@@ -90,6 +90,24 @@ def test_a_lease_ttl_of_exactly_two_cron_minutes_holds(guards: pytest.MonkeyPatc
     assert engine.cadence_breaches(60.0) == ["lease TTL"]
 
 
+def test_a_five_second_controller_tick_keeps_every_cadence_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lease
+
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "5")
+    assert lease.ttl_ms() == 15_000
+    assert "lease TTL" not in engine.cadence_breaches(60.0)
+    assert engine.cadence_s({}) == 60.0
+    assert engine.cadence_s({engine.CADENCE_ENV: "5"}) == 300.0
+
+
+def test_a_lease_ttl_below_two_controller_ticks_breaks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import lease
+
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "5")
+    monkeypatch.setattr(lease, "ttl_ms", lambda: 9_999)
+    assert "lease TTL" in engine.cadence_breaches(60.0)
+
+
 def test_a_stale_watcher_window_of_exactly_the_heartbeat_limit_less_the_cadence_holds(
     guards: pytest.MonkeyPatch,
 ) -> None:
