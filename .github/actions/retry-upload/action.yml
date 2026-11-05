@@ -82,7 +82,8 @@ runs:
         SETTLE_SECONDS: ${{ inputs.settle-seconds }}
         SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
       with:
-        script: require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
+        script: |
+          require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 2
       if: steps.first.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       shell: bash
@@ -125,7 +126,8 @@ runs:
         SETTLE_SECONDS: ${{ inputs.settle-seconds }}
         SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
       with:
-        script: require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
+        script: |
+          require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 3
       if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       shell: bash

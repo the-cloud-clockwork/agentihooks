@@ -81,6 +81,7 @@ def test_a_name_still_held_at_the_bound_ends_the_wait(monkeypatch):
         ("finalized", "a is finalized; the next attempt can upload it."),
         ("held", "::warning title=Retried upload::a is still held after 120s."),
     ],
+    ids=["free", "finalized", "held"],
 )
 def test_main_reports_the_outcome_and_never_fails(monkeypatch, capsys, found, said):
     monkeypatch.setenv("ARTIFACT", "a")
