@@ -393,6 +393,7 @@ def test_a_hive_placed_engineer_with_a_fresh_heartbeat_keeps_its_record_and_clai
     remote: SimpleNamespace, age: int
 ) -> None:
     from scripts.swarm import idle
+    from scripts.swarm.tick import LEASE_MS
     from scripts.tick.steps import agents as agent_steps
 
     _publish(remote, state="unknown")
@@ -411,7 +412,7 @@ def test_a_hive_placed_engineer_with_a_fresh_heartbeat_keeps_its_record_and_clai
     assert actions == []
     assert [agent.name for agent in remote.store.agents("fixture")] == [remote.agent.name]
     assert remote.store.claimant("fixture", "task") == remote.agent.name
-    assert remote.redis.pttl(remote.store.key("fixture", "claim", "task")) > 60000
+    assert abs(remote.redis.pttl(remote.store.key("fixture", "claim", "task")) - LEASE_MS) < 5000
     ledger.update_task.assert_not_called()
 
 
@@ -490,6 +491,9 @@ def test_only_a_lane_agent_on_another_hive_with_a_fresh_heartbeat_counts_as_plac
     assert held_elsewhere.unseen("fixture", remote.store, agent, {"process": True}, 100) is False
     assert held_elsewhere.unseen("fixture", remote.store, agent, {}, 100) is False
     assert held_elsewhere.unseen("fixture", remote.store, agent, {"process": False}, 100) is placed
+    assert [(a.name, a.lane, a.state) for a in remote.store.agents("fixture")] == [
+        (remote.agent.name, "eng", "working")
+    ]
 
 
 def test_one_tick_releases_every_missing_hive_worker_and_keeps_each_action(remote):

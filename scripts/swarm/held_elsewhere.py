@@ -35,7 +35,7 @@ def keep(slug: str, store: Any, agent: AgentRecord, listed: dict[str, set[str]],
 
 
 def placed(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
-    """True for a lane agent placed on another hive whose own heartbeat is younger than the hive lost window."""
+    """True for a lane agent placed on another hive whose own heartbeat is no older than the hive lost window."""
     from scripts.swarm.commands import hive_id
 
     target: dict[str, Any] = agent.runtime_target  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
