@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable, Collection, Mapping
 
-from scripts import session_bands
+from scripts import quota_state, session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
 from scripts.swarm import quota_handoff
 from scripts.swarm.capacity import Account, offered
@@ -39,6 +39,12 @@ class SecretKeys:
         return frozenset(key for key in data if KEY.fullmatch(key))
 
 
+def draining(harness: str, five: float | None, week: float | None) -> bool:
+    """In a swarm an account takes no new hive agent once its week is at or under ten percent left, or, for Claude,
+    its five hour window at or under five percent."""
+    return quota_state.draining(week) or (harness != "codex" and quota_state.draining(five, session_bands.HANDOFF_FIVE))
+
+
 class AccountRoute:
     """An unobserved key keeps the launch cap; an observed key's quota band can only lower it."""
 
@@ -51,11 +57,24 @@ class AccountRoute:
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
+    def _unread_row(self, key: str, cap: int, sessions: int, now: float) -> Account:
+        """An incomplete reading keeps the launch cap unless its fresh week reading shows the account draining."""
+        latest = self.quota.latest(key, self.harness)
+        fresh = latest is not None and session_bands.fresh(latest.observed_ms / 1000, now)
+        if latest is None or not fresh or latest.provider_status == "error":
+            return Account(self.harness, key, OPEN, sessions, None, None, cap)
+        reset = None if latest.week_reset is None else int(latest.week_reset)
+        week = session_bands.left(latest.week_used, reset, now)
+        if not draining(self.harness, None, week):
+            return Account(self.harness, key, OPEN, sessions, None, None, cap)
+        return Account(self.harness, key, CLOSED, sessions, None, week, 0, reset)
+
     def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
-            return Account(self.harness, key, OPEN, sessions, None, None, cap)
-        banded = min(cap, self.quota.cap(key, self.harness))
+            return self._unread_row(key, cap, sessions, now)
+        drained = draining(self.harness, reading.five_left, reading.week_left)
+        banded = 0 if drained else min(cap, self.quota.cap(key, self.harness))
         latest = self.quota.latest(key, self.harness)
         return Account(
             self.harness,

@@ -365,6 +365,86 @@ def test_a_published_observation_holds_against_a_hive_reading_no_newer_than_it()
     assert getattr(route.quota.latest("nestor-coltatgmail-com", "claude"), "five_used", None) == 20.0
 
 
+CLOSED_KEY, OPEN_KEY = "nestorcolt-smatgmail-com", "thecloudclockworkatgmail-com"
+
+
+def _spent_week(store: RedisStore, week_used: float, observed_ms: int = NOW_MS) -> None:
+    """The live shape of a spent account: a hive slot reading with a week and no five hour window."""
+    import json
+
+    from scripts.hive import registry
+
+    _hive_reading(store, "nestorcolt_smatgmail_com", five_used=None, observed_ms=observed_ms)
+    key = f"{registry.key('hive-a')}:quota"
+    readings = json.loads(store.redis.get(key))
+    readings["claude:nestorcolt_smatgmail_com"]["seven_day"]["used"] = week_used
+    store.redis.set(key, json.dumps(readings))
+
+
+def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
+    from scripts.hive import launch
+
+    store, route = _route({CLOSED_KEY, OPEN_KEY})
+    _spent_week(store, 97.0)
+    rows = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account("claude", CLOSED_KEY, "CLOSED", 0, None, 3.0, 0, NOW_MS // 1000 + 48 * HOUR),
+        capacity.Account("claude", OPEN_KEY, "OPEN", 0, None, None, 1),
+    ]
+    assert [row.name for row in launch._open_rows(rows)] == [OPEN_KEY]
+    assert route.choose(1, planned=CLOSED_KEY) == OPEN_KEY
+
+
+def test_a_hive_reading_with_room_in_its_week_keeps_the_launch_cap() -> None:
+    store, route = _route({CLOSED_KEY})
+    _spent_week(store, 89.9)
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert row == capacity.Account("claude", CLOSED_KEY, "OPEN", 0, None, None, 2)
+
+
+def test_a_stale_spent_week_keeps_the_launch_cap() -> None:
+    store, route = _route({CLOSED_KEY})
+    _spent_week(store, 97.0, observed_ms=NOW_MS - session_bands.FRESH_SECONDS * 1000 - 1000)
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000 + 1, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 2)
+
+
+def test_an_errored_spent_week_keeps_the_launch_cap() -> None:
+    store, route = _route({CLOSED_KEY})
+    observation = quota.Observation(
+        CLOSED_KEY, "claude", "exe-" + "0" * 32, 1, NOW_MS, "error", None, 97.0, None, NOW_MS // 1000 + HOUR
+    )
+    store.redis.hset(quota.latest_key("claude"), CLOSED_KEY, quota.encode(observation))
+    [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap) == ("OPEN", 2)
+
+
+DRAINING = {
+    "claude five hour at five": ("claude", 5.0, 50.0, True),
+    "claude five hour above five": ("claude", 5.1, 50.0, False),
+    "claude week at ten": ("claude", None, 10.0, True),
+    "claude week above ten": ("claude", None, 10.1, False),
+    "codex five hour spent": ("codex", 1.0, 50.0, False),
+    "codex week at ten": ("codex", None, 10.0, True),
+    "nothing read": ("claude", None, None, False),
+}
+
+
+@pytest.mark.parametrize(("harness", "five", "week", "expected"), DRAINING.values(), ids=DRAINING.keys())
+def test_a_swarm_account_drains_at_ten_percent_of_its_week_or_five_of_its_five_hours(
+    harness: str, five: float | None, week: float | None, expected: bool
+) -> None:
+    assert approved.draining(harness, five, week) is expected
+
+
+def test_a_draining_fleet_reading_takes_no_hive_agent() -> None:
+    store, route = _route({"akey", "bkey"})
+    _observe(store, "akey", week_used=92.0)
+    [row, _] = approved.FleetAccounts(route, 6)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.cap, row.week_left) == ("CLOSED", 0, 8.0)
+    assert route.choose(6, planned="akey") == "bkey"
+
+
 def _sizing(runtime):
     runtime.host = lambda: None
     config = SwarmConfig(SLUG, "agentihooks", max_eng=2, max_ci=1)
