@@ -8,6 +8,7 @@ import pytest
 
 from scripts import terminate_agent
 from scripts.hive.orders import CommandOrder
+from scripts.swarm import commands
 from scripts.swarm.reaper import Outcome
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -76,3 +77,34 @@ def test_a_master_no_hive_lists_keeps_the_local_retire(store: RedisStore, contro
     assert controller.retire(boss) is False
     assert controller.orders == []
     assert controller.herdr.refusal(boss) == {"process": 0, "refusal": NO_PROCESS}
+
+
+def test_a_name_the_own_hive_lists_keeps_the_local_retire(
+    store: RedisStore, controller: ControllerRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tick("sw", store, tasks(), controller, 1)
+    (boss,) = masters(store)
+    monkeypatch.setattr(commands, "hive_id", lambda: WORKSTATION)
+    assert controller.retire(boss) is False
+    assert controller.orders == []
+
+
+def test_a_name_a_local_session_holds_keeps_the_local_retire(
+    store: RedisStore, controller: ControllerRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tick("sw", store, tasks(), controller, 1)
+    (boss,) = masters(store)
+    held = SimpleNamespace(name=boss.name, process=SimpleNamespace(pid=7))
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [held])
+    assert controller.retire(boss) is False
+    assert controller.orders == []
+
+
+def test_a_runtime_without_hive_reports_keeps_the_local_retire(
+    store: RedisStore, controller: ControllerRuntime
+) -> None:
+    tick("sw", store, tasks(), controller, 1)
+    (boss,) = masters(store)
+    controller.herdr.hive = None
+    assert controller.retire(boss) is False
+    assert controller.orders == []

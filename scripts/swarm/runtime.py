@@ -1224,17 +1224,29 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, homes=()):
+    def retire(self, agent: AgentRecord, homes: tuple = ()) -> bool:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
-        then close the pane; the agent's name alone never selects a process."""
+        then close the pane; the agent's name alone never selects a process. An agent whose record names no host
+        and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
             return self._order(host, _command("retire", agent), agent.name)
+        if self._listed_elsewhere(agent.name):
+            return self.reap_name(agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         if not pid and (launch := launches.find(agent.name, self.home)) is not None:
             return self.retire_process(agent, launch.pid, homes, launch.start_time)
         return self.retire_process(agent, pid, homes)
+
+    def _listed_elsewhere(self, name: str) -> bool:
+        """True when no local session holds the name and another hive's report lists it."""
+        from scripts.swarm.commands import hive_id
+        from scripts.terminate_agent import sessions
+
+        if self.hive is None or any(s.name == name for s in sessions()):
+            return False
+        return self.hive.holder(name) not in ("", hive_id())
 
     def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
         found = None
