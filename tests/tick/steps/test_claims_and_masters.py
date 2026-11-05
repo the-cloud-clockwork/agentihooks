@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
+from scripts.swarm import stack, tick
 from scripts.swarm import store as swarm_store
-from scripts.swarm import tick
 from scripts.swarm.store import AgentRecord
 from scripts.tick.steps import claims, masters
 
@@ -146,9 +146,11 @@ def test_a_parked_task_waits_until_every_parked_dependency_is_done() -> None:
 @pytest.mark.feature("swarm-tick-claims-and-masters")
 def test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere() -> None:
     row = {"branch": "b1", "branch_repo": "https://example.test/other.git"}
-    same = claims._stacked_dep("d1", row, "repo", lambda repo: "other")
+    key = stack.repo_key(row["branch_repo"])
     assert claims._stacked_dep("d1", {"branch": "b1"}, "repo", lambda repo: "x") == {"task": "d1", "branch": "b1"}
-    assert same["task"] == "d1" and same["branch"] == "b1"
+    assert claims._stacked_dep("d1", row, "repo", lambda repo: key) == {"task": "d1", "branch": "b1"}
+    elsewhere = {"task": "d1", "branch": "b1", "repo": "https://example.test/other.git"}
+    assert claims._stacked_dep("d1", row, "repo", lambda repo: "local") == elsewhere
 
 
 @pytest.mark.feature("swarm-tick-claims-and-masters")
