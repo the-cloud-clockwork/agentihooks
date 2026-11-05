@@ -70,7 +70,7 @@ def test_a_name_still_held_at_the_bound_ends_the_wait(monkeypatch):
     monkeypatch.setattr(settle.time, "sleep", slept.append)
     clock = iter(range(0, 1000, 10))
     monkeypatch.setattr(settle.time, "monotonic", lambda: next(clock))
-    assert settle.settle("https://r/", "t", "a", 35) == "held"
+    assert settle.settle("https://r/", "t", "a", 55) == "held"
     assert slept == [10, 10]
 
 
@@ -128,7 +128,7 @@ def test_call_posts_json_to_the_service_with_the_bearer_token(monkeypatch):
     assert request.get_header("Authorization") == "Bearer tok"
     assert request.get_header("Content-type") == "application/json"
     assert json.loads(request.data) == {"a": 1}
-    assert timeout == 30
+    assert timeout == 10
 
 
 @pytest.mark.parametrize(

@@ -18,6 +18,7 @@ import urllib.request
 
 SERVICE = "twirp/github.actions.results.api.v1.ArtifactService/"
 INTERVAL = 10
+TIMEOUT = 10
 FREE = "free"
 FINALIZED = "finalized"
 HELD = "held"
@@ -42,7 +43,7 @@ def call(base: str, token: str, method: str, body: dict[str, object]) -> tuple[i
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
             return response.status, json.loads(response.read() or b"{}")
     except urllib.error.HTTPError as error:
         return error.code, {}
@@ -65,7 +66,7 @@ def settle(base: str, token: str, name: str, seconds: float) -> str:
     deadline = time.monotonic() + seconds
     while True:
         found = state(base, token, name)
-        if found in (FREE, FINALIZED) or time.monotonic() + INTERVAL > deadline:
+        if found in (FREE, FINALIZED) or time.monotonic() + INTERVAL + 2 * TIMEOUT > deadline:
             return found
         print(f"{name} is {found} at the artifact service; asking again in {INTERVAL}s.", flush=True)
         time.sleep(INTERVAL)
