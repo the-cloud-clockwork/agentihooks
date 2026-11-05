@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check").add_argument("--root", type=Path, default=Path("."))
-    commands.add_parser("render").add_argument("--root", type=Path, default=Path("."))
+    commands.add_parser("render").add_argument("--root", default=Path("."))
     shrinking = commands.add_parser("shrink")
     shrinking.add_argument("--base", type=Path, required=True)
     shrinking.add_argument("--head", type=Path, required=True)
