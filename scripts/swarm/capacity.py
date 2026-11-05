@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Any
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
-from scripts.hive.placement import account_key
 from scripts.routing import claude_api, codex_api, master_account, place
-from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
 from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state

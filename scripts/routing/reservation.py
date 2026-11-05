@@ -7,7 +7,7 @@ from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
 from scripts import session_bands
 from scripts.routing import master_account
-from scripts.routing.slots import API
+from scripts.routing.slots import API, account_key
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
@@ -89,8 +89,6 @@ class Reservation:
         return reason(self.masters)
 
     def closes(self, slug: str, week_used: float | None) -> bool:
-        from scripts.hive.placement import account_key
-
         return account_key(slug) == account_key(self.slug) and reached(week_used, self.masters)
 
     def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
-from scripts.hive.placement import account_key
+from scripts.routing.slots import account_key
 from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 if TYPE_CHECKING:
@@ -63,7 +63,10 @@ def current(now: float) -> dict[str, dict]:
 
 
 def counts(harness: str, now: float) -> dict[str, int]:
-    return {row["account"]: row["sessions"] for row in current(now).values() if row["harness"] == harness}
+    """Sessions per account under its AH_CC_TOKEN_ slug spelling, the name session and quota readers look up."""
+    return {
+        row["account"].replace("-", "_"): row["sessions"] for row in current(now).values() if row["harness"] == harness
+    }
 
 
 def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, int]:
@@ -78,13 +81,13 @@ def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, i
         report = json.loads(redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
         seen.update(execution for ids in report.get("_executions", {}).values() for execution in ids)
         if hive["id"] != own:
-            for name, count in report.items():
-                if name.startswith(f"{harness}:"):
-                    slots[name] = slots.get(name, 0) + count
-    for name, count in LaunchSlots(redis).counts(seen).items():
-        if name.startswith(f"{harness}:"):
-            slots[name] = slots.get(name, 0) + count
-    return {name.split(":", 1)[1]: count for name, count in slots.items()}
+            for slot, count in report.items():
+                if slot.startswith(f"{harness}:"):
+                    slots[slot] = slots.get(slot, 0) + count
+    for slot, count in LaunchSlots(redis).counts(seen).items():
+        if slot.startswith(f"{harness}:"):
+            slots[slot] = slots.get(slot, 0) + count
+    return {slot.split(":", 1)[1]: count for slot, count in slots.items()}
 
 
 def held_elsewhere(harness: str, now: float, own: str) -> dict[str, int]:

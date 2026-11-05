@@ -357,3 +357,4 @@ def test_dashed_and_underscore_spellings_of_one_account_read_as_one_quota_row(re
         row for row in capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100) if row.harness == "claude"
     ]
     assert [(row.sessions, row.five_left, row.week_left) for row in rows] == [(3, 80, 70)]
+    assert aggregate.counts("claude", 100) == {"nestor_coltatgmail_com": 3}
