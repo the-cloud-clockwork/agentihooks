@@ -10,7 +10,7 @@ from scripts import aicode_tokens, front_door_route, master_logins, openbao_kv, 
 from scripts import master_claude_login as login
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
-from scripts.routing import native_login
+from scripts.routing import native_login, reservation
 
 ROUTE = "claude-ai"
 STORE = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
@@ -19,12 +19,13 @@ LINKED = ("projects", "sessions")
 EMPTY = "no claude ai login is stored: run agentihooks claude login --master"
 NONE = "no usable claude ai login: {reasons}"
 SPENT = "{account} has {left:.0f}% left"
+RESERVED = "{account} is the primary login reserve at {left:.0f}% of the week left"
 
 
 def _candidates(bao: openbao_kv.OpenBao | None) -> list[tuple[int, str, Mapping[str, str]]]:
     offered = login._offered(bao)
     named = [(number, login.login_account(number, copy), copy) for number, copy in offered.items()]
-    ranks = login._preferred()
+    ranks = login.preferred()
     return sorted(named, key=lambda found: (ranks.get(found[1], len(ranks)), found[0]))
 
 
@@ -54,8 +55,12 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str,
     candidates = _candidates(openbao_kv.from_env(environ))
     if not candidates:
         raise login.LoginRefused(EMPTY)
-    now, reasons = time.time(), []
+    now, reasons = time.time(), list[str]()
     for number, found, copy in candidates:
+        week_left = master_logins.week_left(found, now)
+        if reservation.primary_reserved(found, week_left, environ):
+            reasons.append(RESERVED.format(account=found, left=week_left))
+            continue
         left = master_logins.left(found, now)
         if quota_state.draining(left):
             reasons.append(SPENT.format(account=found, left=left))
