@@ -130,11 +130,17 @@ def write(tree: Path) -> None:
     (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
 
 
-def grade(base: dict, head: dict, recorded: dict | None) -> list[str]:
+def grade(base: dict, head: dict, recorded: dict | None, tree: Path | None = None) -> list[str]:
+    """Return every head unit over a limit beyond its base allowance, a moved unit keeping the allowance it had."""
     errors = []
+    claimed: set[str] = set()
     for unit, rules in sorted(head.items()):
+        source = unit
+        if unit not in base and (moved := moved_from(unit, base, head, tree)) and moved not in claimed:
+            claimed.add(moved)
+            source = moved
         for rule, value in sorted(rules.items()):
-            allowed = base.get(unit, {}).get(rule)
+            allowed = base.get(source, {}).get(rule)
             if allowed is None:
                 errors.append(f"{unit} breaks {rule} at {value}; it is not on the base allowlist")
             elif value > allowed:
@@ -142,6 +148,28 @@ def grade(base: dict, head: dict, recorded: dict | None) -> list[str]:
     if recorded != head:
         errors.append(f"{ALLOWLIST} differs from the head's measurement; run python -m scripts.size_limits --write")
     return errors
+
+
+def moved_from(unit: str, base: dict, head: dict, tree: Path | None) -> str:
+    """Return the one base allowlist key with the unit's name in another file that no longer holds it, else ''."""
+    path, _, name = unit.partition("::")
+    if tree is None or not name:
+        return ""
+    found = [
+        key
+        for key in base
+        if key not in head and key.partition("::")[2] == name and key.partition("::")[0] != path
+        if not _holds(tree, key)
+    ]
+    return found[0] if len(found) == 1 else ""
+
+
+def _holds(tree: Path, key: str) -> bool:
+    path, _, name = key.partition("::")
+    source = tree / path
+    if not source.is_file():
+        return False
+    return name in {unit for unit, _ in functions(source.read_text()).values()}
 
 
 def _base(args) -> dict:
@@ -172,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, SyntaxError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded)
+    errors = grade(base, head, recorded, args.head)
     print(f"{len(head)} units over a limit, {len(base)} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
