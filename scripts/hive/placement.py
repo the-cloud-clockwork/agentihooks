@@ -3,6 +3,7 @@
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
@@ -113,7 +114,7 @@ def account_key(account: str) -> str:
 
 def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
-) -> list[tuple[Callable[[dict], bool], str]]:
+) -> list[tuple[Callable[[dict[str, Any]], bool], str]]:
     key = account_key(slot)
     return [
         (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
