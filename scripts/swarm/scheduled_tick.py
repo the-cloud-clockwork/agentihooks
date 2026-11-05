@@ -12,13 +12,14 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
+    from scripts.swarm.store import RedisStore, SwarmConfig
 
 OWNER = "agentihooks swarm tick"
 EXPRESSION = "* * * * *"
@@ -36,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOCK = "swarm-tick"
 HELD_FD = "AGENTIHOOKS_SWARM_TICK_LOCK_FD"
 PROC = Path("/proc")
+SERVED = "the swarm {slug} is served in Anton, so only its controller ticks it"
 
 
 def ensure(scheduler: Scheduler) -> str:
@@ -107,6 +109,17 @@ def delivered_at(scheduler: Scheduler) -> float:
         return float(json.loads(scheduler.read(DELIVERED))["at"])
     except (ValueError, KeyError, TypeError):
         return 0.0
+
+
+def served(config: "SwarmConfig") -> bool:
+    """True when the Anton controller serves the swarm: the controller stores its own address as the swarm's api_url."""
+    return bool(config.api_url)
+
+
+def hosts(store: "RedisStore") -> bool:
+    """True while a swarm in the store is neither served in Anton nor stopped, so this workstation still ticks it."""
+    configs = [store.config(slug) for slug in cast("list[str]", store.slugs())]
+    return any(not served(config) and config.state != "stopped" for config in configs)
 
 
 def command(binary: str) -> list[str]:

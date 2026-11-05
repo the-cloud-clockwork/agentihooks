@@ -14,6 +14,7 @@ real_reconcile = timer.reconcile
 real_schedule = timer.schedule
 real_undelivered = timer.undelivered
 real_guard = timer.guard
+real_hosts_work = timer.hosts_work
 
 
 @pytest.fixture
@@ -764,6 +765,12 @@ def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
     )
 
 
+def test_undelivered_proves_nothing_while_no_swarm_needs_this_workstation(monkeypatch):
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    monkeypatch.setattr(timer, "_roots", lambda: pytest.fail("the delivery record was read"))
+    assert real_undelivered() == ""
+
+
 def test_guard_restarts_a_dead_supervisor_on_every_pass(tmp_path, monkeypatch):
     started = []
     monkeypatch.setattr(timer, "supervise", lambda: started.append(True) or True)
@@ -1116,18 +1123,18 @@ def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(mon
 
     served = _swarm_store(("live", "running", ANTON))
     monkeypatch.setattr(swarm_store, "connect", lambda: served)
-    assert timer.hosts_work() is False
+    assert real_hosts_work() is False
     local = _swarm_store(("proof", "running", ""))
     monkeypatch.setattr(swarm_store, "connect", lambda: local)
-    assert timer.hosts_work() is True
+    assert real_hosts_work() is True
     local.redis.sadd(f"{swarm_store.PREFIX}:index", "gone")
-    assert timer.hosts_work() is True
+    assert real_hosts_work() is True
 
     def down():
         raise swarm_store.Unreachable("Redis is unreachable")
 
     monkeypatch.setattr(swarm_store, "connect", down)
-    assert timer.hosts_work() is True
+    assert real_hosts_work() is True
 
 
 def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):

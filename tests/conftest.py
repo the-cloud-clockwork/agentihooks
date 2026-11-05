@@ -546,6 +546,7 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda caller: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "")
     monkeypatch.setattr(timer, "guard", lambda binary: True)
+    monkeypatch.setattr(timer, "hosts_work", lambda: True)
 
 
 @pytest.fixture(autouse=True)
