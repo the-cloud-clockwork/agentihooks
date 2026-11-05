@@ -223,19 +223,22 @@ def test_reap_agent_forwards_every_argument_to_watch_remote(store: RedisStore, m
 def test_tick_hands_the_close_group_its_freshly_spawned_rows(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts.tick import registry
     from scripts.tick.steps import tasks as task_steps_module
     from tests.swarm.test_tick import FakeRuntime, tasks
+    from tests.swarm.test_tick_groups import _Marker
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     seen: dict[str, str] = {}
-    original_run_group = tick_module.run_group
 
-    def spying_run_group(name: str, **state: Any) -> list[str]:
-        if name == task_steps_module.CLOSE:
-            seen["claimed_by"] = state["rows"]["t1"]["claimed_by"]
-        return original_run_group(name, **state)
+    def close(get: Any) -> list[str]:
+        seen["claimed_by"] = get("rows")["t1"]["claimed_by"]
+        return []
 
-    monkeypatch.setattr(tick_module, "run_group", spying_run_group)
+    fresh = registry.Registry()
+    for step in (*registry.steps(), _Marker("close marker", task_steps_module.CLOSE, close)):
+        fresh.register(step)
+    monkeypatch.setattr(registry, "registry", fresh)
 
     tick_module.tick("sw", store, ledger, runtime, 1)
 
