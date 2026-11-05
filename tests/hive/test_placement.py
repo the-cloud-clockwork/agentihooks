@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.hive import placement, registry
@@ -400,3 +402,17 @@ def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
     hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
     assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
     assert [item["id"] for item in placement.round_robin(hives, 1, repo, NOW)] == ["pods"]
+
+
+def test_placement_uses_the_name_without_overriding_an_advertised_origin(tmp_path: Path) -> None:
+    checkout = tmp_path / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / ".git" / "config").write_text(
+        '[remote "origin"]\n    url = https://github.com/the-cloud-clockwork/agentihooks.git\n'
+    )
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == "pods"
+    hives[0]["repos"].append("github.com/someone/agentihooks")
+    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == Wait(
+        f"no hive for eng lists the repo {checkout}"
+    )
