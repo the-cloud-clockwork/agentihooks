@@ -19,7 +19,18 @@ from scripts.tick import registry, steps, view
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
-from scripts.tick.steps import AGENTS, PASS, SWARM, TASKS, CallStep, Declared, Left, actions_of, pass_domains
+from scripts.tick.steps import (
+    AGENTS,
+    PASS,
+    SWARM,
+    TASKS,
+    CallStep,
+    Declared,
+    Left,
+    actions_of,
+    budgets,
+    pass_domains,
+)
 
 __all__ = [
     "CLOSE",
@@ -359,11 +370,16 @@ class WriteStep:
         self.group = base.group
         self.call = base.call
         self.lane = base.lane
-        self.budget_s = base.budget_s
+        self.floor_s = base.floor_s
         self.interval_s = base.interval_s
         self.needs = base.needs
         self.reads = base.reads
         self.writes = base.writes
+
+    @property
+    def budget_s(self) -> float:
+        """Return the step's budget this pass: its live budget, never under its floor."""
+        return budgets.floored(self.name, self.floor_s)
 
     def run(self, ctx: Context) -> Result:
         """Run the call against the pass state, returning its actions and its writes."""

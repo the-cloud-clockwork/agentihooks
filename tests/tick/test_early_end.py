@@ -39,7 +39,7 @@ def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
         return real(name, ctx, steps, apply, finished)
 
     step = next(step for step in host.STEPS if step.name == "reboot pass")
-    monkeypatch.setattr(step, "budget_s", 0.01)
+    monkeypatch.setattr(step, "floor_s", 0.01)
     monkeypatch.setattr(reboot, "boot_pass", slow_boot)
     monkeypatch.setattr(engine, "run_group", group)
     try:

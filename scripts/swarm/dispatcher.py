@@ -214,7 +214,7 @@ def rank_decision(slug: str, config: Any, store: Any, ledger: Any, doc: dict[str
     head = store.redis.get(store.key(slug, HEAD))
     known, named = {t["id"]: t for t in doc["tasks"]}, timing.timed(bottleneck.read, store, slug).get("bottleneck")
     graph, fix = timing.timed(hierarchy.project, doc)[0], freeze.fix_phase(config)
-    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, known)
+    released, applied = release_wait.checker(config), apply_wait.checker(config, known)
     deferred = _deferred(doc)
     claimable = timing.timed(_claimable, known, doc, graph, fix, deferred, (released, applied))
     scores, fixed = timing.timed(leverage, doc), _fixed(doc)

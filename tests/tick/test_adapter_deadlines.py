@@ -136,7 +136,7 @@ EXPIRED = Deadline(1.0, clock=lambda: 1.0)
 def _github(monkeypatch: pytest.MonkeyPatch) -> GitHubSourceControl:
     monkeypatch.setattr(github_reads, "rest", _Boom())
     monkeypatch.setattr(github_reads, "charge", _Boom())
-    return GitHubSourceControl("o/r", Path("."), "dev", git=_Boom(), gh=_Boom())
+    return GitHubSourceControl("o/r", Path("."), "dev", gh=_Boom())
 
 
 GITHUB_CALLS: dict[str, Callable[[GitHubSourceControl], object]] = {
@@ -241,15 +241,9 @@ def test_github_api_calls_are_bounded_by_the_live_seconds(monkeypatch: pytest.Mo
     assert seen == [6.0]
 
 
-def test_github_tags_bounds_git_by_the_live_seconds() -> None:
-    seen: list[object] = []
-
-    def git(args: list[str], **options: object) -> _Done:
-        seen.append(options["timeout"])
-        return _Done()
-
-    port = GitHubSourceControl("o/r", Path("."), "dev", git=git)  # pyright: ignore[reportArgumentType]
-    port.tags(deadline=LIVE)
+def test_github_tags_bounds_its_api_read_by_the_live_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _timeouts(monkeypatch)
+    assert GitHubSourceControl("o/r", Path("."), "dev").tags(deadline=LIVE) == ()
     assert seen == [6.0]
 
 

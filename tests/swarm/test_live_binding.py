@@ -80,6 +80,23 @@ def test_each_field_mismatch_is_named(mounted, field):
     assert differences[field]["actual"] == facts[field]
 
 
+@pytest.mark.parametrize(
+    ("recorded", "observed", "differs"),
+    [
+        ("nestor-colt", "nestor_colt", False),
+        ("nestor_colt", "nestor-colt", False),
+        ("nestor-colt", "other_account", True),
+    ],
+)
+def test_account_spellings_differing_only_in_separator_match(
+    mounted: tuple, recorded: str, observed: str, differs: bool
+) -> None:
+    agent, proc, _ = mounted
+    facts = {**live_binding.read(agent, 42, proc), "account": observed}
+    differences = live_binding.compare(replace(agent, account=recorded), facts)
+    assert differences == ({"account": {"expected": recorded, "actual": observed}} if differs else {})
+
+
 @pytest.mark.parametrize("event", EVENTS)
 def test_missing_lifecycle_hook_is_refused(mounted, event):
     agent, proc, home = mounted
