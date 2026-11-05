@@ -240,7 +240,6 @@ def _hive_reading(
     store: RedisStore,
     slot: str,
     five_used: object = 10.0,
-    week_used: float = 40.0,
     hive: str = "hive-a",
     observed_ms: int = NOW_MS,
     heartbeat_ms: int = NOW_MS,
@@ -261,7 +260,7 @@ def _hive_reading(
     )
     reading = {
         "five_hour": {"used": five_used, "resets_at": NOW_MS // 1000 + HOUR},
-        "seven_day": {"used": week_used, "resets_at": NOW_MS // 1000 + 48 * HOUR},
+        "seven_day": {"used": 40.0, "resets_at": NOW_MS // 1000 + 48 * HOUR},
         "observed_at": observed_ms / 1000,
     }
     other = {**reading, "five_hour": {"used": 99.0, "resets_at": NOW_MS // 1000 + HOUR}}
