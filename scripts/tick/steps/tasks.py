@@ -376,15 +376,10 @@ class WriteStep:
         self.reads = base.reads
         self.writes = base.writes
 
-    def _live_budget(self) -> float:
+    @property
+    def budget_s(self) -> float:
         """Return the step's budget this pass: its live budget, never under its floor."""
         return budgets.floored(self.name, self.floor_s)
-
-    def _pin_budget(self, value: float) -> None:
-        """Pin the step's floor to ``value``, its budget until a live budget rises above it."""
-        self.floor_s = value
-
-    budget_s = property(_live_budget, _pin_budget)
 
     def run(self, ctx: Context) -> Result:
         """Run the call against the pass state, returning its actions and its writes."""

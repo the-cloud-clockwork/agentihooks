@@ -69,7 +69,7 @@ def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
         return records
 
     step = next(step for step in host.STEPS if step.name == "tick view")
-    monkeypatch.setattr(step, "budget_s", 30.0 if outcome == engine.OK else 0.01)
+    monkeypatch.setattr(step, "floor_s", 30.0 if outcome == engine.OK else 0.01)
     monkeypatch.setattr(ledger_events, "tick_view", tick_view)
     monkeypatch.setattr(engine, "run_group", group)
     try:
