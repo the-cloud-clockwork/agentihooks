@@ -170,7 +170,7 @@ def _with_imports(source: str) -> str:
 
 
 def _step_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The path and new text for: Append the step stub to its module, creating the module when the package does not hold it."""
+    """The steps module with the step stub appended, created when the package does not hold it."""
     path = root / STEPS / f"{spec.module}.py"
     source = path.read_text() if path.is_file() else f'"""The {spec.module} steps of the tick."""\n'
     return path, _with_imports(source) + "\n\n" + _stub(spec)
@@ -191,7 +191,7 @@ def _table_end(source: str) -> int:
 
 
 def _row_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The path and new text for: Insert the step's row, unmeasured at its interval, at the end of the budgets table."""
+    """The budgets module with the step's unmeasured row at the end of its table."""
     path = root / BUDGETS
     source = path.read_text()
     lines = source.splitlines(keepends=True)
@@ -220,13 +220,13 @@ def _test_source(spec: Spec) -> str:
 
 
 def _test_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The path and new text for: Write the step's feature test."""
+    """The step's feature test file and its source."""
     path = root / test_path(spec.name)
     return path, _test_source(spec)
 
 
 def _index_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The path and new text for: List the step under its scenario in the scenario index."""
+    """The scenario index with the step listed under its scenario."""
     path = root / catalogue.INDEX
     index = _read_json(path)
     index["scenarios"] = dict(sorted({**index["scenarios"], spec.name: [spec.scenario]}.items()))
@@ -234,7 +234,7 @@ def _index_text(root: Path, spec: Spec) -> tuple[Path, str]:
 
 
 def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
-    """The path and new text for: Add the step's test to its feature map entry, creating an inventory entry for a new feature id."""
+    """The feature map with the step's test added to its entry, a new inventory entry for a new id."""
     path = root / catalogue.FEATURE_MAP
     data = _read_json(path)
     entry = next((entry for entry in data["features"] if entry["id"] == spec.feature), None)
@@ -255,7 +255,7 @@ def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
 
 
 def _join_modules(root: Path, module: str) -> tuple[Path, str]:
-    """The path and new text for: Append ``module`` to the ``MODULES`` tuple of the steps package."""
+    """The steps package with ``module`` appended to its ``MODULES`` tuple."""
     path = root / INIT
     source = path.read_text()
     value = next(
@@ -271,12 +271,16 @@ def _join_modules(root: Path, module: str) -> tuple[Path, str]:
     return path, "".join(lines)
 
 
-def _format(root: Path, paths: list[Path]) -> None:
-    """Sort the imports of and format the Python files at ``paths``."""
+def _formatted(root: Path, path: Path, text: str) -> str:
+    """``text`` of the Python file at ``path`` with its imports sorted and formatted, read and returned on stdin and
+    stdout so nothing is written."""
     ruff = [sys.executable, "-m", "ruff"]
-    targets = [str(path) for path in paths]
-    subprocess.run([*ruff, "check", "--select", "I", "--fix", "--quiet", *targets], cwd=root, check=True)
-    subprocess.run([*ruff, "format", "--quiet", *targets], cwd=root, check=True)
+    named = ["--stdin-filename", str(path)]
+    for command in (["check", "--select", "I", "--fix", "--quiet", *named, "-"], ["format", "--quiet", *named, "-"]):
+        text = subprocess.run(
+            [*ruff, *command], cwd=root, input=text, capture_output=True, text=True, check=True
+        ).stdout
+    return text
 
 
 def scaffold(root: Path, spec: Spec) -> list[Path]:
@@ -292,12 +296,11 @@ def scaffold(root: Path, spec: Spec) -> list[Path]:
     ]
     if new:
         texts.append(_join_modules(root, spec.module))
-    for path, text in texts:
+    final = [(path, _formatted(root, path, text) if path.suffix == ".py" else text) for path, text in texts]
+    for path, text in final:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-    written = [path for path, _ in texts]
-    _format(root, [path for path in written if path.suffix == ".py"])
-    return written
+    return [path for path, _ in final]
 
 
 def _parser() -> argparse.ArgumentParser:
