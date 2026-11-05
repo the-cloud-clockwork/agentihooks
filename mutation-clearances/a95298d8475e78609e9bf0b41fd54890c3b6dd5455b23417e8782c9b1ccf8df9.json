@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stall_watch.py:scripts.swarm.stall_watch.x__alert:be0176fc189627f224cb4686ff638df71bf16322a5d19a780b1c7410ab1938df": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and never reads the type argument, so cast(None, inbox.send(...)) executes the same call and yields the same Item as cast(Item, ...); the mutant changes no output."
+  }
+}
