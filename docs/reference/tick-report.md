@@ -105,7 +105,7 @@ Each `tick:records` row carries one `outcome`, checked in this order:
 
 | Outcome | When | Counts as |
 |---|---|---|
-| `skipped` | The step never started: its lane deadline had passed, a step it needs was dropped, or a handed off step was dropped before the pass workers ran it. | Skipped |
+| `skipped` | The step never started: its lane deadline had passed, a step it needs was dropped, a handed off step was dropped before the pass workers ran it, or its interval had not elapsed since its last ended run (`rested` true; see [Interval enforcement](tick-engine-steps.md#interval-enforcement)). | Skipped |
 | `failed` | The step raised. | Neither late nor dropped |
 | `held` | The step's earlier run for the same swarm was still alive, so no thread started. | Held |
 | `late` | The step was still running at its budget, or it finished with a wall time above its budget. | Late share; Abandoned too when it was left running |
@@ -132,7 +132,8 @@ CPU share uses summed own and reaped child CPU of retained steps, excluding the 
 
 The figures are illustrative. Here the fleet red notice step was left running at its budget in 5 of 60 passes, and
 those runs lost 15 declared write domains between them. `spawn` finished in budget on every pass. A step with Held
-above zero overlapped its own earlier run; with Skipped above zero, its lane ran out or a step it needs was dropped.
+above zero overlapped its own earlier run; with Skipped above zero, its lane ran out, a step it needs was dropped, or
+its interval had not elapsed.
 Critical lane end p95 shows how late in a pass the critical lane steps finish, apart from the slow lane steps that
 the pass wall time includes.
 
@@ -215,7 +216,7 @@ pass reads yet, the scheduler cron stays every minute, and every pass still runs
 | A step's Late share climbs | Its wall time is past its budget on those passes. Compare the step row's p95 with its budget in the timing table; a run still going at its budget is abandoned and its result dropped. |
 | Abandoned and Dropped rise together | Runs are left going at their budget and their writes never apply. Raise the step's measured budget or make the step faster; until then its effects land only on passes where it finishes in time. |
 | Held above zero | An earlier run of the same step is still alive in its daemon thread. A held record never counts as abandoned; the run that holds it was abandoned on an earlier pass, so read that step's Abandoned count over a window that includes the passes before the held ones. |
-| Skipped above zero | The lane deadline passed before the step started, or a step it needs was dropped. Read the rows of the steps it needs and the lane's heaviest rows. |
+| Skipped above zero | For a step declared above 60 seconds, or in the slow lane at a cadence above one minute, most skipped rows are rests inside its interval: a 120 second step skips about every other pass. Otherwise the lane deadline passed before the step started, or a step it needs was dropped; read the rows of the steps it needs and the lane's heaviest rows. |
 | One step dominates p95 | Compare it with its budget in the timing table; a step past its budget is recorded late and the pass continues. See [Tick engine steps](tick-engine-steps.md#when-a-step-exceeds-its-budget). |
 | Spawns stop and the master got a pass budget notice | The pass p95 is above the stage target. Read the report over 10 passes to find the slow steps; the hold clears by itself once the passes recover. |
 

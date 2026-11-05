@@ -162,6 +162,11 @@ class SpawnError(RuntimeError):
         """The message and status a failed tick step records for this launch."""
         return {"detail": str(self), "status": str(self.status)}
 
+    def waiting(self) -> bool:
+        """Whether this launch only waits: its hive acknowledgement is pending or its account reservation is full."""
+        full = self.status == "unavailable" and str(self).startswith("account reservation is full")
+        return self.status == "pending" or full
+
 
 @dataclass(frozen=True)
 class Placed:
@@ -522,9 +527,15 @@ def _retire_launch(slug, store, runtime, agent, now_ms):
     return True
 
 
-def _restore_owner(slug, store, ledger, rows, agent):
+def _restore_owner(
+    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agent: AgentRecord
+) -> None:
     row = rows.get(agent.task, {})
-    if _ended(agent, rows) or not _current_owner(agent, row) or not store.ensure_claim(slug, agent, LEASE_MS):
+    if (
+        _ended(agent, rows)
+        or not _current_owner(agent, row)
+        or not timing.timed(store.ensure_claim, slug, agent, LEASE_MS)
+    ):
         return
     if row.get("out_of_scope") or row.get("state") not in ("open", "claimed", "pr"):
         return
@@ -539,7 +550,9 @@ def _restore_owner(slug, store, ledger, rows, agent):
     fields = {"claimed_by": agent.name}
     if row["state"] == "open":
         fields["state"] = "pr" if row.get("pr_url") else "claimed"
-    rows[agent.task] = ledger.update_task(slug, agent.task, fields, if_state=(row["state"],), if_match=expected)
+    rows[agent.task] = timing.timed(
+        ledger.update_task, slug, agent.task, fields, if_state=(row["state"],), if_match=expected
+    )
 
 
 def _drop_remote(slug, store, ledger, rows, agent, reason):
@@ -667,19 +680,27 @@ def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
     return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]
 
 
-def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
+def _watch_remote(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     """A remote agent is judged by its own runtime, never by this host's process table: no answer keeps it suspect,
     holding its claim, neither retired nor dropped."""
-    store.refresh(slug, agent.task, agent.name, LEASE_MS)
+    timing.timed(store.refresh, slug, agent.task, agent.name, LEASE_MS)
     if runtime.observe(agent).state == "unknown":
         if agent.state == SUSPECT:
             return []
-        store.put_agent(slug, replace(agent, state=SUSPECT))
+        timing.timed(store.put_agent, slug, replace(agent, state=SUSPECT))
         return [f"suspect {agent.name}: its runtime did not answer"]
     if agent.state == SUSPECT:
         agent = replace(agent, state="working")
-        store.put_agent(slug, agent)
-    return _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms)
+        timing.timed(store.put_agent, slug, agent)
+    return timing.timed(_watch_agent, slug, store, ledger, runtime, rows, agent, now_ms)
 
 
 def agent_status(agent):
@@ -723,9 +744,17 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
     ]
 
 
-def _watch_agent(slug, store, ledger, runtime, rows, agent, now_ms):
-    if revoked_seats.on_revoked(agent):
-        return _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms)
+def _watch_agent(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
+    if timing.timed(revoked_seats.on_revoked, agent):
+        return timing.timed(_free_revoked, slug, store, ledger, runtime, rows, agent, now_ms)
     return _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms)
 
 
@@ -742,7 +771,7 @@ def _watch_idle(
 
     observed = timing.timed(_observe, runtime, agent)
     if timing.timed(_refusal_due, slug, store, rows, agent, observed, now_ms):
-        return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
+        return timing.timed(_free_refused, slug, store, ledger, runtime, rows, agent, now_ms)
     timing.timed(store.redis.set, store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
     timing.timed(outage.mark_pane, store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
@@ -768,7 +797,7 @@ def _watch_idle(
     exhausted = timing.timed(resume.recovery_exhausted, store, slug, agent)
     pending = timing.timed(resume.recovery_pending, store, slug, agent)
     if timing.timed(_stuck_on_provider, slug, store, agent, observed, exhausted, now_ms):
-        return _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms)
+        return timing.timed(_free_stuck, slug, store, ledger, runtime, rows, agent, now_ms)
     claimant = rows.get(agent.task, {}).get("claimed_by") == agent.name
     nudged = _stale_nudge(slug, store, agent, observed, pending, now_ms) if claimant else []
     if agent.lane == MASTER or (held and not exhausted):
@@ -804,8 +833,13 @@ def _watch_idle(
     if timing.timed(resume.recovery_holds, store, slug, agent, now_ms):
         return nudged
     if idle.idle_ticks >= IDLE_KILL_TICKS and runtime.retire(idle, homes=reaper.scratch_homes(slug, idle.task)):
-        why = f"; outage recovery could not proceed: {resume.recovery_blocker(store, slug, agent)}" if pending else ""
-        return nudged + [f"stalled {agent.name}" + _drop(slug, store, ledger, rows, idle, refund=True) + why]
+        why = (
+            f"; outage recovery could not proceed: {timing.timed(resume.recovery_blocker, store, slug, agent)}"
+            if pending
+            else ""
+        )
+        dropped = timing.timed(_drop, slug, store, ledger, rows, idle, refund=True)
+        return nudged + [f"stalled {agent.name}" + dropped + why]
     return nudged
 
 
@@ -815,9 +849,11 @@ def _stale_nudge(
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == MASTER or not agent.task or pending or timing.timed(outage.open_records, slug):
         return []
-    if elapsed.due(store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
+    if timing.timed(elapsed.due, store, slug, elapsed.IDLE_SINCE, agent.name, now_ms, agent.idle_ticks, IDLE_KILL_MS):
         return []
-    if _operator_at_pane(slug, store, agent, observed, now_ms) or ledger_probe.holding(store, slug):
+    if timing.timed(_operator_at_pane, slug, store, agent, observed, now_ms) or timing.timed(
+        ledger_probe.holding, store, slug
+    ):
         return []
     return stale_nudge.nudge(InboxStore(store.redis), slug, agent, observed.provider_error, now_ms)
 

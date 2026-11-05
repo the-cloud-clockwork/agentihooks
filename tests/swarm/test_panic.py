@@ -584,3 +584,64 @@ def test_panic_found_fails_open_on_a_redis_error(store, monkeypatch):
 
     monkeypatch.setattr(panic, "state", broken)
     assert blocker_window._panic_found(store, 0) == {}
+
+
+def _quiet_watch(monkeypatch: pytest.MonkeyPatch, seen: list[bool]) -> None:
+    monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append(ok) or [])
+
+
+def test_a_pending_hive_launch_and_a_full_reservation_fail_no_step(
+    store: RedisStore, counted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.tick import SpawnError
+
+    seen: list[bool] = []
+    _quiet_watch(monkeypatch, seen)
+    full = "account reservation is full: account=claude:a sessions=1 cap=1"
+    pending = SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+    recorded: dict[str, Any] = {}
+    with timing.tick(SLUG, store), timing.pass_record(store, SLUG):
+        with spawn_stall.watch(store, SLUG, None, lambda: 9_000, None):
+            for error in (pending, SpawnError(full, "unavailable")):
+                with pytest.raises(SpawnError), timing.step("scripts.swarm.controller.FencedRuntime.spawn"):
+                    raise error
+            recorded = timing.PASS.get() or {}
+    assert recorded["failed_steps"] == []
+    assert seen == [True]
+    assert panic.errors_since(store, 0) == 0
+    assert [call for call in counted if call[0] == panic.METRIC] == []
+
+
+def test_a_real_launch_failure_still_fails_its_step(
+    store: RedisStore, counted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.tick import SpawnError
+
+    seen: list[bool] = []
+    _quiet_watch(monkeypatch, seen)
+    with timing.tick(SLUG, store), spawn_stall.watch(store, SLUG, None, lambda: 9_000, None):
+        with pytest.raises(SpawnError), timing.step("scripts.swarm.controller.FencedRuntime.spawn"):
+            raise SpawnError("herdr refused the pane", "refused")
+    assert seen == [False]
+    assert panic.errors_since(store, 0) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "waits"),
+    [
+        ("pending", "hive launch ordered, waiting for its acknowledgement", True),
+        ("unavailable", "account reservation is full: account=claude:a sessions=1 cap=1", True),
+        ("unavailable", "no hive has room for the lane", False),
+        ("refused", "account reservation is full: account=claude:a sessions=1 cap=1", False),
+        ("refused", "herdr refused the pane", False),
+    ],
+)
+def test_only_a_pending_launch_or_a_full_reservation_waits(status: str, detail: str, waits: bool) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    assert SpawnError(detail, status).waiting() is waits
