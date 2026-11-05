@@ -60,6 +60,23 @@ def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
     return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
 
 
+def repository(hive: dict[str, Any], repo: str) -> str:
+    from pathlib import Path
+
+    from scripts.hive.daemon import origin
+
+    if repo in hive["repos"]:
+        return repo
+    identity = origin(Path(repo))
+    if identity:
+        return identity if identity in hive["repos"] else ""
+    name = Path(repo).name.removesuffix(".git")
+    return next(
+        (path for path in hive["repos"] if Path(path).is_absolute() and Path(path).name == name),
+        "",
+    )
+
+
 def equipped(task: dict, hive: dict | None) -> bool:
     return set(task.get("needs") or ()) <= set((hive or {}).get("capabilities") or ())
 
@@ -83,7 +100,7 @@ def for_swarm(hives: list[dict], slug: str) -> list[dict]:
 
 
 def round_robin(hives: list[dict], nodes: int, repo: str, now: int) -> list[dict]:
-    chosen = sorted((hive for hive in hives if live(hive, now) and repo in hive["repos"]), key=lambda hive: hive["id"])
+    chosen = sorted((hive for hive in hives if live(hive, now) and repository(hive, repo)), key=lambda hive: hive["id"])
     return [{**hive, SPREAD: hive["agents"] + hive.get(PLACED, 0)} for hive in chosen[: nodes or None]]
 
 
@@ -128,7 +145,7 @@ def _checks(
             ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
-        (lambda hive: repo in hive["repos"], f"no {kind} for {role} lists the repo {repo}"),
+        (lambda hive: repository(hive, repo), f"no {kind} for {role} lists the repo {repo}"),
         (
             lambda hive: route_kind != INTERACTIVE or _holds(hive["interactive"], harness, key),
             f"no {kind} for {role} holds the {harness} login for {slot}",
@@ -241,7 +258,7 @@ def place_master(
     hosting = [hive for hive in hives if live(hive, now) and hosts(MASTER, hive)]
     if not hosting:
         return Wait(f"no live hive takes {MASTER}")
-    listing = [hive for hive in hosting if repo in hive["repos"]]
+    listing = [hive for hive in hosting if repository(hive, repo)]
     if not listing:
         return Wait(f"no {HIVE} for {MASTER} lists the repo {repo}")
     candidates = []

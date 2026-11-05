@@ -179,7 +179,8 @@ def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.
     found = next((found for found in hives if found["id"] == hive), None)
     if found is None:
         return placement.Wait(f"hive {hive} is not in the hive listing for {origin(Path(repo)) or repo}")
-    return found.get(orders.ORIGIN, "")
+    matched = found.get(orders.ORIGIN, "") or placement.repository(found, repo)
+    return matched if matched != repo else ""
 
 
 def _local_capped(hive: dict, taken: int, bound: int) -> dict:

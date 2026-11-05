@@ -177,7 +177,7 @@ def test_placement_carries_the_hive_checkout_path_into_launch(setup: SimpleNames
     from scripts.swarm_v2.runtime.base import Status
 
     setup.config = replace(setup.config, repo="/home/iamroot/dev/tcc-ecosystem/agentihooks")
-    setup.store.create(setup.config)
+    setup.store.redis.hset(setup.store.key(setup.config.slug, "config"), "repo", setup.config.repo)
     write_hive(setup, repos=["/home/worker/dev/agentihooks"])
     request = request_for(setup)
     request.task[ACK_LATER] = True
