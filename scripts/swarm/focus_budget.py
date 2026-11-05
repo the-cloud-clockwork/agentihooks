@@ -23,6 +23,11 @@ def ranks(doc: dict[str, Any]) -> dict[str, int]:
     return {str(task["id"]): _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in tasks}
 
 
+def ordered(queue: list[tuple[str, dict[str, Any]]], focus: dict[str, int]) -> list[tuple[str, dict[str, Any]]]:
+    """The lane and task queue sorted by each task's focus rank, ties kept in queue order."""
+    return sorted(queue, key=lambda entry: focus[entry[1]["id"]])
+
+
 def _rank(
     task: dict[str, Any],
     chain: list[str],
