@@ -177,6 +177,52 @@ def test_a_pull_request_cannot_allowlist_its_own_offender(tmp_path, capsys):
     assert _grade(base, head, capsys)[0] == 1
 
 
+def test_a_unit_moved_to_another_file_keeps_its_allowance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": EIGHT_PARAMETERS})
+    assert size_limits.load(head) == {"new.py::planted": {"PLR0913": 8}}
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
+
+
+def test_a_moved_unit_that_grows_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    grown = EIGHT_PARAMETERS.replace("h)", "h, i)")
+    head = _recorded(tmp_path / "head", {"old.py": "VALUE = 1\n", "new.py": grown})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "new.py::planted grew on PLR0913 from 8 to 9" in out
+
+
+def test_a_unit_the_old_file_still_holds_is_a_new_unit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    head = _recorded(tmp_path / "head", {"old.py": SEVEN_PARAMETERS, "new.py": EIGHT_PARAMETERS})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "new.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
+
+
+def test_one_moved_allowance_covers_one_unit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS})
+    files = {"old.py": "VALUE = 1\n", "a.py": EIGHT_PARAMETERS, "b.py": EIGHT_PARAMETERS}
+    head = _recorded(tmp_path / "head", files)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "a.py::planted" not in out
+    assert "b.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
+
+
+def test_a_moved_unit_needs_one_matching_base_entry(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    base = _recorded(tmp_path / "base", {"old.py": EIGHT_PARAMETERS, "other.py": EIGHT_PARAMETERS})
+    files = {"old.py": "VALUE = 1\n", "other.py": "VALUE = 2\n", "new.py": EIGHT_PARAMETERS}
+    head = _recorded(tmp_path / "head", files)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "new.py::planted breaks PLR0913 at 8; it is not on the base allowlist" in out
+    assert size_limits.moved_from("new.py::planted", {"old.py::planted": {}}, {}, None) == ""
+    assert size_limits.moved_from("new.py", {"old.py::planted": {}}, {}, head) == ""
+
+
 def test_a_base_without_an_allowlist_is_red(tmp_path, capsys):
     base = _tree(tmp_path / "base", {"mod.py": SEVEN_PARAMETERS})
     head = _recorded(tmp_path / "head", {"mod.py": EIGHT_PARAMETERS})
