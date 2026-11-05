@@ -319,3 +319,41 @@ def test_a_finished_master_still_live_in_the_seat_does_not_clear_the_alarm(store
     assert master_seat_alarm.run("sw", store, ledger, runtime, {}) == []
     assert len(_seat_notes(ledger)) == 1
     assert store.redis.hget(store.key("sw", master_seat_alarm.KEY), "master-2")
+
+
+def _stuck_seat_two(store: RedisStore, started_at: int) -> tuple[AgentRecord, str]:
+    from scripts.inbox.store import InboxStore
+
+    MasterSeats(store.redis).set_count("sw", 2)
+    stuck = AgentRecord(
+        "master@a1b2c3-0009", MASTER, "master-2", started_at=started_at, state="starting", seat="master-2@sw"
+    )
+    store.put_agent("sw", stuck)
+    item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "master-2@sw", "a question for seat two")
+    return stuck, item.id
+
+
+def test_a_seat_two_master_starting_with_no_pane_past_its_deadline_is_retired_and_its_items_go_to_the_front_door(
+    store: RedisStore,
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import master_start
+
+    stuck, item_id = _stuck_seat_two(store, 0)
+    runtime = FakeRuntime()
+    actions = tick("sw", store, tasks(("t1", "eng")), runtime, master_start.DEADLINE_MS + 1)
+    assert stuck.name not in {a.name for a in masters(store) if a.state != "finished"}
+    assert f"retired stuck master {stuck.name} in seat master-2@sw" in actions
+    assert item_id in {item.id for item in InboxStore(store.redis).inbox("master@sw")}
+    (refilled,) = [a for a in masters(store) if a.seat == "master-2@sw" and a.state != "finished"]
+    assert refilled.name != stuck.name and refilled.name in runtime.live
+
+
+def test_a_seat_two_master_starting_with_no_pane_inside_its_deadline_keeps_its_seat(store: RedisStore) -> None:
+    from scripts.inbox.store import InboxStore
+
+    stuck, item_id = _stuck_seat_two(store, 0)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    held = [(a.name, a.state) for a in masters(store) if a.seat == "master-2@sw"]
+    assert held == [(stuck.name, "starting")]
+    assert item_id in {item.id for item in InboxStore(store.redis).inbox("master-2@sw")}
