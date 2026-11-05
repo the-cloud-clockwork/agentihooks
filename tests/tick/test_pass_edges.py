@@ -11,7 +11,7 @@ import pytest
 
 from scripts.tick import registry
 from scripts.tick.step import Context, Domain, Result, Step
-from scripts.tick.steps import PassBox, masters, pass_domain
+from scripts.tick.steps import PassBox, pass_domain
 from tests.swarm.tick_scenarios.test_characterisation import SCENARIOS, replay
 
 tick_module = import_module("scripts.swarm.tick")
@@ -112,20 +112,20 @@ def record(monkeypatch: pytest.MonkeyPatch) -> Recorder:
     ):
         monkeypatch.setattr(PassBox, name, method)
     pass_read = tick_module._PassView.read
-    site_read = masters._SiteView.read
+    graph_read = tick_module._GraphView.read
 
     def read_pass(view: Any, domain: Domain, key: str) -> object | None:
         value = pass_read(view, domain, key)
         rec.viewed(view._state.get("box"), key, value)
         return value
 
-    def read_site(view: Any, domain: Domain, key: str) -> object | None:
-        value = site_read(view, domain, key)
-        rec.viewed(view._found.get("box"), key, value)
+    def read_graph(view: Any, domain: Domain, key: str) -> object | None:
+        value = graph_read(view, domain, key)
+        rec.viewed(view._box, key, value)
         return value
 
     monkeypatch.setattr(tick_module._PassView, "read", read_pass)
-    monkeypatch.setattr(masters._SiteView, "read", read_site)
+    monkeypatch.setattr(tick_module._GraphView, "read", read_graph)
     return rec
 
 
