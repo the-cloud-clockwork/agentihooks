@@ -157,3 +157,78 @@ def test_an_unknown_step_still_has_no_budget() -> None:
     with pytest.raises(ValueError) as raised:
         CallStep("never declared", "place", lambda tick, get: None)
     assert str(raised.value) == "Undeclared step timing: never declared"
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_a_budgeted_step_lands_on_the_steps_stream_trimmed_to_its_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _store()
+    monkeypatch.setattr(timing, "HISTORY_LIMIT", 3)
+    _push(store, "reap", [1.0, 2.0, 3.0, 4.0, 5.0])
+    entries = store.redis.xrange(store.key("sw", "tick:steps"))
+    assert [json.loads(fields["record"])["wall_s"] for _, fields in entries] == [3.0, 4.0, 5.0]
+    assert store.redis.lrange(store.key("sw", "tick:walls:reap"), 0, -1) == ["5.0", "4.0", "3.0", "2.0", "1.0"]
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_a_failed_steps_pipeline_reports_the_steps_stream(capsys: pytest.CaptureFixture[str]) -> None:
+    from redis.exceptions import RedisError
+
+    class Pipe:
+        def __getattr__(self, name: str) -> Any:
+            return lambda *args, **kwargs: None
+
+        def execute(self) -> None:
+            raise RedisError("down")
+
+    class Redis:
+        def pipeline(self, transaction: bool = True) -> Pipe:
+            return Pipe()
+
+    class Down:
+        redis = Redis()
+
+        def key(self, slug: str, name: str) -> str:
+            return f"{slug}:{name}"
+
+    timing.append_step(Down(), "sw", {"step": "reap", "budget_s": 1.0, "wall_s": 2.0})
+    expected = {"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:steps"}
+    assert capsys.readouterr().err == json.dumps(expected) + "\n"
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_the_rebuild_marker_holds_one_rebuild_per_slow_interval() -> None:
+    store = _store()
+    marker = "agentihooks-test-run:swarm:sw:tick:walls-rebuilt"
+    _resolved(store, "reap")
+    assert store.key("sw", budgets.REBUILT) == marker
+    assert store.redis.get(marker) == "1"
+    assert store.redis.ttl(marker) == int(budgets.SLOW_S) == 600
+    record = {"step": "reap", "budget_s": 22.0, "wall_s": 40.0, "phase": "finished"}
+    for _ in range(60):
+        store.redis.xadd(store.key("sw", "tick:steps"), {"record": json.dumps(record)})
+    assert _resolved(store, "reap") == 22.0
+    assert store.redis.exists(store.key("sw", "tick:walls:reap")) == 0
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_full_windows_leave_no_rebuild_marker() -> None:
+    store = _store()
+    for name in budgets.FLOORS:
+        _push(store, name, [1.0])
+    _resolved(store, "reap")
+    assert store.redis.exists(store.key("sw", budgets.REBUILT)) == 0
+
+
+@pytest.mark.feature("swarm-tick-live-budgets")
+def test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps() -> None:
+    store = _store()
+    stream = store.key("sw", "tick:steps")
+    for wall in [12.0] * 70:
+        store.redis.xadd(stream, {"record": json.dumps({"step": "reap", "budget_s": 22.0, "wall_s": wall})})
+    store.redis.xadd(stream, {"record": json.dumps({"step": "spawn", "budget_s": 33.0, "wall_s": 5.0})})
+    _push(store, "spawn", [7.0])
+    store.redis.xadd(stream, {"record": json.dumps({"step": "reap", "wall_s": 99.0})})
+    store.redis.xadd(stream, {"record": json.dumps({"step": "reap", "budget_s": 22.0})})
+    _resolved(store, "reap")
+    assert store.redis.lrange(store.key("sw", "tick:walls:reap"), 0, -1) == ["12.0"] * 60
+    assert store.redis.lrange(store.key("sw", "tick:walls:spawn"), 0, -1) == ["7.0"]

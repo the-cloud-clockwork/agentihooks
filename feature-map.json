@@ -137,7 +137,12 @@
         "tests/tick/test_budgets.py::test_a_write_step_budget_follows_its_live_budget",
         "tests/tick/test_budgets.py::test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere",
         "tests/tick/test_budgets.py::test_spawn_starts_on_floors_by_forty_seconds_whatever_the_live_budgets",
-        "tests/tick/test_budgets.py::test_an_unknown_step_still_has_no_budget"
+        "tests/tick/test_budgets.py::test_an_unknown_step_still_has_no_budget",
+        "tests/tick/test_budgets.py::test_a_budgeted_step_lands_on_the_steps_stream_trimmed_to_its_history",
+        "tests/tick/test_budgets.py::test_a_failed_steps_pipeline_reports_the_steps_stream",
+        "tests/tick/test_budgets.py::test_the_rebuild_marker_holds_one_rebuild_per_slow_interval",
+        "tests/tick/test_budgets.py::test_full_windows_leave_no_rebuild_marker",
+        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps"
       ]
     },
     {
