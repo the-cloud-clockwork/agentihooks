@@ -54,12 +54,11 @@ that update automatically when new reports arrive.
 | [`fleet red notice`](fleet-red-notice.md#the-notice-step-budget) | 19.981 s | 30 s | 60 s |
 
 `CRITICAL_S`, `WIDE_S` and `SLOW_S` declare intervals of 60, 120 and 600
-seconds. The group runner runs each group at its site on every pass and does
-not skip a step because its interval has not elapsed.
-`scripts.tick.engine.interval_s(step, cadence)` gives a step in lane `slow`
-the larger of its declared interval and the slow lane cadence from
-`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval;
-no pass reads it yet. See
+seconds. `scripts.tick.engine.interval_s(step, cadence)` gives a step in lane
+`slow` the larger of its declared interval and the slow lane cadence from
+`AGENTIHOOKS_TICK_CADENCE`, and leaves every other step at its own interval.
+The group runner skips a step whose interval has not elapsed; see
+[Interval enforcement](#interval-enforcement) and
 [Cadence](../pillars/swarm.md#cadence).
 
 A step with no report row uses `UNMEASURED_S`, a ten second p95, giving a
@@ -100,6 +99,86 @@ That is a dictionary entry using the table's existing imports and constants.
 Once measured, replace `UNMEASURED_S` with its observed p95, keeping the
 interval required by the plan. There is no CLI or environment override for
 this table in this delivery.
+
+### Interval enforcement
+
+At the start of each group, `scripts.tick.engine.resting(ordered, cadence)`
+names the steps of that group that rest this pass. A step can rest only when
+its interval from `interval_s(step, cadence)` is above one cron minute
+(`CRON_S`, 60 seconds). It rests while the pass start is no more than its
+interval less one cron minute after the end of its last ended run. Outside a
+recording pass the clock stands in for the pass start.
+
+| Interval | Rests while the last end is at most | Runs |
+| --- | --- | --- |
+| 60 s (`CRITICAL_S`) | never rests | every pass |
+| 120 s (`WIDE_S`) | 60 s before the pass start | every other pass |
+| 600 s (`SLOW_S`) | 540 s before the pass start | about one pass in ten |
+| Slow lane step declared at 60 s, `AGENTIHOOKS_TICK_CADENCE=3` | 120 s before the pass start | one pass in three |
+
+Subtracting one cron minute means a step whose run ended a few seconds into a
+pass is due again on the pass that starts one interval after the earlier one,
+rather than one pass later.
+
+A resting step starts no thread and calls nothing. It ends at once, so steps
+that `need` it start as if it had run. Its `tick:records` row has outcome
+`skipped`, its `skipped` and `rested` fields true, `abandoned` false, a wall time of zero
+and its budget; see
+[Tick report](tick-report.md#outcome-columns). This holds in the sequential
+runner, in the parallel eager runner and for slow lane steps handed off to run
+after the critical lane.
+
+The end of a run is stored only while the pass is recording, and only for a
+step with an interval above one cron minute or a step in lane `slow`. It is
+written when the step's record is journalled, as epoch seconds, into the hash
+`tick:step-ran` under the swarm's Redis key prefix, one field per step name
+(`scripts.swarm.timing.step_ended` and `step_ends`).
+
+| Outcome of the run | Records an end | Next pass |
+| --- | --- | --- |
+| `ok` | yes | rests inside the interval |
+| `failed` | yes | rests inside the interval |
+| `late` (abandoned at its budget or lane deadline, or finished past its budget) | no | due, since the stored end is the one that let it run |
+| `held` (earlier run still alive) | no | due, since the stored end is the one that let it run |
+| Dropped before it started, or rested | no | keeps the earlier end |
+
+A step with no stored end is due. Nothing rests when the pass has no
+recording store or swarm, and a Redis failure reading the hash makes every
+step due. A failed write prints
+`{"event": "swarm_tick_record_failed", "slug": "<swarm>", "stream": "tick:step-ran"}`
+on stderr and leaves the earlier end in place. A group of steps all at one
+cron minute does not read the hash.
+
+A step that writes the pass state must run every pass, because the steps
+after it read that state from the same pass. The registry refuses a step
+whose interval is above 60 seconds (`registry.PASS_BOX_INTERVAL_S`) and that
+writes a `pass:` domain:
+
+```text
+ValueError: Interval of <step> above 60s writes pass:<key>
+```
+
+The fix is to declare that step at `CRITICAL_S` in `MEASURED`. `ledger health`,
+which writes `pass:stop`, is declared at `CRITICAL_S` for that reason, and
+`snapshot job` moved to `CRITICAL_S` in the same delivery.
+
+Read the stored ends of a swarm from the repository root:
+
+```bash
+~/dev/tcc-ecosystem/.venv/bin/python -c 'from scripts.swarm import store, timing; print(timing.step_ends(store.connect(), "rig-grade-swarm"))'
+```
+
+The result maps each step name to the epoch seconds its last ended run
+finished, for example `{"pane evidence": 1793870400.12, "metrics record": 1793870160.5}`.
+Deleting a field makes that step due on the next pass. Count how often a step
+rested in the latest passes with the report:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 60
+```
+
+A 120 second step shows about half its records in the `Skipped` column, a 600
+second step about nine in ten, and a critical step none.
 
 ### When a step exceeds its budget
 
@@ -891,7 +970,9 @@ The delivered proof and limitations are recorded in
 | `Undeclared step timing` at import | Declare that exact step name in `MEASURED` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
 | Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
-| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Expected: every pass runs every registered step; `interval_s` and the cadence are validated but no pass skips a step on them yet |
+| Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
+| `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
+| A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
 | `Unordered writers in lanes tick and slow` on the first group run | A slow step and a critical step touch the same domain with no dependency; add the step that must run first to `needs`; moving both into one lane does not clear it |
 | `Unordered reader and writer ... for pass:<key>` on the first pass | A step reads a pass box key with no need path to the step that writes it; add that writer, or a step that needs it, to the reader's `needs` |
 | `test_pass_edges` names `reads pass <key> without declaring it` | The step reads that key from the box or its pass view; add `pass_domain("<key>")` to its `reads` and its writer to its `needs` |
