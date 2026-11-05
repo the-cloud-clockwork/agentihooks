@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Iterable, Mapping
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, wait
 from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass, replace
@@ -44,6 +44,7 @@ LATE = "late"
 FAILED = "failed"
 HELD = "held"
 SKIPPED = "skipped"
+SETTLE_S = 0.05
 
 _RUNNING: dict[tuple[str | None, str], Thread] = {}
 _RUNNING_LOCK = Lock()
@@ -343,10 +344,36 @@ def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) 
     return run_step(step, ctx)
 
 
+def _waiting(step: Step, names: set[str], found: pool.Pass) -> bool:
+    """Return whether ``step`` still waits, inside its lane, on a handed off step of an earlier group of the pass.
+
+    Such a step is submitted only once that step ended, so it never holds a pass worker while it waits.
+    """
+    earlier = found.handed_of(step.needs - names)
+    return bool(earlier) and not found.lane(step.lane).expired and not found.settled(earlier)
+
+
 def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     """Mark the record's step ended on the pass, dropped when it was abandoned, and return the record."""
     found.end(record.name, record.abandoned)
     return record
+
+
+def _expire(
+    running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
+    dropped: set[str],
+    records: dict[str, StepRecord],
+    found: pool.Pass,
+    clock: Callable[[], float],
+) -> None:
+    """Abandon every running step whose lane expired, recording it dropped and ended on the pass."""
+    for future, (step, started, lane) in list(running.items()):
+        if lane.expired:
+            running.pop(future)
+            dropped.add(step.name)
+            _abandoned(step)
+            left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+            records[step.name] = _ended(found, left)
 
 
 def _eager(
@@ -364,10 +391,12 @@ def _eager(
     pending = list(ordered)
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
     offsets: dict[str, float | None] = {}
-    executor = ThreadPoolExecutor(max_workers=found.workers)
+    submitted: list[Future[StepRecord]] = []
     try:
         while pending or running:
-            ready = [step for step in pending if step.needs & names <= records.keys()]
+            ready = [
+                step for step in pending if step.needs & names <= records.keys() and not _waiting(step, names, found)
+            ]
             for step in ready:
                 pending.remove(step)
                 lane = found.lane(step.lane)
@@ -382,26 +411,25 @@ def _eager(
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
-                    future = executor.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
+                    future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
+                    submitted.append(future)
                     running[future] = (step, clock(), lane)
+            held = any(_waiting(step, names, found) for step in pending)
             if not running:
-                if not ready:
+                if not ready and not held:
                     raise ValueError(f"steps {sorted(step.name for step in pending)} wait on needs that never end")
+                if held:
+                    time.sleep(SETTLE_S)
                 continue
-            timeout = min(lane.remaining for _, _, lane in running.values())
+            timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []))
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
                 step, _, _ = running.pop(future)
                 records[step.name] = _ended(found, _applied(future.result(), apply))
-            for future, (step, started, lane) in list(running.items()):
-                if lane.expired:
-                    running.pop(future)
-                    dropped.add(step.name)
-                    _abandoned(step)
-                    left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
-                    records[step.name] = _ended(found, left)
+            _expire(running, dropped, records, found, clock)
     finally:
-        executor.shutdown(False, cancel_futures=True)
+        for future in submitted:
+            future.cancel()
     return tuple(_journal(step, records[step.name], offsets[step.name]) for step in ordered)
 
 
