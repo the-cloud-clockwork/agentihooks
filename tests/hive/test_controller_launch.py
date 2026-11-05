@@ -181,7 +181,7 @@ def test_placement_carries_the_hive_checkout_path_into_launch(setup: SimpleNames
     write_hive(setup, repos=["/home/worker/dev/agentihooks"])
     request = request_for(setup)
     request.task[ACK_LATER] = True
-    selected = setup.launcher.select(request)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
     assert not isinstance(selected, placement.Wait)
     assert selected.hive == "remote"
     assert selected.origin == "/home/worker/dev/agentihooks"

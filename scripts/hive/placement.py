@@ -145,7 +145,7 @@ def _checks(
             ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
-        (lambda hive: repository(hive, repo), f"no {kind} for {role} lists the repo {repo}"),
+        (lambda hive: bool(repository(hive, repo)), f"no {kind} for {role} lists the repo {repo}"),
         (
             lambda hive: route_kind != INTERACTIVE or _holds(hive["interactive"], harness, key),
             f"no {kind} for {role} holds the {harness} login for {slot}",
