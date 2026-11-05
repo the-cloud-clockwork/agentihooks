@@ -426,8 +426,9 @@ one fan out returns, it cancels only its own futures that never started; the
 executors stay open for the rest of the pass.
 
 A step that needs a step an earlier group handed off is not submitted until that
-step ends or is dropped (`Pass.settled`). While it waits, `_eager` holds it out of the ready set
-(`engine._waiting`) and re-checks every `SETTLE_S` (0.05 seconds), so the wait
+step ends or is dropped (`Pass.settled`). While it waits, `_eager` holds it out
+of the ready set (`engine._waiting`) and re-checks every `SETTLE_S` (0.05
+seconds), so the wait
 holds no pass worker and the slow step it waits on can always get one. The hold
 lasts only while the needed step is still pending and the waiting step's own
 lane deadline has not expired; once either ends, the step is submitted and the
@@ -1058,7 +1059,7 @@ The delivered proof and limitations are recorded in
 | Preempt and spawn are late in a pass with no critical lane overrun | `fleet red notice` ran past its 30 second budget; both wait for it and are dropped when it is abandoned. Look for its `swarm_tick_step_abandoned` line in the same pass |
 | No heartbeat or last tick after a pass that printed actions | The pass raised or returned before its end, so `ended` was none and the closing group stamped nothing; read the tick log for the exception or the early return line. A pass that ended with `pass ended early` does stamp both |
 | `closing` steps recorded late | The step's own budget or the 30 second closing deadline ran out. The deadline starts at the pass `finally`, not at the start of the pass, so a long critical lane does not shorten it |
-| `Dependency cycle: <names>` from `run_group` | The named steps of one group need each other. Remove the need that closes the cycle |
+| `Dependency cycle: <names>` from `run_group` | The named steps of one group are unplaced: they sit on or behind a `needs` cycle among the group's steps. Remove the need that closes the cycle |
 | `wait on needs that never end` | `_eager` was called directly with steps that need each other and none waits on a handed off step of an earlier group; `run_group` refuses the same steps earlier with `Dependency cycle`. Fix the `needs` cycle |
 | `RuntimeError: cannot schedule new futures after shutdown` from a step or fan out | The submit ran after its pass ended, for example from a worker that outlived the pass. The pass executors close at pass end; start such work inside a pass |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
