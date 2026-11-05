@@ -1418,6 +1418,20 @@ def test_only_an_untargeted_master_another_hive_lists_is_kept_unjudged(
     assert agent.name not in {a.name for a in store.agents("sw")}
 
 
+def test_holders_maps_each_listed_name_to_every_hive_and_skips_a_report_without_names(
+    ticking: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import reports
+    from scripts.swarm import held_elsewhere
+
+    store, _, _ = ticking
+    monkeypatch.setattr(reports.registry.hive_state, "index", lambda client: ["root", "stable", "bare"])
+    store.redis.set(reports.key("root"), json.dumps({"names": ["master@a", "eng@b"]}))
+    store.redis.set(reports.key("stable"), json.dumps({"names": ["eng@b"]}))
+    store.redis.set(reports.key("bare"), json.dumps({"executions": {}}))
+    assert held_elsewhere.holders(store) == {"master@a": {"root"}, "eng@b": {"root", "stable"}}
+
+
 def test_a_kept_master_does_not_skip_later_agents(ticking):
     from scripts.swarm.tick import tick
 
