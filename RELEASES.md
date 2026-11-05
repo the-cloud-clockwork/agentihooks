@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.652 · 2026-11-05
+
+### 2026-11-05 · 0640a9ceda29 · #9784 · @nestorcolt
+
+**The controller keeps a hive placed lane agent live by its heartbeat**
+
+This fix stops the controller from prematurely killing lane agents that were placed on remote workstation hives: previously, if the hive's local pane reporting looked "gone," the controller would retire the engineer and reopen its task even while the agent was still actively working, causing churn like tc-g3 cycling through four engineers in an hour. Now the reap and verify passes check the agent's own heartbeat before acting, keeping a remotely placed agent's record, claim, and lease alive as long as its heartbeat is recent and its task hasn't ended, while still correctly reaping truly stale agents.
+
+### 2026-11-05 · d42b8b6294d8 · #9774 · @nestorcolt
+
+**Tick load budget test fetches dev when origin dev is missing**
+
+This change fixes a flaky unit test where the tick load budget check assumed `origin/dev` always existed, which failed on shallow checkouts used by unrelated pull requests. Now `base_budget` automatically fetches `dev` into `refs/remotes/origin/dev` when it's missing, and a new test confirms this fetch happens correctly and the base budget can still be read afterward. This matters because it stops unrelated pull requests from being incorrectly marked red due to a missing branch reference, keeping CI signal accurate and trustworthy for the tick workflow.
+
 ## v2.17.651 · 2026-11-05
 
 ### 2026-11-05 · 34baf8499588 · #9780 · @nestorcolt
