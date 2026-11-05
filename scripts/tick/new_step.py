@@ -12,12 +12,13 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
 from scripts import tick_pattern
 from scripts.tick import catalogue
+from scripts.tick.ports.tools import Tools
 
 PACKAGE = "scripts.tick.steps"
 STEPS = Path("scripts/tick/steps")
@@ -26,9 +27,7 @@ BUDGETS = Path(tick_pattern.BUDGETS)
 TESTS = Path("tests/tick/steps")
 LANES = ("tick", "slow")
 INTERVALS = {60: "CRITICAL_S", 120: "WIDE_S", 600: "SLOW_S"}
-PORTS = frozenset(
-    {"coordination", "host", "inbox", "ledger", "llm", "metrics", "processes", "runtime", "source_control"}
-)
+PORTS = frozenset(field.name for field in fields(Tools))
 SCENARIO = "running"
 IMPORTS = (
     ("Callable", "from collections.abc import Callable"),
@@ -170,12 +169,11 @@ def _with_imports(source: str) -> str:
     return "".join([*lines[:at], *inserted, *lines[at:]]).rstrip("\n") + "\n"
 
 
-def _write_step(root: Path, spec: Spec) -> Path:
-    """Append the step stub to its module, creating the module when the package does not hold it."""
+def _step_text(root: Path, spec: Spec) -> tuple[Path, str]:
+    """The path and new text for: Append the step stub to its module, creating the module when the package does not hold it."""
     path = root / STEPS / f"{spec.module}.py"
     source = path.read_text() if path.is_file() else f'"""The {spec.module} steps of the tick."""\n'
-    path.write_text(_with_imports(source) + "\n\n" + _stub(spec))
-    return path
+    return path, _with_imports(source) + "\n\n" + _stub(spec)
 
 
 def _table_end(source: str) -> int:
@@ -192,15 +190,14 @@ def _table_end(source: str) -> int:
     raise SystemExit(f"{BUDGETS} holds no MEASURED table")
 
 
-def _write_row(root: Path, spec: Spec) -> Path:
-    """Insert the step's row, unmeasured at its interval, at the end of the budgets table."""
+def _row_text(root: Path, spec: Spec) -> tuple[Path, str]:
+    """The path and new text for: Insert the step's row, unmeasured at its interval, at the end of the budgets table."""
     path = root / BUDGETS
     source = path.read_text()
     lines = source.splitlines(keepends=True)
     row = f"    {json.dumps(spec.name)}: Timing(UNMEASURED_S, {INTERVALS[spec.interval]}),\n"
     lines.insert(_table_end(source) - 1, row)
-    path.write_text("".join(lines))
-    return path
+    return path, "".join(lines)
 
 
 def _test_source(spec: Spec) -> str:
@@ -222,25 +219,22 @@ def _test_source(spec: Spec) -> str:
     )
 
 
-def _write_test(root: Path, spec: Spec) -> Path:
-    """Write the step's feature test."""
+def _test_text(root: Path, spec: Spec) -> tuple[Path, str]:
+    """The path and new text for: Write the step's feature test."""
     path = root / test_path(spec.name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_test_source(spec))
-    return path
+    return path, _test_source(spec)
 
 
-def _write_index(root: Path, spec: Spec) -> Path:
-    """List the step under its scenario in the scenario index."""
+def _index_text(root: Path, spec: Spec) -> tuple[Path, str]:
+    """The path and new text for: List the step under its scenario in the scenario index."""
     path = root / catalogue.INDEX
     index = _read_json(path)
     index["scenarios"] = dict(sorted({**index["scenarios"], spec.name: [spec.scenario]}.items()))
-    path.write_text(json.dumps(index, indent=1) + "\n")
-    return path
+    return path, json.dumps(index, indent=1) + "\n"
 
 
-def _write_feature(root: Path, spec: Spec) -> Path:
-    """Add the step's test to its feature map entry, creating an inventory entry for a new feature id."""
+def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
+    """The path and new text for: Add the step's test to its feature map entry, creating an inventory entry for a new feature id."""
     path = root / catalogue.FEATURE_MAP
     data = _read_json(path)
     entry = next((entry for entry in data["features"] if entry["id"] == spec.feature), None)
@@ -257,12 +251,11 @@ def _write_feature(root: Path, spec: Spec) -> Path:
         )
     else:
         entry["tests"] = [*entry.get("tests", []), test_node(spec.name)]
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    return path
+    return path, json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _join_modules(root: Path, module: str) -> Path:
-    """Append ``module`` to the ``MODULES`` tuple of the steps package."""
+def _join_modules(root: Path, module: str) -> tuple[Path, str]:
+    """The path and new text for: Append ``module`` to the ``MODULES`` tuple of the steps package."""
     path = root / INIT
     source = path.read_text()
     value = next(
@@ -275,8 +268,7 @@ def _join_modules(root: Path, module: str) -> Path:
     first, last = value.lineno - 1, (value.end_lineno or value.lineno) - 1
     head, tail = lines[first][: value.col_offset], lines[last][value.end_col_offset or 0 :]
     lines[first : last + 1] = [head + "(" + "".join(f"{json.dumps(name)}, " for name in names) + ")" + tail]
-    path.write_text("".join(lines))
-    return path
+    return path, "".join(lines)
 
 
 def _format(root: Path, paths: list[Path]) -> None:
@@ -291,15 +283,19 @@ def scaffold(root: Path, spec: Spec) -> list[Path]:
     """Write the five artefacts of ``spec`` in the tree at ``root`` and return the files written."""
     _refuse(root, spec)
     new = not (root / STEPS / f"{spec.module}.py").is_file()
-    written = [
-        _write_step(root, spec),
-        _write_row(root, spec),
-        _write_test(root, spec),
-        _write_index(root, spec),
-        _write_feature(root, spec),
+    texts = [
+        _step_text(root, spec),
+        _row_text(root, spec),
+        _test_text(root, spec),
+        _index_text(root, spec),
+        _feature_text(root, spec),
     ]
     if new:
-        written.append(_join_modules(root, spec.module))
+        texts.append(_join_modules(root, spec.module))
+    for path, text in texts:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    written = [path for path, _ in texts]
     _format(root, [path for path in written if path.suffix == ".py"])
     return written
 
