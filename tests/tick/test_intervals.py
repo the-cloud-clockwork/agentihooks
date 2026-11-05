@@ -1,5 +1,6 @@
 """Interval enforcement of the tick engine: wide and slow lane steps skip passes inside their interval."""
 
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -92,9 +93,10 @@ def test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass(record
     assert (len(wide.runs), len(critical.runs)) == (2, 4)
     assert store.redis.hgetall(store.key("sw", timing.STEP_RAN)) == {"wide": repr(BASE_S + 125.0)}
     skipped = [row for row in rows if row["step"] == "wide" and row["outcome"] == engine.SKIPPED]
-    assert [(row["skipped"], row["rested"], row["abandoned"], row["wall_s"], row["budget_s"]) for row in skipped] == [
-        (True, True, False, 0.0, 5.0)
-    ] * 2
+    assert [
+        (row["skipped"], row["rested"], row["abandoned"], row["wall_s"], row["budget_s"], row["start_s"])
+        for row in skipped
+    ] == [(True, True, False, 0.0, 5.0, 5.0)] * 2
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
@@ -190,10 +192,52 @@ def test_a_step_never_recorded_is_due(recording: Any) -> None:
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
+def test_nothing_rests_with_a_swarm_but_no_store() -> None:
+    with timing.tick("sw", None):
+        assert engine.resting((Counted("wide", budgets.WIDE_S),), 60.0) == frozenset()
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_pass_of_critical_steps_reads_no_step_ends(recording: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(_store: object, _slug: str) -> dict[str, float]:
+        raise AssertionError("read step ends")
+
+    monkeypatch.setattr(timing, "step_ends", refuse)
+    assert engine.resting((Counted("critical", budgets.CRITICAL_S),), 60.0) == frozenset()
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_step_at_one_cron_minute_never_rests(recording: Any) -> None:
+    store, _, clock = recording
+    store.redis.hset(store.key("sw", timing.STEP_RAN), "minute", repr(clock[0]))
+    assert engine.resting((Counted("minute", engine.CRON_S),), 60.0) == frozenset()
+    store.redis.hset(store.key("sw", timing.STEP_RAN), "wide", repr(clock[0]))
+    assert engine.resting((Counted("wide", budgets.WIDE_S),), 60.0) == frozenset({"wide"})
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_step_end_storage_failure_is_reported(capsys: pytest.CaptureFixture[str]) -> None:
+    from unittest.mock import patch
+
+    from redis.exceptions import ConnectionError
+
+    store = Store()
+    with patch.object(store.redis, "hset", side_effect=ConnectionError("private connection details")):
+        timing.step_ended(store, "sw", "wide", BASE_S)
+    assert (
+        capsys.readouterr().err
+        == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:step-ran"}) + "\n"
+    )
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
 def test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused() -> None:
     step = Counted("boxed", budgets.WIDE_S, writes=frozenset({Domain("pass:spawn")}))
     with pytest.raises(ValueError, match=r"^Interval of boxed above 60s writes pass:spawn$"):
         registry._validate_timing([step])
+    both = Counted("both", budgets.WIDE_S, writes=frozenset({Domain("pass:spawn"), Domain("pass:agents")}))
+    with pytest.raises(ValueError, match=r"^Interval of both above 60s writes pass:agents, pass:spawn$"):
+        registry._validate_timing([both])
     registry._validate_timing([Counted("boxed", budgets.CRITICAL_S, writes=frozenset({Domain("pass:spawn")}))])
     registry._validate_timing([Counted("plain", budgets.WIDE_S, writes=frozenset({Domain("passes")}))])
 
