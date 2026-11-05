@@ -15,6 +15,7 @@ HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
+NO_GH = "merge observation skipped: this host has no gh binary"
 REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
@@ -36,15 +37,20 @@ def request(repo: str, args: list[str]) -> dict:
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
-        result = github_reads.rest(
-            "swarm.merge_stall",
-            args,
-            subprocess.run,
-            cwd=None if REMOTE.match(repo) else repo,
-            capture_output=True,
-            text=True,
-            timeout=min(20, remaining),
-        )
+        try:
+            result = github_reads.rest(
+                "swarm.merge_stall",
+                args,
+                subprocess.run,
+                cwd=None if REMOTE.match(repo) else repo,
+                capture_output=True,
+                text=True,
+                timeout=min(20, remaining),
+            )
+        except FileNotFoundError:
+            result = None
+    if result is None:
+        raise SwarmError(NO_GH)
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)
