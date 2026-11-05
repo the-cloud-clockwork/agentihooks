@@ -405,7 +405,10 @@ def test_placement_matches_the_repository_under_another_home(repo: str) -> None:
 
 
 @pytest.mark.parametrize("remote_input", [False, True])
-def test_placement_uses_the_name_without_overriding_an_advertised_origin(tmp_path: Path, remote_input: bool) -> None:
+@pytest.mark.parametrize("remote_suffix", ["", ".git"])
+def test_placement_uses_the_name_without_overriding_an_advertised_origin(
+    tmp_path: Path, remote_input: bool, remote_suffix: str
+) -> None:
     checkout = tmp_path / "agentihooks"
     (checkout / ".git").mkdir(parents=True)
     (checkout / ".git" / "config").write_text(
@@ -416,7 +419,14 @@ def test_placement_uses_the_name_without_overriding_an_advertised_origin(tmp_pat
     assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
     hives[0]["repos"].append("github.com/org/another-repo")
     assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == "pods"
-    hives[0]["repos"].append("github.com/someone/agentihooks")
+    hives[0]["repos"].append(f"github.com/someone/agentihooks{remote_suffix}")
     assert place("eng", "claude", "acct", "subscription", repo, hives, NOW) == Wait(
         f"no hive for eng lists the repo {repo}"
     )
+
+
+def test_a_checkout_without_remote_metadata_matches_a_hive_advertising_its_origin(tmp_path: Path) -> None:
+    checkout = tmp_path / "agentihooks"
+    checkout.mkdir()
+    hives = [hive("pods", repos=["/home/worker/dev/agentihooks", "github.com/the-cloud-clockwork/agentihooks"])]
+    assert place("eng", "claude", "acct", "subscription", str(checkout), hives, NOW) == "pods"
