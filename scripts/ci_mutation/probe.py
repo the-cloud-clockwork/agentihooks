@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import time
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,19 @@ def worker_failure(work: Path, reason: str) -> RuntimeError:
     return RuntimeError(f"early mutation failed: {reason}\n{detail}")
 
 
+def refusals(owned: set[str], rows: dict[str, str], seconds: float, budget: float) -> str:
+    """Name every reason an early shard's grading is refused, or return an empty string when it is complete."""
+    statuses = Counter(status for status in rows.values() if status not in {"killed", "survived"})
+    parts = [", ".join(f"{count} {status}" for status, count in sorted(statuses.items()))] if statuses else []
+    if owned - set(rows):
+        parts.append(f"{len(owned - set(rows))} without a result")
+    if set(rows) - owned:
+        parts.append(f"{len(set(rows) - owned)} not assigned to this shard")
+    if seconds > budget:
+        parts.append(f"ran {seconds:.1f} s, over its {budget:.1f} s budget")
+    return "; ".join(parts)
+
+
 def merge_probes(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
     total = plan.get("probe_shards", plan["shards"])
     if len(records) != total or {record["index"] for record in records} != set(range(total)):
@@ -146,8 +160,9 @@ def run_probe(root: Path, selected: dict, stats: SharedStats, shard: tuple[int, 
                 raise worker_failure(work, reason)
             rows.update({row["name"]: row["status"] for values in results.values() for row in values})
     seconds = time.monotonic() - started
-    if set(rows) != owned or set(rows.values()) - {"killed", "survived"} or seconds > budget:
-        raise ValueError("early mutation did not completely grade its assigned mutants within budget")
+    refused = refusals(owned, rows, seconds, budget)
+    if refused:
+        raise ValueError(f"early mutation did not grade its assigned mutants: {refused}")
     return {"plan": plan_fingerprint(plan), "index": shard[0], "total": shard[1], "seconds": seconds, "results": rows}
 
 

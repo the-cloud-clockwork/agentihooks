@@ -536,6 +536,7 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -552,6 +553,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *download-the-shared-mutation-stats
@@ -738,6 +740,7 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -751,6 +754,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *download-the-shared-mutation-stats

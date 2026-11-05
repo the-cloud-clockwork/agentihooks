@@ -65,6 +65,10 @@ These are reached call sites. Calling `tick` directly on a stopped swarm reaches
 return before the normal wrapper return also skips `after`; it is not a cleanup hook in `finally`. The `close` group
 precedes settlement, so reaching it does not prove that the whole wrapper completed.
 
+[Pull request 9720](https://github.com/the-cloud-clockwork/agentihooks/pull/9720) later removed the `after` site and
+the `wrapper status` group. Last tick, heartbeat and status publish now run in the `closing` group, which `run_tick`
+calls from its `finally` on every ending; see [The closing lane](tick-engine-steps.md#the-closing-lane).
+
 ### Usage and configuration
 
 No operator flag, environment variable or swarm setting enables these call sites. In the original delivery,
