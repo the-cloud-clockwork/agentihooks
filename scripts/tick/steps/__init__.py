@@ -5,6 +5,7 @@ from functools import partial
 from importlib import import_module
 from typing import Any, TypedDict, Unpack, cast
 
+from scripts.tick import registry
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import budgets
@@ -128,3 +129,18 @@ def note_left(box: object, records: Iterable[StepRecord]) -> None:
     """Add to a pass ``box`` the name of each recorded step left running past its budget, dropped or held."""
     if isinstance(box, PassBox):
         box.left.extend(record.name for record in records if record.abandoned or record.held)
+
+
+MODULES = (
+    "scripts.tick.steps.agents",
+    "scripts.tick.steps.common",
+    "scripts.tick.steps.host",
+    "scripts.tick.steps.masters",
+    "scripts.tick.steps.observe",
+    "scripts.tick.steps.place",
+    "scripts.tick.steps.report",
+    "scripts.tick.steps.tasks",
+)
+
+for _module in MODULES:
+    registry.require(_module)
