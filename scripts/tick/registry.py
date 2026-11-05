@@ -165,14 +165,24 @@ def _barrier(step: Step, needs: frozenset[str]) -> Step:
     return edged
 
 
+def _crossed(first: Step, second: Step) -> bool:
+    """Return whether ``first`` and ``second`` declare a domain that one writes and the other reads or writes."""
+    return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
+
+
 def site_edges(steps: Iterable[Step], sites: Sequence[str]) -> tuple[Step, ...]:
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
-    site that holds steps; steps of groups outside ``sites`` keep their own needs."""
+    site that holds steps and whose declared reads and writes cross its own; steps of groups outside ``sites`` keep
+    their own needs."""
     found = tuple(steps)
-    members = {site: frozenset(step.name for step in found if step.group == site) for site in sites}
-    barrier: dict[str, frozenset[str]] = {}
-    previous: frozenset[str] = frozenset()
+    members = {site: tuple(step for step in found if step.group == site) for site in sites}
+    barrier: dict[str, tuple[Step, ...]] = {}
+    previous: tuple[Step, ...] = ()
     for site in sites:
         barrier[site] = previous
         previous = members[site] or previous
-    return tuple(_barrier(step, barrier[step.group]) if barrier.get(step.group) else step for step in found)
+    edged = (
+        (step, frozenset(other.name for other in barrier.get(step.group, ()) if _crossed(other, step)))
+        for step in found
+    )
+    return tuple(_barrier(step, needs) if needs else step for step, needs in edged)

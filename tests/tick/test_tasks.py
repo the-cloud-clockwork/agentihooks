@@ -99,7 +99,8 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
-        lane = engine.SLOW if step.name == "fleet red notice" else CallStep.lane
+        slow = {"fleet red notice", "promotion refresh", "release alert"}
+        lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 

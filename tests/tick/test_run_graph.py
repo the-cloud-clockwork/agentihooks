@@ -14,6 +14,7 @@ from scripts.tick.step import Context, Domain, Lane, Result, Write
 pytestmark = pytest.mark.unit
 
 PASS = Domain("pass")
+SHARED = frozenset({Domain("pass:shared")})
 
 
 class View:
@@ -48,7 +49,12 @@ def _needs(steps: tuple[object, ...]) -> dict[str, frozenset[str]]:
 
 
 def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> None:
-    steps = (Step("a1", "a"), Step("a2", "a"), Step("b1", "b", needs=frozenset({"a1"})), Step("c1", "c"))
+    steps = (
+        Step("a1", "a", writes=SHARED),
+        Step("a2", "a", reads=SHARED),
+        Step("b1", "b", needs=frozenset({"a1"}), writes=SHARED),
+        Step("c1", "c", reads=SHARED),
+    )
     edged = registry.site_edges(steps, ("a", "b", "c"))
     assert _needs(edged) == {
         "a1": frozenset(),
@@ -59,7 +65,7 @@ def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> Non
 
 
 def test_site_edges_skip_an_empty_site_and_leave_steps_outside_the_table_alone() -> None:
-    steps = (Step("a1", "a"), Step("b1", "b"), Step("x1", "x", needs=frozenset({"a1"})))
+    steps = (Step("a1", "a", writes=SHARED), Step("b1", "b", reads=SHARED), Step("x1", "x", needs=frozenset({"a1"})))
     edged = registry.site_edges(steps, ("a", "empty", "b"))
     assert _needs(edged) == {"a1": frozenset(), "b1": frozenset({"a1"}), "x1": frozenset({"a1"})}
 
@@ -118,8 +124,8 @@ def test_run_graph_overlaps_a_step_with_no_edge_and_holds_a_barrier_step_until_i
 
     steps = registry.site_edges(
         (
-            Step("probe", "probes", timed("probe", release)),
-            Step("observe", "observe", timed("observe")),
+            Step("probe", "probes", timed("probe", release), writes=SHARED),
+            Step("observe", "observe", timed("observe"), reads=SHARED),
             Step("intent", "judge", freeing),
         ),
         ("probes", "observe"),
