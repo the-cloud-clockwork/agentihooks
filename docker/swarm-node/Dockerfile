@@ -26,8 +26,8 @@ COPY docker/swarm-node/ssh/ /opt/swarm-node/ssh/
 RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH" --base-image "$BASE_IMAGE" \
     && python -c 'import json; from pathlib import Path; s=json.loads(Path("/opt/swarm-node/versions.lock").read_text())["debian_snapshot"]; Path("/etc/apt/sources.list").write_text(f"deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/{s} bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/{s} bookworm-security main\n")' \
     && rm /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
+    && apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
     && rm -r /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_*
 RUN --mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip \
