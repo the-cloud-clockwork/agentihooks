@@ -1230,10 +1230,10 @@ class HerdrRuntime:
         and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
             return self._order(host, _command("retire", agent), agent.name)
-        if self._listed_elsewhere(agent.name):
-            return self.reap_name(agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)
+        if self._listed_elsewhere(agent.name):
+            return self.reap_name(agent.name)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         if not pid and (launch := launches.find(agent.name, self.home)) is not None:
             return self.retire_process(agent, launch.pid, homes, launch.start_time)

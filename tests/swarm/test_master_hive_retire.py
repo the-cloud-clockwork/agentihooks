@@ -8,7 +8,7 @@ import pytest
 
 from scripts import terminate_agent
 from scripts.hive.orders import CommandOrder
-from scripts.swarm import commands
+from scripts.swarm import commands, retire_watch
 from scripts.swarm.reaper import Outcome
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore
@@ -55,6 +55,9 @@ class ControllerRuntime(AffinityRuntime):
     def retire(self, agent: AgentRecord, homes: tuple[str, ...] = ()) -> bool:
         return self.herdr.retire(agent, homes)
 
+    def refusal(self, agent: AgentRecord) -> dict:
+        return self.herdr.refusal(agent)
+
 
 @pytest.fixture
 def controller(store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ControllerRuntime:
@@ -76,6 +79,20 @@ def test_controller_retires_a_handed_off_workstation_master_and_launches_its_suc
     assert controller.delegated == [boss.name]
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0002"]
     assert controller.live == {"master@a1b2c3-0002"}
+
+
+def test_an_unacknowledged_hive_reap_leaves_a_retire_failure_naming_the_hive(
+    store: RedisStore, controller: ControllerRuntime
+) -> None:
+    del controller.herdr._order
+    tick("sw", store, tasks(), controller, 1)
+    (boss,) = masters(store)
+    store.put_agent("sw", replace(boss, state="finished"))
+    tick("sw", store, tasks(), controller, 7)
+    (row,) = retire_watch.rows(store, "sw")
+    assert (row["agent"], row["process"]) == (boss.name, 0)
+    assert row["refusal"] == f"reap ordered on hive {WORKSTATION}, waiting for its acknowledgement"
+    assert [a.name for a in masters(store)] == [boss.name]
 
 
 def test_a_master_no_hive_lists_keeps_the_local_retire(store: RedisStore, controller: ControllerRuntime) -> None:
