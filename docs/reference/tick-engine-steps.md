@@ -855,7 +855,8 @@ by the engine and does not leave the pass.
 
 ## Adding a step
 
-Run the scaffold from the repository root with every field the pattern needs:
+Run the scaffold from the repository root with every field the pattern needs; see
+[Tick step skill and rule](tick-step-skill.md):
 
 ```bash
 python -m scripts.tick.new_step "example" --group "task passes" --lane tick --interval 60 \
