@@ -266,7 +266,20 @@ def test_the_scaffold_formats_under_the_ruff_settings_of_its_tree(tree: Path) ->
 
 def test_the_formatter_refuses_source_ruff_cannot_parse(tree: Path) -> None:
     with pytest.raises(subprocess.CalledProcessError):
-        new_step()._formatted(tree, "def (\n")
+        new_step()._formatted(tree, tree / "x.py", "def (\n")
+
+
+def test_the_scaffold_applies_the_per_file_ruff_settings_of_each_written_file(tree: Path) -> None:
+    (tree / "pyproject.toml").write_text('[tool.ruff.lint.per-file-ignores]\n"scripts/tick/steps/*.py" = ["I"]\n')
+    assert scaffold(tree, STEP) == 0
+    assert (
+        "from typing import Any\nfrom scripts.tick import registry\n"
+        in (tree / "scripts/tick/steps/widgets.py").read_text()
+    )
+    assert (
+        "import pytest\n\nfrom scripts.tick import registry\n"
+        in (tree / "tests/tick/steps/test_probe_widgets.py").read_text()
+    )
 
 
 def test_the_scaffold_lists_the_step_under_the_scenario_given(tree: Path) -> None:

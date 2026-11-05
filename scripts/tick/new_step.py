@@ -265,10 +265,11 @@ def _join_modules(root: Path, module: str) -> tuple[Path, str]:
     return path, "".join(lines)
 
 
-def _formatted(root: Path, text: str) -> str:
-    """Python ``text`` with its imports sorted and formatted under the ruff settings of ``root``, read and returned on
-    stdin and stdout so nothing is written."""
-    for command in (["check", "--select", "I", "--fix", "-"], ["format", "-"]):
+def _formatted(root: Path, path: Path, text: str) -> str:
+    """``text`` of the Python file at ``path`` with its imports sorted and formatted under the ruff settings of
+    ``root``, read and returned on stdin and stdout so nothing is written."""
+    named = ["--stdin-filename", str(path), "-"]
+    for command in (["check", "--select", "I", "--fix", *named], ["format", *named]):
         text = subprocess.run(
             [sys.executable, "-m", "ruff", *command], cwd=root, input=text, capture_output=True, text=True, check=True
         ).stdout
@@ -288,7 +289,7 @@ def scaffold(root: Path, spec: Spec) -> list[Path]:
     ]
     if new:
         texts.append(_join_modules(root, spec.module))
-    final = [(path, _formatted(root, text) if path.suffix == ".py" else text) for path, text in texts]
+    final = [(path, _formatted(root, path, text) if path.suffix == ".py" else text) for path, text in texts]
     for path, text in final:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
