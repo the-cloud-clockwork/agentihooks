@@ -37,7 +37,6 @@ class Timing(NamedTuple):
 
 
 MEASURED: dict[str, Timing] = {
-    "config load": Timing(UNMEASURED_S, CRITICAL_S),
     "stopped branch": Timing(UNMEASURED_S, CRITICAL_S),
     "pane evidence": Timing(1.047, WIDE_S),
     "execution reconcile": Timing(0.442, CRITICAL_S),
