@@ -353,3 +353,12 @@ def test_a_mark_left_from_another_task_starts_over():
     actions = swarm.tick(ENDED)
     assert swarm.retired == [] and len(actions) == 2
     assert len(swarm.agent_inbox()) == 2
+
+
+def test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end() -> None:
+    swarm = Swarm()
+    actions = [action for at in range(START, START + 201 * MINUTE, MINUTE) for action in swarm.tick(at)]
+    assert actions == [f"overrun: told master@sw that {OWNER} has run 90 minutes on task t1"]
+    assert len(swarm.master()) == 1 and swarm.agent_inbox() == []
+    assert swarm.retired == [] and swarm.working() == [OWNER]
+    assert swarm.ledger.rows["t1"]["claimed_by"] == OWNER and swarm.ledger.comments == []
