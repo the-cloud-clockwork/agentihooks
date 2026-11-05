@@ -241,3 +241,29 @@ def test_tick_hands_the_close_group_its_freshly_spawned_rows(
 
     spawned = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
     assert seen["claimed_by"] == spawned
+
+
+class _AnsweringRuntime:
+    def observe(self, agent: AgentRecord) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(state="working")
+
+
+def test_watch_remote_forwards_every_argument_to_watch_agent(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[object, ...]] = []
+
+    def spying_watch_agent(
+        slug: str, store: object, ledger: object, runtime: object, rows: object, agent: object, now_ms: int
+    ) -> list[str]:
+        seen.append((slug, store, ledger, runtime, rows, agent, now_ms))
+        return ["watched"]
+
+    monkeypatch.setattr(tick_module, "_watch_agent", spying_watch_agent)
+    ledger, rows, runtime = object(), {}, _AnsweringRuntime()
+    agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working", runtime_backend="remote")
+
+    assert tick_module._watch_remote("sw", store, ledger, runtime, rows, agent, 13) == ["watched"]
+    assert seen == [("sw", store, ledger, runtime, rows, agent, 13)]
