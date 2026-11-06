@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.667 · 2026-11-06
+
+### 2026-11-06 · ec5f4382735b · #9876 · @agenticore-app
+
+**Leave the size allowlist to the size gate in the threshold pins check**
+
+This change registers `tests/SIZE_ALLOWLIST.json` under `threshold_pins.GRADED_BY` with `scripts.size_limits`, matching how `TYPE_BASELINE.json` and `TICK_PATTERN_ALLOWLIST.json` are handled. Previously, the pins check flagged a unit moved to a new file (with the same parameters and no growth) as a new, disallowed entry, even though the size gate already permits such renames. Now that validation is deferred to the size gate, which correctly accepts non-growing moved units while still rejecting any entry that actually grows or is newly added without justification.
+
 ## v2.17.666 · 2026-11-06
 
 ### 2026-11-06 · a01068212818 · #9874 · @agenticore-app
