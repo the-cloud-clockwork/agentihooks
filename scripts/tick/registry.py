@@ -1,4 +1,5 @@
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from copy import copy
 from dataclasses import dataclass
 from importlib import import_module
 from itertools import combinations
@@ -14,6 +15,7 @@ __all__ = [
     "register",
     "registry",
     "require",
+    "site_edges",
     "steps",
     "validate",
     "waves",
@@ -50,6 +52,7 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
 
 PASS_BOX = "pass:"
 PASS_BOX_INTERVAL_S = 60.0
+SLOW_LANE = "slow"
 
 
 def _validate_timing(steps: list[Step]) -> None:
@@ -197,3 +200,58 @@ def latest_start(name: str, steps: list[Step]) -> float:
         for step in wave:
             starts[step.name] = max((starts[need] + floors[need] for need in step.needs), default=0.0)
     return starts[name]
+
+
+def _needing(step: Step, needs: frozenset[str]) -> Step:
+    """Return a copy of ``step`` that needs exactly ``needs``."""
+    edged = copy(step)
+    object.__setattr__(edged, "needs", needs)
+    return edged
+
+
+def _barrier(step: Step, needs: frozenset[str]) -> Step:
+    """Return a copy of ``step`` that needs ``needs`` too, the barrier edges of its site."""
+    return _needing(step, step.needs | needs)
+
+
+def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]:
+    """Return ``steps`` with each step of a site in ``sites`` no longer needing a step of a later site."""
+    order = {site: index for index, site in enumerate(sites)}
+    at = {step.name: order[step.group] for step in steps if step.group in order}
+    found: list[Step] = []
+    for step in steps:
+        later = frozenset(need for need in step.needs if step.name in at and at.get(need, -1) > at[step.name])
+        found.append(_needing(step, step.needs - later) if later else step)
+    return tuple(found)
+
+
+def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
+    """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
+    site that holds steps; steps of groups outside ``sites`` keep their own needs.
+
+    A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane step, and
+    every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
+    for the sites between: only the steps of the site it names need it too.
+    """
+    found = _backward(tuple(steps), sites)
+    late = _late(found)
+    members = {site: frozenset(s.name for s in found if s.group == site and s.name not in late) for site in sites}
+    barrier: dict[str, frozenset[str]] = {}
+    held: dict[str, frozenset[str]] = {}
+    previous: frozenset[str] = frozenset()
+    for site in sites:
+        barrier[site] = previous | held.pop(site, frozenset())
+        if joins and site in joins:
+            held[joins[site]] = held.get(joins[site], frozenset()) | members[site]
+        else:
+            previous = members[site] or previous
+    return tuple(_barrier(step, barrier[step.group]) if barrier.get(step.group) else step for step in found)
+
+
+def _late(steps: tuple[Step, ...]) -> frozenset[str]:
+    """Return the slow lane steps of ``steps`` and every step needing one of them, directly or through another."""
+    late: set[str] = set()
+    for step in ordered(steps):
+        if step.lane == SLOW_LANE or step.needs & late:
+            late.add(step.name)
+    return frozenset(late)

@@ -46,7 +46,7 @@ def swarm_store():
 
 
 def test_the_tick_run_guard_leaves_a_hub_address_with_no_mode_to_the_controller(hub, swarm_store, monkeypatch):
-    monkeypatch.setattr(cli, "tick", lambda *args: pytest.fail("a remote host must not run an ordinary tick"))
+    monkeypatch.setattr(cli, "run_sites", lambda *args: pytest.fail("a remote host must not run an ordinary tick"))
     ledger, runtime = FakeLedger([{"id": "t1", "lane": "eng", "state": "open"}]), FakeRuntime()
 
     assert cli.run_tick(swarm_store, "sw", ledger, runtime, FakeHerdr({})) == [cli.CONTROLLER_TICKS]
