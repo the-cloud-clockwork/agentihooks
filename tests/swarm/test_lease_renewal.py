@@ -481,7 +481,9 @@ def test_beat_keeps_beating_through_a_redis_error(store, clock, monkeypatch):
     assert renewals == [(store, "sw", held)] * 2
 
 
-def test_beat_keeps_beating_through_a_hosted_lease_outage(store, clock, monkeypatch) -> None:
+def test_beat_keeps_beating_through_a_hosted_lease_outage(
+    store: RedisStore, clock: list[int], monkeypatch: pytest.MonkeyPatch
+) -> None:
     held, renewals = lease.acquire(store, "sw", "home"), []
 
     def renew(*args: object) -> None:
@@ -503,7 +505,9 @@ def test_beat_keeps_beating_through_a_hosted_lease_outage(store, clock, monkeypa
         ("409", False),
     ],
 )
-def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(monkeypatch, raised, unavailable) -> None:
+def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(
+    monkeypatch: pytest.MonkeyPatch, raised: OSError | str, unavailable: bool
+) -> None:
     import io
     import json
     import urllib.error

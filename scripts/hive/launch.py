@@ -406,8 +406,10 @@ class HiveLaunch:
     def unacknowledged(self, order: LaunchOrder) -> bool:
         return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
 
-    def refused_stale(self, order: LaunchOrder) -> bool:
-        """True when the hive refused the order because its controller epoch was no longer live."""
+    def stale(self, order: LaunchOrder) -> bool:
+        """True when the order carries an older controller epoch than this pass, or the hive refused it for one."""
+        if order.epoch != self.held.epoch:
+            return True
         ack = self.orders.ack(order)
         return ack is not None and ack.status != "live" and ack.failure == STALE_EPOCH
 
@@ -492,7 +494,8 @@ class HiveLaunch:
             previous = self.store.execution_registry.get(self.slug, order.execution_id)
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
-            elif self.refused_stale(order):
+            elif self.stale(order):
+                self.reap(order, previous)
                 self.end(previous, f"hive launch failed: {STALE_EPOCH}")
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):

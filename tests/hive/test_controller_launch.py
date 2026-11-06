@@ -733,8 +733,16 @@ def test_failed_order_can_retry_with_a_new_generation(setup):
     assert setup.launcher.orders_for("task").generation == order.generation + 1
 
 
-def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_the_same_pass(setup) -> None:
+@pytest.mark.parametrize(
+    ("behind", "ack"),
+    [(1, ("failed", "stale_epoch")), (0, ("failed", "stale_epoch")), (1, None), (1, ("live", ""))],
+    ids=["refused-older", "refused-current", "unacknowledged-older", "live-older"],
+)
+def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_the_same_pass(
+    setup: SimpleNamespace, behind: int, ack: tuple[str, str] | None
+) -> None:
     from scripts.hive.orders import Ack
+    from scripts.swarm import lease
     from scripts.swarm.tick import ACK_LATER
     from scripts.swarm_v2.runtime.base import Status
 
@@ -742,16 +750,20 @@ def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_
     request.task[ACK_LATER] = True
     stale = replace(
         order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task)),
-        epoch=setup.held.epoch - 1,
+        epoch=setup.held.epoch - behind,
+        expires_at=lease.now_ms(setup.store) + 60000,
     )
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(stale.__dict__))
-    setup.launcher.orders.finish("remote", "0-0", stale, Ack("failed", {}, "stale_epoch"))
+    if ack is not None:
+        setup.launcher.orders.finish("remote", "0-0", stale, Ack(ack[0], {"host_id": "remote"}, ack[1]))
     assert setup.launcher.spawn(request).status == Status.PENDING
     reissued = setup.launcher.orders_for("task")
     assert reissued.epoch == setup.held.epoch
     assert reissued.generation == stale.generation + 1
     assert reissued.execution_id != stale.execution_id
     assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [f"reap:{request.name}"]
 
 
 def test_an_ended_launch_releases_its_admission_reservation(setup):
