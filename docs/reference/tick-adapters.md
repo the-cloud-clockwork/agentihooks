@@ -966,7 +966,7 @@ look at the placement reads in the table above.
 ### Timed rows inside spawn order
 
 `_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
-`scripts.swarm.tick._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
+`scripts.tick.steps.place._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
 while `_spawn_order` runs. Once per spawn order it first times the runtime's `begin_placement_pass` when the runtime
 has one, recorded under that method's name, such as `scripts.swarm.controller.FencedRuntime.begin_placement_pass`.
 Then it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
@@ -983,7 +983,7 @@ parts in this order:
 `focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
 tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
 `scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
-checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue
+checks, until the lane's free room is filled. After the lanes, `scripts.tick.steps.place._ranked` sorts the whole queue
 once, `scripts.swarm.focus_budget.ranks` reads each task's focus rank and `scripts.swarm.focus_budget.ordered` sorts
 the queue by that rank. Every call in spawn order that reads the store, the runtime or the ledger document has a row;
 only the local queue and wait list bookkeeping between them is untimed.
@@ -1005,9 +1005,9 @@ A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm
 ```text
 scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
 scripts.swarm.profile_first.placeable  426  0.000s  0.311s  0.29%
-scripts.swarm.tick._ranked  71  0.002s  0.009s  0.00%
+scripts.tick.steps.place._ranked  71  0.002s  0.009s  0.00%
 scripts.swarm.tick._running  138  0.000s  0.001s  0.00%
-scripts.swarm.tick._spawn_order  71  3.336s  17.861s  2.26%
+scripts.tick.steps.place._spawn_order  71  3.336s  17.861s  2.26%
 scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
 scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
 ```

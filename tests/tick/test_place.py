@@ -374,7 +374,11 @@ def test_the_tick_module_holds_no_spawn_definition() -> None:
     from scripts.swarm import tick
 
     text = Path(str(tick.__file__)).read_text(encoding="utf-8")
-    defined = [name for name in SPAWN_CLUSTER if f"\ndef {name}(" in text or f"\nclass {name}" in text]
+    defined = [
+        name
+        for name in SPAWN_CLUSTER
+        if any(f"\n{kind} {name}{end}" in text for kind in ("def", "class") for end in "(:")
+    ]
     assert defined == []
 
 
