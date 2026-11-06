@@ -1,4 +1,4 @@
-# pyright: reportUnusedFunction=false, reportUnusedImport=false
+# pyright: reportUnusedFunction=false, reportUnusedImport=false, reportPrivateUsage=false
 """One reconcile pass over a swarm: retire finished agents, free dead or stalled agents' tasks, spawn up to the caps.
 
 Scaling up is immediate; scaling down happens only as agents finish, so a lowered cap never kills work.
@@ -67,20 +67,20 @@ from scripts.swarm import (
     readiness,
     reaper,
     release_wait,
-    resume,
+    resume,  # noqa: F401
     retire_watch,  # noqa: F401
     revoked_seats,  # noqa: F401
     run_window,
     seat_spawn,
     session_model,  # noqa: F401
-    stack,
+    stack,  # noqa: F401
     stale_nudge,  # noqa: F401
     successor_retry,
     timing,
 )
 from scripts.swarm import idle as idle_state  # noqa: F401
 from scripts.swarm.ledger_client import LedgerRefused, pass_state  # noqa: F401
-from scripts.swarm.naming import lane_of, parse, seat_label
+from scripts.swarm.naming import lane_of, parse, seat_label  # noqa: F401
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved  # noqa: F401
 from scripts.swarm.ready import awaiting as awaiting_merge  # noqa: F401
@@ -129,7 +129,7 @@ from scripts.tick import sites as tick_sites  # isort: skip
 from scripts.tick.steps.common import (
     _collected,  # noqa: F401
     _current_owner,
-    _drop,
+    _drop,  # noqa: F401
     _ended,
     _follow,  # noqa: F401
     _operator_line,
@@ -164,6 +164,22 @@ from scripts.tick.steps.place import (  # noqa: F401
     _settle_admission,
     _spawn_failed,
     _started,
+)
+from scripts.tick.steps.territory import (  # noqa: F401
+    _area,
+    _bin_closed,
+    _close_space,
+    _end_awaiting_seats,
+    _master_set,
+    _nested,
+    _overlaps,
+    _parked,
+    _refund_parked,
+    _settle,
+    _shared,
+    _sharing,
+    _stack_base,
+    _stacked_dep,
 )
 
 LEASE_MS = 10 * 60 * 1000
@@ -276,7 +292,7 @@ class Runtime(Protocol):
     def dismiss(self, agent: AgentRecord) -> bool: ...
     def name_pane(self, agent: AgentRecord) -> bool: ...
     def conversations(self) -> dict[str, str] | None: ...
-    def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...
+    def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...  # noqa: F811
     def close_space(self, config: SwarmConfig) -> bool: ...
     def pane_tail(self, pane_id: str, lines: int) -> str: ...
     def launched_pane(self, pane_id: str, name: str) -> bool: ...
@@ -338,20 +354,6 @@ def _codex_hook_order():
     moved = restore_hook_order(home)
     path = (home / "hooks.json").resolve()
     return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
-
-
-def _close_space(slug, config, store, runtime):
-    if not store.agents(slug):
-        runtime.close_space(config)
-    return []
-
-
-def _bin_closed(slug, store, ledger, doc):
-    if doc.get("closed_at") and not store.agents(slug):
-        exits.close_swarm(InboxStore(store.redis), slug)
-        if ledger.bin_closed(slug, doc["closed_at"]):
-            return ["the closed ledger moved to the bin"]
-    return []
 
 
 def _woken(slug, config, store, ledger):
@@ -466,66 +468,6 @@ def _demoted(slug, store, task_ids):
     failed = store.launch_failures(slug)
     held = [task_id for task_id in task_ids if failed.get(task_id)]
     return set(held) - store.handoff_tasks(slug, held) if held else set()
-
-
-def _parked(task, rows):
-    return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])
-
-
-def _stack_base(task, rows, repo, origin=None):
-    deps = [dep for dep in task.get("depends_on") or [] if rows[dep].get("state") != "done"]
-    return [_stacked_dep(dep, rows[dep], repo, origin or stack.origin_key) for dep in deps]
-
-
-def _stacked_dep(dep, row, repo, origin):
-    base = {"task": dep, "branch": row["branch"]}
-    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != origin(repo)
-    return {**base, "repo": row["branch_repo"]} if elsewhere else base
-
-
-def _refund_parked(slug, store, rows, agent):
-    reason = (store.handoff_envelope(slug, agent.task) or {}).get("reason")
-    preempted = preempt.take_victim(store, slug, agent.name)
-    if _parked(rows.get(agent.task, {}), rows) or reason == "quota" or (reason == "operator" and preempted):
-        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
-
-
-def _master_set(doc, task_id):
-    by = doc.get("_meta", {}).get("stamps", {}).get(f"tasks/{task_id}/state", {}).get("by")
-    return "master" if lane_of(by) == MASTER else ""
-
-
-def _overlaps(mine, theirs):
-    return bool(_shared(mine, theirs))
-
-
-def _shared(mine, theirs):
-    pairs = [(a, b) for a in map(_area, mine) for b in map(_area, theirs)]
-    return sorted({b if _nested(a, b) else a for a, b in pairs if _nested(a, b) or _nested(b, a)})
-
-
-def _sharing(task, rows, agents):
-    mine = task.get("territory") or []
-    owners = {a.task: a.name for a in agents if not _ended(a, rows)}
-    running = [t for t in rows.values() if t.get("state") in ACTIVE and t["id"] != task["id"]]
-    return [
-        {
-            "task": t["id"],
-            "claimant": owners.get(t["id"], ""),
-            "areas": areas,
-            **({"checks": t["state"] == "pr"} if t["id"] not in owners else {}),
-        }
-        for t in running
-        if (areas := _shared(mine, t.get("territory") or []))
-    ]
-
-
-def _area(entry):
-    return entry.strip().removeprefix("./").rstrip("/")
-
-
-def _nested(outer, inner):
-    return inner == outer or inner.startswith(outer + "/")
 
 
 def _held_for_master(slug, store, now_ms):
@@ -1199,34 +1141,3 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any
             return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token, caller)
-
-
-def _settle(
-    slug: str, config: SwarmConfig, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], doc: Any
-) -> list[str]:
-    agents = store.agents(slug)
-    if config.state == "stopping":
-        if not any(a.lane == MASTER and a.state != "finished" for a in agents):
-            _end_awaiting_seats(slug, store, ledger, rows, agents)
-            agents = [a for a in agents if a.state != resume.AWAITING]
-        if agents:
-            return []
-        store.update(slug, state="stopped")
-        return ["stopped"]
-    if any(a.lane != MASTER for a in agents):
-        return []
-    if config.state != "running" or any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
-        return []
-    store.update(slug, state="drained")
-    blocked = sum(1 for t in rows.values() if t.get("state") == "blocked" and not t.get("out_of_scope"))
-    waiting = {0: "", 1: ", one blocked task waits for you"}.get(blocked, f", {blocked} blocked tasks wait for you")
-    ledger.notify(slug, freeze.notice(doc, rows.values(), freeze.fix_phase(config)) + waiting)
-    return ["drained"]
-
-
-def _end_awaiting_seats(
-    slug: str, store: RedisStore, ledger: Any, rows: dict[str, dict[str, Any]], agents: list[AgentRecord]
-) -> None:
-    for agent in agents:
-        if agent.state == resume.AWAITING:
-            _drop(slug, store, ledger, rows, agent)
