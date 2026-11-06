@@ -11,9 +11,14 @@ pytestmark = pytest.mark.xdist_group("hosted_client_lookup")
 
 @pytest.fixture(scope="module")
 def imported_hosted():
-    original = dict(vars(hosted_ledger))
+    # Snapshot the namespace before any test reloads the module. Restoring it
+    # on teardown (instead of reloading again) keeps HostedLedger bound to the
+    # class object every other module imported; a teardown reload rebinds the
+    # class and breaks isinstance(...) for later tests on this worker (#5520).
+    original_namespace = dict(hosted_ledger.__dict__)
     yield hosted_ledger
-    vars(hosted_ledger).update(original)
+    hosted_ledger.__dict__.clear()
+    hosted_ledger.__dict__.update(original_namespace)
 
 
 def test_01_import_under_a_patched_client(monkeypatch, imported_hosted):
