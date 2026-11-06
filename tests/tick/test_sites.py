@@ -1,5 +1,6 @@
 """The sites of the flat pass graph: the graph view, the tick's checks between sites and the graph runner."""
 
+from threading import Event
 from time import monotonic
 from typing import Any
 
@@ -9,8 +10,9 @@ from scripts.swarm import reaper
 from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore
 from scripts.tick import engine, sites
-from scripts.tick.step import Domain
-from scripts.tick.steps import PASS, actions
+from scripts.tick.deadline import Deadline
+from scripts.tick.step import Domain, Write
+from scripts.tick.steps import PASS, PassBox, actions, actions_of
 from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_tick import store  # noqa: F401
@@ -86,7 +88,12 @@ def test_tick_sites_leave_the_tick_out_when_a_value_it_reads_is_missing() -> Non
     assert not found.left
 
 
-def test_the_start_check_reads_the_clock_adds_the_appliers_and_scans_once(store: RedisStore) -> None:  # noqa: F811
+def test_the_start_check_reads_the_clock_adds_the_appliers_and_scans_once(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table = {7: object()}
+    monkeypatch.setattr(reaper, "processes", lambda: table)
     state: dict[str, Any] = {"store": store, "slug": "sw"}
     found = sites.TickSites(state, {}, {}, lambda: 7, scanning=True)
     before = reaper.PASS.get()
@@ -95,7 +102,9 @@ def test_the_start_check_reads_the_clock_adds_the_appliers_and_scans_once(store:
     assert state["due"] == store.key("sw", tick_module.SPAWN_DUE)
     assert set(found.apply) == set(task_steps.appliers(state))
     assert found.scan is not None
-    assert reaper.PASS.get() is not before
+    scanning = reaper.PASS.get()
+    assert scanning is not before and scanning is not None
+    assert scanning.scan(deadline=Deadline.after(5.0)) is table
     found.close()
     assert found.scan is None
     assert reaper.PASS.get() is before
@@ -134,6 +143,30 @@ def test_run_sites_runs_the_registered_steps_of_its_sites_in_site_order_through_
     assert ctx.view.read(PASS, "slug") == "sw"
     assert ctx.view.read(PASS, "box") is box
     assert ctx.deadline.expires_at - monotonic() == pytest.approx(tick_module.GROUP_BUDGET_S, abs=5.0)
+
+
+def test_run_sites_applies_writes_through_its_appliers_and_notes_the_steps_it_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = Event()
+    applied: list[Write] = []
+
+    def stuck(get: Any) -> list[str]:
+        release.wait(30.0)
+        return []
+
+    _with(monkeypatch, _Marker("a1", "a", lambda get: ["a1"]), _Marker("b1", "b", stuck, budget_s=0.05), real=False)
+    box = PassBox()
+    apply = {actions_of("a1"): lambda write: applied.append(write) or None}
+    try:
+        sites.run_sites(("a", "b"), {}, box, engine.SiteGate({}, lambda step: False), apply)
+        assert [write.value for write in applied] == [["a1"]]
+        assert box.left == ["b1"]
+    finally:
+        release.set()
+        worker = engine._RUNNING.get((None, "b1"))
+        if worker is not None:
+            worker.join(30.0)
 
 
 def test_run_sites_prints_what_the_slow_lane_steps_hand_back(
