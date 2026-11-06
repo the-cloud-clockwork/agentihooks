@@ -246,6 +246,7 @@
         "tests/tick/steps/test_master_placement_ops.py::test_the_tick_module_holds_no_moved_master_operation",
         "tests/tick/steps/test_master_placement_ops.py::test_retire_master_returns_the_hold_without_retiring",
         "tests/tick/steps/test_master_placement_ops.py::test_retire_master_drops_the_master_only_once_retired",
+        "tests/tick/steps/test_master_placement_ops.py::test_retire_master_asks_the_hive_report_with_its_store_master_homes_and_time",
         "tests/tick/steps/test_master_placement_ops.py::test_a_stopping_swarm_waits_for_its_workers_then_retires_each_master",
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_starts_only_once_the_old_lead_ended",
         "tests/tick/steps/test_master_placement_ops.py::test_a_seated_non_lead_master_never_holds_the_start",

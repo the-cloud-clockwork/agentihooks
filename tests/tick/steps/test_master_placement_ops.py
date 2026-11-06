@@ -148,6 +148,26 @@ def test_retire_master_drops_the_master_only_once_retired(
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
+def test_retire_master_asks_the_hive_report_with_its_store_master_homes_and_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = Calls()
+    seen: list[tuple[Any, ...]] = []
+
+    def gone(store: Any, runtime: Any, master: Any, homes: Any, now_ms: int) -> bool:
+        seen.append((store, runtime, master, homes, now_ms))
+        return True
+
+    monkeypatch.setattr(tick.master_retire, "hold", _given(lambda *args: None))
+    monkeypatch.setattr(tick.reaper, "scratch_homes", lambda slug, task: [f"{slug}:{task}"])
+    monkeypatch.setattr(tick.retire_watch, "retire_unless_gone", gone)
+    master, store = _master_record(), _store(calls)
+    runtime = _runtime(calls)
+    assert masters._retire_master("sw", store, runtime, master, NOW) == f"retired {master.name}"
+    assert seen == [(store, runtime, master, ["sw:master"], NOW)]
+
+
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_stopping_swarm_waits_for_its_workers_then_retires_each_master(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     monkeypatch.setattr(
