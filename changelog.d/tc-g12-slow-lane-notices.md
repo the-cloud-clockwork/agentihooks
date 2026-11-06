@@ -1,0 +1,1 @@
+Notice and watch tick steps run on the slow lane, the critical path needs none of them, the critical lane deadline is 60 s and the slow lane 59 s, and site barrier edges stay only between steps whose declared reads and writes cross.

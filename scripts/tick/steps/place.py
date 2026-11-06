@@ -49,9 +49,7 @@ Get = Callable[[str], Any]
 NOTICES = "placement notices"
 ACKS = "placement acks"
 PLACEMENT = "placement"
-PREEMPT_NEEDS = frozenset(
-    {"reap", "drained resume", "recover outages", "retire idle master", "prerequisite reopen", "fleet red notice"}
-)
+PREEMPT_NEEDS = frozenset({"reap", "drained resume", "recover outages", "prerequisite reopen"})
 RESUMED = frozenset({"drained resume"})
 CONFIG_DOC = pass_domains("config", "doc")
 TASK_STATE = pass_domains("config", "rows", "doc")
