@@ -280,7 +280,8 @@
         "tests/tick/steps/test_claim_order.py::test_the_tick_module_holds_no_moved_definition",
         "tests/tick/steps/test_claim_order.py::test_moved_claim_code_reaches_tick_seams_through_the_tick_module",
         "tests/tick/steps/test_claim_order.py::test_agent_status_reads_state_prompt_and_idle_ticks",
-        "tests/tick/steps/test_claim_order.py::test_the_store_projects_agent_status_from_the_claims_module"
+        "tests/tick/steps/test_claim_order.py::test_the_store_projects_agent_status_from_the_claims_module",
+        "tests/tick/steps/test_claim_order.py::test_a_spawn_error_defaults_to_a_refusal_with_no_pane_or_harness"
       ]
     },
     {

@@ -89,3 +89,11 @@ def test_the_store_projects_agent_status_from_the_claims_module() -> None:
     text = Path(str(swarm_store.__file__)).read_text(encoding="utf-8")
     assert "from scripts.tick.steps.claims import agent_status" in text
     assert "from scripts.swarm.tick import agent_status" not in text
+
+
+@pytest.mark.feature("swarm-tick-claim-order")
+def test_a_spawn_error_defaults_to_a_refusal_with_no_pane_or_harness() -> None:
+    plain = claims.SpawnError("no room")
+    assert (str(plain), plain.status, plain.pane_id, plain.harness) == ("no room", "refused", "", "")
+    named = claims.SpawnError("pending", "pending", "p1", harness="codex")
+    assert (named.status, named.pane_id, named.harness) == ("pending", "p1", "codex")
