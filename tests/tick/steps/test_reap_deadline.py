@@ -110,6 +110,22 @@ def test_a_reap_pass_with_no_deadline_judges_every_agent(monkeypatch: pytest.Mon
     assert judged == ["a", "b"]
 
 
+def test_a_reap_pass_returns_actions_in_agent_order_when_tasks_interleave(monkeypatch: pytest.MonkeyPatch) -> None:
+    found = [
+        AgentRecord(name="a", lane="eng", task="x", state="working"),
+        AgentRecord(name="b", lane="eng", task="y", state="working"),
+        AgentRecord(name="c", lane="eng", task="x", state="working"),
+    ]
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: found)
+    monkeypatch.setattr(tick.pool, "fan_out", _sequential)
+    judged = _judging(monkeypatch, _Clock(0.0), 1.0)
+
+    actions = agents._reap("sw", object(), object(), _Runtime(), {}, 1, Deadline(10.0, _Clock(0.0)))
+
+    assert judged == ["a", "c", "b"]
+    assert actions == ["judged a", "judged b", "judged c"]
+
+
 class _View:
     """A pass view answering the pass state."""
 

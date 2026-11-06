@@ -469,18 +469,23 @@ def _session_models(slug: Any, store: Any) -> Any:
             store.put_agent(slug, reported)
 
 
-def _reap_step(tick: Any, get: Get, deadline: Deadline | None = None) -> Any:
+def _reap_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), deadline
+        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), get("deadline")
     )
+
+
+def _with_deadline(ctx: Context, key: str) -> Any:
+    """Return the context deadline under ``deadline``, else the pass value under ``key``."""
+    return ctx.deadline if key == "deadline" else ctx.view.read(PASS, key)
 
 
 class _ReapStep(CallStep):
     """The reap step: it hands the reap pass the pass runtime and ledger and the deadline of its step context."""
 
     def run(self, ctx: Context) -> Result:
-        """Run the reap pass within the context deadline, writing its actions."""
-        found = _reap_step(tick, partial(ctx.view.read, PASS), ctx.deadline)
+        """Run the reap call with a reader of the pass state that also answers the context deadline."""
+        found = self.call(tick, partial(_with_deadline, ctx))
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
