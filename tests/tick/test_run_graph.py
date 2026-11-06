@@ -81,6 +81,17 @@ def test_site_edges_drop_a_need_on_a_step_of_a_later_site_and_keep_one_outside_t
     assert _needs(edged) == {"a1": frozenset({"x1"}), "b1": frozenset({"a1", "x1"}), "x1": frozenset()}
 
 
+def test_site_edges_hold_every_site_joining_the_same_later_site() -> None:
+    first, second = Domain("pass:first"), Domain("pass:second")
+    steps = (
+        Step("a1", "a", writes=frozenset({first})),
+        Step("b1", "b", writes=frozenset({second})),
+        Step("c1", "c", reads=frozenset({first, second})),
+    )
+    edged = registry.site_edges(steps, ("a", "b", "c"), {"a": "c", "b": "c"})
+    assert _needs(edged) == {"a1": frozenset(), "b1": frozenset(), "c1": frozenset({"a1", "b1"})}
+
+
 def test_a_handed_off_step_runs_when_the_gate_given_it_and_the_records_opens_it_and_it_does_not_rest() -> None:
     step, records = Step("a1", "a"), {"x1": engine.StepRecord("x1", 0.0, 1.0)}
     asked: list[tuple[object, object]] = []
