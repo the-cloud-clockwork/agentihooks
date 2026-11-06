@@ -579,7 +579,15 @@ def _refusal_due(slug, store, rows, agent, observed, now_ms):
     return content_refusal.repeated(store, slug, agent, observed)
 
 
-def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
+def _free_refused(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     if not _retire_unless_gone(slug, store, runtime, agent, now_ms):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     content_refusal.handoff(store, slug, agent, now_ms)
@@ -588,7 +596,15 @@ def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
     ]
 
 
-def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
+def _free_revoked(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     account = f"{agent.harness} account {agent.account}"
     if agent.lane == MASTER:
         revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
@@ -729,7 +745,15 @@ def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
     return state == idle_state.IDLE and outage.held_past_limit(store, slug, agent.name, now_ms)
 
 
-def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
+def _free_stuck(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     if not _retire_unless_gone(slug, store, runtime, agent, now_ms):
         store.put_agent(slug, agent)
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
@@ -1494,7 +1518,7 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
     return [f"spawned master {record.name}", *master_move.account_moved(slug, launched, record)]
 
 
-def _retire_master(slug, store, runtime, master, now_ms):
+def _retire_master(slug: str, store: RedisStore, runtime: Any, master: AgentRecord, now_ms: int) -> str:
     live = master.name in runtime.live_names()
     if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
         return held
