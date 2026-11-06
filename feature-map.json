@@ -1532,6 +1532,7 @@
         "tests/swarm_ledger/test_export_parts.py::test_parts_must_be_a_list_of_distinct_names",
         "tests/swarm_ledger/test_export_parts.py::test_the_client_reads_changes_of_the_named_parts",
         "tests/tick/test_view.py::test_a_first_pass_reads_the_parts_in_full_and_stores_them",
+        "tests/tick/test_view.py::test_a_hold_entered_on_another_thread_closes_on_this_one_without_raising",
         "tests/tick/test_view.py::test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view",
         "tests/tick/test_view.py::test_an_exceeded_change_window_replaces_the_stored_view",
         "tests/tick/test_view.py::test_a_patch_that_does_not_fit_falls_back_to_one_full_read",
