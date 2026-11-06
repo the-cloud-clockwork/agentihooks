@@ -171,6 +171,26 @@ def test_observe_is_the_default_and_logs_the_question_without_sending_it(store):
     rows = gate_log.recent(SLUG)
     assert [(row["gate"], row["kind"], row["agent"]) for row in rows] == [("panic-call", "observe", "swarm")]
     assert rows[0]["reason"].startswith("Is this a panic mode call? No agent launch")
+    assert rows[0]["at"] == START + HOUR
+
+
+def test_an_early_end_streak_start_carries_across_passes_to_the_held_hour(store):
+    enforce(store)
+    early_ends.note(store, SLUG, "doc")
+    assert panic_call.step(store, SLUG, START) == []
+    assert panic_call.read(store, SLUG)["early"] == {"value": "doc", "since": START}
+    lines = panic_call.step(store, SLUG, START + HOUR)
+    assert len(lines) == 1 and "Tick passes ending early on swarm sw for 60 minutes" in lines[0]
+
+
+def test_a_signal_not_yet_held_an_hour_does_not_stop_a_later_one_being_asked(store):
+    enforce(store)
+    stall_launches(store, START + 2 * HOUR)
+    store.redis.set(
+        store.key(SLUG, "merge-stall"), json.dumps({"repo": "o/r", "queue": 1, "merged": START, "at": START})
+    )
+    lines = panic_call.step(store, SLUG, START + 2 * HOUR)
+    assert len(lines) == 1 and "No merge into dev on swarm sw for 120 minutes" in lines[0]
 
 
 def test_off_skips_without_reading_or_writing_state(store):
