@@ -284,7 +284,13 @@
         "tests/tick/steps/test_territory.py::test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere",
         "tests/tick/steps/test_territory.py::test_master_set_reads_the_state_stamp_author_lane",
         "tests/tick/steps/test_territory.py::test_close_space_closes_only_an_empty_swarm",
-        "tests/tick/steps/test_territory.py::test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff"
+        "tests/tick/steps/test_territory.py::test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_ends_awaiting_seats_and_stops_once_no_agent_is_left",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent",
+        "tests/tick/steps/test_territory.py::test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks",
+        "tests/tick/steps/test_territory.py::test_a_swarm_with_work_or_workers_or_not_running_does_not_drain",
+        "tests/tick/steps/test_territory.py::test_sharing_names_each_running_task_with_a_shared_area_and_its_claimant",
+        "tests/tick/steps/test_territory.py::test_stack_base_stacks_each_unfinished_dependency_with_the_given_or_default_origin"
       ]
     },
     {
