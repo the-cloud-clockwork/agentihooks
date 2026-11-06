@@ -1645,6 +1645,17 @@
       "tests": [
         "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
       ]
+    },
+    {
+      "id": "swarm-tick-panic-holds-spawn",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2402",
+      "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
+      "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
+      "tests": [
+        "tests/tick/steps/test_spawn_due.py::test_spawn_due",
+        "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
     }
   ],
   "unmapped_rules": [
