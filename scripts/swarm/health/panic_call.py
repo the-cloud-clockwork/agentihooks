@@ -2,9 +2,9 @@
 
 Code measures each signal's start: no agent launch while a lane could take one, no merge into dev while the merge
 queue holds entries, a tick step failure category still recurring, tick passes ending early on one missing value, and
-an urgent task held open. At the first hour a signal holds and every hour after, the panic-call gate acts by its mode
-in the swarm config: observe logs the question to the swarm gate log, enforce sends it to the master seat's inbox,
-off skips.
+an urgent task held open or blocked. At the first hour a signal holds and every hour after, the panic-call gate acts by
+its mode in the swarm config: observe logs the question to the swarm gate log, enforce sends it to the master seat's
+inbox, off skips.
 """
 
 import hashlib
@@ -15,15 +15,17 @@ from typing import Any
 
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
-from scripts.inbox.seats import seat_address
+from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import blockers, timing
-from scripts.swarm.health import early_ends, spawn_stall, urgent_hold
+from scripts.swarm.health import early_ends
 
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
 KEY = "panic-call"
+LAUNCH_KEY = "spawn-stall"
 MERGE_KEY = "merge-stall"
+URGENT_KEY = "urgent-hold"
 SPAWN_STALL = "spawn stall"
 SENDER = "swarm"
 MASTER = "master"
@@ -55,19 +57,23 @@ class Signal:
     evidence: str
 
 
+def _stored(store: Any, slug: str, key: str) -> dict[str, Any]:
+    raw = store.redis.get(store.key(slug, key))
+    return dict[str, Any](json.loads(raw)) if raw else {}
+
+
 def read(store: Any, slug: str) -> dict[str, Any]:
-    """Return the hours already asked per signal and the early end streak start."""
-    raw = store.redis.get(store.key(slug, KEY))
-    return json.loads(raw) if raw else {}
+    """Return the saved state: ``asked``, the hours already asked per signal, and ``early``, the early end streak start."""
+    return _stored(store, slug, KEY)
 
 
 def _launch(store: Any, slug: str) -> list[Signal]:
-    stall = spawn_stall.read(store, slug)
+    stall = _stored(store, slug, LAUNCH_KEY)
     return [Signal("No agent launch", stall["since"], LAUNCH)] if "since" in stall else []
 
 
 def _merge(store: Any, slug: str) -> list[Signal]:
-    state = json.loads(store.redis.get(store.key(slug, MERGE_KEY)) or "{}")
+    state = _stored(store, slug, MERGE_KEY)
     if not state.get("queue") or not state.get("merged") or state.get("error"):
         return []
     return [Signal("No merge into dev", state["merged"], f"{state['queue']} queued entries on {state['repo']}")]
@@ -96,7 +102,7 @@ def _early(store: Any, slug: str, at: int, previous: dict[str, Any]) -> tuple[li
 
 
 def _urgent(store: Any, slug: str) -> list[Signal]:
-    held = urgent_hold.read(store, slug).get("tasks", {})
+    held = dict[str, Any](_stored(store, slug, URGENT_KEY).get("tasks", {}))
     return [
         Signal(f"Urgent task {row['title']} held", row["since"], row["why"] or UNCLAIMED)
         for _, row in sorted(held.items())
@@ -124,33 +130,45 @@ def question(slug: str, signal: Signal, at: int) -> str:
 
 def _ask(store: Any, slug: str, mode: str, text: str, ref: str, at: int) -> str:
     if mode != "enforce":
-        gate_log.append(slug, gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=text, now_ms=at))
+        row = gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=text, now_ms=at)  # pyright: ignore[reportUnknownMemberType]
+        gate_log.append(slug, row)  # pyright: ignore[reportUnknownMemberType]
         return f"panic call: logged {text}"
-    master = seat_address(slug, MASTER)
+    master = str(seat_address(slug, MASTER))
     try:
         InboxStore(store.redis).send(
             SENDER, master, text, ref=ref, item_id=hashlib.sha256(ref.encode()).hexdigest()[:12]
         )
     except DuplicateItem:
-        pass
+        return f"panic call: already asked {master}: {text}"
     return f"panic call: asked {master}: {text}"
+
+
+def _save(store: Any, slug: str, asked: dict[str, int], early: dict[str, Any]) -> None:
+    key = store.key(slug, KEY)
+    timing.keep()
+    if asked or early:
+        store.redis.set(key, json.dumps({"asked": asked, "early": early}))
+    else:
+        store.redis.delete(key)
 
 
 def step(store: Any, slug: str, at: int) -> list[str]:
     """Ask once for each signal at its first held hour and once per hour after, by the panic-call gate mode."""
-    mode = modes.configured(GATE, store.config(slug).gates)
+    mode = str(modes.configured(GATE, store.config(slug).gates))  # pyright: ignore[reportUnknownMemberType]
     if mode == "off":
         return []
     previous = read(store, slug)
     found, early = signals(store, slug, at, previous.get("early", {}))
-    before, asked, lines = previous.get("asked", {}), {}, []
+    before = dict[str, int](previous.get("asked", {}))
+    asked: dict[str, int] = {}
+    lines: list[str] = []
     for signal in found:
         key, hours = f"{signal.name}|{signal.since}", (at - signal.since) // HOUR_MS
-        asked[key] = before.get(key, 0)
-        if hours < 1 or hours <= asked[key]:
+        if hours < 1 or hours <= before.get(key, 0):
+            if key in before:
+                asked[key] = before[key]
             continue
         asked[key] = hours
         lines.append(_ask(store, slug, mode, question(slug, signal, at), f"{KEY}:{slug}:{key}:{hours}", at))
-    timing.keep()
-    store.redis.set(store.key(slug, KEY), json.dumps({"asked": asked, "early": early}))
+    _save(store, slug, asked, early)
     return lines

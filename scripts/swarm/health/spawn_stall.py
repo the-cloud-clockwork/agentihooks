@@ -204,4 +204,5 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         from scripts.swarm.health import panic_call
 
         for line in panic_call.step(store, slug, clock()):
-            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic_call", "slug": slug, "action": line}))
+            event = json.dumps({"event": "swarm_panic_call", "slug": slug, "action": line})
+            timing.emit(sys.stdout, event)  # pyright: ignore[reportUnknownMemberType]

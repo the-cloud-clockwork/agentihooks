@@ -93,6 +93,29 @@ def test_a_merge_observation_error_or_an_empty_queue_is_no_merge_signal(store):
     assert panic_call.signals(store, SLUG, START, {})[0] == []
     store.redis.set(key, json.dumps({"repo": "o/r", "queue": 2, "merged": START, "at": START, "error": "gh down"}))
     assert panic_call.signals(store, SLUG, START, {})[0] == []
+    store.redis.set(key, json.dumps({"repo": "o/r", "queue": 2, "at": START}))
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+
+
+def test_an_ended_early_streak_forgets_its_start(store):
+    assert panic_call.signals(store, SLUG, START + HOUR, {"value": "doc", "since": START}) == ([], {})
+
+
+def test_a_held_urgent_task_names_why_it_is_held(store):
+    store.redis.set(
+        store.key(SLUG, "urgent-hold"),
+        json.dumps({"at": START, "tasks": {"t1": {"since": START, "why": "its claimant blocked it", "title": "x"}}}),
+    )
+    found = panic_call.signals(store, SLUG, START, {})[0]
+    assert [(signal.name, signal.evidence) for signal in found] == [("Urgent task x held", "its claimant blocked it")]
+
+
+def test_a_step_failure_counts_as_recurring_up_to_the_recent_window(store):
+    blockers.record(store, SLUG, "KeyError", "doc", START - 2 * HOUR)
+    blockers.record(store, SLUG, "KeyError", "doc", START)
+    at = START + blockers.RECENT_MS
+    assert names(panic_call.signals(store, SLUG, at, {})[0]) == [("Tick step failing with KeyError", START - 2 * HOUR)]
+    assert panic_call.signals(store, SLUG, at + 1, {})[0] == []
 
 
 def test_a_step_failure_that_stopped_recurring_is_no_signal(store):
@@ -134,7 +157,7 @@ def test_a_new_start_asks_again_and_a_cleared_signal_is_forgotten(store):
     panic_call.step(store, SLUG, START + HOUR)
     spawn_stall.save(store, SLUG, {"at": START + HOUR})
     panic_call.step(store, SLUG, START + HOUR + MINUTE)
-    assert json.loads(store.redis.get(store.key(SLUG, panic_call.KEY)))["asked"] == {}
+    assert store.redis.get(store.key(SLUG, panic_call.KEY)) is None
     stall_launches(store, START + 2 * HOUR)
     assert len(panic_call.step(store, SLUG, START + 3 * HOUR)) == 1
     assert len(items(store)) == 2
@@ -163,7 +186,8 @@ def test_a_repeated_send_of_the_same_hour_is_one_item(store):
     stall_launches(store, START)
     panic_call.step(store, SLUG, START + HOUR)
     store.redis.delete(store.key(SLUG, panic_call.KEY))
-    panic_call.step(store, SLUG, START + HOUR + MINUTE)
+    lines = panic_call.step(store, SLUG, START + HOUR + MINUTE)
+    assert len(lines) == 1 and lines[0].startswith(f"panic call: already asked master@{SLUG}")
     assert len(items(store)) == 1
 
 
@@ -178,3 +202,16 @@ def test_the_spawn_stall_watch_runs_the_panic_call_after_each_pass(store, monkey
     assert seen == [(SLUG, START)]
     event = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert event == {"event": "swarm_panic_call", "slug": SLUG, "action": "panic call: asked"}
+
+
+def test_a_planted_two_hour_no_launch_window_sends_the_master_the_panic_question(store, monkeypatch):
+    enforce(store)
+    stall_launches(store, START - 2 * HOUR)
+    monkeypatch.setattr(spawn_stall, "eligible", lambda *args: True)
+    monkeypatch.setattr(spawn_stall, "launched", lambda store, slug: 0)
+    with spawn_stall.watch(store, SLUG, None, lambda: START, None):
+        pass
+    asked = [item for item in items(store) if item.text.startswith("Is this a panic mode call?")]
+    assert len(asked) == 1
+    assert f"No agent launch on swarm {SLUG} for 120 minutes" in asked[0].text
+    assert spawn_stall.read(store, SLUG)["since"] == START - 2 * HOUR
