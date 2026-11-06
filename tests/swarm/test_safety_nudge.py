@@ -47,7 +47,7 @@ class FakeCron:
     def __init__(self, lines: list[str] | None) -> None:
         self.lines = lines
 
-    def __call__(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def __call__(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert args[0] == safety_nudge.CRON
         if args[1] == "-l":
             if self.lines is None:
