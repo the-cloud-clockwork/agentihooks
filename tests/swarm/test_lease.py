@@ -286,6 +286,7 @@ def _loop_sleeps(store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock: list
 
     sleeps: list[float] = []
     readings = iter(clock)
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
     monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
@@ -312,7 +313,9 @@ def test_controller_loop_starts_at_once_after_a_pass_longer_than_a_tick(
     assert _loop_sleeps(store, monkeypatch, [100.0, 170.0, 170.0, 200.0]) == [30.0]
 
 
-def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys):
+def test_controller_loop_waits_one_tick_between_runs(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts import operator_env
     from scripts.swarm import controller
 
