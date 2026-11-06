@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.675 · 2026-11-06
+
+### 2026-11-06 · f62b9a6fa8f1 · #9898 · @agenticore-app
+
+**Start controller tick passes one tick apart from pass start**
+
+The controller's run loop previously waited a full tick after every pass regardless of how long the pass itself took, causing passes to start a median 109 seconds apart instead of the intended 60. This change makes the wait equal to the tick duration minus the pass's own elapsed time, skipping the wait entirely if the pass already ran longer than a tick, so passes reliably start one tick apart as required for the sixty-pass scale proof.
+
+### 2026-11-06 · 5fb69274e8ca · #9894 · @agenticore-app
+
+**Move the master placement operations into the masters step module**
+
+This change relocates the master placement logic (`_master`, `_recover_master`, `_retire_master`, `respawn_master`, `place_master`, `_under_tick_lock`) from `scripts.swarm.tick` into `scripts.tick.steps.masters`, with behavior unchanged and backward-compatible re-exports left in place so existing callers and test seams keep working. It shrinks the tick module's pattern registry from 76 to 70 names and cuts its type baseline nearly in half, while new tests exercise every branch through the masters module. Tick equivalence runs confirm identical dispatch on clean and faulted scenarios, and review found no standards or spec violations, making the module easier to maintain going forward.
+
 ## v2.17.674 · 2026-11-06
 
 ### 2026-11-06 · 3bf0db589686 · #9906 · @nestorcolt
