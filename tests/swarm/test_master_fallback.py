@@ -95,11 +95,23 @@ def test_a_stopped_swarm_is_left_alone():
     assert down == {}
 
 
-def test_the_unit_runs_the_loop_with_the_watched_swarms_and_minutes():
-    text = master_fallback.unit_text("/py", "/repo", {master_fallback.SWARMS: "sw", master_fallback.MINUTES: "20"})
+def test_the_timer_runs_one_pass_a_minute_with_the_watched_swarms_and_minutes():
+    units = master_fallback.unit_text("/py", "/repo", {master_fallback.SWARMS: "sw", master_fallback.MINUTES: "20"})
+    service = units["agentihooks-master-fallback.service"]
+    timer = units["agentihooks-master-fallback.timer"]
 
-    assert 'ExecStart="/py" -m scripts.swarm.master_fallback run' in text
-    assert f"Environment={master_fallback.SWARMS}=sw" in text
-    assert f"Environment={master_fallback.MINUTES}=20" in text
-    assert "WorkingDirectory=/repo" in text
-    assert "Restart=always" in text
+    assert 'ExecStart="/py" -m scripts.swarm.master_fallback run' in service
+    assert "Type=oneshot" in service
+    assert f"Environment={master_fallback.SWARMS}=sw" in service
+    assert f"Environment={master_fallback.MINUTES}=20" in service
+    assert "WorkingDirectory=/repo" in service
+    assert "OnUnitActiveSec=60" in timer
+    assert "WantedBy=timers.target" in timer
+
+
+def test_the_outage_starts_survive_between_passes(tmp_path):
+    state = tmp_path / "fallback.json"
+
+    assert master_fallback.load(state) == {}
+    state.write_text('{"sw": 5}')
+    assert master_fallback.load(state) == {"sw": 5}

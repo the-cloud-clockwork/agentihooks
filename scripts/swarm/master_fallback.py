@@ -1,6 +1,6 @@
-"""Master fallback tick: a small loop on the master hive that starts a new master for a swarm that has had no live
-master for AGENTIHOOKS_MASTER_FALLBACK_MINUTES (default 20), whether or not the main tick runs. It reads only the
-swarm's master records and the local live agent names, and acts only through agentihooks swarm <slug> master up."""
+"""Master fallback tick: a one-minute systemd timer on the master hive that starts a new master for a swarm that has
+had no live master for AGENTIHOOKS_MASTER_FALLBACK_MINUTES (default 20), whether or not the main tick runs. It reads
+only the swarm's master records and the local live agent names, and acts only through agentihooks swarm master up."""
 
 import json
 import os
@@ -15,7 +15,8 @@ MINUTES = "AGENTIHOOKS_MASTER_FALLBACK_MINUTES"
 SWARMS = "AGENTIHOOKS_MASTER_FALLBACK_SWARMS"
 DEFAULT_MINUTES = 20.0
 INTERVAL_S = 60
-UNIT = "agentihooks-master-fallback.service"
+UNIT = "agentihooks-master-fallback"
+STATE = Path.home() / ".agentihooks" / "master-fallback.json"
 QUIET = ("stopped", "stopping")
 
 
@@ -72,51 +73,58 @@ def check(
     return lines
 
 
-def run(environ: Mapping[str, str]) -> None:
-    """Run the fallback pass every minute until stopped; a failed pass is logged and the loop goes on."""
+def run(environ: Mapping[str, str], state: Path = STATE) -> None:
+    """One fallback pass, started every minute by its systemd timer; the outage starts survive in the state file."""
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import connect
 
-    down_since: dict[str, int] = {}
+    down_since = load(state)
     runtime: Any = HerdrRuntime()
-    while True:
-        try:
-            store: Any = connect()
-            for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since):
-                print(line, flush=True)
-        except Exception as error:
-            print(json.dumps({"error": f"{type(error).__name__}: {error}"}), flush=True)
-        time.sleep(INTERVAL_S)
+    store: Any = connect()
+    for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since):
+        print(line, flush=True)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps(down_since), encoding="utf-8")
 
 
-def unit_text(python: str, repo: str, environ: Mapping[str, str]) -> str:
-    """The systemd user unit that keeps the fallback running on the master hive."""
-    return (
+def load(state: Path) -> dict[str, int]:
+    """The outage start per swarm the last pass saw, empty when no pass has saved one."""
+    return json.loads(state.read_text(encoding="utf-8")) if state.exists() else {}
+
+
+def unit_text(python: str, repo: str, environ: Mapping[str, str]) -> dict[str, str]:
+    """The systemd user service that runs one fallback pass and the timer that starts it every minute."""
+    service = (
         "[Unit]\nDescription=agentihooks master fallback tick\n\n"
-        "[Service]\n"
+        "[Service]\nType=oneshot\n"
         f"WorkingDirectory={repo}\n"
         f"Environment={SWARMS}={environ.get(SWARMS, '')}\n"
         f"Environment={MINUTES}={minutes(environ):g}\n"
         f'ExecStart="{python}" -m scripts.swarm.master_fallback run\n'
-        "Restart=always\nRestartSec=10\n\n"
-        "[Install]\nWantedBy=default.target\n"
     )
+    timer = (
+        "[Unit]\nDescription=agentihooks master fallback tick every minute\n\n"
+        f"[Timer]\nOnBootSec={INTERVAL_S}\nOnUnitActiveSec={INTERVAL_S}\nAccuracySec=5\n\n"
+        "[Install]\nWantedBy=timers.target\n"
+    )
+    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
 
 
 def install(environ: Mapping[str, str]) -> Path:
-    """Write and start the fallback unit for the current user."""
+    """Write the fallback service and timer for the current user and start the timer."""
     repo = str(Path(__file__).resolve().parents[2])
-    path = Path.home() / ".config" / "systemd" / "user" / UNIT
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(unit_text(sys.executable, repo, environ), encoding="utf-8")
+    folder = Path.home() / ".config" / "systemd" / "user"
+    folder.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["systemctl", "--user", "disable", "--now", f"{UNIT}.service"], check=False)
+    for name, text in unit_text(sys.executable, repo, environ).items():
+        (folder / name).write_text(text, encoding="utf-8")
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "--now", UNIT], check=True)
-    subprocess.run(["systemctl", "--user", "restart", UNIT], check=True)
-    return path
+    subprocess.run(["systemctl", "--user", "enable", "--now", f"{UNIT}.timer"], check=True)
+    return folder / f"{UNIT}.timer"
 
 
 def main(argv: list[str]) -> None:
-    """run keeps the loop going; install writes and starts its unit."""
+    """run makes one pass; install writes the service and timer and starts the timer."""
     if argv[:1] == ["install"]:
         print(install(os.environ))
         return
