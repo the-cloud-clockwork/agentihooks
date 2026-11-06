@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.665 · 2026-11-06
+
+### 2026-11-06 · 7e9726556ba6 · #9847 · @nestorcolt
+
+**Fleet panic spares release tag runs; merge stall read skips without gh**
+
+This change fixes two issues that were undermining the panic workflow: fleet panic cancellation now spares runs tied to release events or version-tagged heads (vX.Y.Z), so builds shipping an actual fix on tags like v2.17.652 aren't killed mid-run and don't need manual rerunning. Separately, the merge stall GitHub read no longer fails its tick step when gh isn't installed on a host; it now records a skip in merge stall state instead, preventing repeated false failures that were holding the panic level down.
+
 ## v2.17.663 · 2026-11-05
 
 ### 2026-11-05 · d33a41d2f8e8 · #9853 · @nestorcolt
