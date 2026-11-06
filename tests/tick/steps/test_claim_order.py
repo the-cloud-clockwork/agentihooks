@@ -65,6 +65,12 @@ def test_moved_claim_code_reaches_tick_seams_through_the_tick_module(monkeypatch
         ("claimable", "sw", "store", "rows", "doc", "eng", None, None),
         ("order", "sw", "store", ["t1"], None),
     ]
+    calls.clear()
+    assert claims.ready_in_order("sw", "store", "rows", "doc", "ci", "dispatch", "claims") == ["ordered"]
+    assert calls == [
+        ("claimable", "sw", "store", "rows", "doc", "ci", "dispatch", "claims"),
+        ("order", "sw", "store", ["t1"], "dispatch"),
+    ]
 
 
 @pytest.mark.feature("swarm-tick-claim-order")
@@ -209,10 +215,28 @@ def test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks(
     snapshots: list[tuple[Any, ...]] = []
     monkeypatch.setattr(tick.hierarchy, "project", lambda doc: ("graph", "rest"))
     monkeypatch.setattr(tick.freeze, "fix_phase", lambda config: f"fix {config}")
-    monkeypatch.setattr(tick.release_wait, "checker", lambda config: lambda task: task["id"] != "r")
-    monkeypatch.setattr(tick.apply_wait, "checker", lambda config, rows: lambda task: task["id"] != "a")
-    monkeypatch.setattr(tick.fleet_red, "saved_reader", lambda store, slug: "reader")
-    monkeypatch.setattr(tick.fleet_red, "checker", lambda reader: lambda task: task["id"] != "f")
+    built: list[tuple[Any, ...]] = []
+
+    def released(config: str) -> Any:
+        built.append(("released", config))
+        return lambda task: task["id"] != "r"
+
+    def applied(config: str, rows: object) -> Any:
+        built.append(("applied", config, rows))
+        return lambda task: task["id"] != "a"
+
+    def reader(store: object, slug: str) -> str:
+        built.append(("reader", store, slug))
+        return "reader"
+
+    def unshared(saved: str) -> Any:
+        built.append(("unshared", saved))
+        return lambda task: task["id"] != "f"
+
+    monkeypatch.setattr(tick.release_wait, "checker", released)
+    monkeypatch.setattr(tick.apply_wait, "checker", applied)
+    monkeypatch.setattr(tick.fleet_red, "saved_reader", reader)
+    monkeypatch.setattr(tick.fleet_red, "checker", unshared)
     monkeypatch.setattr(tick.readiness, "Snapshot", lambda *args: snapshots.append(args) or "snapshot")
     rows = {
         "open1": _task("open1", state="open", order=3),
@@ -230,3 +254,9 @@ def test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks(
     assert (slug, seen_rows, doc, graph, fix) == ("sw", rows, {"doc": 1}, "graph", "fix config")
     assert [owned(t) for t in ("owned", "held", "open1")] == [True, True, False]
     assert [passes({"id": t}) for t in ("ok", "r", "a", "f")] == [True, False, False, False]
+    assert built == [
+        ("released", "config"),
+        ("applied", "config", rows),
+        ("reader", store, "sw"),
+        ("unshared", "reader"),
+    ]
