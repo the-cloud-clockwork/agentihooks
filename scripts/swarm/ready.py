@@ -202,7 +202,7 @@ class Pass:
 
 
 def merge_pass(run, rows):
-    actions = []
+    actions, closed = [], set()
     for task_id, row in rows.items():
         row = dict(row)
         if row.get("awaiting") != AWAITING:
@@ -211,8 +211,8 @@ def merge_pass(run, rows):
                 if pull is not None and pull.state == "OPEN" and pull.merge_problem:
                     found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
                     actions += _unmergeable(run, row, found, pull)
-                if pull is not None and pull.state == "MERGED":
-                    actions += _close_merged(run, rows, row)
+                if pull is not None and pull.state == "MERGED" and task_id not in closed:
+                    actions += _close_merged(run, rows, row, closed)
             continue
         found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
@@ -222,7 +222,7 @@ def merge_pass(run, rows):
     return actions
 
 
-def _close_merged(run: Pass, rows: Mapping[str, dict], row: dict) -> list[str]:
+def _close_merged(run: Pass, rows: Mapping[str, dict], row: dict, closed: set[str]) -> list[str]:
     """Close a code or ci task whose recorded pull request merged outside the merge pass.
 
     The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
@@ -244,10 +244,11 @@ def _close_merged(run: Pass, rows: Mapping[str, dict], row: dict) -> list[str]:
         if member in rows and rows[member].get("state") != "done":
             run.ledger.update_task(run.slug, member, fields)
             finished.append(member)
+    closed.update(finished)
     run.store.clear_handoff(run.slug, task_id)
     forget(run.store, run.slug, task_id)
-    closed = {**rows, **{done: {**rows[done], **fields} for done in finished}}
-    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, closed)]
+    view = {**rows, **{done: {**rows[done], **fields} for done in finished}}
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, view)]
 
 
 def _leave(run, task_id, row):
