@@ -386,12 +386,14 @@ def test_a_one_second_tick_is_the_shortest_allowed(monkeypatch):
     assert lease.ttl_ms() == 3000
 
 
-def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeypatch):
+def test_the_controller_sleeps_one_configured_tick_between_passes(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import scripts.operator_env
 
-    slept = []
+    slept: list[float] = []
 
-    def sleep(seconds):
+    def sleep(seconds: float) -> None:
         slept.append(seconds)
         raise SwarmError("stopped after one pass")
 
@@ -400,6 +402,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {})
+    monkeypatch.setattr(controller, "monotonic", lambda: 7.0)
     monkeypatch.setattr(controller, "scheduled_wait", sleep)
     assert controller.main(["run"]) == 1
     assert slept == [4.0]
