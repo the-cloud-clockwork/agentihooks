@@ -223,7 +223,10 @@ def merge_pass(run, rows):
 
 
 def _close_merged(run: Pass, rows: dict, row: dict) -> list[str]:
-    """Close a code or ci task whose recorded pull request merged outside the merge pass, in the pass rows too."""
+    """Close a code or ci task whose recorded pull request merged outside the merge pass, in the pass rows too.
+
+    Its worktree stays with the owner that kept the seat, which removes it when it leaves.
+    """
     task_id, url = row["id"], row["pr_url"]
     if row.get("awaiting") or ledger_kinds.kind(row) not in GATED:
         return []
@@ -243,6 +246,7 @@ def _close_merged(run: Pass, rows: dict, row: dict) -> list[str]:
             rows[member] = {**rows[member], **fields}
             finished.append(member)
     run.store.clear_handoff(run.slug, task_id)
+    forget(run.store, run.slug, task_id)
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows)]
 
 

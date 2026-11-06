@@ -1,3 +1,4 @@
+import copy
 import json
 import subprocess
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
@@ -800,17 +801,13 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
 
 
 def test_a_merged_recorded_pull_request_closes_its_task_and_unparks_its_dependent_in_one_pass(merging):
-    import copy
-
-    from scripts.swarm import claim_hold
-
     rows = {
         "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t3"]},
         "t2": {"id": "t2", "state": "open", "claimed_by": "", "parked_on": ["t1"]},
         "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": URL},
     }
     ledger = Ledger(copy.deepcopy(rows))
-    ready.forget(merging.store, "sw", "t1")
+    ready.save(merging.store, "sw", "t1", ready.held_record(URL, HEAD, TOP, "engineer@a1b2c3-0002", NOW))
     run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
     assert claim_hold.waits(rows["t2"], rows) == "it waits on task t1"
     assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
@@ -818,6 +815,7 @@ def test_a_merged_recorded_pull_request_closes_its_task_and_unparks_its_dependen
     assert rows["t1"]["state"] == "done" and rows["t3"]["state"] == "done"
     assert claim_hold.waits(rows["t2"], rows) == ""
     assert merging.store.handoff("sw", "t1") == ""
+    assert ready.record(merging.store, "sw", "t1") is None
     assert merging.shell.calls == []
     assert ready.merge_pass(run, rows) == []
 
