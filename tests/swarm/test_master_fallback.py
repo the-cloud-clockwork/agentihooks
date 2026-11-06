@@ -109,6 +109,17 @@ def test_a_stopped_swarm_is_left_alone(state):
     assert master_fallback.check(store, env, set, 60 * MINUTE, down, launch) == []
 
 
+def test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it():
+    store, down = Store({"a": [], "b": []}, {"a": "stopped"}), {"a": 0, "b": 0}
+    started, launch = _launches(5)
+    env = {master_fallback.SWARMS: "a,b"}
+
+    assert master_fallback.check(store, env, set, 60 * MINUTE, down, launch) == [
+        '{"swarm": "b", "master_up": 5, "at": 3600000}'
+    ]
+    assert started == ["b"]
+
+
 def test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes():
     text = master_fallback.unit_text("/py", "/repo", {master_fallback.SWARMS: "sw", master_fallback.MINUTES: "20"})
 
@@ -182,15 +193,18 @@ def test_install_makes_the_unit_folder(tmp_path, monkeypatch):
 
 def test_main_installs_passes_or_runs(monkeypatch, capsys):
     seen = []
-    monkeypatch.setattr(master_fallback, "install", lambda environ: seen.append("install") or "/unit")
-    monkeypatch.setattr(master_fallback, "pass_once", lambda environ: seen.append("pass"))
-    monkeypatch.setattr(master_fallback, "run", lambda environ: seen.append("run"))
+    monkeypatch.setattr(master_fallback, "install", lambda environ: seen.append(("install", environ)) or "/unit")
+    monkeypatch.setattr(master_fallback, "pass_once", lambda environ: seen.append(("pass", environ)))
+    monkeypatch.setattr(master_fallback, "run", lambda environ: seen.append(("run", environ)))
 
     master_fallback.main(["install"])
     master_fallback.main(["pass"])
     master_fallback.main([])
+    master_fallback.main(["install", "pass"])
 
-    assert seen == ["install", "pass", "run"]
+    environ = master_fallback.os.environ
+    assert seen == [("install", environ), ("pass", environ), ("run", environ), ("run", environ)]
+    assert all(found is environ for _, found in seen)
     assert capsys.readouterr().out == "/unit\n"
 
 
@@ -309,3 +323,20 @@ def test_the_loop_and_a_pass_flush_every_line_they_log(tmp_path, monkeypatch):
     master_fallback.pass_once({}, tmp_path / "fallback.json")
 
     assert printed == [{"flush": True}, {"flush": True}]
+
+
+def test_a_pass_flushes_each_master_it_started(tmp_path, monkeypatch):
+    from scripts.swarm import runtime, store
+
+    printed = []
+    state = tmp_path / "fallback.json"
+    state.write_text('{"sw": 0}')
+    monkeypatch.setattr(master_fallback, "print", lambda *args, **kwargs: printed.append((args, kwargs)), raising=False)
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
+    monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
+    monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+
+    master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
+
+    assert printed == [(('{"swarm": "sw", "master_up": 77, "at": 1200000}',), {"flush": True})]

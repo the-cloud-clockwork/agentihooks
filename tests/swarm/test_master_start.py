@@ -122,6 +122,17 @@ def test_a_hook_beat_from_before_the_launch_does_not_keep_the_master(store):  # 
     assert master.name in runtime.killed
 
 
+def test_a_master_with_no_launch_time_counts_its_beat_from_its_start(store):  # noqa: F811
+    from scripts.swarm import idle, master_start
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("master@sw-1", MASTER, MASTER, started_at=1000, launched_at=0)
+    idle.beat(store.redis, "sw", agent.name, "working", 999)
+    assert master_start.hooked(store, "sw", agent) is False
+    idle.beat(store.redis, "sw", agent.name, "working", 1000)
+    assert master_start.hooked(store, "sw", agent) is True
+
+
 def test_dead_launch_retries_without_waiting_for_worker_grace(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     store.put_handoff("sw", MASTER, "Retain this handoff")

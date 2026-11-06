@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
@@ -84,7 +84,7 @@ def hooked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
     from scripts.swarm import idle
 
     read = idle.heartbeat  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    beat = cast(dict[str, int] | None, read(store.redis, slug, agent.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    beat: dict[str, int] | None = read(store.redis, slug, agent.name)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     return beat is not None and beat["at"] >= (agent.launched_at or agent.started_at)
 
 

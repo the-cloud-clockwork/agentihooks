@@ -144,10 +144,10 @@ def install(environ: Mapping[str, str]) -> Path:
 
 def main(argv: list[str]) -> None:
     """run keeps the loop going, pass makes one pass, install writes and starts the service."""
-    if argv[:1] == ["install"]:
+    if argv == ["install"]:
         print(install(os.environ))
         return
-    if argv[:1] == ["pass"]:
+    if argv == ["pass"]:
         pass_once(os.environ)
         return
     run(os.environ)
