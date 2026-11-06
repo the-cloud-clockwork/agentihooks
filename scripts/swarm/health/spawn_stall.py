@@ -201,3 +201,7 @@ def watch(store: RedisStore, slug: str, ledger: Any, clock: Callable[[], int], r
         deliver(store, slug, ledger, clock())
         if found := findings(store, slug):
             blockers.record(store, slug, found[0].kind, found[0].summary, clock())
+        from scripts.swarm.health import panic_call
+
+        for line in panic_call.step(store, slug, clock()):
+            timing.emit(sys.stdout, json.dumps({"event": "swarm_panic_call", "slug": slug, "action": line}))
