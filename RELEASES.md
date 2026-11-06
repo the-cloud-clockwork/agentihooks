@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.673 · 2026-11-06
+
+### 2026-11-06 · b9a84b19bc5c · #9904 · @nestorcolt
+
+**Hold every step of the earlier site in the tick site barrier**
+
+This fixes a regression from the earlier barrier-pruning change, which skipped waits for steps or hooks that didn't explicitly declare reads, causing the quiet pass to run immediately after ledger state and crash on missing data before any agents launched. The barrier now again holds every non-slow step of the prior site, regardless of what a pass declares, while still excluding the slow lane via `_late`. The now-unnecessary `hooked` parameter from the previous fix is removed, and tests confirm site edges, undeclared-read steps, hook-dependent sites, and the quiet pass all wait correctly.
+
 ## v2.17.672 · 2026-11-06
 
 ### 2026-11-06 · 1d79a7a89dc0 · #9902 · @nestorcolt
