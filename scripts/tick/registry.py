@@ -225,25 +225,14 @@ def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]
     return tuple(found)
 
 
-def _crossed(first: Step, second: Step) -> bool:
-    """Return whether ``first`` and ``second`` declare a domain that one writes and the other reads or writes."""
-    return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
-
-
-def site_edges(
-    steps: Iterable[Step],
-    sites: Sequence[str],
-    joins: Mapping[str, str] | None = None,
-    hooked: frozenset[str] = frozenset(),
-) -> tuple[Step, ...]:
+def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
-    site that holds steps and whose declared reads and writes cross its own; steps of groups outside ``sites`` keep
-    their own needs.
+    site that holds steps; steps of groups outside ``sites`` keep their own needs.
 
     A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane step, and
     every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
-    for the sites between: only the steps of the site it names need it too. A step of a ``hooked`` site keeps its
-    whole barrier, because the site's hook reads pass values no step declares.
+    for the sites between: only the steps of the site it names need it too. The barrier holds whatever a step
+    declares, because site hooks and steps read pass values no declaration names.
     """
     found = _backward(tuple(steps), sites)
     late = _late(found)
@@ -257,15 +246,7 @@ def site_edges(
             held[joins[site]] = held.get(joins[site], ()) + members[site]
         else:
             previous = members[site] or previous
-    edged = (
-        (
-            step,
-            frozenset(
-                other.name for other in barrier.get(step.group, ()) if step.group in hooked or _crossed(other, step)
-            ),
-        )
-        for step in found
-    )
+    edged = ((step, frozenset(other.name for other in barrier.get(step.group, ()))) for step in found)
     return tuple(_barrier(step, needs) if needs else step for step, needs in edged)
 
 
