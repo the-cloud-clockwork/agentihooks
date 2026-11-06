@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.674 · 2026-11-06
+
+### 2026-11-06 · 3bf0db589686 · #9906 · @nestorcolt
+
+**Close the ledger view hold safely when another thread's context entered it**
+
+This fix addresses the crash loop that began after 2.17.673, where the Anton controller restarted 70 times in six hours due to a ValueError when resetting a context variable token created on a different thread. The underlying cause was the fence site hook entering the ledger view hold on a pass executor thread while the exit stack closed it on the main thread. The fix makes holding() fall back to clearing the context variable directly when the token's context doesn't match, so closing a hold entered on another thread no longer raises, restoring normal tick, master, and launch operation.
+
+### 2026-11-06 · 0396b88f8bb5 · #9896 · @agenticore-app
+
+**Close a task in the merge pass once its recorded pull request merges**
+
+This change teaches the slow-lane merge pass to notice when a task's recorded pull request already merged outside the normal flow—for example, when an owner waited on merge instead of releasing through ready—and closes that task automatically, along with its group members, clearing the ready record and settling linked issues. Tasks with unmet proof, failed verdicts, pending values, or splits are left untouched, and split tasks still close via swarm done. This prevents stuck tasks from silently blocking dependents, though same-pass placement is deferred as a follow-up ledger fix.
+
 ## v2.17.673 · 2026-11-06
 
 ### 2026-11-06 · b9a84b19bc5c · #9904 · @nestorcolt
