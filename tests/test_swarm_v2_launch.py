@@ -743,10 +743,11 @@ def test_a_tick_never_replaces_a_seat_whose_execution_is_still_live(world):
     assert str(conflict.value) == "replacement does not match the current execution"
 
 
-def test_a_tick_replaces_a_seat_whose_execution_finished_without_an_ending(world):
+@pytest.mark.parametrize("state", ["finished", "ended"])
+def test_a_tick_replaces_a_seat_whose_execution_finished_without_an_ending(world, state):
     assert world.tick(FIRST).ok
     occupant = world.store.execution_occupants(SLUG)[FIRST]
-    world.store.put_agent(SLUG, replace(occupant, state="finished"))
+    world.store.put_agent(SLUG, replace(occupant, state=state))
     assert world.endings() == {}
 
     placed = world.tick(FIRST)
