@@ -6,6 +6,7 @@ THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures 
 
 import json
 import math
+import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
@@ -27,6 +28,8 @@ RELEASE_ERRORS = THRESHOLD // 4
 CANCEL_EVERY_MS = 60 * 1000
 METRIC = "agentihooks.swarm.errors"
 MERGE_QUEUE = "merge_group"
+RELEASE_EVENT = "release"
+RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 REPOS = (
     "the-cloud-clockwork/agentihooks",
     "the-cloud-clockwork/agentihooks-bundle",
@@ -156,11 +159,17 @@ def _branch(url: str) -> str:
 
 
 def _spared(row: RepositoryRun, branches: set[str]) -> bool:
-    return row.status not in ACTIVE or row.event == MERGE_QUEUE or row.branch in branches
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix or a release tag."""
+    return (
+        row.status not in ACTIVE
+        or row.event in (MERGE_QUEUE, RELEASE_EVENT)
+        or row.branch in branches
+        or RELEASE_TAG.fullmatch(str(row.branch)) is not None
+    )
 
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
+    """Cancels every queued or running Actions run except the merge queue, release tags and the named fixes."""
     branches = {_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
