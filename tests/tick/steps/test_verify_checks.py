@@ -33,7 +33,7 @@ def _agent(name: str, state: str = "working") -> SimpleNamespace:
     return SimpleNamespace(name=name, task=f"task-{name}", lane="eng", state=state, profile="p")
 
 
-def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]) -> list[tuple[Any, ...]]:
+def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[Any]) -> list[tuple[Any, ...]]:
     seen: list[tuple[Any, ...]] = []
     monkeypatch.setattr(launch_check, "judged", lambda store, slug: {"judged"})
     monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: agents)

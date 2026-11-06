@@ -530,7 +530,9 @@ def test_a_refused_retire_is_recorded_with_its_refusal_and_retried(monkeypatch: 
     reports = SimpleNamespace(removed=calls.fn("removed", False))
     monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports))
     monkeypatch.setattr(tick, "reaper", SimpleNamespace(scratch_homes=lambda slug, task: (slug, task, "homes")))
-    monkeypatch.setattr(tick, "retire_watch", SimpleNamespace(failed=calls.fn("failed")))
+    monkeypatch.setattr(
+        tick, "retire_watch", SimpleNamespace(failed=calls.fn("failed"), reported_gone=calls.fn("reported_gone", False))
+    )
     runtime = SimpleNamespace(retire=calls.fn("retire", False), refusal=calls.fn("refusal", "pane busy"))
     store, agent = _store(calls), _agent()
     actions = agents._retire_ended("sw", store, "ledger", runtime, {}, agent, NOW)

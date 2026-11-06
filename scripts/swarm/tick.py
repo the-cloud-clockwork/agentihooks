@@ -1145,7 +1145,7 @@ def _retire_master(slug: str, store: RedisStore, runtime: Any, master: AgentReco
     live = master.name in runtime.live_names()
     if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
         return held
-    if not retire_watch.retire_unless_gone(slug, store, runtime, master, now_ms):
+    if not retire_watch.retire_unless_gone(store, runtime, master, reaper.scratch_homes(slug, master.task), now_ms):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"

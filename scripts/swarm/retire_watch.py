@@ -65,6 +65,8 @@ def reported_gone(store: Any, agent: "AgentRecord", now_ms: int) -> bool:
     """True when a hive report observed after the launch shows the agent's process gone or no longer lists it."""
     from scripts.hive import reports
 
+    if not agent.hive and not reports.host(agent):
+        return False
     raw: str | None = store.redis.get(reports.key(agent.hive)) if agent.hive else None
     observed: int = json.loads(raw).get("observed_at", 0) if raw else -1
     fresh = observed >= (agent.launched_at or agent.started_at)
@@ -72,10 +74,8 @@ def reported_gone(store: Any, agent: "AgentRecord", now_ms: int) -> bool:
     return hives.gone(agent) or (fresh and hives.vanished(agent, now_ms))
 
 
-def retire_unless_gone(slug: str, store: "RedisStore", runtime: Any, agent: "AgentRecord", now_ms: int) -> bool:
-    """True when the hive report shows the agent gone, else whether the runtime retired it."""
-    from scripts.swarm import reaper
-
+def retire_unless_gone(store: "RedisStore", runtime: Any, agent: "AgentRecord", homes: Any, now_ms: int) -> bool:
+    """True when the hive report shows the agent gone, else whether the runtime retired it with ``homes``."""
     if reported_gone(store, agent, now_ms):
         return True
-    return runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
+    return runtime.retire(agent, homes=homes)
