@@ -86,8 +86,9 @@ def test_registry_waves_reproduce_todays_constraints() -> None:
     waves = wave_of()
     for before, after in (*EDGES, *((need, "spawn") for need in sorted(budgets.SPAWN_NEEDS))):
         assert waves[before] < waves[after], (before, after)
+    critical = {step.name: waves[step.name] for step in registry.steps() if step.lane != engine.SLOW}
     assert waves["settle"] == max(waves.values())
-    assert [name for name, wave in waves.items() if wave == max(waves.values())] == ["settle"]
+    assert [name for name, wave in critical.items() if wave == max(waves.values())] == ["settle"]
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")

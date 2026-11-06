@@ -86,6 +86,11 @@ class _Marker:
         return Result((Write(actions_of(self.name), self.name, found),))
 
 
+def _crossed(first: Step, second: Step) -> bool:
+    """Return whether ``first`` and ``second`` declare a domain that one writes and the other reads or writes."""
+    return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
+
+
 def _graphs(monkeypatch: pytest.MonkeyPatch) -> list[Graph]:
     seen: list[Graph] = []
     real = engine.run_graph
@@ -155,15 +160,19 @@ def test_each_tick_site_needs_every_step_of_the_site_before(store: RedisStore, m
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     [(steps, _, records)] = seen
     late = registry._late(steps)
-    members = {site: {s.name for s in steps if s.group == site and s.name not in late} for site in TICK_GROUPS}
+    members = {site: [s for s in steps if s.group == site and s.name not in late] for site in TICK_GROUPS}
     filled = [site for site in TICK_GROUPS if members[site]]
     assert len(filled) > 2
     order = [record.name for record in records]
+    crossings = 0
     for before, after in zip(filled, filled[1:], strict=False):
         for step in steps:
             if step.group == after:
-                assert members[before] <= step.needs, (before, step.name)
-                assert all(order.index(name) < order.index(step.name) for name in members[before])
+                crossed = {other.name for other in members[before] if _crossed(other, step)}
+                crossings += len(crossed)
+                assert crossed <= step.needs, (before, step.name)
+                assert all(order.index(name) < order.index(step.name) for name in crossed)
+    assert crossings > 0
 
 
 def test_the_tick_graph_reads_its_pass_state_under_the_group_budget(
@@ -239,13 +248,13 @@ def test_the_intent_site_joins_the_wrapper_at_the_relay(
     seen = _graphs(monkeypatch)
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
     [(steps, _, _)] = seen
-    intent = {step.name for step in steps if step.group == "wrapper intent"}
+    intent = [step for step in steps if step.group == "wrapper intent"]
     assert intent
     for step in steps:
         if step.group == "wrapper relay":
-            assert intent <= step.needs
+            assert {other.name for other in intent if _crossed(other, step)} <= step.needs
         elif step.group in ("wrapper reboot", "start"):
-            assert not intent & step.needs
+            assert not {other.name for other in intent} & step.needs
     assert cli.INTENT_JOINS == {"wrapper intent": "wrapper relay"}
 
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
@@ -473,7 +474,7 @@ STEPS = (
     ),
     CallStep("spawn hold clear", PASS_SETUP, partial(_run, step_spawn_hold_clear)),
     CallStep("pass budget", PASS_SETUP, partial(_run, step_pass_budget)),
-    CallStep("pane evidence", "observe", partial(_run, step_pane_evidence)),
+    CallStep("pane evidence", "observe", partial(_run, step_pane_evidence), lane=SLOW),
     CallStep("execution reconcile", "observe", partial(_run, step_execution_reconcile)),
     CallStep("master move fail over", "observe", partial(_run, step_master_move_fail_over), CONFIGURED, CONFIG),
     CallStep("recover master", "observe", partial(_run, step_recover_master), CONFIGURED, CONFIG),

@@ -9,13 +9,26 @@ from typing import Any
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
-from scripts.tick.steps import AGENTS, TASKS, CallStep, pass_domains
+from scripts.tick.deadline import Deadline
+from scripts.tick.engine import SLOW
+from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
 
 Get = Callable[[str], Any]
 
 
-def _reap(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, dict[str, Any]], now_ms: int) -> list[str]:
-    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order."""
+def _reap(
+    slug: str,
+    store: Any,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    now_ms: int,
+    deadline: Deadline | None = None,
+) -> list[str]:
+    """Judge every legacy agent of the swarm, one task per pass worker, returning actions in agent order.
+
+    Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
+    """
     from scripts.hub.reconciler import legacy_agents
 
     live, rows = tick.timing.timed(tick._live_names, runtime), dict(rows)
@@ -27,15 +40,21 @@ def _reap(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, dict
         by_task.setdefault(agent.task or agent.name, []).append(index)
 
     def one(indexes: list[int]) -> list[tuple[int, list[str]]]:
-        """Return the actions judging each agent of one task took, in agent order."""
+        """Return the actions judging each agent of one task took, in agent order, until the deadline passes."""
         judged: list[tuple[int, list[str]]] = []
         for index in indexes:
+            if deadline is not None and deadline.expired:
+                break
             with tick.timing.acting(agents[index].name):
                 judged.append((index, tick._reap_agent(judging, agents[index])))
         return judged
 
     found = dict(pair for pairs in tick.pool.fan_out(one, by_task.values()) for pair in pairs)
-    return [action for index in range(len(agents)) for action in found[index]]
+    actions = [action for index in sorted(found) for action in found[index]]
+    left = len(agents) - len(found)
+    if left:
+        actions.append(f"reap stopped at the pass deadline, {left} of {len(agents)} agents left for the next pass")
+    return actions
 
 
 def _strays(slug: Any, config: Any, store: Any, runtime: Any) -> Any:
@@ -459,7 +478,7 @@ def _session_models(slug: Any, store: Any) -> Any:
 
 def _reap_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms")
+        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), get(DEADLINE)
     )
 
 
@@ -517,8 +536,8 @@ STEPS = (
         feature="swarm-tick-agents-reap",
     ),
     CallStep("recover outages", "agents", _recover_outages, LISTED, ROWS),
-    CallStep("strays", "agents", _strays_step, frozenset({"stopped branch"}), pass_domains("config")),
-    CallStep("failed panes", "agents", _failed_panes),
+    CallStep("strays", "agents", _strays_step, frozenset({"drained resume"}), pass_domains("config"), lane=SLOW),
+    CallStep("failed panes", "agents", _failed_panes, lane=SLOW),
     CallStep(
         "orphans",
         "tasks",
@@ -527,8 +546,8 @@ STEPS = (
         frozenset({TASKS}) | pass_domains("config", "rows"),
         frozenset({TASKS}),
     ),
-    CallStep("conversations", "close", _conversations_step),
-    CallStep("session models", "close", _session_models_step),
+    CallStep("conversations", "close", _conversations_step, lane=SLOW),
+    CallStep("session models", "close", _session_models_step, lane=SLOW),
     CallStep("handoff transfers", "close", _transfers),
 )
 
