@@ -763,7 +763,12 @@ def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_
     assert reissued.execution_id != stale.execution_id
     assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
-    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [f"reap:{request.name}"]
+    reaped = (
+        f"reap:fixture:{stale.execution_id}:{stale.generation}"
+        if ack is not None and ack[0] == "live"
+        else f"reap:{request.name}"
+    )
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [reaped]
 
 
 def test_an_ended_launch_releases_its_admission_reservation(setup):

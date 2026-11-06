@@ -495,7 +495,10 @@ class HiveLaunch:
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.stale(order):
-                self.reap(order, previous)
+                if (ack := self.orders.ack(order)) is not None and ack.status == "live":
+                    self.reap_execution(order)
+                else:
+                    self.reap(order, previous)
                 self.end(previous, f"hive launch failed: {STALE_EPOCH}")
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
