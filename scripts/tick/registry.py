@@ -225,11 +225,6 @@ def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]
     return tuple(found)
 
 
-def crossed(first: Step, second: Step) -> bool:
-    """Return whether ``first`` and ``second`` declare a domain that one writes and the other reads or writes."""
-    return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
-
-
 def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
     site that holds steps; steps of groups outside ``sites`` keep their own needs.
