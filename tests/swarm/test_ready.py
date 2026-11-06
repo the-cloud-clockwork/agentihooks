@@ -1,6 +1,7 @@
+import copy
 import json
 import subprocess
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import TypeVar
 
 import pytest
@@ -9,7 +10,7 @@ from scripts.gates import Call, Who
 from scripts.gates.base import Decision
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.verdicts import Verdicts
-from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stack, tick, waits
+from scripts.swarm import capacity, claim_hold, cli, linked_issues, merge_queue, ready, stack, tick, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
@@ -797,6 +798,110 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+def test_one_merge_pass_closes_a_merged_recorded_task_and_unparks_its_dependent_for_the_next_placement(merging):
+    tasks = {
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t3"]},
+        "t2": {"id": "t2", "state": "open", "claimed_by": "", "parked_on": ["t1"]},
+        "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": URL},
+    }
+    rows = MappingProxyType(copy.deepcopy(tasks))
+    ledger = Ledger(tasks)
+    ready.save(merging.store, "sw", "t1", ready.held_record(URL, HEAD, TOP, "engineer@a1b2c3-0002", NOW))
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert claim_hold.waits(ledger.rows["t2"], ledger.rows) == "it waits on task t1"
+    assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
+    assert ledger.rows["t1"]["state"] == "done" and ledger.rows["t3"]["state"] == "done"
+    assert ledger.rows["t1"]["awaiting"] == "" and ledger.rows["t3"]["pr_url"] == URL
+    assert claim_hold.waits(ledger.rows["t2"], ledger.rows) == ""
+    assert merging.store.handoff("sw", "t1") == ""
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.shell.calls == []
+    assert ready.merge_pass(run, MappingProxyType(copy.deepcopy(ledger.rows))) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"kind": "tune"}, {"contract": {"after": "yes"}}, {"pr_url": ""}, {"state": "claimed"}, {"awaiting": "fix"}],
+)
+def test_a_pr_task_outside_the_merge_pass_stays_put_unless_a_merged_code_pull_request_closes_it(merging, change):
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, **change}}
+    before = dict(rows["t1"])
+    ready.forget(merging.store, "sw", "t1")
+    run = ready.Pass(merging.store, "sw", Ledger(rows), {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert rows["t1"] == before
+
+
+def test_a_merged_recorded_task_with_a_failed_intent_verdict_stays_in_pr(merging, monkeypatch):
+    from scripts.gates import intent
+
+    reads = []
+    verdicts = SimpleNamespace(read=lambda task: reads.append(task) or {"verdict": intent.FAIL})
+    monkeypatch.setattr(
+        intent, "Verdicts", lambda slug, name: verdicts if (slug, name) == ("sw", intent.NAME) else None
+    )
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL}}
+    before = dict(rows["t1"])
+    run = ready.Pass(merging.store, "sw", Ledger(rows), {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert rows["t1"] == before and reads == ["t1"]
+
+
+@pytest.mark.parametrize(
+    "change,pulls,closes",
+    [
+        ({"contract": {"after": "no"}, "proof": {}}, {}, True),
+        ({"contract": {"after": "yes"}, "proof": {"command": "probe", "output": "ok"}}, {}, True),
+        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {}, False),
+        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {"8": RUNNING}, False),
+    ],
+)
+def test_a_merged_recorded_task_closes_only_with_its_proof_and_leaves_split_tasks_to_swarm_done(
+    merging, change, pulls, closes
+):
+    known = {URL: MERGED, "https://github.com/o/r/pull/8": MERGED}
+    known.update({f"https://github.com/o/r/pull/{number}": pull for number, pull in pulls.items()})
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, **change}}
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, known.get, known.get, NOW)
+    assert ready.merge_pass(run, rows) == ([f"task t1 done, {URL} merged"] if closes else [])
+    assert ledger.rows["t1"]["state"] == ("done" if closes else "pr")
+
+
+def test_a_merged_recorded_task_skips_group_members_done_or_gone(merging):
+    other = "https://github.com/o/r/pull/9"
+    rows = {
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t9", "t2", "t3"]},
+        "t2": {"id": "t2", "state": "done", "pr_url": other},
+        "t3": {"id": "t3", "state": "open", "claimed_by": ""},
+    }
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
+    assert ledger.rows["t2"] == {"id": "t2", "state": "done", "pr_url": other}
+    assert ledger.rows["t3"] == {"id": "t3", "state": "done", "claimed_by": "", "pr_url": URL, "awaiting": ""}
+
+
+@pytest.mark.parametrize("live", [{"state": "open", "claimed_by": ""}, {"pr_url": "https://github.com/o/r/pull/9"}])
+def test_a_merged_recorded_task_the_ledger_moved_since_the_pass_read_is_left_alone(merging, live):
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL}}
+    ledger = Ledger({"t1": {**rows["t1"], **live}})
+    before = dict(ledger.rows["t1"])
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert ledger.rows["t1"] == before
+
+
+def test_a_merged_recorded_close_keeps_the_earlier_actions_of_the_pass(merging):
+    rows = {
+        "t0": {"id": "t0", "state": "pr", "claimed_by": "", "pr_url": URL, "awaiting": "merge"},
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL},
+    }
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == ["task t0 left the merge pass", f"task t1 done, {URL} merged"]
 
 
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])

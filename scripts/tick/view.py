@@ -11,7 +11,7 @@ import sys
 import urllib.error
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -217,11 +217,20 @@ def document(slug: str) -> dict[str, Any] | None:
 
 @contextmanager
 def holding() -> Generator[None]:
-    """Hold no view on entry and drop whatever view the block started on exit."""
+    """Hold no view on entry and drop whatever view the block started on exit, even when the block is left from
+    another thread's context than the one that entered it."""
     current_token, refresh_token, held_token = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
     try:
         yield
     finally:
-        HELD.reset(held_token)
-        REFRESH.reset(refresh_token)
-        CURRENT.reset(current_token)
+        _reset(HELD, held_token)
+        _reset(REFRESH, refresh_token)
+        _reset(CURRENT, current_token)
+
+
+def _reset(var: ContextVar[Any], token: Token[Any]) -> None:
+    """Restore ``var`` to its value before ``token``, or to nothing when ``token`` came from another context."""
+    try:
+        var.reset(token)
+    except ValueError:
+        var.set(None)
