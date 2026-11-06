@@ -1,10 +1,10 @@
 """The placement steps of the tick pass, run at their sites in today's order: acks, ranking, preempt and spawn."""
 
-# pyright: reportUnusedFunction=false
+# pyright: reportUnusedFunction=false, reportUnusedClass=false
 
 import json
 import os
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -14,9 +14,6 @@ from importlib import import_module
 from types import MappingProxyType
 from typing import Any
 
-from scripts.gates import Who, modes
-from scripts.gates import claims as claim_cap
-from scripts.gates import log as gate_log
 from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
@@ -27,6 +24,10 @@ from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_dom
 from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
+Who: Any = import_module("scripts.gates").Who
+modes: Any = import_module("scripts.gates.modes")
+claim_cap: Any = import_module("scripts.gates.claims")
+gate_log: Any = import_module("scripts.gates.log")
 continuation: Any = import_module("scripts.swarm.continuation")
 dispatcher: Any = import_module("scripts.swarm.dispatcher")
 failed_panes: Any = import_module("scripts.swarm.failed_panes")
@@ -273,9 +274,9 @@ def _held_for_master(slug: str, store: Any, now_ms: int) -> list[str]:
 
 
 def _host_full(slug: str, store: Any, now_ms: int, in_flight: int = 0) -> str:
-    from scripts.swarm import capacity
+    capacity: Any = import_module("scripts.swarm.capacity")
 
-    host = capacity.read(store, slug).get("host") or {}
+    host: dict[str, Any] = capacity.read(store, slug).get("host") or {}
     if host.get("room") is None:
         return ""
     recent = tick.host_spent(store, host["granted_at"], now_ms) + in_flight
@@ -333,7 +334,7 @@ class _LaunchClock:
         self.begun, self.tried, self.forgiven, self.free, self.failing = tick.time.monotonic(), 0, 0, 0.0, ""
         self.preparations, self.preparing = 0, 0.0
 
-    def spent(self, task: dict, batch: list) -> str | None:
+    def spent(self, task: dict[str, Any], batch: list[Any]) -> str | None:
         if not self.preparations:
             return None
         charged = self.tried - self.forgiven
@@ -364,13 +365,13 @@ def _steer(slug: str, store: Any, task: dict[str, Any], failing: str) -> dict[st
     return {"avoid_harness": avoid} if avoid else {}
 
 
-def _steered_off(error: BaseException) -> str:
+def _steered_off(error: Any) -> str:
     if isinstance(error, tick.SpawnError) and error.status != "unavailable":
         return error.harness
     return ""
 
 
-def _record_spawn_failure(slug: str, store: Any, record: Any, error: Exception, now_ms: int) -> None:
+def _record_spawn_failure(slug: str, store: Any, record: Any, error: Any, now_ms: int) -> None:
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{tick.__name__}._spawn", error)
     waiting = isinstance(error, tick.SpawnError) and error.status == "unavailable"
@@ -393,7 +394,7 @@ def _owner_hold(slug: str, store: Any, runtime: Any, task: dict[str, Any]) -> st
 
 
 @contextmanager
-def _placement_pass(runtime: Any) -> Iterator[None]:
+def _placement_pass(runtime: Any) -> Generator[None]:
     try:
         yield
     finally:
@@ -404,13 +405,13 @@ def _placement_pass(runtime: Any) -> Iterator[None]:
 def _spawn(
     slug: str,
     config: SwarmConfig,
-    store: object,
-    ledger: object,
-    runtime: object,
-    rows: dict,
-    doc: dict,
+    store: Any,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, Any],
+    doc: dict[str, Any],
     now_ms: int,
-) -> list:
+) -> list[str]:
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = timing.timed(tick._held_for_master, slug, store, now_ms)
@@ -418,7 +419,8 @@ def _spawn(
     actions += timing.timed(tick._block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     run = tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
-    clock, batch = tick._LaunchClock(), []
+    clock = tick._LaunchClock()
+    batch: list[Any] = []
     for lane, task in order:
         stop = held or [
             timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
@@ -440,13 +442,13 @@ def _spawn(
 class _Pass:
     slug: str
     config: SwarmConfig
-    store: object
-    ledger: object
-    runtime: object
-    rows: dict
-    doc: dict
+    store: Any
+    ledger: Any
+    runtime: Any
+    rows: dict[str, Any]
+    doc: dict[str, Any]
     now_ms: int
-    memo: dict = field(default_factory=dict)
+    memo: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def _pass_reclaim(run: Any) -> Callable[..., Any]:
@@ -458,8 +460,8 @@ def _pass_reclaim(run: Any) -> Callable[..., Any]:
 @dataclass(frozen=True)
 class Launch:
     record: AgentRecord
-    task: dict
-    primed: dict
+    task: dict[str, Any]
+    primed: dict[str, Any]
 
 
 def _prepare(
@@ -505,7 +507,7 @@ def _prepare(
     )
     task["group"] = [
         {key: rows[m][key] for key in ("id", "title", "description")}
-        for m in task.get("group_members") or []
+        for m in task.get("group_members") or []  # pyright: ignore[reportUnknownVariableType]
         if m in rows
     ]
     saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
@@ -564,15 +566,17 @@ def _launch(run: Any, launch: Any) -> tuple[Any, Any]:
 
 
 def _launch_all(run: Any, clock: Any, batch: list[Any]) -> list[str]:
-    from scripts.swarm import launch_job
+    launch_job: Any = import_module("scripts.swarm.launch_job")
 
     if not batch:
         return []
     at, contexts = tick.time.monotonic(), [copy_context() for _ in batch]
     with ThreadPoolExecutor(max_workers=len(batch)) as pool:
-        outcomes = list(pool.map(lambda context, launch: context.run(tick._launch, run, launch), contexts, batch))
+        outcomes: list[Any] = list(
+            pool.map(lambda context, launch: context.run(tick._launch, run, launch), contexts, batch)  # pyright: ignore[reportUnknownLambdaType, reportUnknownMemberType, reportUnknownArgumentType]
+        )
     clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
-    actions = []
+    actions: list[str] = []
     for launch, outcome in zip(batch, outcomes):
         launch, (placed, launched), retried = tick._retry_successor(run, launch, outcome)
         actions += retried
@@ -616,7 +620,8 @@ def _spawn_order(
     doc: dict[str, Any],
     runtime: Any,
 ) -> tuple[list[Any], list[Any]]:
-    from scripts.swarm import capacity, focus_budget
+    capacity: Any = import_module("scripts.swarm.capacity")
+    focus_budget: Any = import_module("scripts.swarm.focus_budget")
 
     if begin := getattr(runtime, "begin_placement_pass", None):
         timing.timed(begin)
@@ -625,7 +630,8 @@ def _spawn_order(
     caps = timing.timed(capacity.caps, decision, config)
     dispatched = timing.timed(preempt.yielding, store, slug, doc, timing.timed(dispatcher.claim_key, config, doc))
     claims = timing.timed(tick.claim_view, slug, store, rows, doc, dispatched)
-    queue, waits = [], []
+    queue: list[tuple[int, str, dict[str, Any]]] = []
+    waits: list[Any] = []
     for lane, cap in caps.items():
         running = timing.timed(tick._running, agents, rows, lane)
         busy = len(running)
@@ -660,7 +666,7 @@ def _ranked(
 def _block_unresolved(
     slug: str, ledger: Any, rows: dict[str, Any], order: list[tuple[str, dict[str, Any]]]
 ) -> list[str]:
-    blocked = []
+    blocked: list[str] = []
     for _, task in order:
         if profile_first.UNRESOLVED in task:
             blocked.append(tick._unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
@@ -691,7 +697,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
     lives, mode = store.claims(slug, task["id"]), modes.configured(claim_cap.GATE, store.config(slug).gates)
     if lives < claim_cap.CAP or mode == "off":
         return ""
-    last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
+    last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     failure = claim_cap.launch_failure(lives, store.launches(slug), task["id"])
     reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
@@ -708,7 +714,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
 
 
 def primed(store: Any, slug: str, seat: str, task: dict[str, Any]) -> dict[str, Any]:
-    from scripts.swarm import priming_trace
+    priming_trace: Any = import_module("scripts.swarm.priming_trace")
 
     memory = {"recaps": store.memory.recaps(seat), "learned": store.memory.learned(seat)}
     envelope = task.get("handoff_envelope", store.handoff_envelope(slug, task["id"]))
