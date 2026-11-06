@@ -756,6 +756,16 @@ def cmd_tick(store, args):
         print("another swarm tick is running on this machine", file=sys.stderr)
 
 
+def cmd_swarm_tick(store: RedisStore, args: argparse.Namespace) -> None:
+    """Tick one swarm on this workstation, refused for a swarm the Anton controller serves."""
+    from scripts.swarm import scheduled_tick
+
+    if scheduled_tick.served(store.config(args.slug)):
+        raise SwarmError(scheduled_tick.SERVED.format(slug=args.slug))
+    for action in run_tick(store, args.slug):
+        print(action)
+
+
 def _tick_host(store, started):
     from scripts import operator_env
     from scripts.swarm_ledger import authority_context
@@ -2603,6 +2613,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
+    sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
     report.add_argument("--passes", type=tick_report.pass_count, default=100)
     report.set_defaults(handler=tick_report.command)
