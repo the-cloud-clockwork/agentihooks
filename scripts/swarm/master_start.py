@@ -79,6 +79,14 @@ def dead(agent: AgentRecord, live: set[str], at: int) -> bool:
     return agent.state == "starting" and agent.name not in live and at - since >= deadline_ms(agent)
 
 
+def hooked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
+    """The master's own hooks beat since its launch, which proves a live session where no hive report reaches."""
+    from scripts.swarm import idle
+
+    beat = idle.heartbeat(store.redis, slug, agent.name)
+    return bool(beat) and int(beat.get("at", 0)) >= (agent.launched_at or agent.started_at)
+
+
 def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
     pending = read(store, slug)
     repeated = pending.get("alerted") and master_alarm.read(store, slug).get("error") == error
@@ -103,7 +111,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     ):
         store.redis.delete(store.key(slug, "master-start"))
         return []
-    if agent and runtime.reported(agent):
+    if agent and (runtime.reported(agent) or hooked(store, slug, agent)):
         store.put_agent(slug, replace(agent, state="working"))
         store.clear_handoff(slug, MASTER)
         store.redis.delete(store.key(slug, "master-start"))

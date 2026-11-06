@@ -96,6 +96,21 @@ def test_first_hook_confirms_startup_and_prevents_retry(store):  # noqa: F811
     assert len(runtime.masters) == 1
 
 
+def test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches(store):  # noqa: F811
+    from scripts.swarm import idle
+
+    runtime, ledger = StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    master = masters(store)[0]
+    idle.beat(store.redis, "sw", master.name, "working", 2)
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    assert masters(store)[0].state == "working"
+    assert master.name not in runtime.killed
+    assert store.redis.get(store.key("sw", "master-start")) is None
+    tick("sw", store, ledger, runtime, 3 * DEADLINE)
+    assert len(runtime.masters) == 1
+
+
 def test_dead_launch_retries_without_waiting_for_worker_grace(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     store.put_handoff("sw", MASTER, "Retain this handoff")
