@@ -36,7 +36,7 @@ from scripts.swarm import (
     claim_hold,  # noqa: F401
     claim_order,  # noqa: F401
     content_refusal,  # noqa: F401
-    continuation,  # noqa: F401
+    continuation,
     control_notifications,  # noqa: F401
     dead_resume,  # noqa: F401
     deliberate_exit,  # noqa: F401
@@ -92,7 +92,7 @@ from scripts.swarm.store import (  # noqa: F401
     SwarmConfig,
     SwarmError,
 )
-from scripts.swarm_ledger import ledger_rank, ledger_workspace  # noqa: F401
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy  # noqa: F401
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
@@ -135,7 +135,6 @@ from scripts.tick.steps.claims import (  # noqa: F401
     _demoted,
     _launch_order,
     _owned_tasks,
-    _prepare,
     agent_status,
     claim_view,
     ready_in_order,
@@ -575,6 +574,85 @@ class Launch:
     record: AgentRecord
     task: dict
     primed: dict
+
+
+def _prepare(run, lane, task, taken, failing, peers):
+    slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
+    rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    task = rows[task["id"]] = dict(task)
+    expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
+    blocked = (
+        timing.timed(_lives_spent, slug, store, ledger, rows, task)
+        or timing.timed(_room_wait, runtime, lane, task)
+        or timing.timed(_held_back, slug, ledger, rows, runtime, task, now_ms)
+        or timing.timed(_owner_hold, slug, store, runtime, task)
+    )
+    if blocked:
+        return None, [blocked]
+    name = store.next_name(slug, lane, now_ms)
+    if not timing.timed(store.claim, slug, task["id"], name, LEASE_MS):
+        _release_admission(slug, runtime, task)
+        return None, []
+    handoff = store.handoff(slug, task["id"])
+    lives = store.earlier_lives(slug, task["id"])
+    if handoff:
+        task["handoff"] = handoff
+        task["handoff_envelope"] = timing.timed(
+            continuation.resolve,
+            config.repo,
+            task,
+            rows,
+            lives,
+            store.handoff_envelope(slug, task["id"]) or {},
+            _pass_reclaim(run),
+        )
+    elif lives or task.get("branch"):
+        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, _pass_reclaim(run))
+        store.put_reclaim(slug, name, task["reclaim"])
+    task["stack_base"] = _stack_base(task, rows, config.repo)
+    task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime, peers))
+    task["group"] = [
+        {key: rows[m][key] for key in ("id", "title", "description")}
+        for m in task.get("group_members") or []
+        if m in rows
+    ]
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+    seat = _free_seat(slug, lane, taken, preferred)
+    taken.add(seat)
+    record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
+    store.put_agent(slug, record)
+    try:
+        state = "pr" if task.get("pr_url") else "claimed"
+        fields = {
+            "state": state,
+            "claimed_by": name,
+            "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
+        }
+        kind = config.lanes.get(lane, {}).get("kind", "")
+        if kind not in ("", "auto") and not task.get("kind"):
+            fields["kind"] = kind
+        live = timing.timed(ledger.update_task, slug, task["id"], fields, if_state=("open",), if_match=expected)
+        task.update(live)
+        if live["claimed_by"] != name:
+            _release_admission(slug, runtime, task)
+            store.release(slug, task["id"], name)
+            store.drop_agent(slug, name)
+            return None, [f"task {task['id']} is {live['state']} on the ledger, not claimed"]
+        task.update(fields)
+        timing.timed(store.record_launch, slug, record, "pending")
+        store.seats.occupy(seat, name, now_ms)
+        task["transfer"] = timing.timed(transfers.attach, store, slug, record)
+        primed_task = {
+            **timing.timed(primed, store, slug, seat, task),
+            ACK_LATER: True,
+            "detached_launch": True,
+            **_steer(slug, store, task, failing),
+        }
+    except Exception as exc:
+        failed = Failed(record, task, exc)
+        return None, timing.timed(_not_launched, slug, store, ledger, runtime, rows, failed, now_ms)
+    return Launch(record, task, primed_task), []
 
 
 def _launch(run, launch):

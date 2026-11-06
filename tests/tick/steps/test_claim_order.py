@@ -27,7 +27,6 @@ CLAIMED = (
     "claim_view",
     "_launch_order",
     "_demoted",
-    "_prepare",
 )
 MOVED = [(claims, name) for name in CLAIMED]
 

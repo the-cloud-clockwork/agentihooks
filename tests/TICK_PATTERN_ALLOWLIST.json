@@ -30,6 +30,7 @@
   "def _parked",
   "def _pass_reclaim",
   "def _placement_pass",
+  "def _prepare",
   "def _print_actions",
   "def _ranked",
   "def _record_spawn_failure",

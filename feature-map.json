@@ -273,7 +273,7 @@
       "id": "swarm-tick-claim-order",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13",
-      "behaviour": "Claim order, agent status, the launch records and launch preparation live in the claims step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "behaviour": "Claim order, agent status and the launch records live in the claims step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
       "seam": "scripts.tick.steps.claims, re-exported by scripts.swarm.tick",
       "tests": [
         "tests/tick/steps/test_claim_order.py::test_tick_reexports_the_moved_name",
