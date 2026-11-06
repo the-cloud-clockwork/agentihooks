@@ -268,3 +268,44 @@ def test_a_failed_pass_is_logged_and_saves_nothing(tmp_path, monkeypatch, capsys
 
     assert capsys.readouterr().out == '{"error": "RuntimeError: redis down"}\n'
     assert not (tmp_path / "fallback.json").exists()
+
+
+def test_a_first_pass_makes_every_missing_state_folder(tmp_path, monkeypatch):
+    from scripts.swarm import runtime, store
+
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
+    monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+    state = tmp_path / "home" / ".agentihooks" / "fallback.json"
+
+    master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
+
+    assert master_fallback.load(state) == {"sw": 1200000}
+
+
+def test_the_loop_and_a_pass_flush_every_line_they_log(tmp_path, monkeypatch):
+    from scripts.scheduler import process_timer
+    from scripts.swarm import runtime, store
+
+    printed = []
+
+    def run(command, check, timeout):
+        raise master_fallback.subprocess.TimeoutExpired(command, timeout)
+
+    def wait(delay, timeout):
+        raise Done
+
+    def connect():
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(master_fallback, "print", lambda *args, **kwargs: printed.append(kwargs), raising=False)
+    monkeypatch.setattr(master_fallback.subprocess, "run", run)
+    monkeypatch.setattr(process_timer, "wait", wait)
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
+    monkeypatch.setattr(store, "connect", connect)
+
+    with pytest.raises(Done):
+        master_fallback.run({})
+    master_fallback.pass_once({}, tmp_path / "fallback.json")
+
+    assert printed == [{"flush": True}, {"flush": True}]
