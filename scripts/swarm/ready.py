@@ -14,6 +14,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from scripts.gates import intent
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import (
     claim_order,
@@ -236,6 +237,8 @@ def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, 
     if ledger_kinds.after(row) and ledger_kinds.unmet(row):
         return []
     if row.get("split") and done_gate.refusal(row, url, run.github):
+        return []
+    if (intent.Verdicts(run.slug, intent.NAME).read(task_id) or {}).get("verdict") == intent.FAIL:
         return []
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
     live = run.ledger.update_task(run.slug, task_id, fields, if_state=("pr",), if_match={"pr_url": url})

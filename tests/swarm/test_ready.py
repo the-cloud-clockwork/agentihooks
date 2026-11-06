@@ -834,6 +834,21 @@ def test_a_pr_task_outside_the_merge_pass_stays_put_unless_a_merged_code_pull_re
     assert rows["t1"] == before
 
 
+def test_a_merged_recorded_task_with_a_failed_intent_verdict_stays_in_pr(merging, monkeypatch):
+    from scripts.gates import intent
+
+    reads = []
+    verdicts = SimpleNamespace(read=lambda task: reads.append(task) or {"verdict": intent.FAIL})
+    monkeypatch.setattr(
+        intent, "Verdicts", lambda slug, name: verdicts if (slug, name) == ("sw", intent.NAME) else None
+    )
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL}}
+    before = dict(rows["t1"])
+    run = ready.Pass(merging.store, "sw", Ledger(rows), {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert rows["t1"] == before and reads == ["t1"]
+
+
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
 def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
     merging.rows["t1"]["kind"] = kind
