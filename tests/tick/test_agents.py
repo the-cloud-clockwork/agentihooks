@@ -93,8 +93,9 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
     state = _state()
     found = actions(engine.run_group("agents", _ctx(state)))
     assert found == ["reaped", "recovered", "stray", "pane"]
+    assert isinstance(seen[0][1][-1], Deadline)
     assert seen == [
-        ("reap", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7)),
+        ("reap", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7, seen[0][1][-1])),
         ("recover", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7)),
         ("strays", ("sw", state["config"], "store", state["runtime"])),
         ("panes", ("sw", "store", state["runtime"], 7)),
