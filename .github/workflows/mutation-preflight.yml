@@ -536,6 +536,7 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -552,6 +553,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *download-the-shared-mutation-stats
@@ -738,6 +740,7 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -751,6 +754,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *download-the-shared-mutation-stats
@@ -852,7 +856,7 @@ jobs:
     needs: [plan, stats, refine, replan, mutation-shard]
     if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       BASE: ${{ inputs.base || 'origin/dev' }}
     steps:

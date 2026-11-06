@@ -162,10 +162,14 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
 - **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
   list of emails, for example
   `nestor.colt@gmail.com,thecloudclockwork@gmail.com`); logins it does not
-  name follow in slot order. A login with 10% or less left on its five hour or
-  week window (the shared drain floor) is skipped, and so is one whose
-  `claude auth status --text` check fails. A slot with only an OpenBao copy is
-  restored into its home first, unless a master holds that slot.
+  name follow in slot order. The first entry is the primary login: at or under
+  `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` (default 20) of its week left,
+  nothing new places there and it is skipped for the next login in order,
+  above that reserve it is still offered first. A login with 10% or less left
+  on its five hour or week window (the shared drain floor) is skipped, and so
+  is one whose `claude auth status --text` check fails. A slot with only an
+  OpenBao copy is restored into its home first, unless a master holds that
+  slot.
 - **Master slots stay free.** The session never writes the slot's claim, so a
   master launch takes the same slot as if the session were not there. It runs
   in its own home, `$AGENTIHOOKS_HOME/claude-ai/<name>/claude`, where `<name>` is

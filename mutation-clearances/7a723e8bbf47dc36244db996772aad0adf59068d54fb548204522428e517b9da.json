@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_running:5701b5e9c07fd7f56aae9b699238e1d8e465416d5d6fa0b63c2d164eb6e09461": {
+    "reader": "standards_reader",
+    "reason": "ThreadPoolExecutor.shutdown tests wait only through 'if wait:' before joining its threads; None and False are both falsy, so the join is skipped either way, and the cancel_futures path and the queue wake up run before that check without reading wait. The mutant changes nothing observable in running."
+  }
+}

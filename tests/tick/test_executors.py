@@ -95,6 +95,49 @@ def test_a_pass_shuts_both_executors_down_when_it_ends() -> None:
         found.fans.submit(lambda: 2)
 
 
+def test_a_pass_keeps_its_worker_bound_and_names_its_step_threads() -> None:
+    with pool.running(workers=WORKERS) as found:
+        assert found.workers == WORKERS
+        name = found.steps.submit(lambda: current_thread().name).result()
+    assert name.startswith("tick-step_")
+
+
+def test_a_pass_cancels_fan_outs_still_queued_when_it_ends() -> None:
+    gate, started = Event(), Event()
+
+    def blocker() -> None:
+        started.set()
+        gate.wait(5)
+
+    try:
+        with pool.running(workers=1) as found:
+            found.fans.submit(blocker)
+            assert started.wait(5)
+            queued = found.fans.submit(lambda: None)
+        assert queued.cancelled()
+    finally:
+        gate.set()
+
+
+def test_a_group_whose_needs_never_end_is_refused_on_the_first_idle_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    checks: list[str] = []
+    waiting = engine._waiting
+
+    def bounded(step: Step, names: set[str], found: pool.Pass) -> bool:
+        checks.append(step.name)
+        assert len(checks) <= 2, "the group kept looping on needs that never end"
+        return waiting(step, names, found)
+
+    def action(ctx: Context) -> Result:
+        return Result()
+
+    monkeypatch.setattr(engine, "_waiting", bounded)
+    steps = (Step("a", action, "never", frozenset({"b"})), Step("b", action, "never", frozenset({"a"})))
+    with pool.running(workers=2) as found, pytest.raises(ValueError, match="wait on needs that never end"):
+        engine._eager(steps, _ctx(), found, {})
+    assert checks == ["a", "b"]
+
+
 def test_a_fan_out_inside_a_fanned_out_action_runs_inline() -> None:
     outer: list[str] = []
     inner: list[str] = []

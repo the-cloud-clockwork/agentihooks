@@ -38,16 +38,16 @@ jobs:
 
   promotion-ready:
     name: Promotion ready
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
       - run: echo 'All promotion dependencies graded this development revision.'
 
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, promotion-ready]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree, promotion-ready]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     uses: ./.github/workflows/promote.yml
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -251,6 +251,24 @@ jobs:
   hierarchy-cpu:
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
     uses: ./.github/workflows/hierarchy-cpu.yml
+
+  tick-pattern-tree:
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compare the whole tree tick pattern with its allowlist
+        run: python -m scripts.tick_pattern --tree
 
   kind-due:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -1882,7 +1900,6 @@ jobs:
           name: early-collected-${{ matrix.python-version }}
 
       - name: Fetch the protected grader's dev head
-        if: steps.collection.outcome == 'success'
         run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
 
       # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
@@ -4289,6 +4306,7 @@ jobs:
         with: *mutation-refine-download-planned-mutation-test-selection
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-refine-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -4305,6 +4323,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-refine-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-refine-download-the-shared-mutation-stats
@@ -4472,6 +4491,7 @@ jobs:
           exit 1
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         id: download-probe-shared-mutation-stats
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -4488,6 +4508,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-probe-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-probe-download-the-shared-mutation-stats
@@ -4802,6 +4823,7 @@ jobs:
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Download the shared mutation stats
+        timeout-minutes: 1
         if: needs.mutation-plan.outputs.forwarded != 'true'
         id: download-the-shared-mutation-stats
         continue-on-error: true
@@ -4819,6 +4841,7 @@ jobs:
           sleep 30
 
       - name: Download the shared mutation stats, attempt 2
+        timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats

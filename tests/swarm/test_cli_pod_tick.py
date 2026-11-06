@@ -14,7 +14,7 @@ def test_an_agent_pod_tick_takes_no_controller_lease_and_never_spawns_or_reaps(m
     store.create(SwarmConfig("sw", ".", 1, 0, state="running"))
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
     passes = []
-    monkeypatch.setattr(cli, "tick", lambda slug, *args: passes.append(slug) or [])
+    monkeypatch.setattr(cli, "run_sites", lambda sites, state, *args: passes.append(state["slug"]) or ())
     ledger, rt = FakeLedger([{"id": "t1", "lane": "eng", "state": "open"}]), FakeRuntime()
 
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))

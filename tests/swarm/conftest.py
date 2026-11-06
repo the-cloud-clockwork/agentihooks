@@ -12,6 +12,7 @@ from scripts.swarm import (
     slice_screen,
     trace_plan,
 )
+from scripts.tick import engine
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,13 @@ def roomy_host(monkeypatch, request):
 def below_the_blocker_gate(monkeypatch, request):
     if request.module.__name__.rpartition(".")[2] != "test_block_gate":
         monkeypatch.setattr(cli, "_block_refusal", lambda store, slug, task: "")
+
+
+@pytest.fixture(autouse=True)
+def every_step_due(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """Run every step on each pass of a frozen clock, except where the characterisation scenarios test intervals."""
+    if request.module.__name__.rpartition(".")[2] != "test_characterisation":
+        monkeypatch.setattr(engine, "resting", lambda ordered, cadence: frozenset())
 
 
 @pytest.fixture

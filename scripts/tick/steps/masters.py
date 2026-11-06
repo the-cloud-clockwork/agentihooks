@@ -1,7 +1,6 @@
 """The master and dispatcher seat steps of the tick pass, run at their four sites in today's order."""
 
-from collections.abc import Callable, Mapping
-from functools import partial
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,11 +14,9 @@ from scripts.swarm import (
     tick_master,
 )
 from scripts.swarm_v2 import master_scale, master_seat_alarm
-from scripts.tick import engine, registry
-from scripts.tick.deadline import Deadline
+from scripts.tick import registry
 from scripts.tick.engine import SLOW
-from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, Left, PassBox, actions, budgets, pass_domains, tasks
+from scripts.tick.steps import CallStep, Left, pass_domains, tasks
 
 __all__ = [
     "DISPATCH",
@@ -28,12 +25,6 @@ __all__ = [
     "SEATS",
     "STEPS",
     "WATCH",
-    "raise_held",
-    "run_dispatch",
-    "run_masters",
-    "run_seats",
-    "run_site",
-    "run_watch",
 ]
 
 Get = Callable[[str], Any]
@@ -57,36 +48,6 @@ SEAT: Any = SimpleNamespace(
 )
 
 
-class _SiteView:
-    """A view holding the tick's locals at a site and the box its steps hold an exception in."""
-
-    def __init__(self, found: Mapping[str, Any], box: dict[str, Any]) -> None:
-        """Keep the site's locals and the box."""
-        self._found = found
-        self._box = box
-
-    def read(self, domain: Domain, key: str) -> object | None:
-        """Return the box or the local under ``key`` for the pass domain, nothing for any other domain."""
-        if domain != PASS:
-            return None
-        return self._box if key == BOX else self._found[key]
-
-
-def run_site(group: str, found: Mapping[str, Any]) -> list[str]:
-    """Run tick group ``group`` against the tick's locals ``found``, raising what a step held, returning actions."""
-    box: dict[str, Any] = PassBox()
-    ctx = Context(_SiteView(found, box), Deadline.after(budgets.SLOW_S))
-    records = engine.run_group(group, ctx, apply=tasks.appliers(dict(found)))
-    raise_held(box)
-    return actions(records)
-
-
-run_masters = partial(run_site, MASTERS)
-run_seats = partial(run_site, SEATS)
-run_dispatch = partial(run_site, DISPATCH)
-run_watch = partial(run_site, WATCH)
-
-
 def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
     """Wrap ``call`` to skip once a step held an exception and to hold the exception it raises."""
 
@@ -103,12 +64,6 @@ def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
 
     return run
-
-
-def raise_held(box: dict[str, Any]) -> None:
-    """Raise the exception a step held, as the hand written pass let it escape."""
-    if RAISED in box:
-        raise box[RAISED]
 
 
 def _master_wake(tick: Any, get: Get) -> Any:
@@ -237,14 +192,14 @@ STEPS = (
         lane=SLOW,
     ),
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
-    CallStep("master down", SEATS, _held(_master_down), RESUMED, CONFIG),
-    CallStep("tick master", SEATS, _held(_tick_master), RESUMED, pass_domains("config", "doc")),
-    CallStep("master scale", SEATS, _held(_master_scale), RESUMED, pass_domains("config", "doc")),
-    CallStep("seat alarm", SEATS, _held(_seat_alarm), LISTED, pass_domains("doc")),
+    CallStep("master down", SEATS, _held(tasks.placing(_master_down)), RESUMED, CONFIG),
+    CallStep("tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc")),
+    CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
+    CallStep("seat alarm", SEATS, _held(tasks.placing(_seat_alarm)), LISTED, pass_domains("doc")),
     CallStep(
         "dispatch seat",
         DISPATCH,
-        _held(_dispatch_seat),
+        _held(tasks.placing(_dispatch_seat)),
         RESUMED | {"sleeping"},
         pass_domains("config", "doc", "sleeping"),
     ),

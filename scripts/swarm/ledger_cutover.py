@@ -1,10 +1,11 @@
 import json
 import os
 from collections.abc import Mapping
+from typing import Any
 
 from scripts.gates import Who
 from scripts.swarm import fencing, lease
-from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_route
 from scripts.swarm_ledger.api import client
 from scripts.swarm_v2 import masters
@@ -12,19 +13,33 @@ from scripts.swarm_v2 import masters
 READY = "ledger-ready"
 
 
-def _stamp(config, agent):
+def _stamp(config: SwarmConfig, agent: AgentRecord) -> str:
+    launch = {"generation": agent.generation} if agent.execution_id else {"launched_at": agent.launched_at}
     return json.dumps(
         {
             "url": config.pending_api_url,
             "staged_at": config.ledger_staged_at,
             "execution_id": agent.execution_id,
-            "generation": agent.generation,
+            **launch,
         }
     )
 
 
-def _fresh(config, agent):
-    return bool(agent.execution_id and agent.launched_at >= config.ledger_staged_at and agent.state != "finished")
+def _identified(agent: AgentRecord) -> bool:
+    """A registered execution, or a master, whose launch path records no execution identity."""
+    return bool(agent.execution_id) or (agent.lane == MASTER and agent.launched_at > 0)
+
+
+def _fresh(config: SwarmConfig, agent: AgentRecord) -> bool:
+    return _identified(agent) and agent.launched_at >= config.ledger_staged_at and agent.state != "finished"
+
+
+def _current(store: RedisStore, pipe: Any, slug: str, agent: AgentRecord) -> bool:
+    if not agent.execution_id:
+        row = json.loads(pipe.hget(store.key(slug, "agents"), agent.name) or "{}")
+        return row.get("state") != "finished" and row.get("launched_at") == agent.launched_at
+    current = fencing.read(store, slug)["executions"].get(agent.execution_id)
+    return current is not None and current["state"] != "finished" and current["generation"] == agent.generation
 
 
 def acknowledge(store: RedisStore, slug: str, who: Who, environ: Mapping[str, str] = os.environ) -> bool:
@@ -48,15 +63,12 @@ def acknowledge(store: RedisStore, slug: str, who: Who, environ: Mapping[str, st
 
     with store.redis.pipeline() as pipe:
         try:
-            pipe.watch(store.key(slug, "config"))
+            pipe.watch(store.key(slug, "config"), store.key(slug, "agents"))
             settings = pipe.hgetall(store.key(slug, "config"))
-            current = fencing.read(store, slug)["executions"].get(agent.execution_id)
             if (
                 settings.get("pending_api_url") != config.pending_api_url
                 or int(settings.get("ledger_staged_at") or 0) != config.ledger_staged_at
-                or current is None
-                or current["state"] == "finished"
-                or current["generation"] != agent.generation
+                or not _current(store, pipe, slug, agent)
             ):
                 return False
             pipe.multi()

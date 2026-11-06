@@ -177,6 +177,8 @@ agentihooks broadcast emit "prod is down, stop everything"
 
 **Critical** is the most aggressive. The agent sees the message before every user turn AND before every tool call. An agent making 5 tool calls per turn sees the critical message 6 times. It cannot miss it.
 
+A headless worker run (`AGENTIHOOKS_WORKER_RUN=1`) receives no broadcast at any severity and claims none from the fleet; see [Worker Mode](worker-mode.md).
+
 ---
 
 ## CLI Reference

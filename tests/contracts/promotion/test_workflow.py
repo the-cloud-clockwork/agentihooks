@@ -53,7 +53,16 @@ def _graded_needs(promote, analysis="A1"):
 
 @pytest.mark.parametrize("result", ["failure", "cancelled"])
 @pytest.mark.parametrize(
-    "job", ["gate-required", "refresh-durations", "coverage-baseline", "flake-budget", "sonar", "hierarchy-cpu"]
+    "job",
+    [
+        "gate-required",
+        "refresh-durations",
+        "coverage-baseline",
+        "flake-budget",
+        "sonar",
+        "hierarchy-cpu",
+        "tick-pattern-tree",
+    ],
 )
 def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(job, result):
     promote = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["promote"]
@@ -69,6 +78,21 @@ def test_promotion_requires_a_successful_hierarchy_proof(result):
     needs = _graded_needs(promote)
     needs["hierarchy-cpu"].result = result
     assert enabled(promote["if"], "push", needs) == (result == "success")
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
+def test_promotion_requires_a_clean_whole_tree_tick_pattern(result: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    tree = jobs["tick-pattern-tree"]
+    assert any(step.get("run") == "python -m scripts.tick_pattern --tree" for step in tree["steps"])
+    assert enabled(tree["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(tree["if"], event, {})
+    assert "tick-pattern-tree" not in jobs["gate-required"]["needs"]
+    for consumer in ("promotion-ready", "promote"):
+        needs = _graded_needs(jobs[consumer])
+        needs["tick-pattern-tree"].result = result
+        assert enabled(jobs[consumer]["if"], "push", needs) == (result == "success")
 
 
 def test_a_revision_sonar_graded_promotes_from_its_own_analysis():

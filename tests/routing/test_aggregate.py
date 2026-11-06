@@ -320,3 +320,51 @@ def test_aggregate_selects_slot_metadata_and_keeps_the_first_equal_observation(r
     assert row["cap"] == cap
     assert row["kind"] == ("subscription" if cap == 6 else "api")
     assert row["quota"]["five_hour"]["used"] == (20 if cap == 6 else 40)
+
+
+def test_dashed_and_underscore_spellings_of_one_account_read_as_one_quota_row(redis, monkeypatch):
+    from scripts.swarm import capacity
+
+    for hive, account, sessions, quotas in (
+        (
+            "a",
+            "nestor_coltatgmail_com",
+            1,
+            {
+                "claude:nestor_coltatgmail_com": {
+                    "five_hour": {"used": 20, "resets_at": 200},
+                    "seven_day": {"used": 30, "resets_at": 300},
+                    "observed_at": 95,
+                }
+            },
+        ),
+        ("b", "nestor-coltatgmail-com", 2, {}),
+    ):
+        registry.update(redis, hive, ["max-agents=8"])
+        registry.beat(
+            redis,
+            hive,
+            {
+                "heartbeat_at": 100000,
+                "slots": [{"harness": "claude", "account": account, "kind": "subscription", "cap": 6}],
+            },
+        )
+        redis.set(f"{registry.key(hive)}:sessions", json.dumps({f"claude:{account}": sessions}), ex=45)
+        redis.set(f"{registry.key(hive)}:quota", json.dumps(quotas), ex=45)
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    monkeypatch.setattr("time.time", lambda: 100)
+    rows = [
+        row for row in capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100) if row.harness == "claude"
+    ]
+    assert [(row.sessions, row.five_left, row.week_left) for row in rows] == [(3, 80, 70)]
+    assert aggregate.counts("claude", 100) == {"nestor_coltatgmail_com": 3}
+
+
+def test_an_account_holding_a_colon_keeps_every_part_in_its_key_and_count(redis, monkeypatch):
+    from scripts.routing import reservation
+
+    assert reservation.LaunchSlots(redis).reserve("codex:tenant_x:one_y", "pending", 1, 1000)
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    assert aggregate.name("codex:tenant_x:one_y") == "codex:tenant-x:one-y"
+    assert list(aggregate.read(redis, 100)) == ["codex:tenant-x:one-y"]
+    assert aggregate.counts("codex", 100) == {"tenant_x:one_y": 1}

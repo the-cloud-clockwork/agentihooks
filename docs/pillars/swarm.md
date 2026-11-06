@@ -4346,7 +4346,7 @@ One tick pass reconciles one swarm with its agents, panes, ledger and hives. The
 groups, and every piece of work inside a group is a registered step. The step names, the group each belongs to and
 the place each group runs in the pass are listed in
 [Tick engine steps](../reference/tick-engine-steps.md#groups-and-their-sites); this section covers how the engine runs
-them, the two lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
+them, the three lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
 systems through, and the cadence the passes run at.
 
 In the observe group the execution reconcile step ends any orphan execution still holding a seat (see
@@ -4363,8 +4363,16 @@ decisions until recovery (see [Outage holds and recovery](#outage-holds-and-reco
 | Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
 
 A value a held or late writer never stored raises `Left` when a later step reads it from the pass box, and the tick
-raises the held error at the group's site, so a pass never continues on a value no step produced. Adding a step,
-the pass state and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+raises the held error at the group's site, so a pass never continues on a value no step produced. The pass state
+and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+
+Every step follows one pattern, and `python -m scripts.tick.new_step` writes a new step with its budget row, feature
+test, scenario index row and feature map entry in one command (see
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step)). The
+[tick pattern gate](../reference/tick-pattern-gate.md) refuses a pull request that adds a step outside the pattern,
+and the [tick step catalogue](../reference/tick-step-catalogue.md), rendered from the registry by
+`python -m scripts.tick.catalogue render`, lists every step with its group, lane, budget, interval, needs, effects and
+feature.
 
 ### Two lanes and fan out
 
@@ -4380,17 +4388,19 @@ agentihooks swarm <slug> set tick-mode=sequential   # the default
 | `sequential` | One step at a time in group order. |
 | `parallel` | Eagerly: each step starts the moment every step it needs has ended, on at most 8 workers. Records keep group order. |
 
-A parallel pass has two lanes, each with its own deadline from the start of the pass:
+A parallel pass has three lanes, each with its own deadline:
 
 | Lane | Deadline | Steps |
 |---|---|---|
-| critical | 110 seconds | Every step whose lane is not `slow`. A step declares lane `tick` unless it names another. |
-| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps of the `wrapper events` and `wrapper metrics` groups, which run after the `tick call` step of the `wrapper reboot` group has spawned. |
+| critical | 110 seconds from the start of the pass | Every step whose lane is neither `slow` nor `closing`. A step declares lane `tick` unless it names another. |
+| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps of the `wrapper events` and `wrapper metrics` groups, which run after the `tick call` step of the `wrapper reboot` group has spawned. Counted from the start of the pass. |
+| closing | 30 seconds from the start of the pass `finally` | Last tick, heartbeat and status publish, the `closing` group the pass runs from its `finally` on every ending. See [The closing lane](../reference/tick-engine-steps.md#the-closing-lane). |
 
 The slow lane holds the ledger event pass, done recheck, progress checks, waits end, merge pass, doc report,
 priorities sweep, health findings, findings pass, metrics record and bottleneck status. They call the ledger,
 GitHub, the findings checks and the metrics store. The command runner and quota notice run before spawn and stay
-critical, as do inbox wake, snapshot job, last tick, heartbeat and status publish.
+critical, as do inbox wake and snapshot job. Last tick, heartbeat and status publish run on the closing lane, so
+a pass whose critical lane ran out still writes its heartbeat and publishes its status.
 
 In a parallel pass a group runs its critical steps first and returns their records as soon as they end. Its slow
 lane steps, and every step that needs one of them, then start on a daemon thread of their own, which schedules
@@ -4399,7 +4409,7 @@ that needs a critical step recorded late or dropped is dropped too and recorded 
 of a group have all ended, the tick prints their actions, one line per failed step as
 `slow lane step <name> failed: <error>`, and `a slow lane step held <repr>` when the pass box holds a held
 exception, printed with its repr. When the pass ends it joins each handed off thread in turn for at most what is left of the slow lane
-deadline plus one second (`LATER_GRACE_S`), so every extra hung thread adds about one second. A need on a step of
+or closing lane deadline, whichever is later, plus one second (`LATER_GRACE_S`), so every extra hung thread adds about one second. A need on a step of
 another group is not waited for: a handed off step is ordered only against the steps of its own group. A
 sequential pass runs every step in group order, as before.
 
@@ -4418,14 +4428,21 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 
 ### Budgets and intervals
 
-Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
-120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
-Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
-every registered step on every pass. Timing changes, overlap limits and the
+Each step's budget is the p95 of its last 60 recorded walls with fifty percent headroom, rounded up to a whole
+second, and never under the step's declared floor; with fewer than 60 walls it is the floor. Its declared interval is
+60 seconds for a step that belongs in every pass, 120 seconds for a wide sweep and 600 seconds for a slow job. Floors
+and intervals live in the checked in timing table `scripts.tick.steps.budgets.FLOORS`; a step the table does not name
+is refused when the step is built.
+A step whose interval is above one minute rests on a pass that starts within its interval less one minute of the end of
+its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in ten. A
+resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with `rested`
+true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the step
+stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass
+state must be declared at 60 seconds, and the registry refuses one above that. The
+[tick step catalogue](../reference/tick-step-catalogue.md) shows each step's floor and interval. Timing changes, overlap limits and the
 forty second spawn bound are covered in
-[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals), and the rest rule in
+[Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
 
 ### Records
 
@@ -4452,7 +4469,8 @@ under `scripts/tick` outside the adapters that imports an adapted implementation
 [The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. Each pass
 builds the real adapters once. A step that reads `ctx.tools` gets write access only to the ports its declared effects
-name, and a write through another port fails it; call steps only record their effects until they move into step
+name, and a write through another port fails it; the [tick step catalogue](../reference/tick-step-catalogue.md)
+lists each step's effects. Call steps only record their effects until they move into step
 classes (see
 [Effects in a tick pass](../reference/tick-adapters.md#effects-in-a-tick-pass)). See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
@@ -4465,16 +4483,21 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks once per
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Each pass considers every step the
+[tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
+([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
 `AGENTIHOOKS_TICK_CADENCE` sets the slow lane cadence in whole minutes, one to five, one when unset; the cron stays
 every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
 cadence, and leaves critical lane steps at their own interval. Every guard must outlast one missed slow pass, so
 `scripts.tick.engine.cadence_s` refuses a cadence when twice it exceeds the 690 second delivery guard or the ten minute
-heartbeat limit, when the lease TTL is below two cron minutes, or when the stale watcher's pass and slug window no
+heartbeat limit, when the lease TTL is below two controller ticks, or when the stale watcher's pass and slug window no
 longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
-limit. No step is skipped on its interval yet, so the setting is validated but does not change a pass today.
+limit. At a cadence of three minutes a slow lane step declared at 60 seconds runs one pass in three and rests on the
+other two; at the default of one it runs every pass, and a slow step declared at 600 seconds keeps its own interval
+at every cadence the setting accepts.
 
 Check a cadence before setting it, from the repository root with the workspace Python:
 
@@ -5113,12 +5136,15 @@ green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/act
 
 ### Tick heartbeat and stale watcher
 
-Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
-input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
-freshest account observation, and the ledger revision from the pass that last saw it change. The ledger probe
-writes the ledger every pass, so a revision that holds still is a write that never lands; a ledger the tick cannot
-read ends the pass early, which shows as no completed pass. An input never observed is recorded as unknown and
-never judged.
+Every tick pass that runs to its end, or ends early because no step stored a value a later step needed, writes the
+swarm's heartbeat and last tick to Redis from the closing group of its `finally`: when the pass ended, and when
+each input it decided on was last observed. Only a full pass clears the early end streak; a pass that raised or
+returned before its end writes neither (see
+[The closing lane](../reference/tick-engine-steps.md#the-closing-lane)). The host room counts from its last
+capacity decision, the quota from the freshest account observation, and the ledger revision from the pass that last
+saw it change. The ledger probe writes the ledger every pass, so a revision that holds still is a write that never
+lands; a ledger the tick cannot read ends the pass early, which shows as no completed pass. An input never observed
+is recorded as unknown and never judged.
 
 The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
 its last pass. The tick never judges itself: `agentihooks swarm tick-watch`, a process apart from the tick that
