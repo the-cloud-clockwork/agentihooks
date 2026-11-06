@@ -36,11 +36,42 @@ _FROZEN_COMMANDS = (
 )
 BLOCK = (
     "BLOCKED: sustained blockers on swarm {slug} ({categories}) hold the master to the fix: reads, read-only shell, "
-    "edits inside a worktree, git, gh, agentihooks swarm {slug} merge|blockers, msg and ledger commands."
+    "edits inside a worktree, git, gh, ruff, wt.sh, the prepush and type gates, read-only kubectl and systemctl, "
+    "Monitor, Skill, ToolSearch, agentihooks run-in-terminal, agentihooks swarm {slug} merge|blockers|panic|status, "
+    "msg and ledger commands."
 )
 _READ_TOOLS = frozenset({"Read", "Glob", "Grep", "LS", "NotebookRead"})
+_FIX_TOOLS = frozenset({"Monitor", "ToolSearch", "Skill", "TaskStop", "TaskOutput"})
+_FIX_TOOL_PREFIXES = ("mcp__serena__", "mcp__inbox__", "mcp__agentihooks__", "mcp__agentibrain__")
 _WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit"})
-_READ_COMMANDS = frozenset({"cat", "head", "tail", "ls", "wc", "grep", "find", "pwd"})
+_READ_COMMANDS = frozenset(
+    {
+        "cat",
+        "head",
+        "tail",
+        "ls",
+        "wc",
+        "grep",
+        "find",
+        "pwd",
+        "cd",
+        "date",
+        "jq",
+        "sort",
+        "uniq",
+        "cut",
+        "diff",
+        "stat",
+        "ps",
+        "journalctl",
+        "which",
+    }
+)
+_FIX_COMMANDS = frozenset({"git", "gh", "ruff", "wt.sh"})
+_FIX_MODULES = frozenset({"scripts.ci_prepush", "scripts.type_gate"})
+_KUBECTL_READS = frozenset({"get", "logs", "describe", "top", "events"})
+_SYSTEMCTL_READS = frozenset({"status", "show", "is-active", "list-units"})
+_SWARM_FIX = frozenset({"merge", "blockers", "panic", "status"})
 _WORKTREES = Path.home() / "dev" / "worktrees"
 
 
@@ -85,14 +116,20 @@ def _in_worktree(value: str, cwd: str) -> bool:
 def _allowed_tokens(tokens: list[str], slug: str) -> bool:
     if not tokens:
         return False
-    name = Path(tokens[0]).name
-    if name in _READ_COMMANDS or name in ("git", "gh"):
+    name, rest = Path(tokens[0]).name, tokens[1:]
+    if name in _READ_COMMANDS or name in _FIX_COMMANDS:
         return True
-    if name != "agentihooks" or len(tokens) < 2:
+    if name.startswith("python"):
+        return len(rest) > 1 and rest[0] == "-m" and rest[1] in _FIX_MODULES
+    if name == "kubectl":
+        return bool(_KUBECTL_READS.intersection(rest))
+    if name == "systemctl":
+        return bool(_SYSTEMCTL_READS.intersection(rest))
+    if name != "agentihooks" or not rest:
         return False
-    if tokens[1] == "swarm":
-        return len(tokens) >= 4 and tokens[2] == slug and tokens[3] in ("merge", "blockers", "panic")
-    return tokens[1] in ("msg", "ledger")
+    if rest[0] == "swarm":
+        return len(rest) >= 3 and rest[1] == slug and rest[2] in _SWARM_FIX
+    return rest[0] in ("msg", "ledger", "run-in-terminal")
 
 
 def _allowed_bash(command: str, slug: str) -> bool:
@@ -103,7 +140,7 @@ def _allowed_bash(command: str, slug: str) -> bool:
 
 
 def _allowed(tool_name: str, tool_input: dict[str, Any], cwd: str, slug: str) -> bool:
-    if tool_name in _READ_TOOLS or tool_name.startswith("mcp__serena__"):
+    if tool_name in _READ_TOOLS or tool_name in _FIX_TOOLS or tool_name.startswith(_FIX_TOOL_PREFIXES):
         return True
     if tool_name == "Bash":
         return _allowed_bash(str(tool_input.get("command") or ""), slug)

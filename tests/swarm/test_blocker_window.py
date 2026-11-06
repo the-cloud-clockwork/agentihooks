@@ -183,6 +183,43 @@ def test_reads_and_the_allow_listed_commands_pass(store, master):
         assert block is None, f"{tool} {tool_input} was blocked"
 
 
+def test_the_tools_a_fix_needs_pass(store, master):
+    _sustain(store)
+    for tool, tool_input in (
+        ("Bash", {"command": "cd /w && python -m scripts.ci_prepush && git push"}),
+        ("Bash", {"command": "/v/bin/python -m scripts.type_gate --write"}),
+        ("Bash", {"command": "ruff check scripts"}),
+        ("Bash", {"command": "/s/wt.sh new"}),
+        ("Bash", {"command": "kubectl -n ns logs deploy/x"}),
+        ("Bash", {"command": "systemctl --user status x.service"}),
+        ("Bash", {"command": "agentihooks run-in-terminal 'make' --dir /w"}),
+        ("Bash", {"command": f"agentihooks swarm {SLUG} status"}),
+        ("Bash", {"command": f"agentihooks swarm {SLUG} panic on --fix url"}),
+        ("Monitor", {"command": "gh pr checks 1"}),
+        ("Skill", {"skill": "run-in-terminal"}),
+        ("ToolSearch", {"query": "select:Monitor"}),
+        ("mcp__inbox__reply", {}),
+        ("mcp__agentihooks__channel_list", {}),
+    ):
+        _, block = blocker_window.pretool(tool, tool_input, SID)
+        assert block is None, f"{tool} {tool_input} was blocked"
+
+
+def test_writes_and_other_modules_stay_denied(store, master):
+    _sustain(store)
+    for command in (
+        "python -m scripts.swarm.tick",
+        "python -m",
+        "python script.py",
+        "kubectl delete pod x",
+        "systemctl --user restart x.service",
+        f"agentihooks swarm {SLUG} start",
+        "agentihooks init-agent --dir /w",
+    ):
+        _, block = blocker_window.pretool("Bash", {"command": command}, SID)
+        assert block is not None, f"{command} passed"
+
+
 def test_edits_inside_the_worktree_pass(store, master):
     _sustain(store)
     target = blocker_window._WORKTREES / "agentihooks" / "mine" / "f.py"
