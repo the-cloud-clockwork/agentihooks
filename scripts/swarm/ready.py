@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import (
@@ -201,8 +202,9 @@ class Pass:
     journal: Callable = queue_record.Journal
 
 
-def merge_pass(run, rows):
-    actions, closed = [], set()
+def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    closed: set[str] = set()
     for task_id, row in rows.items():
         row = dict(row)
         if row.get("awaiting") != AWAITING:
@@ -222,7 +224,7 @@ def merge_pass(run, rows):
     return actions
 
 
-def _close_merged(run: Pass, rows: Mapping[str, dict], row: dict, closed: set[str]) -> list[str]:
+def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
     """Close a code or ci task whose recorded pull request merged outside the merge pass.
 
     The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
