@@ -27,6 +27,7 @@ master_retire: Any = import_module("scripts.swarm.master_retire")
 master_start: Any = import_module("scripts.swarm.master_start")
 readiness: Any = import_module("scripts.swarm.readiness")
 reaper: Any = import_module("scripts.swarm.reaper")
+retire_watch: Any = import_module("scripts.swarm.retire_watch")
 
 RAISED = "raised"
 PASS_SETUP = "pass setup"
@@ -256,7 +257,7 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
             actions.append(held)
             continue
-        gone = tick._reported_gone(store, agent, now_ms)
+        gone = retire_watch.reported_gone(store, agent, now_ms)
         if not gone and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
@@ -377,7 +378,7 @@ def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int)
     local = agent.runtime_backend == "local"
     exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
     kept = replace(agent, pane_id="") if exited else agent
-    gone = tick._reported_gone(store, agent, now_ms)
+    gone = retire_watch.reported_gone(store, agent, now_ms)
     if not gone and not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
         return False
     if exited:

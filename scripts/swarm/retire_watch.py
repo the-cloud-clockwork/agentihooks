@@ -2,13 +2,13 @@
 two minutes since the first failure."""
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm import elapsed
 from scripts.swarm.health.findings import Finding
 
 if TYPE_CHECKING:
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore
 
 LIMIT_MS = 2 * elapsed.PASS_MS
 
@@ -59,3 +59,23 @@ def findings(store: "RedisStore", slug: str) -> list[Finding]:
         for row in waiting
         if elapsed.reached(row["at"] - row["since"], LIMIT_MS)
     ]
+
+
+def reported_gone(store: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """True when a hive report observed after the launch shows the agent's process gone or no longer lists it."""
+    from scripts.hive import reports
+
+    raw: str | None = store.redis.get(reports.key(agent.hive)) if agent.hive else None
+    observed: int = json.loads(raw).get("observed_at", 0) if raw else -1
+    fresh = observed >= (agent.launched_at or agent.started_at)
+    hives = reports.Reports(store.redis)
+    return hives.gone(agent) or (fresh and hives.vanished(agent, now_ms))
+
+
+def retire_unless_gone(slug: str, store: "RedisStore", runtime: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """True when the hive report shows the agent gone, else whether the runtime retired it."""
+    from scripts.swarm import reaper
+
+    if reported_gone(store, agent, now_ms):
+        return True
+    return runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))

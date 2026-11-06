@@ -264,7 +264,9 @@ def test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first(
     calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [f"{slug}/{task}"])
     monkeypatch.setattr(failed_panes, "hold", lambda *args: calls.append(("hold", args)))
-    monkeypatch.setattr(tick, "_reported_gone", lambda store, agent, now_ms: store != "store" or now_ms != 5)
+    monkeypatch.setattr(
+        observe.retire_watch, "reported_gone", lambda store, agent, now_ms: store != "store" or now_ms != 5
+    )
     agent = AgentRecord("engineer@1-1", lane, "t1", pane_id="%3")
 
     def retire(kept: AgentRecord, homes: list[str]) -> bool:
@@ -282,7 +284,9 @@ def test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first(
 def test_retiring_a_launch_its_hive_reports_gone_makes_no_runtime_call(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [])
     monkeypatch.setattr(
-        tick, "_reported_gone", lambda store, agent, now_ms: (store, agent.name, now_ms) == ("store", MASTER, 5)
+        observe.retire_watch,
+        "reported_gone",
+        lambda store, agent, now_ms: (store, agent.name, now_ms) == ("store", MASTER, 5),
     )
     agent = AgentRecord(MASTER, MASTER, MASTER, pane_id="%3")
     runtime = SimpleNamespace(live_names=lambda: set(), retire=lambda kept, homes: pytest.fail("gone needs no retire"))
