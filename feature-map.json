@@ -281,7 +281,12 @@
         "tests/tick/steps/test_claim_order.py::test_moved_claim_code_reaches_tick_seams_through_the_tick_module",
         "tests/tick/steps/test_claim_order.py::test_agent_status_reads_state_prompt_and_idle_ticks",
         "tests/tick/steps/test_claim_order.py::test_the_store_projects_agent_status_from_the_claims_module",
-        "tests/tick/steps/test_claim_order.py::test_a_spawn_error_defaults_to_a_refusal_with_no_pane_or_harness"
+        "tests/tick/steps/test_claim_order.py::test_a_spawn_error_defaults_to_a_refusal_with_no_pane_or_harness",
+        "tests/tick/steps/test_claim_order.py::test_claimable_puts_tasks_overlapping_held_territory_after_the_clear_ones",
+        "tests/tick/steps/test_claim_order.py::test_claimable_builds_its_claim_view_with_the_dispatch_order",
+        "tests/tick/steps/test_claim_order.py::test_launch_order_ranks_then_demotes_failed_launches_then_resumes_first",
+        "tests/tick/steps/test_claim_order.py::test_demoted_names_failed_launches_without_a_handoff",
+        "tests/tick/steps/test_claim_order.py::test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks"
       ]
     },
     {
