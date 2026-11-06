@@ -145,13 +145,17 @@ def test_plan_reads_the_allowlist_and_grader_at_the_merge_base(repo, tmp_path):
 
 
 def test_plan_snapshots_the_base_sources_the_allowlist_names(repo, tmp_path):
-    allowlist = '{"scripts/old.py::planted": {"PLR0913": 8}, "scripts/long.py": {"file-lines": 9}, "gone.py::x": {}}\n'
+    allowlist = (
+        '{"scripts/old.py::planted": {"PLR0913": 8}, "scripts/long.py": {"file-lines": 9}, "gone.py::x": {},'
+        ' "deep/er/odd::old.py::planted": {"PLR0913": 8}}\n'
+    )
     _commit(
         repo,
         {
             "tests/SIZE_ALLOWLIST.json": allowlist,
             "scripts/old.py": "def planted(): ...\n",
             "scripts/long.py": "L = 1\n",
+            "deep/er/odd::old.py": "def planted(): ...\n",
         },
         "allowlisted",
     )
@@ -164,6 +168,8 @@ def test_plan_snapshots_the_base_sources_the_allowlist_names(repo, tmp_path):
 
     assert (grade / "scripts/old.py").read_text() == "def planted(): ...\n"
     assert (grade / "scripts/long.py").read_text() == "L = 1\n"
+    assert (grade / "deep/er/odd::old.py").read_text() == "def planted(): ...\n"
+    assert not (grade / "deep/er/odd").exists()
     assert not (grade / "gone.py").exists()
     assert not (grade / "scripts/beta.py").exists()
 
