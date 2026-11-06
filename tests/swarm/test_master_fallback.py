@@ -1,4 +1,7 @@
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -128,3 +131,114 @@ def test_the_outage_starts_survive_between_passes(tmp_path):
     assert master_fallback.load(state) == {}
     state.write_text('{"sw": 5}')
     assert master_fallback.load(state) == {"sw": 5}
+
+
+class Done(Exception):
+    pass
+
+
+def test_start_runs_master_up_new(monkeypatch):
+    calls = []
+
+    def run(command, check):
+        calls.append((command, check))
+        return SimpleNamespace(returncode=4)
+
+    monkeypatch.setattr(master_fallback.subprocess, "run", run)
+
+    assert master_fallback.start("sw") == 4
+    assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], False)]
+
+
+def test_install_writes_and_restarts_the_service_and_retires_the_timer(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(master_fallback.subprocess, "run", lambda command, check: calls.append((command, check)))
+    folder = tmp_path / ".config" / "systemd" / "user"
+    folder.mkdir(parents=True)
+    (folder / "agentihooks-master-fallback.timer").write_text("old")
+    env = {master_fallback.SWARMS: "sw"}
+
+    path = master_fallback.install(env)
+
+    repo = str(Path(master_fallback.__file__).resolve().parents[2])
+    assert path == folder / "agentihooks-master-fallback.service"
+    assert path.read_text() == master_fallback.unit_text(sys.executable, repo, env)
+    assert not (folder / "agentihooks-master-fallback.timer").exists()
+    assert calls == [
+        (["systemctl", "--user", "disable", "--now", "agentihooks-master-fallback.timer"], False),
+        (["systemctl", "--user", "daemon-reload"], True),
+        (["systemctl", "--user", "enable", "agentihooks-master-fallback.service"], True),
+        (["systemctl", "--user", "restart", "agentihooks-master-fallback.service"], True),
+    ]
+
+
+def test_install_makes_the_unit_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(master_fallback.subprocess, "run", lambda command, check: None)
+
+    assert master_fallback.install({}).exists()
+
+
+def test_main_installs_or_runs(monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(master_fallback, "install", lambda environ: seen.append("install") or "/unit")
+    monkeypatch.setattr(master_fallback, "run", lambda environ: seen.append("run"))
+
+    master_fallback.main(["install"])
+    master_fallback.main([])
+
+    assert seen == ["install", "run"]
+    assert capsys.readouterr().out == "/unit\n"
+
+
+def test_run_makes_a_pass_saves_its_state_and_waits_a_minute(tmp_path, monkeypatch, capsys):
+    from scripts.scheduler import process_timer
+    from scripts.swarm import runtime, store
+
+    waits = []
+
+    def wait(delay):
+        waits.append(delay)
+        raise Done
+
+    class Herdr:
+        def live_names(self):
+            return set()
+
+    state = tmp_path / "state" / "fallback.json"
+    state.parent.mkdir()
+    state.write_text('{"sw": 0}')
+    monkeypatch.setattr(process_timer, "wait", wait)
+    monkeypatch.setattr(runtime, "HerdrRuntime", Herdr)
+    monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
+    monkeypatch.setattr(master_fallback, "start", lambda slug: 0)
+    monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
+
+    with pytest.raises(Done):
+        master_fallback.run({master_fallback.SWARMS: "sw"}, state)
+
+    assert waits == [60]
+    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 0, "at": 1200000}\n'
+    assert master_fallback.load(state) == {"sw": 1200000}
+
+
+def test_run_logs_a_failed_pass_and_goes_on(tmp_path, monkeypatch, capsys):
+    from scripts.scheduler import process_timer
+    from scripts.swarm import runtime, store
+
+    def connect():
+        raise RuntimeError("redis down")
+
+    def wait(delay):
+        raise Done
+
+    monkeypatch.setattr(process_timer, "wait", wait)
+    monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
+    monkeypatch.setattr(store, "connect", connect)
+
+    with pytest.raises(Done):
+        master_fallback.run({}, tmp_path / "fallback.json")
+
+    assert capsys.readouterr().out == '{"error": "RuntimeError: redis down"}\n'
+    assert not (tmp_path / "fallback.json").exists()
