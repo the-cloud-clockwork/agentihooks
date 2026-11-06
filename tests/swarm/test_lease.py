@@ -313,6 +313,12 @@ def test_controller_loop_starts_at_once_after_a_pass_longer_than_a_tick(
     assert _loop_sleeps(store, monkeypatch, [100.0, 170.0, 170.0, 200.0]) == [30.0]
 
 
+def test_controller_loop_starts_at_once_after_a_pass_of_exactly_one_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 160.0, 160.0, 210.0]) == [10.0]
+
+
 def test_controller_loop_waits_one_tick_between_runs(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
