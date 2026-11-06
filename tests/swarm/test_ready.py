@@ -800,7 +800,7 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.run() == []
 
 
-def test_a_merged_recorded_pull_request_closes_its_task_and_unparks_its_dependent_in_one_pass(merging):
+def test_one_merge_pass_closes_a_merged_recorded_task_and_unparks_its_dependent_for_the_next_placement(merging):
     tasks = {
         "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t3"]},
         "t2": {"id": "t2", "state": "open", "claimed_by": "", "parked_on": ["t1"]},
