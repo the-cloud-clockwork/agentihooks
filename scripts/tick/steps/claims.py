@@ -42,11 +42,11 @@ class Placed:
     profile: str = ""
     model_source: str = ""
     model_confidence: float | None = None
-    profile_decision: dict[str, Any] = field(default_factory=dict)
+    profile_decision: dict = field(default_factory=dict)  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
     choice: str = ""
     launched_at: int = 0
-    overlays: list[Any] = field(default_factory=list)
-    launch_timings: dict[str, Any] = field(default_factory=dict)
+    overlays: list = field(default_factory=list)  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
+    launch_timings: dict = field(default_factory=dict)  # pyright: ignore[reportMissingTypeArgument, reportUnknownVariableType]
     route_kind: str = "subscription"
     transport: str = ""
     execution: AgentRecord | None = None

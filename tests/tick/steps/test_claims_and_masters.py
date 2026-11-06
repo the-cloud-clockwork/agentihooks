@@ -171,3 +171,57 @@ def test_close_space_closes_only_an_empty_swarm() -> None:
     assert closed == []
     assert claims._close_space("sw", "config", SimpleNamespace(agents=lambda slug: []), runtime) == []
     assert closed == ["config"]
+
+
+class _RefundStore:
+    """A store answering one handoff envelope and recording each refunded claim."""
+
+    def __init__(self, envelope: dict[str, str] | None) -> None:
+        self.envelope = envelope
+        self.asked: list[tuple[str, str]] = []
+        self.refunded: list[tuple[str, str, str, int]] = []
+
+    def handoff_envelope(self, slug: str, task_id: str) -> dict[str, str] | None:
+        self.asked.append((slug, task_id))
+        return self.envelope
+
+    def claim_generation(self, slug: str, task_id: str) -> int:
+        return 7 if (slug, task_id) == ("sw", "t1") else 0
+
+    def refund_held_claim(self, slug: str, task_id: str, name: str, generation: int) -> None:
+        self.refunded.append((slug, task_id, name, generation))
+
+
+@pytest.mark.feature("swarm-tick-claims-and-masters")
+@pytest.mark.parametrize(
+    ("envelope", "victim", "parked_on", "refunded"),
+    [
+        (None, False, [], False),
+        ({"reason": "quota"}, False, [], True),
+        ({"reason": "operator"}, True, [], True),
+        ({"reason": "operator"}, False, [], False),
+        ({"reason": "context"}, True, [], False),
+        ({}, False, ["t0"], True),
+    ],
+)
+def test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    envelope: dict[str, str] | None,
+    victim: bool,
+    parked_on: list[str],
+    refunded: bool,
+) -> None:
+    taken: list[tuple[object, str, str]] = []
+
+    def take_victim(store: object, slug: str, name: str) -> bool:
+        taken.append((store, slug, name))
+        return victim
+
+    monkeypatch.setattr(tick.preempt, "take_victim", take_victim)
+    store = _RefundStore(envelope)
+    rows = {"t0": {"state": "claimed"}, "t1": {"parked_on": parked_on}}
+    agent = AgentRecord("engineer@1-1", "eng", "t1")
+    claims._refund_parked("sw", store, rows, agent)
+    assert store.asked == [("sw", "t1")]
+    assert taken == [(store, "sw", "engineer@1-1")]
+    assert store.refunded == ([("sw", "t1", "engineer@1-1", 7)] if refunded else [])
