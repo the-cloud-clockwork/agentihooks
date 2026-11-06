@@ -15,6 +15,7 @@ from scripts.swarm import (
 )
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, pass_domains, tasks
 
 __all__ = [
@@ -178,11 +179,19 @@ CONFIG = pass_domains("config")
 
 STEPS = (
     CallStep("master wake", MASTERS, _held(_master_wake), CONFIGURED | LISTED, pass_domains("config", "doc")),
-    CallStep("retire idle master", MASTERS, _held(_retire_idle_master), frozenset({"spawn due"}), pass_domains("rows")),
-    tasks.WriteStep(
-        "master stall", MASTERS, _held(_master_stall), writes=frozenset({tasks.STALL}), needs=CONFIGURED, reads=CONFIG
+    CallStep(
+        "retire idle master", MASTERS, _held(_retire_idle_master), frozenset({"spawn"}), pass_domains("rows"), lane=SLOW
     ),
-    CallStep("prompt stall", MASTERS, _held(_prompt_stall), CONFIGURED, CONFIG),
+    tasks.WriteStep(
+        "master stall",
+        MASTERS,
+        _held(_master_stall),
+        writes=frozenset({tasks.STALL}),
+        needs=RESUMED,
+        reads=CONFIG,
+        lane=SLOW,
+    ),
+    CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
     CallStep("master down", SEATS, _held(tasks.placing(_master_down)), RESUMED, CONFIG),
     CallStep("tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc")),
     CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
@@ -194,8 +203,10 @@ STEPS = (
         RESUMED | {"sleeping"},
         pass_domains("config", "doc", "sleeping"),
     ),
-    CallStep("night watch", WATCH, _held(_night_watch), LISTED | {"sleeping"}, pass_domains("doc", "sleeping")),
-    CallStep("master alarm", WATCH, _held(_master_alarm)),
+    CallStep(
+        "night watch", WATCH, _held(_night_watch), LISTED | {"sleeping"}, pass_domains("doc", "sleeping"), lane=SLOW
+    ),
+    CallStep("master alarm", WATCH, _held(_master_alarm), lane=SLOW),
 )
 
 for _step in STEPS:
