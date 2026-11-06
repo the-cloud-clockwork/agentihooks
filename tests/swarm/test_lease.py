@@ -280,11 +280,44 @@ def test_release_conflict_does_not_remove_the_lease(store, monkeypatch):
     assert lease.current(store, "sw") == held
 
 
+def _loop_sleeps(store: RedisStore, monkeypatch: pytest.MonkeyPatch, clock: list[float]) -> list[float]:
+    from scripts import operator_env
+    from scripts.swarm import controller
+
+    sleeps: list[float] = []
+    readings = iter(clock)
+    monkeypatch.setattr(operator_env, "fill", lambda env: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda env: [])
+    monkeypatch.setattr(controller, "connect", lambda: store)
+    monkeypatch.setattr(controller, "monotonic", lambda: next(readings))
+    monkeypatch.setattr(controller, "run_once", lambda saved: {"sw": []})
+
+    def record(delay: float) -> None:
+        sleeps.append(delay)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(controller, "scheduled_wait", record)
+    with pytest.raises(KeyboardInterrupt):
+        controller.main(["run"])
+    return sleeps
+
+
+def test_controller_loop_starts_passes_one_tick_apart(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 145.0]) == [15.0]
+
+
+def test_controller_loop_starts_at_once_after_a_pass_longer_than_a_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 170.0, 170.0, 200.0]) == [30.0]
+
+
 def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys):
     from scripts import operator_env
     from scripts.swarm import controller
 
     calls, sleeps = [], []
+    monkeypatch.setattr(controller, "monotonic", lambda: 5.0)
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
     monkeypatch.setattr(operator_env, "classifier", lambda env: [])
     monkeypatch.setattr(controller, "connect", lambda: store)

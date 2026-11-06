@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
@@ -549,6 +550,13 @@ def _stopped(*_) -> None:
     sys.exit(143)
 
 
+def _cadence_wait(started: float) -> None:
+    """Wait out the rest of one tick from the pass start, so passes start one tick apart."""
+    left = lease.tick_ms() / 1000 - (monotonic() - started)
+    if left > 0:
+        scheduled_wait(left)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
     parser.add_argument("action", choices=("run", "live", "ready"))
@@ -577,6 +585,7 @@ def main(argv: list[str]) -> int:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
         while True:
+            started = monotonic()
             for slug, actions in tick_once(store, service).items():
                 for action in actions:
                     print(f"{slug}: {action}", flush=True)
@@ -585,7 +594,7 @@ def main(argv: list[str]) -> int:
             proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
             if args.once:
                 return 0
-            scheduled_wait(lease.tick_ms() / 1000)
+            _cadence_wait(started)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
