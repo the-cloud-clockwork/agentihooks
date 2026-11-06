@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.669 · 2026-11-06
+
+### 2026-11-06 · db0748fb4973 · #9850 · @nestorcolt
+
+**Read promotion runs by repository name without the workstation checkout**
+
+Promotion watch previously shelled out to `gh api` with `cwd` pinned to the swarm's workstation checkout, so controllers like Anton that have no such checkout failed every pass with "promotion watch skipped, reading dev push runs failed" and filed zero fixer tasks on red runs. The watch now resolves the repository from the swarm's stored origin (`release_wait.repository`) and reads via `GH_REPO` with no working directory, falling back to the checkout only when a swarm has no GitHub origin. This restores fixer-task filing for promotion checks on controllers without a local checkout.
+
 ## v2.17.667 · 2026-11-06
 
 ### 2026-11-06 · ec5f4382735b · #9876 · @agenticore-app
