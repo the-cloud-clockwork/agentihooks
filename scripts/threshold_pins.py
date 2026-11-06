@@ -43,6 +43,7 @@ GRADED_BY = (
     ("tests/TYPE_BASELINE.json", "scripts.type_gate"),
     ("tests/WHOLE_LEDGER_ALLOWLIST.json", "scripts.no_whole_ledger"),
     ("tests/TICK_PATTERN_ALLOWLIST.json", "scripts.tick_pattern"),
+    ("tests/SIZE_ALLOWLIST.json", "scripts.size_limits"),
 )
 MUTATORS = ("update", "setdefault", "pop", "popitem", "clear", "append", "extend", "insert", "remove", "add", "discard")
 REGISTERED = ("*ALLOWLIST*.json", "*floors*.json", "*FLOOR*.json", "*MANIFEST*.json", "*BASELINE*.json")
