@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.672 · 2026-11-06
+
+### 2026-11-06 · 1d79a7a89dc0 · #9902 · @nestorcolt
+
+**Keep the whole site barrier for a site whose hook reads pass values**
+
+This fixes the outage caused by #9839's barrier pruning, which only tracked reads and writes declared by steps, ignoring that site hooks also read values but aren't steps themselves. The relay site's `_judged` hook read `judged` without any step declaring that read, so its barrier got dropped and the hook ran before the intent check finished, breaking every rig-grade-swarm pass since the 07:42 UTC roll. The fix has `registry.site_edges` accept `hooked` sites that keep their full barrier regardless of step declarations, with `sites.run_sites` now passing the gate's hooked sites through.
+
+### 2026-11-06 · ba0c1400886f · #9887 · @agenticore-app
+
+**Stop the reap pass at its deadline and leave the rest for the next pass**
+
+This change makes the reap pass respect its step's context deadline instead of running unbounded: it now stops judging agents once the deadline expires and records an action noting how many agents were left for the next pass. The deadline is passed through from the reap step's run via the registered step call, along with the existing runtime and ledger. This prevents a single reap pass from overrunning its allotted time and ensures leftover work is clearly handed off rather than silently dropped or blocking subsequent passes.
+
 ## v2.17.671 · 2026-11-06
 
 ### 2026-11-06 · f3203edbbe0a · #9839 · @agenticore-app
