@@ -733,6 +733,27 @@ def test_failed_order_can_retry_with_a_new_generation(setup):
     assert setup.launcher.orders_for("task").generation == order.generation + 1
 
 
+def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_the_same_pass(setup) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    stale = replace(
+        order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task)),
+        epoch=setup.held.epoch - 1,
+    )
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(stale.__dict__))
+    setup.launcher.orders.finish("remote", "0-0", stale, Ack("failed", {}, "stale_epoch"))
+    assert setup.launcher.spawn(request).status == Status.PENDING
+    reissued = setup.launcher.orders_for("task")
+    assert reissued.epoch == setup.held.epoch
+    assert reissued.generation == stale.generation + 1
+    assert reissued.execution_id != stale.execution_id
+    assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
+
+
 def test_an_ended_launch_releases_its_admission_reservation(setup):
     from scripts.hive import admission
     from scripts.hive.orders import Ack
