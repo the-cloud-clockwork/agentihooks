@@ -290,7 +290,9 @@
         "tests/tick/steps/test_territory.py::test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks",
         "tests/tick/steps/test_territory.py::test_a_swarm_with_work_or_workers_or_not_running_does_not_drain",
         "tests/tick/steps/test_territory.py::test_sharing_names_each_running_task_with_a_shared_area_and_its_claimant",
-        "tests/tick/steps/test_territory.py::test_stack_base_stacks_each_unfinished_dependency_with_the_given_or_default_origin"
+        "tests/tick/steps/test_territory.py::test_stack_base_stacks_each_unfinished_dependency_with_the_given_or_default_origin",
+        "tests/tick/steps/test_territory.py::test_end_awaiting_seats_drops_only_agents_awaiting_a_decision",
+        "tests/tick/steps/test_territory.py::test_bin_closed_closes_the_swarm_inbox_and_bins_a_closed_empty_ledger"
       ]
     },
     {

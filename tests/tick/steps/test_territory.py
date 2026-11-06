@@ -187,6 +187,10 @@ def _agent(name: str, lane: str, state: str = "working") -> AgentRecord:
     return AgentRecord(name, lane, "t1", state=state)
 
 
+def _settled(config: Any, store: Any, ledger: Any, rows: dict[str, dict[str, Any]], doc: dict[str, Any]) -> list[str]:
+    return territory._settle("sw", config, store, ledger, rows, doc)
+
+
 def _settle_seams(monkeypatch: pytest.MonkeyPatch, claimable: bool = False) -> list[tuple[Any, ...]]:
     calls: list[tuple[Any, ...]] = []
 
@@ -209,7 +213,7 @@ def test_a_stopping_swarm_ends_awaiting_seats_and_stops_once_no_agent_is_left(mo
     calls = _settle_seams(monkeypatch)
     store = _SettleStore([_agent("engineer@1-1", "eng", "awaiting-decision")])
     config = SimpleNamespace(state="stopping")
-    assert territory._settle("sw", config, store, _Ledger(), {}, {}) == ["stopped"]
+    assert _settled(config, store, _Ledger(), {}, {}) == ["stopped"]
     assert calls == [("end", ["engineer@1-1"])]
     assert store.updates == [("sw", {"state": "stopped"})]
 
@@ -219,10 +223,10 @@ def test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent(monkeypatch
     calls = _settle_seams(monkeypatch)
     config = SimpleNamespace(state="stopping")
     master = _SettleStore([_agent("master@1-1", "master")])
-    assert territory._settle("sw", config, master, _Ledger(), {}, {}) == []
+    assert _settled(config, master, _Ledger(), {}, {}) == []
     assert calls == []
     finished = _SettleStore([_agent("master@1-1", "master", "finished"), _agent("engineer@1-1", "eng")])
-    assert territory._settle("sw", config, finished, _Ledger(), {}, {}) == []
+    assert _settled(config, finished, _Ledger(), {}, {}) == []
     assert calls == [("end", ["master@1-1", "engineer@1-1"])]
     assert master.updates == [] and finished.updates == []
 
@@ -236,11 +240,11 @@ def test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks(
     monkeypatch: pytest.MonkeyPatch, blocked: int, tail: str
 ) -> None:
     calls = _settle_seams(monkeypatch)
-    rows = {f"b{i}": {"state": "blocked"} for i in range(blocked)}
+    rows: dict[str, dict[str, Any]] = {f"b{i}": {"state": "blocked"} for i in range(blocked)}
     rows["x"] = {"state": "blocked", "out_of_scope": True}
     rows["d"] = {"state": "done"}
     store, ledger = _SettleStore([_agent("master@1-1", "master")]), _Ledger()
-    assert territory._settle("sw", SimpleNamespace(state="running"), store, ledger, rows, {}) == ["drained"]
+    assert _settled(SimpleNamespace(state="running"), store, ledger, rows, {}) == ["drained"]
     assert calls == [("claimable", "eng"), ("claimable", "ci"), ("claimable", "plan")]
     assert store.updates == [("sw", {"state": "drained"})]
     assert ledger.notices == [("sw", f"drained fix {len(rows)}{tail}")]
@@ -250,12 +254,12 @@ def test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks(
 def test_a_swarm_with_work_or_workers_or_not_running_does_not_drain(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _settle_seams(monkeypatch, claimable=True)
     master = [_agent("master@1-1", "master")]
-    assert territory._settle("sw", SimpleNamespace(state="running"), _SettleStore(master), _Ledger(), {}, {}) == []
+    assert _settled(SimpleNamespace(state="running"), _SettleStore(master), _Ledger(), {}, {}) == []
     assert calls == [("claimable", "eng"), ("claimable", "ci")]
     worker = _SettleStore([*master, _agent("engineer@1-1", "eng")])
-    assert territory._settle("sw", SimpleNamespace(state="running"), worker, _Ledger(), {}, {}) == []
+    assert _settled(SimpleNamespace(state="running"), worker, _Ledger(), {}, {}) == []
     paused = _SettleStore(master)
-    assert territory._settle("sw", SimpleNamespace(state="paused"), paused, _Ledger(), {}, {}) == []
+    assert _settled(SimpleNamespace(state="paused"), paused, _Ledger(), {}, {}) == []
     assert len(calls) == 2
     assert worker.updates == [] and paused.updates == []
 
@@ -306,3 +310,53 @@ def test_stack_base_stacks_each_unfinished_dependency_with_the_given_or_default_
     assert territory._stack_base({"depends_on": ["b"]}, rows, "repo") == [{"task": "b"}]
     assert stacked == [("b", "bb", "repo", stack.origin_key)]
     assert territory._stack_base({}, rows, "repo") == []
+
+
+@pytest.mark.feature("swarm-tick-territory")
+def test_end_awaiting_seats_drops_only_agents_awaiting_a_decision(monkeypatch: pytest.MonkeyPatch) -> None:
+    dropped: list[tuple[Any, ...]] = []
+
+    def drop(slug: str, store: object, ledger: object, rows: object, agent: AgentRecord) -> None:
+        dropped.append((slug, store, ledger, rows, agent.name))
+
+    monkeypatch.setattr(tick, "_drop", drop)
+    store: Any = "store"
+    rows: dict[str, dict[str, Any]] = {"t1": {}}
+    agents = [_agent("engineer@1-1", "eng", "awaiting-decision"), _agent("engineer@1-2", "eng")]
+    territory._end_awaiting_seats("sw", store, "ledger", rows, agents)
+    assert dropped == [("sw", "store", "ledger", rows, "engineer@1-1")]
+
+
+class _BinLedger:
+    """A ledger answering whether a closed ledger moved to the bin and recording each ask."""
+
+    def __init__(self, moved: bool) -> None:
+        self.moved = moved
+        self.asked: list[tuple[str, int]] = []
+
+    def bin_closed(self, slug: str, closed_at: int) -> bool:
+        self.asked.append((slug, closed_at))
+        return self.moved
+
+
+@pytest.mark.feature("swarm-tick-territory")
+@pytest.mark.parametrize(
+    ("closed_at", "agents", "moved", "actions", "closed"),
+    [
+        (5, [], True, ["the closed ledger moved to the bin"], True),
+        (5, [], False, [], True),
+        (5, ["engineer@1-1"], True, [], False),
+        (0, [], True, [], False),
+    ],
+)
+def test_bin_closed_closes_the_swarm_inbox_and_bins_a_closed_empty_ledger(
+    monkeypatch: pytest.MonkeyPatch, closed_at: int, agents: list[str], moved: bool, actions: list[str], closed: bool
+) -> None:
+    swarms: list[tuple[object, str]] = []
+    monkeypatch.setattr(tick, "InboxStore", lambda redis: ("inbox", redis))
+    monkeypatch.setattr(tick.exits, "close_swarm", lambda inbox, slug: swarms.append((inbox, slug)))
+    store = SimpleNamespace(redis="redis", agents=lambda slug: agents if slug == "sw" else ["other"])
+    ledger = _BinLedger(moved)
+    assert territory._bin_closed("sw", store, ledger, {"closed_at": closed_at}) == actions
+    assert swarms == ([(("inbox", "redis"), "sw")] if closed else [])
+    assert ledger.asked == ([("sw", closed_at)] if closed else [])
