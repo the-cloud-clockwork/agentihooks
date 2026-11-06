@@ -102,13 +102,24 @@ def test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches(store)
     runtime, ledger = StartupRuntime(), tasks()
     tick("sw", store, ledger, runtime, 1)
     master = masters(store)[0]
-    idle.beat(store.redis, "sw", master.name, "working", 2)
+    idle.beat(store.redis, "sw", master.name, "working", master.launched_at or master.started_at)
     tick("sw", store, ledger, runtime, DEADLINE + 1)
     assert masters(store)[0].state == "working"
     assert master.name not in runtime.killed
     assert store.redis.get(store.key("sw", "master-start")) is None
     tick("sw", store, ledger, runtime, 3 * DEADLINE)
     assert len(runtime.masters) == 1
+
+
+def test_a_hook_beat_from_before_the_launch_does_not_keep_the_master(store):  # noqa: F811
+    from scripts.swarm import idle
+
+    runtime, ledger = StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    master = masters(store)[0]
+    idle.beat(store.redis, "sw", master.name, "working", (master.launched_at or master.started_at) - 1)
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    assert master.name in runtime.killed
 
 
 def test_dead_launch_retries_without_waiting_for_worker_grace(store):  # noqa: F811

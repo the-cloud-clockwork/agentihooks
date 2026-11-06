@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
@@ -83,8 +83,9 @@ def hooked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
     """The master's own hooks beat since its launch, which proves a live session where no hive report reaches."""
     from scripts.swarm import idle
 
-    beat = idle.heartbeat(store.redis, slug, agent.name)
-    return bool(beat) and int(beat.get("at", 0)) >= (agent.launched_at or agent.started_at)
+    read = idle.heartbeat  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    beat = cast("dict[str, int] | None", read(store.redis, slug, agent.name))
+    return beat is not None and beat["at"] >= (agent.launched_at or agent.started_at)
 
 
 def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
