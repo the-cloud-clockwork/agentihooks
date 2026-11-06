@@ -451,7 +451,7 @@ class _Pass:
     memo: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
-def _pass_reclaim(run: Any) -> Callable[..., Any]:
+def _pass_reclaim(run: Any) -> partial[Any]:
     if "heads" not in run.memo:
         run.memo["heads"] = timing.call(tick.remote_heads, run.config.repo)
     return partial(tick.reclaim, heads=run.memo["heads"])
