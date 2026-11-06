@@ -316,6 +316,15 @@ def test_a_handoff_target_needs_the_minimum_room(world):
     assert world.quota.admit(ACCOUNT, HARNESS, SPARE).action == quota.WAIT
 
 
+def test_the_primary_login_is_refused_admission_and_capped_at_its_reserve(world, monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 80.0}, account=ACCOUNT)
+    assert world.quota.cap(ACCOUNT, HARNESS) == 0
+    assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
+
+
 def test_a_provider_outage_waits_a_bounded_time_without_new_starts(world):
     world.publish(EXHAUSTED)
     world.publish({**EXHAUSTED, "provider_status": "error", "observed_ms": 260000, "five_used": None})

@@ -49,7 +49,7 @@ def front_doors(store: "RedisStore") -> list[FrontDoor]:
 
 def ordered(now: float) -> list[tuple[str, float]]:
     """The stored logins in the order a front door launch tries them, each with its room left."""
-    ranks = login._preferred()
+    ranks = login.preferred()
     found = [(number, account, master_logins.left(account, now)) for number, account in login.logins().items()]
     found.sort(key=lambda row: (ranks.get(row[1], len(ranks)), -row[2], row[0]))
     return [(account, left) for _, account, left in found if account]
