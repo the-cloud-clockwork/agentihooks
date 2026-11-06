@@ -112,17 +112,6 @@ def test_describe_joins_multiple_categories_with_a_comma(store):
     assert blocker_window._describe(found) == "alpha for 0 minutes, beta for 0 minutes"
 
 
-def test_in_worktree_resolves_relative_to_dot_when_cwd_is_empty(monkeypatch):
-    monkeypatch.setattr(blocker_window, "_WORKTREES", Path.cwd())
-    assert blocker_window._in_worktree(".", "") is True
-
-
-def test_in_worktree_falls_back_to_dot_after_a_chdir(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(blocker_window, "_WORKTREES", tmp_path)
-    assert blocker_window._in_worktree(".", "") is True
-
-
 def test_slug_defaults_to_empty_string(monkeypatch):
     monkeypatch.setattr(master_coding, "seat", lambda session_id: {})
     assert blocker_window._slug(SID) == ""
@@ -147,106 +136,22 @@ def test_the_window_records_now_ms_divided_by_1000(store, master, monkeypatch):
     assert recorded == 2000.0
 
 
-def test_a_notebook_edit_without_a_file_path_uses_the_notebook_path(store, master):
-    _sustain(store)
-    target = blocker_window._WORKTREES / "agentihooks" / "mine" / "nb.ipynb"
-    _, block = blocker_window.pretool("NotebookEdit", {"notebook_path": str(target)}, SID)
-    assert block is None
-
-
-def test_an_unlisted_tool_is_denied(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("WebFetch", {}, SID)
-    assert block is not None
-
-
-def test_allowed_bash_receives_the_literal_command_default(store, master, monkeypatch):
-    captured = {}
-    monkeypatch.setattr(blocker_window, "_allowed_bash", lambda command, slug: captured.setdefault("command", command))
-    _sustain(store)
-    blocker_window.pretool("Bash", {}, SID)
-    assert captured["command"] == ""
-
-
-def test_reads_and_the_allow_listed_commands_pass(store, master):
+def test_the_master_keeps_every_tool_while_blockers_sustain(store, master):
     _sustain(store)
     for tool, tool_input in (
-        ("Read", {"file_path": "x"}),
-        ("Bash", {"command": "git status"}),
-        ("Bash", {"command": "gh pr view 1"}),
-        ("Bash", {"command": f"agentihooks swarm {SLUG} blockers"}),
-        ("Bash", {"command": f"agentihooks swarm {SLUG} merge queue url"}),
-        ("Bash", {"command": "agentihooks msg inbox"}),
-        ("Bash", {"command": f"agentihooks ledger --slug {SLUG} comment t1 hi"}),
+        ("Bash", {"command": "echo hi"}),
+        ("Bash", {"command": "cd /w && python -m scripts.ci_prepush && git push"}),
+        ("Bash", {"command": "kubectl -n ns logs deploy/x"}),
+        ("Bash", {"command": "systemctl --user status x.service"}),
+        ("Bash", {"command": "agentihooks run-in-terminal 'make' --dir /w"}),
+        ("Write", {"file_path": "/home/me/scratchpad/notes.md"}),
+        ("Edit", {}),
+        ("Monitor", {"command": "gh pr checks 1"}),
+        ("WebFetch", {}),
     ):
         _, block = blocker_window.pretool(tool, tool_input, SID)
         assert block is None, f"{tool} {tool_input} was blocked"
-
-
-def test_edits_inside_the_worktree_pass(store, master):
-    _sustain(store)
-    target = blocker_window._WORKTREES / "agentihooks" / "mine" / "f.py"
-    _, block = blocker_window.pretool("Edit", {"file_path": str(target)}, SID)
-    assert block is None
-
-
-def test_a_tool_call_outside_the_fix_is_denied(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("Bash", {"command": "echo hi"}, SID)
-    assert block is not None and "cat" in block
-    _, block = blocker_window.pretool("Write", {"file_path": "/etc/hosts"}, SID)
-    assert block is not None
-
-
-def test_the_block_names_the_swarm(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("Bash", {"command": "echo hi"}, SID)
-    assert block == blocker_window.BLOCK.format(slug=SLUG, categories="cat for 60 minutes")
-
-
-def test_a_different_swarm_merge_command_is_denied(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("Bash", {"command": "agentihooks swarm other merge queue url"}, SID)
-    assert block is not None
-
-
-def test_bash_agentihooks_alone_is_denied(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("Bash", {"command": "agentihooks"}, SID)
-    assert block is not None
-
-
-def test_allowed_tokens_accepts_an_exact_two_token_command():
-    assert blocker_window._allowed_tokens(["agentihooks", "msg"], SLUG) is True
-
-
-def test_allowed_tokens_denies_an_empty_token_list():
-    assert blocker_window._allowed_tokens([], SLUG) is False
-
-
-def test_serena_tool_calls_pass(store, master):
-    _sustain(store)
-    _, block = blocker_window.pretool("mcp__serena__find_symbol", {}, SID)
-    assert block is None
-
-
-def test_write_tool_without_a_path_is_denied_before_checking_the_worktree(store, master, monkeypatch):
-    called = []
-    monkeypatch.setattr(blocker_window, "_in_worktree", lambda value, cwd: called.append(value) or True)
-    _sustain(store)
-    _, block = blocker_window.pretool("Edit", {}, SID)
-    assert block is not None
-    assert called == []
-
-
-def test_pretool_default_cwd_argument(store, master, monkeypatch):
-    captured = {}
-    monkeypatch.setattr(
-        blocker_window, "_allowed", lambda tool_name, tool_input, cwd, slug: captured.setdefault("cwd", cwd)
-    )
-    _sustain(store)
-    blocker_window.pretool("Edit", {"file_path": "f.py"}, SID)
-    assert captured["cwd"] == ""
+    assert master_coding.is_open(SID)
 
 
 def test_a_store_failure_fails_open(master, monkeypatch):
@@ -259,23 +164,13 @@ def test_a_store_failure_fails_open(master, monkeypatch):
     assert blocker_window.pretool("Bash", {"command": "echo hi"}, SID) == (None, None)
 
 
-def test_checked_denies_and_notes_the_notice_kwargs(store, master, monkeypatch):
+def test_checked_never_denies_the_master_and_notes_the_notice_kwargs(store, master, monkeypatch):
     captured = {}
     monkeypatch.setattr("hooks.common.inject_context", lambda *args, **kwargs: captured.update(kwargs))
     _sustain(store)
     block = blocker_window.checked({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": SID})
-    assert block is not None and "cat" in block
-    assert captured == {"also_log": False, "skip_compression": True, "kind": "alert"}
-
-
-def test_checked_resolves_a_relative_edit_against_the_given_cwd(store, master, monkeypatch):
-    monkeypatch.setattr("hooks.common.inject_context", lambda *args, **kwargs: None)
-    _sustain(store)
-    workdir = blocker_window._WORKTREES / "agentihooks" / "mine"
-    block = blocker_window.checked(
-        {"tool_name": "Edit", "tool_input": {"file_path": "f.py"}, "session_id": SID, "cwd": str(workdir)}
-    )
     assert block is None
+    assert captured == {"also_log": False, "skip_compression": True, "kind": "alert"}
 
 
 def test_open_for_blockers_mkdir_is_idempotent(master):
@@ -337,11 +232,3 @@ def test_checked_injects_the_notice_text(store, master, monkeypatch):
     blocker_window.checked({"tool_name": "Read", "tool_input": {}, "session_id": SID})
     assert len(captured) == 1
     assert captured[0][0].startswith(f"BLOCKER QUEUE on swarm {SLUG}: cat for 60 minutes")
-
-
-def test_in_worktree_resolves_a_parent_against_the_process_cwd(tmp_path, monkeypatch):
-    worktrees = tmp_path / "wt"
-    worktrees.mkdir()
-    monkeypatch.chdir(worktrees)
-    monkeypatch.setattr(blocker_window, "_WORKTREES", worktrees)
-    assert blocker_window._in_worktree("..", "") is False

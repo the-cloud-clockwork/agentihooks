@@ -7,7 +7,7 @@ further master seats its count holds.
 """
 
 import json
-import os
+import os  # noqa: F401
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -30,7 +30,7 @@ from scripts.inbox import exits, wake  # noqa: F401
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
-    affinity,
+    affinity,  # noqa: F401
     apply_wait,  # noqa: F401
     bottleneck_remedy,  # noqa: F401
     claim_hold,  # noqa: F401
@@ -49,15 +49,15 @@ from scripts.swarm import (
     grouping,  # noqa: F401
     held_elsewhere,  # noqa: F401
     input_wait,  # noqa: F401
-    launch_check,
+    launch_check,  # noqa: F401
     ledger_events,  # noqa: F401
     ledger_probe,  # noqa: F401
     lifetime,  # noqa: F401
     live_binding,  # noqa: F401
     lost_runner,
-    master_move,
+    master_move,  # noqa: F401
     master_questions,  # noqa: F401
-    master_retire,
+    master_retire,  # noqa: F401
     master_start,
     outage,  # noqa: F401
     pane_evidence,  # noqa: F401
@@ -71,7 +71,7 @@ from scripts.swarm import (
     retire_watch,  # noqa: F401
     revoked_seats,  # noqa: F401
     run_window,
-    seat_spawn,
+    seat_spawn,  # noqa: F401
     session_model,  # noqa: F401
     stack,
     stale_nudge,  # noqa: F401
@@ -80,7 +80,7 @@ from scripts.swarm import (
 )
 from scripts.swarm import idle as idle_state  # noqa: F401
 from scripts.swarm.ledger_client import LedgerRefused, pass_state  # noqa: F401
-from scripts.swarm.naming import lane_of, parse, seat_label
+from scripts.swarm.naming import lane_of, parse, seat_label  # noqa: F401
 from scripts.swarm.profile_choice import ProfileUnresolved  # noqa: F401
 from scripts.swarm.ready import awaiting as awaiting_merge  # noqa: F401
 from scripts.swarm.store import (  # noqa: F401
@@ -94,7 +94,7 @@ from scripts.swarm.store import (  # noqa: F401
 )
 from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy  # noqa: F401
-from scripts.swarm_v2 import masters as master_seats
+from scripts.swarm_v2 import masters as master_seats  # noqa: F401
 from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -122,6 +122,14 @@ from scripts.tick.steps.agents import (  # noqa: F401
     _watch_agent,
     _watch_idle,
     _watch_remote,
+)
+from scripts.tick.steps.masters import (  # noqa: F401
+    _master,
+    _recover_master,
+    _retire_master,
+    _under_tick_lock,
+    place_master,
+    respawn_master,
 )
 
 from scripts.tick import sites as tick_sites  # isort: skip
@@ -881,37 +889,6 @@ def placed_record(record, placed):
     )
 
 
-def _recover_master(slug, config, store, runtime, now_ms):
-    recorded = [a for a in store.agents(slug) if a.lane == MASTER]
-    agents = [a for a in recorded if master_seats.is_lead(slug, a)]
-    live = runtime.live_names()
-    if any(a.state != "finished" and a.name in live for a in agents):
-        return []
-    finished = {a.name for a in recorded}
-    seat = seat_address(slug, MASTER)
-    occupant = store.seats.occupant(seat).occupant
-    candidates = []
-    for name in sorted(live - finished):
-        parsed = parse(name)
-        if name == occupant or (parsed and parsed.kind == MASTER and parsed.code == config.code):
-            candidates.append(name)
-        elif name.startswith(f"{slug}-master-"):
-            candidates.append(name)
-    if not candidates:
-        return []
-    name = occupant if occupant in candidates else candidates[0]
-    record = store.execution_occupants(slug).get(seat)
-    if not record or record.name != name:
-        record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
-    store.put_agent(slug, placed_record(record, runtime.recover(name)))
-    for agent in agents:
-        if agent.name not in live and agent.state != "finished":
-            store.drop_agent(slug, agent.name)
-    if occupant != name:
-        store.seats.occupy(seat, name, now_ms)
-    return [f"adopted live master {name}"]
-
-
 def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
     from scripts.swarm.health import night_watch
 
@@ -922,135 +899,6 @@ def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
             return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
-
-
-def _master(slug, config, store, runtime, now_ms, past_host=False):
-    store.redis.hdel(MASTER_WAITING, slug)
-    agents = store.agents(slug)
-    masters = [a for a in agents if a.lane == MASTER]
-    if config.state == "stopping":
-        if any(a.lane != MASTER for a in agents):
-            return []
-        return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
-    masters = [m for m in masters if master_seats.is_lead(slug, m)]
-    pending = master_start.read(store, slug)
-    if any(m.state != "finished" for m in masters) or master_start.blocked(pending, now_ms):
-        return []
-    if any(m.name in runtime.live_names() for m in masters):
-        return ["the old master is still running, waiting for it to end before starting the next"]
-    if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {}):
-        return [refused]
-    if refused := seat_spawn.no_slot(config, runtime, MASTER):
-        store.redis.hset(MASTER_WAITING, slug, now_ms)
-        return [refused]
-    if not past_host and (held := seat_spawn.host_hold(slug, store, now_ms, MASTER)):
-        return [held]
-
-    launched = {}
-
-    def prepare(record):
-        transfer = transfers.attach(store, slug, record)
-        task = (
-            {**pending["task"], "transfer": transfer}
-            if pending
-            else primed(
-                store,
-                slug,
-                record.seat,
-                {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
-            )
-        )
-        from scripts.swarm import master_launch
-
-        task = master_launch._filled(master_move.pinned(store, slug, task, transfer), config)
-        master_start.begin(store, slug, record.name, task, now_ms)
-        affinity.handed_off(store, slug)
-        launched.update(task)
-        return task
-
-    try:
-        record, placed = seat_spawn.place(slug, config, store, runtime, MASTER, now_ms, prepare)
-    except seat_spawn.SeatFailed as spawn_failure:
-        exc, record = spawn_failure.error, spawn_failure.record
-        store.drop_agent(slug, record.name)
-        if seat_spawn.room_refused(exc):
-            transfers.detach(store, slug, record)
-            master_start.withdraw(store, slug, pending)
-            return [f"the master waits: {exc}"]
-        transfers.failed(store, slug, record)
-        affinity.failed(store, slug, str(exc))
-        return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
-    affinity.placed(store, slug, placed.harness)
-    master_move.placed(store, slug)
-    record = placed_record(record, placed)
-    reported = runtime.reported(record)
-    store.put_agent(slug, replace(record, state="working" if reported else "starting"))
-    launch_check.begin(store, slug, record, now_ms)
-    if reported:
-        store.redis.delete(store.key(slug, "master-start"))
-        store.clear_handoff(slug, MASTER)
-    store.redis.hdel(store.key(slug, "launch-assignments"), MASTER)
-    return [f"spawned master {record.name}", *master_move.account_moved(slug, launched, record)]
-
-
-def _retire_master(slug, store, runtime, master, now_ms):
-    live = master.name in runtime.live_names()
-    if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
-        return held
-    if not runtime.retire(master, homes=reaper.scratch_homes(slug, master.task)):
-        return f"could not retire {master.name}, retrying next tick"
-    store.drop_agent(slug, master.name)
-    return f"retired {master.name}"
-
-
-def respawn_master(slug, store, runtime, now_ms):
-    from scripts.swarm import controller
-
-    def respawn(config, held):
-        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
-        live, actions = fenced.live_names(), []
-        for agent in store.agents(slug):
-            gone = agent.state not in ("finished", "starting") and agent.name not in live
-            if agent.lane == MASTER and gone and master_seats.is_lead(slug, agent):
-                store.drop_agent(slug, agent.name)
-                actions.append(f"dropped the gone master {agent.name}")
-        return actions + (
-            _recover_master(slug, config, store, fenced, now_ms) or _master(slug, config, store, fenced, now_ms)
-        )
-
-    return _under_tick_lock(slug, store, respawn, "respawn master")
-
-
-def place_master(slug, store, runtime, now_ms):
-    from scripts.swarm import controller
-
-    def place(config, held):
-        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
-        return _master(slug, config, store, fenced, now_ms)
-
-    return _under_tick_lock(slug, store, place, "place master")
-
-
-def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any:
-    from scripts.swarm import controller, lease
-    from scripts.swarm.commands import hive_id
-
-    if store.config(slug).state in ("stopping", "stopped"):
-        return []
-    held = lease.acquire(store, slug, hive_id())
-    if held is None:
-        return []
-    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
-    if token is None:
-        return []
-    try:
-        config = store.ensure_code(slug)
-        if config.state in ("stopping", "stopped"):
-            return []
-        with lease.held_pass(store, slug, held):
-            return act(config, held)
-    finally:
-        controller.release_tick_lock(store, slug, token, caller)
 
 
 def _settle(

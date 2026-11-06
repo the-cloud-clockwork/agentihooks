@@ -91,10 +91,14 @@ def test_the_agent_steps_sit_in_their_groups_in_legacy_order() -> None:
 def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _fakes(monkeypatch)
     state = _state()
-    found = actions(engine.run_group("agents", _ctx(state)))
+    ctx = _ctx(state)
+    found = actions(engine.run_group("agents", ctx))
     assert found == ["reaped", "recovered", "stray", "pane"]
+    handed = seen[0][1][-1]
+    assert isinstance(handed, Deadline)
+    assert handed.expires_at <= ctx.deadline.expires_at
     assert seen == [
-        ("reap", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7)),
+        ("reap", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7, handed)),
         ("recover", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7)),
         ("strays", ("sw", state["config"], "store", state["runtime"])),
         ("panes", ("sw", "store", state["runtime"], 7)),
