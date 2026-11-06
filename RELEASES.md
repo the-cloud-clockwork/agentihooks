@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.677 · 2026-11-06
+
+### 2026-11-06 · b71beb085c1e · #9913 · @nestorcolt
+
+**Fence the tick pass runtime at its first site**
+
+This change moves where the controller fences its runtime from the "wrapper health" hook to the "wrapper probes" hook, since probes fires first on every tick while health only runs once a slow-lane step is ready. Previously, "spawn due" could start before fencing happened, so spawned tasks used the bare runtime without a controller_epoch, causing every hosted Kubernetes launch to fail with a KeyError and keep the swarm stuck in panic mode. Fencing earlier ensures all spawns carry the proper epoch from the start.
+
+### 2026-11-06 · d2447b90e0a3 · #9912 · @nestorcolt
+
+**Place the login front door master on a hive when the controller runs in a pod**
+
+When the controller runs as a hosted pod, it previously launched the Claude.ai login front door in its own isolated pod, which meant init-agent couldn't find a workstation checkout, leaving masters 0610 and 0611 permanently stuck and never starting up. This change detects the AGENTIHOOKS_POD_NAME environment variable and routes every master seat, including the login front door, to hive placement instead, ensuring it runs alongside a proper checkout and actually comes up reliably in pod deployments.
+
 ## v2.17.676 · 2026-11-06
 
 ### 2026-11-06 · 6dd5a8cdd900 · #9909 · @nestorcolt
