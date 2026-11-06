@@ -533,6 +533,7 @@ def test_a_missing_checkout_still_fails_the_merge_read_step(
         raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
 
     monkeypatch.setattr(subprocess, "run", missing)
+    monkeypatch.delenv("AGENTIHOOKS_POD_NAME", raising=False)
     current = {"pass_id": "p", "failed_steps": []}
     swarm, run = timing.SWARM.set("proof"), timing.PASS.set(current)
     try:
