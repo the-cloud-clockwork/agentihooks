@@ -1,6 +1,9 @@
 import json
+import os
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -91,7 +94,7 @@ def store():
 
 
 def refresh(store, ledger, run, now=NOW):
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     return promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), now, run)
 
 
@@ -596,7 +599,7 @@ def test_a_former_owner_closed_alert_for_the_run_holds_it_too(store, monkeypatch
 @pytest.mark.parametrize("slug", ["proof-323133-cxc9-1", "proof-ed3ec8-t12-3"])
 def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
     calls, ledger = [], Ledger()
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     actions = promotion_watch.refresh(slug, config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
     assert (actions, calls, ledger.added, ledger.raised) == ([], [], [], [])
     assert store.redis.keys("*") == []
@@ -604,7 +607,7 @@ def test_a_proof_swarm_never_reads_promotion_runs_or_files_fixers(store, slug):
 
 def test_a_slug_that_only_resembles_a_proof_swarm_still_files_fixers(store):
     calls, ledger = [], Ledger()
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     promotion_watch.refresh("proof-323133-cxc9", config, store, ledger, ledger.doc(), NOW, gh([RED], JOBS, calls))
     assert calls and ledger.added
 
@@ -752,7 +755,7 @@ def test_the_tick_hands_the_watch_its_ledger_state_and_clock(store, monkeypatch)
 
 
 def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
-    config = SimpleNamespace(repo="/repo")
+    config = SimpleNamespace(repo="/repo", repo_origin="")
     red = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW, gh([RED], JOBS))
     assert red[-2] == "raised the promotion alert for dev push run 900"
     green = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW * 2, gh([GREEN]))
@@ -1669,3 +1672,25 @@ def test_multiple_matching_coverage_consumers_are_named_as_consequences(store):
         "; consequences: sonar: Wait for the coverage merge; Missing coverage for shard 1; sonar (3.12): Wait for the coverage merge; Missing coverage for shard 1."
         in ledger.added[0][1]["description"]
     )
+
+
+def test_a_controller_without_the_workstation_checkout_still_files_fixer_tasks(
+    store: RedisStore, tmp_path: Path
+) -> None:
+    missing = str(tmp_path / "workstation" / "agentihooks")
+    config: Any = SimpleNamespace(repo=missing, repo_origin="github.com/o/r")
+    recorded = gh([RED], JOBS)
+    kwargs_seen: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        kwargs_seen.append(kwargs)
+        if "cwd" in kwargs and not os.path.isdir(kwargs["cwd"]):
+            raise FileNotFoundError(2, "No such file or directory", kwargs["cwd"])
+        return recorded(argv, **kwargs)
+
+    ledger: Any = Ledger()
+    actions = promotion_watch.refresh(SLUG, config, store, ledger, ledger.doc(), NOW, run)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-900-1"]
+    assert "filed promo-900-0 for the failed dev job helm-kind" in actions
+    assert kwargs_seen and all("cwd" not in kwargs for kwargs in kwargs_seen)
+    assert {kwargs["env"]["GH_REPO"] for kwargs in kwargs_seen} == {"o/r"}
