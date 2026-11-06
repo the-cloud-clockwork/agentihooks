@@ -33,8 +33,8 @@ __all__ = [
 
 PARALLEL = "parallel"
 SEQUENTIAL = "sequential"
-CRITICAL_S = 110.0
-SLOW_S = 400.0
+CRITICAL_S = 60.0
+SLOW_S = 59.0
 WORKERS = 8
 SLOW_LANE = "slow"
 CLOSING_LANE = "closing"

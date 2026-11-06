@@ -519,10 +519,7 @@ DRAINED_RESUME_NEEDS = frozenset(
         "recover master",
         "spawn due",
         "master start watch",
-        "strays",
         "master wake",
-        "master stall",
-        "prompt stall",
     }
 )
 RESUMED = frozenset({"drained resume"})
@@ -546,14 +543,14 @@ STEPS = (
     CallStep(
         "prerequisite reopen", REOPENS, held(_prerequisite_reopen), frozenset({"dev red reopen"}), pass_domains("rows")
     ),
-    CallStep("promotion refresh", REOPENS, held(_promotion_refresh), RESUMED, CONFIG_DOC),
-    CallStep("release alert", REOPENS, held(_release_alert), RESUMED, CONFIG_DOC),
+    CallStep("promotion refresh", REOPENS, held(_promotion_refresh), RESUMED, CONFIG_DOC, lane=SLOW),
+    CallStep("release alert", REOPENS, held(_release_alert), RESUMED, CONFIG_DOC, lane=SLOW),
     WriteStep(
         "fleet red notice",
         REOPENS,
         held(_fleet_red_notice),
         writes=frozenset({FLEET_RED, FLEET_RED_LIFTED, fleet_red.LISTINGS}),
-        needs=frozenset({"spawn due"}),
+        needs=frozenset({"spawn"}),
         reads=pass_domains("rows"),
         lane=SLOW,
     ),
