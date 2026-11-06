@@ -8,7 +8,7 @@ nav_order: 65
 
 `tests/swarm/test_tick_load.py` runs one full tick pass under simulated load on
 a virtual clock and holds its duration to a pass budget. The budget lives in
-`tests/swarm/tick_scenarios/load_budget.json`, starts at 384 seconds and may
+`tests/swarm/tick_scenarios/load_budget.json`, started at 384 seconds, stands at 153 seconds and may
 only go down: a pull request that raises it fails CI. Together with the golden
 characterisation in `tests/swarm/tick_scenarios/`, it guards every later change
 to the tick: a change that makes one tick step 300 seconds slower turns the
@@ -103,7 +103,7 @@ that any 300 second slowdown crosses it.
 
 ```json
 {
-  "pass_budget_s": 384
+  "pass_budget_s": 153
 }
 ```
 
