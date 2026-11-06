@@ -319,9 +319,9 @@ def test_the_wrapper_steps_after_fencing_read_the_fenced_runtime(
         ),
     )
     cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-    assert probed == [rt]
+    assert len(probed) == 1
     assert len(fenced) == 5
-    assert all(isinstance(runtime, controller.FencedRuntime) for runtime in fenced)
+    assert all(isinstance(runtime, controller.FencedRuntime) for runtime in probed + fenced)
 
 
 def test_the_wrapper_runs_the_tick_with_the_fenced_pass_state_and_keeps_its_actions(
