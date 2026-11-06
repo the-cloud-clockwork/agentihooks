@@ -9,7 +9,7 @@ further master seats its count holds.
 import json
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -19,7 +19,7 @@ from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle  # noqa: F401
-from scripts.doctor import priming
+from scripts.doctor import priming  # noqa: F401
 from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
@@ -28,7 +28,7 @@ from scripts.handoff.envelope import reclaim, remote_heads
 from scripts.hive import registry, reports  # noqa: F401
 from scripts.inbox import exits, wake  # noqa: F401
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, InboxStore  # noqa: F401
 from scripts.swarm import (
     affinity,
     apply_wait,
@@ -97,8 +97,8 @@ from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
-from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain
+from scripts.tick.deadline import Deadline  # noqa: F401
+from scripts.tick.step import Context  # noqa: F401
 from scripts.tick.steps import observe as observe_steps
 from scripts.tick.steps import tasks as task_steps
 from scripts.tick.steps.agents import (  # noqa: F401
@@ -132,13 +132,22 @@ from scripts.tick.steps.common import (
     _drop,
     _ended,
     _follow,  # noqa: F401
-    _operator_line,
+    _operator_line,  # noqa: F401
     _rebind,  # noqa: F401
     _reopen,  # noqa: F401
     _still_held,  # noqa: F401
     skip_dropped,  # noqa: F401
     skip_refused,  # noqa: F401
 )
+from scripts.tick.steps.masters import (  # noqa: F401
+    _codex_hook_order,
+    _master_down,
+    _night_watch,
+    _PassView,
+    _print_actions,
+    _woken,
+)
+from scripts.tick.steps.masters import _run_group as run_group  # noqa: F401
 from scripts.tick.steps.observe import (  # noqa: F401
     _acknowledging,
     _collect_acks,
@@ -283,43 +292,6 @@ class Runtime(Protocol):
     def close_pane(self, pane_id: str) -> None: ...
 
 
-class _PassView:
-    """A view holding the pass state a tick group site hands its steps."""
-
-    def __init__(self, state: dict[str, object]) -> None:
-        """Keep the pass state of the group site."""
-        self._state = state
-
-    def read(self, domain: Domain, key: str) -> object | None:
-        """Return the pass state under ``key``, nothing for any other domain."""
-        return self._state.get(key) if domain == steps.PASS else None
-
-
-def run_group(name: str, **state: Any) -> list[str]:
-    """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions.
-
-    Actions of slow lane steps that end after the group returns are printed when they end.
-    """
-    ctx = Context(_PassView(state), Deadline.after(GROUP_BUDGET_S))
-    box: Mapping[str, object] = state.get("box", {})
-    printing = partial(_print_actions, box)
-    records = engine.run_group(name, ctx, apply=task_steps.appliers(state), finished=printing)
-    steps.note_left(box, records)
-    return steps.actions(records)
-
-
-def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, ...]) -> None:
-    """Print each action the handed off steps returned, each step that failed with its error, and the exception a
-    held step stored in the pass ``box``, one per line."""
-    for action in steps.actions(records):
-        print(action)
-    for record in records:
-        if record.error:
-            print(f"slow lane step {record.name} failed: {record.error}")
-    if "raised" in box:
-        print(f"a slow lane step held {box['raised']!r}")
-
-
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     box: dict[str, Any] = steps.PassBox()
@@ -329,15 +301,6 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
     observe_steps.raise_held(box)
     return [] if sites.left else steps.actions(records)
-
-
-def _codex_hook_order():
-    from scripts.targets.codex_target import codex_home, restore_hook_order
-
-    home = codex_home()
-    moved = restore_hook_order(home)
-    path = (home / "hooks.json").resolve()
-    return [f"restored the approved Codex hook order in {path}: {', '.join(moved)}"] if moved else []
 
 
 def _close_space(slug, config, store, runtime):
@@ -352,36 +315,6 @@ def _bin_closed(slug, store, ledger, doc):
         if ledger.bin_closed(slug, doc["closed_at"]):
             return ["the closed ledger moved to the bin"]
     return []
-
-
-def _woken(slug, config, store, ledger):
-    inbox = InboxStore(store.redis)
-    waiting = inbox.pending_items(seat_address(slug, MASTER))
-    if waiting and config.template == priming.TEMPLATE and ledger.closed(slug):
-        priming.cancel_master_items(inbox, slug)
-        return False
-    return any(_operator_line(item) for item in waiting)
-
-
-def _master_down(slug, config, store, ledger, runtime, now_ms):
-    """Operator lines waiting at a master seat nobody holds: tell the chat once per line, and return any line a dead
-    master took but never closed to pending so the next master receives it."""
-    live = runtime.live_names()
-    masters = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
-    if config.state == "stopping" or any(m.name in live or now_ms - m.started_at <= STARTUP_GRACE_MS for m in masters):
-        return []
-    inbox, seat = InboxStore(store.redis), seat_address(slug, MASTER)
-    waiting = [item for item in inbox.inbox(seat) if item.state not in CLOSED and _operator_line(item)]
-    for item in waiting:
-        if item.state != "pending":
-            inbox.redirect(item.id, "swarm", seat, REDELIVERED)
-    told = [item for item in waiting if DOWN_TOLD not in (e.get("event") for e in inbox.history(item.id))]
-    for item in told:
-        inbox.note(item.id, DOWN_TOLD, "swarm", MASTER_DOWN, now_ms)
-    if not told:
-        return []
-    ledger.notify(slug, MASTER_DOWN)
-    return [f"master down, told the operator about {len(told)} waiting lines"]
 
 
 def agent_status(agent):
@@ -1058,18 +991,6 @@ def _recover_master(slug, config, store, runtime, now_ms):
     if occupant != name:
         store.seats.occupy(seat, name, now_ms)
     return [f"adopted live master {name}"]
-
-
-def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
-    from scripts.swarm.health import night_watch
-
-    def respawn():
-        if master_start.read(store, slug).get("alerted"):
-            store.redis.delete(store.key(slug, "master-start"))
-        with PLACING:
-            return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
-
-    return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
 
 def _master(slug, config, store, runtime, now_ms, past_host=False):

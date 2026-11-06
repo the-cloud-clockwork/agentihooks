@@ -270,6 +270,27 @@
       ]
     },
     {
+      "id": "swarm-tick-masters-moved",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13d",
+      "behaviour": "Master down, the woken check, night watch, the pass view, the group runner, its action printer and the Codex hook order live in the masters step module; the swarm tick module re-exports each one, run_group as the masters module's _run_group, and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.masters, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_masters_moved.py::test_tick_reexports_the_moved_name",
+        "tests/tick/steps/test_masters_moved.py::test_the_tick_module_holds_no_moved_definition",
+        "tests/tick/steps/test_masters_moved.py::test_the_step_wrappers_call_the_moved_operations_through_the_tick_module",
+        "tests/tick/steps/test_masters_moved.py::test_woken_reads_pending_operator_lines_at_the_master_seat",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_stays_quiet_while_a_master_lives_starts_or_the_swarm_stops",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_tells_each_waiting_operator_line_once_and_returns_taken_lines",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_says_nothing_when_every_line_was_told",
+        "tests/tick/steps/test_masters_moved.py::test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_the_host",
+        "tests/tick/steps/test_masters_moved.py::test_the_pass_view_reads_only_the_pass_domain",
+        "tests/tick/steps/test_masters_moved.py::test_run_group_runs_the_registered_steps_and_notes_the_left_box",
+        "tests/tick/steps/test_masters_moved.py::test_print_actions_prints_actions_failures_and_the_held_exception",
+        "tests/tick/steps/test_masters_moved.py::test_codex_hook_order_reports_the_hooks_it_restored"
+      ]
+    },
+    {
       "id": "swarm-tick-declared-edges",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
