@@ -799,6 +799,42 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert merging.run() == []
 
 
+def test_a_merged_recorded_pull_request_closes_its_task_and_unparks_its_dependent_in_one_pass(merging):
+    import copy
+
+    from scripts.swarm import claim_hold
+
+    rows = {
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t3"]},
+        "t2": {"id": "t2", "state": "open", "claimed_by": "", "parked_on": ["t1"]},
+        "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": URL},
+    }
+    ledger = Ledger(copy.deepcopy(rows))
+    ready.forget(merging.store, "sw", "t1")
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert claim_hold.waits(rows["t2"], rows) == "it waits on task t1"
+    assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
+    assert ledger.rows["t1"]["state"] == "done" and ledger.rows["t3"]["state"] == "done"
+    assert rows["t1"]["state"] == "done" and rows["t3"]["state"] == "done"
+    assert claim_hold.waits(rows["t2"], rows) == ""
+    assert merging.store.handoff("sw", "t1") == ""
+    assert merging.shell.calls == []
+    assert ready.merge_pass(run, rows) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"kind": "tune"}, {"contract": {"after": "yes"}}, {"pr_url": ""}, {"state": "claimed"}, {"awaiting": "fix"}],
+)
+def test_a_pr_task_outside_the_merge_pass_stays_put_unless_a_merged_code_pull_request_closes_it(merging, change):
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, **change}}
+    before = dict(rows["t1"])
+    ready.forget(merging.store, "sw", "t1")
+    run = ready.Pass(merging.store, "sw", Ledger(rows), {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert rows["t1"] == before
+
+
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
 def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
     merging.rows["t1"]["kind"] = kind
