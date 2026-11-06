@@ -90,34 +90,30 @@ def load(path: Path) -> dict[str, Entry]:
 
 def save(path: Path, entries: dict[str, Entry]) -> None:
     """Write the registry atomically through a temporary file in the same folder."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(entries, indent=1, sort_keys=True))
+    temporary.write_text(json.dumps(entries))
     os.replace(temporary, path)
 
 
 @contextlib.contextmanager
 def locked(path: Path) -> Generator[None, None, None]:
-    """Hold an exclusive lock on the registry while it is read, changed and written."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Hold an exclusive lock on the registry while it is read, changed and written; closing releases it."""
+    path.parent.mkdir(exist_ok=True)
     with path.with_name(f".{path.name}.lock").open("a") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+        yield
 
 
 def live(entries: dict[str, Entry], proc: Path = PROC) -> dict[str, Entry]:
     """The entries whose process is still running."""
-    return {name: entry for name, entry in entries.items() if alive(int(entry.get("pid") or 0), proc)}
+    return {name: entry for name, entry in entries.items() if alive(entry.get("pid", 0), proc)}
 
 
 def entry_of(environ: Mapping[str, str], pid: int, now: float) -> Entry | None:
     """The registry entry for this session, None unless it is a swarm master inside a herdr pane."""
     from scripts.swarm.naming import lane_of
 
-    name, slug, pane = (environ.get(k, "") for k in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "HERDR_PANE_ID"))
+    name, slug, pane = (environ.get(k) for k in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "HERDR_PANE_ID"))
     if not (name and slug and pane) or lane_of(name) != "master":
         return None
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
@@ -154,7 +150,7 @@ def nudge(herdr: Messenger, entry: Entry) -> str:
     """Type the nudge into an idle master pane; the outcome is sent, failed or the reason it was skipped."""
     from scripts.swarm.delivery import READY
 
-    pane = Pane(entry["seat"], entry.get("harness") or "claude", entry["pane"])
+    pane = Pane(entry["seat"], entry["harness"], entry["pane"])
     try:
         status = herdr.agent_status(pane)
         if status not in READY:
@@ -179,10 +175,10 @@ def run_round(
     sender = (herdr or messenger()) if entries else None
     results = [{**entry, "at": at, "outcome": nudge(sender, entry)} for entry in entries.values() if sender]
     target = log_path(environ)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    target.parent.mkdir(exist_ok=True)
     with target.open("a") as handle:
         for result in results or [{"at": at, "outcome": "no-masters"}]:
-            handle.write(json.dumps(result, sort_keys=True) + "\n")
+            handle.write(json.dumps(result) + "\n")
     return results
 
 
@@ -222,7 +218,7 @@ def check(
     """Whether the hourly job exists, and the registered pane of this master or of every live master."""
     job = next((line for line in table(runner) if MARKER in line), "")
     entries = live(load(registry_path(environ)), proc)
-    name = environ.get("AGENTIHOOKS_AGENT_NAME", "")
+    name = environ.get("AGENTIHOOKS_AGENT_NAME")
     mine = {name: entries[name]} if name in entries else entries
     return {"installed": bool(job), "job": job, "masters": list(mine.values())}
 
