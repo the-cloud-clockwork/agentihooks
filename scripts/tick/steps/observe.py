@@ -256,7 +256,8 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
             actions.append(held)
             continue
-        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        gone = tick.reports.Reports(store.redis).gone(agent)
+        if not gone and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
