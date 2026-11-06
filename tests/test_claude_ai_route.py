@@ -118,6 +118,42 @@ def test_a_spent_login_falls_to_the_next_in_order(rendered, monkeypatch, checked
     assert capsys.readouterr().out == "[agenti] account=thecloudclockworkatgmail_com route=claude-ai slot=2\n"
 
 
+def test_the_primary_login_above_its_reserve_is_still_offered_first(rendered, monkeypatch, checked, executed):
+    _slot(1, PREFERRED)
+    _slot(2, SECOND)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    monkeypatch.setattr(
+        master_logins, "week_left", _left({"nestor_coltatgmail_com": 21.0, "thecloudclockworkatgmail_com": 90.0})
+    )
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["nestor_coltatgmail_com"]
+
+
+def test_the_primary_login_at_its_reserve_is_skipped_for_the_next_in_order(rendered, monkeypatch, checked, executed):
+    _slot(1, PREFERRED)
+    _slot(2, SECOND)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    monkeypatch.setattr(
+        master_logins, "week_left", _left({"nestor_coltatgmail_com": 20.0, "thecloudclockworkatgmail_com": 90.0})
+    )
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["thecloudclockworkatgmail_com"]
+
+
+def test_a_reserved_primary_login_refusal_names_its_account_and_week(
+    rendered: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda *_: 100.0)
+    monkeypatch.setattr(master_logins, "week_left", lambda *_: 20.0)
+    with pytest.raises(login.LoginRefused) as refused:
+        claude_ai.prepare(_environ(rendered), rendered.parent)
+    assert (
+        str(refused.value)
+        == "no usable claude ai login: nestor_coltatgmail_com is the primary login reserve at 20% of the week left"
+    )
+
+
 def test_a_login_that_fails_its_native_check_falls_to_the_next(rendered, monkeypatch, executed):
     _slot(1, PREFERRED)
     _slot(2, SECOND)

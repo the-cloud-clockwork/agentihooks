@@ -4,6 +4,7 @@ missing, failed or aged reading is unknown, never full capacity. Infrastructure 
 
 import json
 import math
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
@@ -277,6 +278,11 @@ class QuotaObservations:
             return 0
         if not reading.routing_left:
             return 0
+        if harness == "claude":
+            from scripts.routing import reservation
+
+            if reservation.primary_reserved(account, reading.week_left, os.environ):
+                return 0
         return (
             session_bands.week_cap(reading.week_left)
             if harness == "codex"
@@ -285,7 +291,14 @@ class QuotaObservations:
 
     def _room(self, account: str, harness: str) -> bool:
         reading = self.reading(account, harness)
-        return reading.state == OBSERVED and reading.routing_left >= MIN_ROUTING_LEFT
+        if reading.state != OBSERVED or reading.routing_left < MIN_ROUTING_LEFT:
+            return False
+        if harness == "claude":
+            from scripts.routing import reservation
+
+            if reservation.primary_reserved(account, reading.week_left, os.environ):
+                return False
+        return True
 
     def admit(self, account: str, harness: str, handoff: str | None = None) -> Admission:
         if self._room(account, harness):
