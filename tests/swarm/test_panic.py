@@ -339,6 +339,22 @@ def test_every_active_status_is_cancelled():
         assert panic.cancel_runs([], ["o/a"], runs) == ["o/a run 1 on x"]
 
 
+def test_cancel_runs_spares_release_tag_runs() -> None:
+    runs = Runs(
+        {
+            "o/a": [
+                _row(1, "v2.17.652", event="release"),
+                _row(2, "v2.17.653", event="push"),
+                _row(3, "v2-feature"),
+                _row(4, "release", event="push"),
+                _row(5, "main", event="release"),
+            ],
+        },
+    )
+    assert panic.cancel_runs([], ["o/a"], runs) == ["o/a run 3 on v2-feature", "o/a run 4 on release"]
+    assert runs.cancelled() == ["o/a:3", "o/a:4"]
+
+
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     assert panic.REPOS == (
         "the-cloud-clockwork/agentihooks",
