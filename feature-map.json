@@ -1645,6 +1645,77 @@
       "tests": [
         "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
       ]
+    },
+    {
+      "id": "master-fallback-tick",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session.",
+      "seam": "python -m scripts.swarm.master_fallback run, pass and install",
+      "tests": [
+        "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
+        "tests/swarm/test_master_fallback.py::test_a_live_master_resets_the_wait",
+        "tests/swarm/test_master_fallback.py::test_a_stopped_swarm_is_left_alone",
+        "tests/swarm/test_master_fallback.py::test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it",
+        "tests/swarm/test_master_fallback.py::test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute",
+        "tests/swarm/test_master_fallback.py::test_run_logs_a_timed_out_pass_and_goes_on",
+        "tests/swarm/test_master_fallback.py::test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes",
+        "tests/swarm/test_master_fallback.py::test_install_writes_and_restarts_the_service_and_retires_the_timer",
+        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session"
+      ]
+    },
+    {
+      "id": "panic-master-keeps-every-tool",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "During panic and sustained blockers the master keeps every tool and its hotfix window, while every other session stays frozen for pushes, reruns, dispatches and deploys.",
+      "seam": "The PreToolUse panic freeze, blocker window and master shell guard",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_opens_the_master_hotfix_window",
+        "tests/swarm/test_panic.py::test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions",
+        "tests/swarm/test_blocker_window.py::test_the_master_keeps_every_tool_while_blockers_sustain",
+        "tests/swarm/test_blocker_window.py::test_checked_never_denies_the_master_and_notes_the_notice_kwargs",
+        "tests/test_master_coding.py::test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker"
+      ]
+    },
+    {
+      "id": "tick-pass-fence-first-site",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A tick pass fences its runtime at its first site, so every later step, slow lane wrapper steps included, reads the fenced runtime and the health site never fences again.",
+      "seam": "The tick pass site hooks through the tick group wrapper",
+      "tests": [
+        "tests/swarm/test_pass_fence.py::test_the_first_pass_site_fences_the_runtime_every_later_step_reads",
+        "tests/swarm/test_pass_fence.py::test_the_health_site_holds_the_ledger_view_without_fencing_again",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_steps_after_fencing_read_the_fenced_runtime"
+      ]
+    },
+    {
+      "id": "pod-controller-master-on-hive",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A controller running in a pod places every master seat, the login front door included, on a hive.",
+      "seam": "The controller master placement through the hive launch",
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_controller_in_a_pod_places_the_login_front_door_on_a_hive"
+      ]
+    },
+    {
+      "id": "starting-master-hooks-beat-kept",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A starting master whose own hooks beat after its launch is kept even when no runtime report reaches the tick; a beat from before the launch does not keep it.",
+      "seam": "The swarm tick master start deadline through master_start.hooked",
+      "tests": [
+        "tests/swarm/test_master_start.py::test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches",
+        "tests/swarm/test_master_start.py::test_a_hook_beat_from_before_the_launch_does_not_keep_the_master",
+        "tests/swarm/test_master_start.py::test_a_master_with_no_launch_time_counts_its_beat_from_its_start"
+      ]
     }
   ],
   "unmapped_rules": [
