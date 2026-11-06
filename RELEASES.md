@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.676 · 2026-11-06
+
+### 2026-11-06 · 6dd5a8cdd900 · #9909 · @nestorcolt
+
+**Replace a finished seat execution in the distributed launch**
+
+This fix updates DistributedLaunch so it passes the previous execution id when replacing a seat whose occupant finished without a launch ending, matching the behavior already used by the hive launch. Previously it only did this for occupants in launch-endings, leaving an empty previous execution id for finished occupants and causing admission to fail with "replacement does not match the current execution." That was stalling controller spawns across t2396, tc-h16, wrn5, wrn6, and wrn7, so aligning the two code paths resolves the spawn stalls while keeping the live-occupant conflict check intact.
+
 ## v2.17.675 · 2026-11-06
 
 ### 2026-11-06 · f62b9a6fa8f1 · #9898 · @agenticore-app
