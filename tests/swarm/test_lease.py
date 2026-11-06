@@ -307,6 +307,12 @@ def test_controller_loop_starts_passes_one_tick_apart(store: RedisStore, monkeyp
     assert _loop_sleeps(store, monkeypatch, [100.0, 145.0]) == [15.0]
 
 
+def test_controller_loop_waits_the_last_half_second_of_a_tick(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _loop_sleeps(store, monkeypatch, [100.0, 159.5]) == [0.5]
+
+
 def test_controller_loop_starts_at_once_after_a_pass_longer_than_a_tick(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
