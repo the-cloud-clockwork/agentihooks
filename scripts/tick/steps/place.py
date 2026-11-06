@@ -21,7 +21,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
-from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
+from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
 Who: Any = import_module("scripts.gates").Who
@@ -464,91 +464,6 @@ class Launch:
     primed: dict[str, Any]
 
 
-def _prepare(
-    run: Any, lane: str, task: dict[str, Any], taken: set[str], failing: str, peers: set[str]
-) -> tuple[Any, list[str]]:
-    slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
-    rows, doc, now_ms = run.rows, run.doc, run.now_ms
-    task = rows[task["id"]] = dict(task)
-    expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
-    blocked = (
-        timing.timed(tick._lives_spent, slug, store, ledger, rows, task)
-        or timing.timed(tick._room_wait, runtime, lane, task)
-        or timing.timed(tick._held_back, slug, ledger, rows, runtime, task, now_ms)
-        or timing.timed(tick._owner_hold, slug, store, runtime, task)
-    )
-    if blocked:
-        return None, [blocked]
-    name = store.next_name(slug, lane, now_ms)
-    if not timing.timed(store.claim, slug, task["id"], name, tick.LEASE_MS):
-        tick._release_admission(slug, runtime, task)
-        return None, []
-    handoff = store.handoff(slug, task["id"])
-    lives = store.earlier_lives(slug, task["id"])
-    if handoff:
-        task["handoff"] = handoff
-        task["handoff_envelope"] = timing.timed(
-            continuation.resolve,
-            config.repo,
-            task,
-            rows,
-            lives,
-            store.handoff_envelope(slug, task["id"]) or {},
-            tick._pass_reclaim(run),
-        )
-    elif lives or task.get("branch"):
-        task["reclaim"] = timing.timed(
-            continuation.resolve, config.repo, task, rows, lives, {}, tick._pass_reclaim(run)
-        )
-        store.put_reclaim(slug, name, task["reclaim"])
-    task["stack_base"] = tick._stack_base(task, rows, config.repo)
-    task["overlaps"] = timing.timed(
-        tick._sharing, task, rows, timing.timed(tick._reported, slug, store, runtime, peers)
-    )
-    task["group"] = [
-        {key: rows[m][key] for key in ("id", "title", "description")}
-        for m in task.get("group_members") or []  # pyright: ignore[reportUnknownVariableType]
-        if m in rows
-    ]
-    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
-    preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
-    seat = tick._free_seat(slug, lane, taken, preferred)
-    taken.add(seat)
-    record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
-    store.put_agent(slug, record)
-    try:
-        state = "pr" if task.get("pr_url") else "claimed"
-        fields = {
-            "state": state,
-            "claimed_by": name,
-            "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
-        }
-        kind = config.lanes.get(lane, {}).get("kind", "")
-        if kind not in ("", "auto") and not task.get("kind"):
-            fields["kind"] = kind
-        live = timing.timed(ledger.update_task, slug, task["id"], fields, if_state=("open",), if_match=expected)
-        task.update(live)
-        if live["claimed_by"] != name:
-            tick._release_admission(slug, runtime, task)
-            store.release(slug, task["id"], name)
-            store.drop_agent(slug, name)
-            return None, [f"task {task['id']} is {live['state']} on the ledger, not claimed"]
-        task.update(fields)
-        timing.timed(store.record_launch, slug, record, "pending")
-        store.seats.occupy(seat, name, now_ms)
-        task["transfer"] = timing.timed(transfers.attach, store, slug, record)
-        primed_task = {
-            **timing.timed(tick.primed, store, slug, seat, task),
-            tick.ACK_LATER: True,
-            "detached_launch": True,
-            **tick._steer(slug, store, task, failing),
-        }
-    except Exception as exc:
-        failed = tick.Failed(record, task, exc)
-        return None, timing.timed(tick._not_launched, slug, store, ledger, runtime, rows, failed, now_ms)
-    return tick.Launch(record, task, primed_task), []
-
-
 def _launch(run: Any, launch: Any) -> tuple[Any, Any]:
     from scripts.swarm_v2.runtime import codex
 
@@ -771,22 +686,31 @@ def placed_record(record: Any, placed: Any) -> Any:
 
 
 STEPS = (
-    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
+    CallStep("quota notice", NOTICES, held(placing(_quota_notice)), RESUMED, CONFIG_DOC),
     CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
     CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
-    CallStep("collect acks", ACKS, held(_collect_acks), RESUMED, CONFIG_DOC),
-    CallStep("codex hook order", ACKS, held(_codex_hook_order), frozenset({"sleeping"}), pass_domains("sleeping")),
-    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC),
+    CallStep("collect acks", ACKS, held(placing(_collect_acks)), RESUMED, CONFIG_DOC),
+    CallStep(
+        "codex hook order", ACKS, held(placing(_codex_hook_order)), frozenset({"sleeping"}), pass_domains("sleeping")
+    ),
+    WriteStep(
+        "rank pass", PLACEMENT, held(placing(_rank_pass)), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC
+    ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
     ),
     CallStep(
-        "preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}) | TASK_STATE, frozenset({AGENTS})
+        "preempt",
+        PLACEMENT,
+        held(placing(_preempt)),
+        PREEMPT_NEEDS,
+        frozenset({AGENTS}) | TASK_STATE,
+        frozenset({AGENTS}),
     ),
     CallStep(
         "spawn",
         PLACEMENT,
-        held(_spawn_step),
+        held(placing(_spawn_step)),
         budgets.SPAWN_NEEDS,
         frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
         PLACED | pass_domains("rows"),

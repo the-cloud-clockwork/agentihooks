@@ -34,6 +34,7 @@
   "def _overlaps",
   "def _owned_tasks",
   "def _parked",
+  "def _prepare",
   "def _print_actions",
   "def _reap_agent",
   "def _recover_master",

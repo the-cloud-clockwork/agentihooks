@@ -6,12 +6,12 @@ Each swarm keeps one lead master, the agent the operator talks to, which works n
 further master seats its count holds.
 """
 
+import json
 import os
 import time  # noqa: F401
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial
-from importlib import import_module
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
@@ -32,6 +32,7 @@ from scripts.swarm import (
     claim_hold,  # noqa: F401
     claim_order,
     content_refusal,
+    continuation,
     control_notifications,  # noqa: F401
     dead_resume,
     deliberate_exit,
@@ -86,16 +87,16 @@ from scripts.swarm.store import (  # noqa: F401
     SwarmConfig,
     SwarmError,
 )
-from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
-from scripts.tick.steps import place
 from scripts.tick.steps import tasks as task_steps
+
+from scripts.tick import sites as tick_sites  # isort: skip
 from scripts.tick.steps.common import (
     _collected,  # noqa: F401
     _current_owner,
@@ -143,7 +144,6 @@ from scripts.tick.steps.place import (  # noqa: F401
     _Pass,
     _pass_reclaim,
     _placement_pass,
-    _prepare,
     _ranked,
     _record_spawn_failure,
     _refused_reservation,
@@ -326,43 +326,13 @@ def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, 
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    for name in MASTER_MOVE_MODULES:
-        import_module(name)
     box: dict[str, Any] = steps.PassBox()
-    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
-    actions = run_group("start", **passing)
+    state: dict[str, Any] = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "box": box}
+    sites = tick_sites.TickSites(state, box, task_steps.appliers(state), lambda: now_ms)
+    gate = engine.SiteGate(sites.hooks(), sites.shut)
+    records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
     observe_steps.raise_held(box)
-    if "finished" in box:
-        return actions
-    actions += run_group(observe_steps.PASS_SETUP, **passing)
-    actions += run_group("observe", **passing)
-    observe_steps.raise_held(box)
-    config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    passing |= {"rows": rows, "doc": doc, "due": due}
-    actions += run_group("agents", **passing, config=config)
-    actions.extend(master_steps.run_masters(locals()))
-    actions += run_group(task_steps.DRAINED, **passing, config=config)
-    task_steps.raise_held(box)
-    config, sleeping = box["config"], task_steps.sleeping_of(box)
-    actions += run_group("tasks", **passing, config=config)
-    actions += run_group(task_steps.REOPENS, **passing, config=config)
-    actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
-    task_steps.raise_held(box)
-    with PLACING:
-        run_group("place")
-        actions += run_group(place.NOTICES, **passing, config=config)
-        actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
-        task_steps.raise_held(box)
-        if not sleeping:
-            actions.extend(master_steps.run_seats(locals()))
-            actions += run_group(place.PLACEMENT, **passing, config=config)
-            task_steps.raise_held(box)
-        actions.extend(master_steps.run_dispatch(locals()))
-    actions.extend(master_steps.run_watch(locals()))
-    passing["rows"] = box["rows"]
-    actions += run_group(task_steps.CLOSE, **passing, config=config)
-    task_steps.raise_held(box)
-    return actions
+    return [] if sites.left else steps.actions(records)
 
 
 def _codex_hook_order():
@@ -913,6 +883,85 @@ def _area(entry):
 
 def _nested(outer, inner):
     return inner == outer or inner.startswith(outer + "/")
+
+
+def _prepare(run, lane, task, taken, failing, peers):
+    slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
+    rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    task = rows[task["id"]] = dict(task)
+    expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
+    blocked = (
+        timing.timed(_lives_spent, slug, store, ledger, rows, task)
+        or timing.timed(_room_wait, runtime, lane, task)
+        or timing.timed(_held_back, slug, ledger, rows, runtime, task, now_ms)
+        or timing.timed(_owner_hold, slug, store, runtime, task)
+    )
+    if blocked:
+        return None, [blocked]
+    name = store.next_name(slug, lane, now_ms)
+    if not timing.timed(store.claim, slug, task["id"], name, LEASE_MS):
+        _release_admission(slug, runtime, task)
+        return None, []
+    handoff = store.handoff(slug, task["id"])
+    lives = store.earlier_lives(slug, task["id"])
+    if handoff:
+        task["handoff"] = handoff
+        task["handoff_envelope"] = timing.timed(
+            continuation.resolve,
+            config.repo,
+            task,
+            rows,
+            lives,
+            store.handoff_envelope(slug, task["id"]) or {},
+            _pass_reclaim(run),
+        )
+    elif lives or task.get("branch"):
+        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, _pass_reclaim(run))
+        store.put_reclaim(slug, name, task["reclaim"])
+    task["stack_base"] = _stack_base(task, rows, config.repo)
+    task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime, peers))
+    task["group"] = [
+        {key: rows[m][key] for key in ("id", "title", "description")}
+        for m in task.get("group_members") or []
+        if m in rows
+    ]
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+    seat = _free_seat(slug, lane, taken, preferred)
+    taken.add(seat)
+    record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
+    store.put_agent(slug, record)
+    try:
+        state = "pr" if task.get("pr_url") else "claimed"
+        fields = {
+            "state": state,
+            "claimed_by": name,
+            "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
+        }
+        kind = config.lanes.get(lane, {}).get("kind", "")
+        if kind not in ("", "auto") and not task.get("kind"):
+            fields["kind"] = kind
+        live = timing.timed(ledger.update_task, slug, task["id"], fields, if_state=("open",), if_match=expected)
+        task.update(live)
+        if live["claimed_by"] != name:
+            _release_admission(slug, runtime, task)
+            store.release(slug, task["id"], name)
+            store.drop_agent(slug, name)
+            return None, [f"task {task['id']} is {live['state']} on the ledger, not claimed"]
+        task.update(fields)
+        timing.timed(store.record_launch, slug, record, "pending")
+        store.seats.occupy(seat, name, now_ms)
+        task["transfer"] = timing.timed(transfers.attach, store, slug, record)
+        primed_task = {
+            **timing.timed(primed, store, slug, seat, task),
+            ACK_LATER: True,
+            "detached_launch": True,
+            **_steer(slug, store, task, failing),
+        }
+    except Exception as exc:
+        failed = Failed(record, task, exc)
+        return None, timing.timed(_not_launched, slug, store, ledger, runtime, rows, failed, now_ms)
+    return Launch(record, task, primed_task), []
 
 
 def _acknowledging_error(exc):
