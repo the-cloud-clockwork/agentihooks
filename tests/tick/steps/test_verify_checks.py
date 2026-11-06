@@ -7,6 +7,7 @@ import pytest
 
 from scripts.hub import reconciler
 from scripts.swarm import dead_resume, held_elsewhere, launch_check, live_binding, master_retire, reaper, tick
+from scripts.swarm.store import AgentRecord
 from scripts.tick.steps import observe
 
 pytestmark = pytest.mark.unit
@@ -113,8 +114,7 @@ def test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_
 def test_verification_retires_a_master_its_hive_reports_gone_in_one_pass_without_a_runtime_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    dead, alive = _agent("dead"), _agent("alive")
-    dead.lane = alive.lane = "master"
+    dead, alive = (AgentRecord(name, "master", f"task-{name}", profile="p") for name in ("dead", "alive"))
     seen = _verify_seams(monkeypatch, [dead, alive])
     monkeypatch.setattr(live_binding, "record", lambda store, slug, agent, facts, now_ms: ["process"])
     monkeypatch.setattr(

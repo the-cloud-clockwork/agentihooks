@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import retire_watch
@@ -111,7 +113,7 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
 def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired_in_one_pass_without_a_runtime_call(
     store: RedisStore,
     monkeypatch: pytest.MonkeyPatch,
-    placed: dict[str, object],
+    placed: dict[str, Any],
     listed: bool,
     observed: int,
     expected: str,
@@ -127,8 +129,8 @@ def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired
 
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
     name = store.next_name("sw", "master")
-    started = store.start_execution("sw", AgentRecord(name, "master", "master", seat="master@sw", started_at=1))
-    agent = replace(started, state="finished", **placed)
+    seed = AgentRecord(name, "master", "master", seat="master@sw", started_at=1, **placed)
+    agent = replace(store.start_execution("sw", seed), state="finished")
     store.put_agent("sw", agent)
     now = reports.STARTUP_MS + 10
     names = ["other", name] if listed else ["other"]
