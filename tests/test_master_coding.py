@@ -355,7 +355,7 @@ def test_the_shell_guard_blocks_a_master_ruleset_call(master, monkeypatch):
         hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "gh ruleset list"}})
 
 
-def test_the_shell_guard_blocks_a_sustained_blocker(master, monkeypatch):
+def test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker(master, monkeypatch):
     import fakeredis
 
     from scripts.swarm import blockers
@@ -372,6 +372,5 @@ def test_the_shell_guard_blocks_a_sustained_blocker(master, monkeypatch):
     blockers.record(store, "rig", "cat", "boom", now_ms)
     monkeypatch.setattr("hooks.context.local_test_guard.check_local_tests", Mock())
     monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
-    with pytest.raises(hook_manager.BlockAction) as excinfo:
-        hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": SID})
-    assert "cat" in str(excinfo.value)
+    hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": SID})
+    assert master_coding.is_open(SID)
