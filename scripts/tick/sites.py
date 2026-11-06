@@ -138,7 +138,7 @@ def run_sites(
     order = {site: index for index, site in enumerate(sites)}
     found = sorted((step for step in step_registry.steps() if step.group in order), key=lambda step: order[step.group])
     ctx = Context(_GraphView(state, box), Deadline.after(tick.GROUP_BUDGET_S))
-    edged = step_registry.site_edges(found, sites, joins)
+    edged = step_registry.site_edges(found, sites, joins, frozenset(gate.hooks))
     records = engine.run_graph(edged, ctx, apply, partial(tick._print_actions, box), gate)
     steps.note_left(box, records)
     return records
