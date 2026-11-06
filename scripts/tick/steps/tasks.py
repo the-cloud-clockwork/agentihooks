@@ -101,6 +101,16 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
     return run
 
 
+def placing(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
+    """Wrap ``call`` to run holding the host placement lock, so placements of the swarms on a host never overlap."""
+
+    def run(tick: Any, get: Get) -> Any:
+        with tick.PLACING:
+            return call(tick, get)
+
+    return run
+
+
 def raise_held(box: dict[str, Any]) -> None:
     """Raise the exception a step held, as the hand written pass let it escape."""
     if RAISED in box:

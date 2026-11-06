@@ -14,7 +14,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | Step | Group | Lane | Floor | Interval | Needs | Effects | Feature |
 |---|---|---|---|---|---|---|---|
 | failed panes | agents | tick | 2 | 120 | none | none | none |
-| reap | agents | tick | 22 | 60 | spawn due | none | none |
+| reap | agents | tick | 22 | 60 | spawn due | inbox, ledger, runtime | swarm-tick-agents-reap |
 | recover outages | agents | tick | 2 | 60 | spawn due | none | none |
 | strays | agents | tick | 2 | 120 | stopped branch | none | none |
 | close space | close | tick | 2 | 60 | drained resume | none | none |

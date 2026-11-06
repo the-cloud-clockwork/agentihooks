@@ -961,11 +961,10 @@ def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkey
     started = []
     monkeypatch.setattr(refresh_job, "spawn", started.append)
 
-    def overrun(slug: str, *args: object) -> list[str]:
-        assert slug == "sw"
+    def overrun(sites: object) -> bool:
         raise cli.tick_stop.Stopped
 
-    monkeypatch.setattr(cli, "tick", overrun)
+    monkeypatch.setattr(cli.TickSites, "_start", overrun)
     with pytest.raises(cli.tick_stop.Stopped):
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]

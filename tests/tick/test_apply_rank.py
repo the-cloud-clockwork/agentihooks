@@ -1,5 +1,6 @@
 """The rank pass step returns its decided pass as one write that its applier takes while the saved heads hold."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
@@ -149,6 +150,7 @@ def test_a_rank_pass_whose_heads_another_pass_moved_is_dropped_and_recomputed_on
 
     class Tick:
         dispatcher = type("D", (), {"rank_decision": staticmethod(rank_decision)})
+        PLACING = nullcontext()
 
         @staticmethod
         def skip_refused(function: Any, *args: Any) -> Any:
