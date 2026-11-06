@@ -4,15 +4,13 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 from importlib import import_module
 from typing import Any
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Result, Write
-from scripts.tick.steps import AGENTS, PASS, TASKS, CallStep, actions_of, pass_domains
+from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
 
 Get = Callable[[str], Any]
 
@@ -471,22 +469,8 @@ def _session_models(slug: Any, store: Any) -> Any:
 
 def _reap_step(tick: Any, get: Get) -> Any:
     return tick.skip_refused(
-        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), get("deadline")
+        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), get(DEADLINE)
     )
-
-
-def _with_deadline(ctx: Context, key: str) -> Any:
-    """Return the context deadline under ``deadline``, else the pass value under ``key``."""
-    return ctx.deadline if key == "deadline" else ctx.view.read(PASS, key)
-
-
-class _ReapStep(CallStep):
-    """The reap step: it hands the reap pass the pass runtime and ledger and the deadline of its step context."""
-
-    def run(self, ctx: Context) -> Result:
-        """Run the reap call with a reader of the pass state that also answers the context deadline."""
-        found = self.call(tick, partial(_with_deadline, ctx))
-        return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
 def _recover_outages(tick: Any, get: Get) -> Any:
@@ -531,7 +515,7 @@ LISTED = frozenset({"spawn due"})
 ROWS = pass_domains("rows")
 
 STEPS = (
-    _ReapStep(
+    CallStep(
         "reap",
         "agents",
         _reap_step,
