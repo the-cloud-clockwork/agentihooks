@@ -535,7 +535,7 @@ def test_panic_opens_the_master_hotfix_window(store, master):
     assert notice is not None
     assert "panic for 0 minutes" in notice
     assert f"agentihooks swarm {SLUG} panic on --fix <pr url>" in notice
-    assert block is not None
+    assert block is None
 
 
 def test_the_master_may_press_the_panic_button(store, master):
