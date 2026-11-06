@@ -512,8 +512,9 @@ def run_tick(
             actions += run_group("wrapper metrics", **passing, count=len(actions))
             host_steps.raise_held(box)
             doc = timing.call(ledger_client.pass_state, ledger, slug)
+            started = box["started"]
             ended = report_steps.FULL
-            return probed + controls + actions
+            return probed + controls + actions + (["started automatic snapshot"] if started else [])
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)

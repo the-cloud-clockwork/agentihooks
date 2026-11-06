@@ -2,44 +2,31 @@ import argparse
 import json
 import subprocess
 import time
-from typing import Any
 
 
-def _api(endpoint: str) -> dict[str, Any]:
+def _api(endpoint: str) -> dict:
     return json.loads(
         subprocess.run(["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=30).stdout
     )
 
 
-def verify(
-    repository: str,
-    head: str,
-    attempts: int = 36,
-    interval: float = 5,
-    event: str = "pull_request",
-    waits: int = 36,
-) -> str:
-    """Wait for the head's Tests run to list a job, polling a queued or running run up to ``waits`` times."""
+def verify(repository: str, head: str, attempts: int = 36, interval: float = 5, event: str = "pull_request") -> str:
     problem = "Tests run is missing for this head."
-    for poll in range(max(attempts, waits)):
+    for attempt in range(attempts):
         runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?head_sha={head}&event={event}&per_page=1")[
             "workflow_runs"
         ]
         matching = [run for run in runs if run["head_sha"] == head]
         if matching:
             run = matching[0]
-            completed = run["status"] == "completed"
-            if completed and run["conclusion"] != "success":
+            if run["status"] == "completed" and run["conclusion"] != "success":
                 return f"Tests run {run['id']} ended with {run['conclusion']}."
             jobs = _api(f"repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=1")
             if jobs["total_count"] > 0:
                 return ""
             problem = f"Tests run {run['id']} has no jobs."
-            if completed or poll + 1 >= waits:
-                return problem
-        elif poll + 1 >= attempts:
-            return problem
-        time.sleep(interval)
+        if attempt + 1 < attempts:
+            time.sleep(interval)
     return problem
 
 
@@ -48,9 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--head", required=True)
     parser.add_argument("--event", default="pull_request")
-    parser.add_argument("--waits", type=int, default=36)
     args = parser.parse_args(argv)
-    problem = verify(args.repository, args.head, event=args.event, waits=args.waits)
+    problem = verify(args.repository, args.head, event=args.event)
     if problem:
         print(f"::error::{problem}")
         return 1

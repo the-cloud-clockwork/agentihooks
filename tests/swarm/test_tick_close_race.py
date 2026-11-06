@@ -13,6 +13,7 @@ from scripts.swarm import (
     master_move,
     master_retire,
     master_wake,
+    overrun,
     stall_watch,
     waits,
 )
@@ -20,6 +21,7 @@ from scripts.swarm.ledger_events import Mail, PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore
 from tests.inbox.test_decided_events import crew, queue_event  # noqa: F401
 from tests.inbox.test_decided_events import wake as wake_at
+from tests.swarm import test_overrun as overrun_case
 from tests.swarm import test_stall_watch as stall_case
 from tests.swarm.test_automated_gc import LIMIT, START, answer, sweep, world  # noqa: F401
 from tests.swarm.test_automated_gc import SLUG as GC_SLUG
@@ -186,6 +188,18 @@ def test_ledger_events_pass_a_red_notice_closed_meanwhile(store, race):
     assert ledger_events._settle_red_notices(mail, lambda _: PullRequest("MERGED", 1, 1, False)) == []
     assert race.closed_meanwhile(inbox, item)
     assert not store.redis.hexists(mail.red_index(), item.id)
+
+
+def test_overrun_passes_its_ask_closed_meanwhile(race):
+    swarm = overrun_case.Swarm()
+    swarm.tick(overrun_case.PARK)
+    [ask] = swarm.agent_inbox()
+    race.arm()
+    swarm.tick(overrun_case.ENDED)
+    assert swarm.retired == [overrun_case.OWNER]
+    assert swarm.ledger.rows["t1"]["state"] == "open"
+    assert race.closed_meanwhile(InboxStore(swarm.store.redis), ask)
+    assert swarm.store.take_restart(overrun_case.SLUG, "t1") == overrun.CAUSE
 
 
 def test_automated_activity_records_an_answer_closed_meanwhile(world, race):  # noqa: F811

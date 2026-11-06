@@ -30,7 +30,7 @@ from scripts.swarm.status import findings
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, actions_of, budgets, host, report
+from scripts.tick.steps import PASS, CallStep, actions, budgets, host, report
 
 pytestmark = pytest.mark.unit
 
@@ -216,26 +216,14 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
     redis = SimpleNamespace(set=lambda key, value: calls.append(("set", key, value)))
     store = SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
     found = _run("wrapper metrics", calls, _pass(box, store=store, count=5), monkeypatch)
-    assert found == ["ran 1", "ran 2", "ran 3", "started automatic snapshot"]
+    assert found == ["ran 1", "ran 2", "ran 3"]
     assert calls == [
         ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", store, DOC, ["f"], "view", "ledger")),
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
     ]
-    assert box == {"found": ["f"]}
-
-
-def test_the_snapshot_step_returns_no_line_when_no_job_started(monkeypatch: pytest.MonkeyPatch) -> None:
-    step = next(step for step in report.STEPS if step.name == "snapshot job")
-    store = SimpleNamespace()
-    box: dict[str, Any] = {}
-    cli = SimpleNamespace(now_ms=lambda: 7, snapshot_job=snapshot_job)
-    monkeypatch.setattr(host, "import_module", lambda name: cli)
-    monkeypatch.setattr(timing, "call", lambda function, *args: False)
-    assert step.writes == {actions_of("snapshot job")}
-    assert step.call(None, {"box": box, "store": store, "slug": "sw"}.get) == []
-    assert box == {}
+    assert box == {"found": ["f"], "started": ["ran 4"]}
 
 
 def test_the_watches_and_findings_declare_the_steps_they_need() -> None:

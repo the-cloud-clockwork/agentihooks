@@ -1,6 +1,5 @@
 import json
 import subprocess
-from types import ModuleType
 
 import pytest
 
@@ -92,7 +91,7 @@ def test_command_reports_startup_result(monkeypatch, capsys, problem, code, outp
     calls = []
     monkeypatch.setattr(ci_tests_start, "verify", lambda *args, **kwargs: calls.append((args, kwargs)) or problem)
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head"]) == code
-    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 36})]
+    assert calls == [(("owner/repo", "head"), {"event": "pull_request"})]
     assert capsys.readouterr().out == output
 
 
@@ -188,77 +187,3 @@ def test_can_verify_the_push_event_used_by_the_ci_plant(monkeypatch, capsys):
     assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--event", "push"]) == 1
     assert endpoints == ["repos/owner/repo/actions/workflows/test.yml/runs?head_sha=head&event=push&per_page=1"]
     assert capsys.readouterr().out == "::error::Tests run 11 ended with failure.\n"
-
-
-def _replay(monkeypatch: pytest.MonkeyPatch, replies: list[dict]) -> tuple[ModuleType, list[str], list[float]]:
-    from scripts import ci_tests_start
-
-    calls: list[str] = []
-    sleeps: list[float] = []
-    queue = iter(replies)
-
-    def api(endpoint: str) -> dict:
-        calls.append(endpoint)
-        return next(queue)
-
-    monkeypatch.setattr(ci_tests_start, "_api", api)
-    monkeypatch.setattr(ci_tests_start.time, "sleep", sleeps.append)
-    return ci_tests_start, calls, sleeps
-
-
-def test_keeps_waiting_past_registration_while_the_run_lists_jobs_late(monkeypatch: pytest.MonkeyPatch) -> None:
-    queued = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]}
-    module, calls, sleeps = _replay(
-        monkeypatch,
-        [
-            queued,
-            {"total_count": 0},
-            queued,
-            {"total_count": 0},
-            queued,
-            {"total_count": 0},
-            queued,
-            {"total_count": 1},
-        ],
-    )
-    assert module.verify("owner/repo", "head", attempts=1, interval=3, waits=5) == ""
-    assert len(calls) == 8
-    assert sleeps == [3, 3, 3]
-
-
-def test_a_run_that_completes_without_jobs_is_red_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    done = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "completed", "conclusion": "success"}]}
-    module, calls, sleeps = _replay(monkeypatch, [done, {"total_count": 0}])
-    assert module.verify("owner/repo", "head", attempts=5, interval=3, waits=5) == "Tests run 11 has no jobs."
-    assert len(calls) == 2
-    assert sleeps == []
-
-
-def test_a_run_that_never_lists_jobs_is_red_after_the_wait_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    running = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "in_progress", "conclusion": None}]}
-    module, calls, sleeps = _replay(monkeypatch, [running, {"total_count": 0}] * 3)
-    assert module.verify("owner/repo", "head", attempts=1, interval=3, waits=3) == "Tests run 11 has no jobs."
-    assert len(calls) == 6
-    assert sleeps == [3, 3]
-
-
-def test_default_wait_for_a_started_run_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    running = {"workflow_runs": [{"id": 11, "head_sha": "head", "status": "queued", "conclusion": None}]}
-    module, calls, sleeps = _replay(monkeypatch, [running, {"total_count": 0}] * 36)
-    assert module.verify("owner/repo", "head") == "Tests run 11 has no jobs."
-    assert len(calls) == 72
-    assert sleeps == [5] * 35
-
-
-def test_command_passes_the_started_run_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts import ci_tests_start
-
-    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
-
-    def verify(*args: str, **kwargs: object) -> str:
-        calls.append((args, kwargs))
-        return ""
-
-    monkeypatch.setattr(ci_tests_start, "verify", verify)
-    assert ci_tests_start.main(["--repository", "owner/repo", "--head", "head", "--waits", "120"]) == 0
-    assert calls == [(("owner/repo", "head"), {"event": "pull_request", "waits": 120})]

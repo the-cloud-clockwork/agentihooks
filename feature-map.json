@@ -70,7 +70,6 @@
         "tests/swarm/test_tick_load.py::test_simulated_load_pass_fits_the_budget",
         "tests/swarm/test_tick_load.py::test_a_step_made_300_seconds_slower_breaks_the_budget",
         "tests/swarm/test_tick_load.py::test_the_budget_only_shrinks_against_its_base",
-        "tests/swarm/test_tick_load.py::test_the_base_budget_fetches_dev_when_origin_dev_is_missing",
         "tests/swarm/test_tick_load.py::test_a_raised_budget_is_refused",
         "tests/swarm/test_tick_load.py::test_an_equal_or_lower_budget_is_accepted"
       ],
@@ -119,29 +118,6 @@
         "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
         "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
         "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
-      ]
-    },
-    {
-      "id": "swarm-tick-common-helpers",
-      "origin": "inventory",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h9",
-      "behaviour": "The helpers the tick steps and the swarm tick module share live in the common step module, the swarm tick module re-exports each one, and a moved helper reaches its siblings through the tick module so a patched tick seam still applies.",
-      "seam": "scripts.tick.steps.common, re-exported by scripts.swarm.tick",
-      "tests": [
-        "tests/tick/steps/test_common.py::test_tick_reexports_the_common_helper",
-        "tests/tick/steps/test_common.py::test_common_helpers_reach_tick_seams_through_the_tick_module",
-        "tests/tick/steps/test_common.py::test_still_held_needs_active_state_owner_and_generation",
-        "tests/tick/steps/test_common.py::test_current_owner_accepts_an_unclaimed_row_or_its_own_claim",
-        "tests/tick/steps/test_common.py::test_ended_reads_the_task_row_except_for_masters",
-        "tests/tick/steps/test_common.py::test_operator_line_skips_operator_control_notices",
-        "tests/tick/steps/test_common.py::test_reopen_guards_on_active_state_and_reports_the_live_state",
-        "tests/tick/steps/test_common.py::test_rebind_takes_the_one_pane_holding_the_conversation",
-        "tests/tick/steps/test_common.py::test_follow_keeps_an_agent_without_a_pid_and_reports_a_rebind",
-        "tests/tick/steps/test_common.py::test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line",
-        "tests/tick/steps/test_common.py::test_skip_dropped_retries_once_then_skips",
-        "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
-        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
-        "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
       ]
     },
     {

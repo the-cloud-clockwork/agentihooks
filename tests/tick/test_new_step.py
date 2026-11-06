@@ -145,7 +145,7 @@ def test_a_new_module_joins_the_modules_the_registry_loads(tree: Path) -> None:
 def test_the_registry_loads_every_listed_step_module() -> None:
     steps = import_module("scripts.tick.steps")
     catalogue = import_module("scripts.tick.catalogue")
-    assert sorted(steps.MODULES) == [name for name in catalogue.step_modules() if name.rsplit(".", 1)[-1] not in {"budgets", "common"}]
+    assert sorted(steps.MODULES) == [name for name in catalogue.step_modules() if not name.endswith(".budgets")]
     names = {step.name for step in import_module("scripts.tick.registry").steps()}
     assert {"inbox relay", "snapshot job", "spawn"} <= names
 
@@ -241,3 +241,37 @@ def test_check_reports_each_artefact_and_a_planted_missing_one_goes_red(
 def test_check_reports_nothing_for_an_unknown_step(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert new_step().main(["--check", STEP, "--root", str(tree)]) == 1
     assert set(json.loads(capsys.readouterr().out).values()) == {False}
+
+
+def test_the_scaffold_refuses_a_module_name_outside_the_steps_package(tree: Path) -> None:
+    argv = [STEP, "--group", "g", "--lane", "tick", "--interval", "60", "--feature", "f", "--root", str(tree)]
+    with pytest.raises(SystemExit) as refused:
+        new_step().main([*argv, "--module", "budgets"])
+    assert str(refused.value) == "budgets is not a steps module name"
+
+
+def test_the_scaffold_refuses_an_unknown_lane(tree: Path) -> None:
+    argv = [STEP, "--group", "g", "--lane", "fast", "--interval", "60", "--feature", "f", "--module", "widgets"]
+    with pytest.raises(SystemExit):
+        new_step().main([*argv, "--root", str(tree)])
+    assert not (tree / "scripts/tick/steps/widgets.py").exists()
+
+
+def test_the_scaffolded_test_expects_the_step_ports(tree: Path) -> None:
+    assert scaffold(tree, STEP) == 0
+    written = ast.parse((tree / "tests/tick/steps/test_probe_widgets.py").read_text())
+    (compare,) = [node for node in ast.walk(written) if isinstance(node, ast.Compare)]
+    (expected,) = compare.comparators
+    assert isinstance(expected, ast.Tuple)
+    assert ast.unparse(expected.elts[3]) == "frozenset({'inbox', 'ledger'})"
+
+
+def test_a_dotted_import_binds_its_first_name() -> None:
+    assert new_step()._bound(ast.parse("import os.path\nimport a.b as c\n")) == {"os", "c"}
+
+
+def test_missing_imports_go_after_the_last_import_or_open_an_empty_module() -> None:
+    added = "".join(line + "\n" for _, line in new_step().IMPORTS)
+    assert new_step()._with_imports("") == "\n" + added
+    source = '"""Doc."""\nimport os\n\nX = 1\n'
+    assert new_step()._with_imports(source) == '"""Doc."""\nimport os\n\n' + added + "\nX = 1\n"

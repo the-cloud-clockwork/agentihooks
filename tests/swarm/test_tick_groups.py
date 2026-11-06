@@ -307,7 +307,7 @@ def test_a_failed_wrapper_step_raises_out_of_the_tick_wrapper(
     assert dict(seen)["closing"].view.read(PASS, "ended") is None
 
 
-def test_a_snapshot_job_left_past_its_budget_ends_the_pass_full_without_its_line(
+def test_a_wrapper_value_left_past_its_budget_ends_the_tick_naming_the_value_and_the_step(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -327,11 +327,10 @@ def test_a_snapshot_job_left_past_its_budget_ends_the_pass_full_without_its_line
 
     monkeypatch.setattr(snapshot_job, "start", start)
     try:
-        found = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
-        assert not any(line.startswith("pass ended early") for line in found)
-        assert "started automatic snapshot" not in found
+        assert cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({})) == [
+            "pass ended early: no step stored started, the pass left snapshot job"
+        ]
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
-        assert swarm.redis.get(swarm.key("sw", "early-end-streak")) is None
     finally:
         release.set()
         running = engine._RUNNING.get(("sw", "snapshot job"))
@@ -339,7 +338,7 @@ def test_a_snapshot_job_left_past_its_budget_ends_the_pass_full_without_its_line
             running.join(30.0)
     assert called == [True]
     assert [name for name, _ in seen][-2:] == ["wrapper metrics", "closing"]
-    assert dict(seen)["closing"].view.read(PASS, "ended") == report.FULL
+    assert dict(seen)["closing"].view.read(PASS, "ended") == report.EARLY
 
 
 def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(
