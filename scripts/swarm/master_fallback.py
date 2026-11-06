@@ -16,6 +16,8 @@ MINUTES = "AGENTIHOOKS_MASTER_FALLBACK_MINUTES"
 SWARMS = "AGENTIHOOKS_MASTER_FALLBACK_SWARMS"
 DEFAULT_MINUTES = 20.0
 INTERVAL_S = 60
+PASS_TIMEOUT_S = 50
+MODULE = "scripts.swarm.master_fallback"
 UNIT = "agentihooks-master-fallback"
 STATE = Path.home() / ".agentihooks" / "master-fallback.json"
 QUIET = ("stopped", "stopping")
@@ -49,9 +51,10 @@ def step(slug: str, live: bool, now_ms: int, down_since: dict[str, int], limit_m
 
 
 def start(slug: str) -> int:
-    """Start a new master the same way the operator does from a terminal."""
+    """Start a new master the same way the operator does from a terminal, in its own session so a timed out pass
+    never cuts the launch short; returns the launch process id."""
     command = ["agentihooks", "swarm", slug, "master", "up", "--new"]
-    return subprocess.run(command, check=False).returncode
+    return subprocess.Popen(command, start_new_session=True).pid
 
 
 def check(
@@ -75,25 +78,34 @@ def check(
     return lines
 
 
-def run(environ: Mapping[str, str], state: Path = STATE) -> None:
-    """Run the fallback pass every minute on the agentihooks scheduler's timer; a failed pass is logged and the loop
-    goes on, and the outage starts survive a restart in the state file."""
+def run(environ: Mapping[str, str]) -> None:
+    """Run one fallback pass a minute, each in its own process with a hard timeout, so a hung herdr or Redis call
+    can never stop the loop; the wait between passes is bounded the same way."""
     from scripts.scheduler import process_timer
+
+    while True:
+        try:
+            subprocess.run([sys.executable, "-m", MODULE, "pass"], check=False, timeout=PASS_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            print(json.dumps({"error": f"pass timed out after {PASS_TIMEOUT_S}s"}), flush=True)
+        process_timer.wait(INTERVAL_S, timeout=2 * INTERVAL_S)
+
+
+def pass_once(environ: Mapping[str, str], state: Path = STATE) -> None:
+    """One fallback pass: start a master where the window ran out and save the outage starts."""
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm.store import connect  # pyright: ignore[reportUnknownVariableType]
 
     down_since = load(state)
-    runtime: Any = HerdrRuntime()
-    while True:
-        try:
-            store: Any = connect()
-            for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since, start):
-                print(line, flush=True)
-            state.parent.mkdir(parents=True, exist_ok=True)
-            state.write_text(json.dumps(down_since))
-        except Exception as error:
-            print(json.dumps({"error": f"{type(error).__name__}: {error}"}), flush=True)
-        process_timer.wait(INTERVAL_S)
+    try:
+        runtime: Any = HerdrRuntime()
+        store: Any = connect()
+        for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since, start):
+            print(line, flush=True)
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps(down_since))
+    except Exception as error:
+        print(json.dumps({"error": f"{type(error).__name__}: {error}"}), flush=True)
 
 
 def load(state: Path) -> dict[str, int]:
@@ -131,9 +143,12 @@ def install(environ: Mapping[str, str]) -> Path:
 
 
 def main(argv: list[str]) -> None:
-    """run keeps the loop going; install writes and starts its service."""
+    """run keeps the loop going, pass makes one pass, install writes and starts the service."""
     if argv[:1] == ["install"]:
         print(install(os.environ))
+        return
+    if argv[:1] == ["pass"]:
+        pass_once(os.environ)
         return
     run(os.environ)
 

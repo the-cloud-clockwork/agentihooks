@@ -137,17 +137,17 @@ class Done(Exception):
     pass
 
 
-def test_start_runs_master_up_new(monkeypatch):
+def test_start_launches_master_up_new_in_its_own_session(monkeypatch):
     calls = []
 
-    def run(command, check):
-        calls.append((command, check))
-        return SimpleNamespace(returncode=4)
+    def popen(command, start_new_session):
+        calls.append((command, start_new_session))
+        return SimpleNamespace(pid=4321)
 
-    monkeypatch.setattr(master_fallback.subprocess, "run", run)
+    monkeypatch.setattr(master_fallback.subprocess, "Popen", popen)
 
-    assert master_fallback.start("sw") == 4
-    assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], False)]
+    assert master_fallback.start("sw") == 4321
+    assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], True)]
 
 
 def test_install_writes_and_restarts_the_service_and_retires_the_timer(tmp_path, monkeypatch):
@@ -180,27 +180,62 @@ def test_install_makes_the_unit_folder(tmp_path, monkeypatch):
     assert master_fallback.install({}).exists()
 
 
-def test_main_installs_or_runs(monkeypatch, capsys):
+def test_main_installs_passes_or_runs(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(master_fallback, "install", lambda environ: seen.append("install") or "/unit")
+    monkeypatch.setattr(master_fallback, "pass_once", lambda environ: seen.append("pass"))
     monkeypatch.setattr(master_fallback, "run", lambda environ: seen.append("run"))
 
     master_fallback.main(["install"])
+    master_fallback.main(["pass"])
     master_fallback.main([])
 
-    assert seen == ["install", "run"]
+    assert seen == ["install", "pass", "run"]
     assert capsys.readouterr().out == "/unit\n"
 
 
-def test_run_makes_a_pass_saves_its_state_and_waits_a_minute(tmp_path, monkeypatch, capsys):
+def test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute(monkeypatch):
     from scripts.scheduler import process_timer
-    from scripts.swarm import runtime, store
 
-    waits = []
+    runs, waits = [], []
 
-    def wait(delay):
-        waits.append(delay)
+    def run(command, check, timeout):
+        runs.append((command, check, timeout))
+
+    def wait(delay, timeout):
+        waits.append((delay, timeout))
         raise Done
+
+    monkeypatch.setattr(master_fallback.subprocess, "run", run)
+    monkeypatch.setattr(process_timer, "wait", wait)
+
+    with pytest.raises(Done):
+        master_fallback.run({})
+
+    assert runs == [([sys.executable, "-m", "scripts.swarm.master_fallback", "pass"], False, 50)]
+    assert waits == [(60, 120)]
+
+
+def test_run_logs_a_timed_out_pass_and_goes_on(monkeypatch, capsys):
+    from scripts.scheduler import process_timer
+
+    def run(command, check, timeout):
+        raise master_fallback.subprocess.TimeoutExpired(command, timeout)
+
+    def wait(delay, timeout):
+        raise Done
+
+    monkeypatch.setattr(master_fallback.subprocess, "run", run)
+    monkeypatch.setattr(process_timer, "wait", wait)
+
+    with pytest.raises(Done):
+        master_fallback.run({})
+
+    assert capsys.readouterr().out == '{"error": "pass timed out after 50s"}\n'
+
+
+def test_a_pass_starts_a_master_and_saves_its_state(tmp_path, monkeypatch, capsys):
+    from scripts.swarm import runtime, store
 
     class Herdr:
         def live_names(self):
@@ -209,36 +244,27 @@ def test_run_makes_a_pass_saves_its_state_and_waits_a_minute(tmp_path, monkeypat
     state = tmp_path / "state" / "fallback.json"
     state.parent.mkdir()
     state.write_text('{"sw": 0}')
-    monkeypatch.setattr(process_timer, "wait", wait)
     monkeypatch.setattr(runtime, "HerdrRuntime", Herdr)
     monkeypatch.setattr(store, "connect", lambda: Store({"sw": []}))
-    monkeypatch.setattr(master_fallback, "start", lambda slug: 0)
+    monkeypatch.setattr(master_fallback, "start", lambda slug: 77)
     monkeypatch.setattr(master_fallback.time, "time", lambda: 1200.0)
 
-    with pytest.raises(Done):
-        master_fallback.run({master_fallback.SWARMS: "sw"}, state)
+    master_fallback.pass_once({master_fallback.SWARMS: "sw"}, state)
 
-    assert waits == [60]
-    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 0, "at": 1200000}\n'
+    assert capsys.readouterr().out == '{"swarm": "sw", "master_up": 77, "at": 1200000}\n'
     assert master_fallback.load(state) == {"sw": 1200000}
 
 
-def test_run_logs_a_failed_pass_and_goes_on(tmp_path, monkeypatch, capsys):
-    from scripts.scheduler import process_timer
+def test_a_failed_pass_is_logged_and_saves_nothing(tmp_path, monkeypatch, capsys):
     from scripts.swarm import runtime, store
 
     def connect():
         raise RuntimeError("redis down")
 
-    def wait(delay):
-        raise Done
-
-    monkeypatch.setattr(process_timer, "wait", wait)
     monkeypatch.setattr(runtime, "HerdrRuntime", lambda: SimpleNamespace(live_names=set))
     monkeypatch.setattr(store, "connect", connect)
 
-    with pytest.raises(Done):
-        master_fallback.run({}, tmp_path / "fallback.json")
+    master_fallback.pass_once({}, tmp_path / "fallback.json")
 
     assert capsys.readouterr().out == '{"error": "RuntimeError: redis down"}\n'
     assert not (tmp_path / "fallback.json").exists()
