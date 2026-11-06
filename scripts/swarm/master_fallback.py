@@ -104,7 +104,7 @@ def unit_text(python: str, repo: str, environ: Mapping[str, str]) -> dict[str, s
     )
     timer = (
         "[Unit]\nDescription=agentihooks master fallback tick every minute\n\n"
-        f"[Timer]\nOnBootSec={INTERVAL_S}\nOnUnitActiveSec={INTERVAL_S}\nAccuracySec=5\n\n"
+        f"[Timer]\nOnActiveSec={INTERVAL_S}\nOnBootSec={INTERVAL_S}\nOnUnitActiveSec={INTERVAL_S}\nAccuracySec=5\n\n"
         "[Install]\nWantedBy=timers.target\n"
     )
     return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}

@@ -106,6 +106,7 @@ def test_the_timer_runs_one_pass_a_minute_with_the_watched_swarms_and_minutes():
     assert f"Environment={master_fallback.MINUTES}=20" in service
     assert "WorkingDirectory=/repo" in service
     assert "OnUnitActiveSec=60" in timer
+    assert "OnActiveSec=60" in timer
     assert "WantedBy=timers.target" in timer
 
 
