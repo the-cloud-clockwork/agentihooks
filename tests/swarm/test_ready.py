@@ -849,6 +849,41 @@ def test_a_merged_recorded_task_with_a_failed_intent_verdict_stays_in_pr(merging
     assert rows["t1"] == before and reads == ["t1"]
 
 
+@pytest.mark.parametrize(
+    "change,pulls,closes",
+    [
+        ({"contract": {"after": "no"}, "proof": {}}, {}, True),
+        ({"contract": {"after": "yes"}, "proof": {"command": "probe", "output": "ok"}}, {}, True),
+        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {}, True),
+        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {"8": RUNNING}, False),
+    ],
+)
+def test_a_merged_recorded_task_closes_only_once_its_proof_and_split_halves_are_complete(
+    merging, change, pulls, closes
+):
+    known = {URL: MERGED, "https://github.com/o/r/pull/8": MERGED}
+    known.update({f"https://github.com/o/r/pull/{number}": pull for number, pull in pulls.items()})
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, **change}}
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, known.get, known.get, NOW)
+    assert ready.merge_pass(run, rows) == ([f"task t1 done, {URL} merged"] if closes else [])
+    assert ledger.rows["t1"]["state"] == ("done" if closes else "pr")
+
+
+def test_a_merged_recorded_task_skips_group_members_done_or_gone(merging):
+    other = "https://github.com/o/r/pull/9"
+    rows = {
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t9", "t2", "t3"]},
+        "t2": {"id": "t2", "state": "done", "pr_url": other},
+        "t3": {"id": "t3", "state": "open", "claimed_by": ""},
+    }
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
+    assert ledger.rows["t2"] == {"id": "t2", "state": "done", "pr_url": other}
+    assert ledger.rows["t3"] == {"id": "t3", "state": "done", "claimed_by": "", "pr_url": URL, "awaiting": ""}
+
+
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
 def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
     merging.rows["t1"]["kind"] = kind
