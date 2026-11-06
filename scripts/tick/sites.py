@@ -1,6 +1,7 @@
 """The sites of the flat pass graph: the tick's site table, its checks between sites and the graph runner."""
 
 from collections.abc import Callable, Mapping
+from contextvars import Token
 from dataclasses import dataclass
 from functools import partial
 from importlib import import_module
@@ -9,6 +10,7 @@ from typing import Any
 from scripts.swarm import reaper
 from scripts.tick import engine, steps
 from scripts.tick import registry as step_registry
+from scripts.tick.adapters.processes import PassProcesses
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Step, Write
 from scripts.tick.steps import masters as master_steps
@@ -76,7 +78,7 @@ class TickSites:
     clock: Callable[[], int]
     scanning: bool = False
     left: bool = False
-    scan: Any = None
+    scan: Token[PassProcesses | None] | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the start, agents and tasks sites."""

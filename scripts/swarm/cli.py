@@ -370,18 +370,32 @@ class _Wrapper:
     """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
     actions it returned in their order."""
 
-    store: RedisStore
-    slug: str
-    ledger: Any
     held: Any
     beating: ExitStack
     state: dict[str, Any]
     box: PassBox
     ticks: TickSites
-    watching: ExitStack = dataclass_field(default_factory=ExitStack)
-    seen: dict[str, Any] = dataclass_field(default_factory=dict[str, Any])
-    ended: list[str] | None = None
-    checked: list[str] = dataclass_field(default_factory=list[str])
+    watching: ExitStack = dataclass_field(default_factory=ExitStack, init=False)
+    seen: dict[str, Any] = dataclass_field(default_factory=dict[str, Any], init=False)
+    ended: list[str] | None = dataclass_field(default=None, init=False)
+    checked: list[str] = dataclass_field(default_factory=list[str], init=False)
+    judging: PassBox = dataclass_field(init=False)
+    groups: dict[str, str] = dataclass_field(init=False)
+
+    @property
+    def store(self) -> RedisStore:
+        """Return the swarm store of the pass state."""
+        return self.state["store"]
+
+    @property
+    def slug(self) -> str:
+        """Return the swarm of the pass state."""
+        return self.state["slug"]
+
+    @property
+    def ledger(self) -> Any:
+        """Return the ledger client of the pass state."""
+        return self.state["ledger"]
 
     def __post_init__(self) -> None:
         """Hand the intent check its own box, sharing the pass's left steps, and end the tick's scan with the watch."""
@@ -586,7 +600,7 @@ def run_tick(
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
-        wrapper = _Wrapper(store, slug, ledger, held, beating, state, box, ticks)
+        wrapper = _Wrapper(held, beating, state, box, ticks)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
