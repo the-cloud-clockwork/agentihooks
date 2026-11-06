@@ -230,14 +230,20 @@ def _crossed(first: Step, second: Step) -> bool:
     return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
 
 
-def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
+def site_edges(
+    steps: Iterable[Step],
+    sites: Sequence[str],
+    joins: Mapping[str, str] | None = None,
+    hooked: frozenset[str] = frozenset(),
+) -> tuple[Step, ...]:
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
     site that holds steps and whose declared reads and writes cross its own; steps of groups outside ``sites`` keep
     their own needs.
 
     A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane step, and
     every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
-    for the sites between: only the steps of the site it names need it too.
+    for the sites between: only the steps of the site it names need it too. A step of a ``hooked`` site keeps its
+    whole barrier, because the site's hook reads pass values no step declares.
     """
     found = _backward(tuple(steps), sites)
     late = _late(found)
@@ -252,7 +258,12 @@ def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, 
         else:
             previous = members[site] or previous
     edged = (
-        (step, frozenset(other.name for other in barrier.get(step.group, ()) if _crossed(other, step)))
+        (
+            step,
+            frozenset(
+                other.name for other in barrier.get(step.group, ()) if step.group in hooked or _crossed(other, step)
+            ),
+        )
         for step in found
     )
     return tuple(_barrier(step, needs) if needs else step for step, needs in edged)

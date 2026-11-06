@@ -281,3 +281,47 @@ def test_site_edges_keep_only_barriers_whose_reads_and_writes_cross() -> None:
         "after": frozenset({"writer", "reader"}),
         "free": frozenset(),
     }
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_a_hooked_site_keeps_its_whole_barrier_whatever_its_steps_declare() -> None:
+    rows = Domain("pass:rows")
+    writer = TimedStep("writer", 1.0, group="a", writes=frozenset({rows}))
+    free = TimedStep("free", 1.0, group="b")
+    other = TimedStep("other", 1.0, group="c")
+    edged = registry.site_edges((writer, free, other), ("a", "b", "c"), hooked=frozenset({"b"}))
+    assert {step.name: step.needs for step in edged} == {
+        "writer": frozenset(),
+        "free": frozenset({"writer"}),
+        "other": frozenset(),
+    }
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read() -> None:
+    sites = scripts.swarm.cli.PASS_SITES
+    order = {site: index for index, site in enumerate(sites)}
+    found = sorted((s for s in registry.steps() if s.group in order), key=lambda s: order[s.group])
+    hooked = frozenset({"wrapper relay", "wrapper view"})
+    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS, hooked)
+    by_name = {step.name: step for step in edged}
+    assert "intent check" in by_name["outbox migration"].needs
+    assert "intent check" in by_name["page relay"].needs
+    assert "page relay" in by_name["tick view"].needs
+
+
+@pytest.mark.feature("swarm-tick-step-isolation")
+def test_run_sites_hands_site_edges_the_sites_its_gate_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick import sites as tick_sites
+
+    seen: list[frozenset[str]] = []
+
+    def edges(steps: object, names: object, joins: object = None, hooked: frozenset[str] = frozenset()) -> tuple[()]:
+        seen.append(hooked)
+        return ()
+
+    monkeypatch.setattr(tick_sites.step_registry, "site_edges", edges)
+    monkeypatch.setattr(tick_sites.engine, "run_graph", lambda *args, **kwargs: ())
+    gate = engine.SiteGate({"wrapper relay": lambda: True}, lambda step: False)
+    tick_sites.run_sites(("wrapper relay",), {}, {}, gate, {})
+    assert seen == [frozenset({"wrapper relay"})]
