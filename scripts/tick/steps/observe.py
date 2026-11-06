@@ -143,7 +143,7 @@ def step_spawn_due(
         and config.engine != tick.EVENTS_ENGINE
         and not tick.lifetime.sleeping(slug, store, rows)
     ):
-        if store.redis.exists(due):
+        if store.redis.exists(due) and tick.panic.state(store) is None:
             claimed = dict(rows)
             with tick.PLACING, tick._placement_pass(runtime):
                 actions += tick.skip_refused(tick._spawn, slug, config, store, ledger, runtime, claimed, doc, now_ms)
