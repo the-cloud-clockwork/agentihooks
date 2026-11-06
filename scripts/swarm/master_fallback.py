@@ -80,7 +80,7 @@ def run(environ: Mapping[str, str], state: Path = STATE) -> None:
     goes on, and the outage starts survive a restart in the state file."""
     from scripts.scheduler import process_timer
     from scripts.swarm.runtime import HerdrRuntime
-    from scripts.swarm.store import connect
+    from scripts.swarm.store import connect  # pyright: ignore[reportUnknownVariableType]
 
     down_since = load(state)
     runtime: Any = HerdrRuntime()
