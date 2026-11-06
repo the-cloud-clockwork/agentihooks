@@ -23,7 +23,6 @@
   "def _overlaps",
   "def _owned_tasks",
   "def _parked",
-  "def _prepare",
   "def _print_actions",
   "def _recover_master",
   "def _refund_parked",

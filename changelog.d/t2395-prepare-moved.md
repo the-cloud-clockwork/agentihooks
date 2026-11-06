@@ -1,0 +1,1 @@
+`_prepare`, which claims a task, picks its seat and primes its launch for the spawn pass, moves verbatim into `scripts.tick.steps.place` beside its one caller, `_spawn`. The swarm tick module re-exports it, the moved code reaches tick names through the tick module so patched tick seams still apply, and the tick pattern allowlist for the tick module drops its entry.
