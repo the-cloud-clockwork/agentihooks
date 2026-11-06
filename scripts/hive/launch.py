@@ -407,7 +407,7 @@ class HiveLaunch:
         return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
 
     def stale(self, order: LaunchOrder) -> bool:
-        """True when the order carries an older controller epoch than this pass, or the hive refused it for one."""
+        """True when the order carries a controller epoch other than this pass's, or the hive refused it as stale."""
         if order.epoch != self.held.epoch:
             return True
         ack = self.orders.ack(order)
