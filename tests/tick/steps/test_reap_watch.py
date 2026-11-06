@@ -665,3 +665,24 @@ def test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane(
         assert actions == ["could not retire eng@1-1, stuck on a provider error, retrying next tick"]
         expected.append(("put_agent", ("sw", agent)))
     assert calls == expected
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize(
+    ("free", "said"),
+    [
+        (agents._free_refused, " after repeated content refusals"),
+        (agents._free_revoked, " on revoked claude account a1"),
+        (agents._free_stuck, ", stuck on a provider error"),
+    ],
+)
+def test_a_freeing_retire_asks_the_hive_report_with_its_store_agent_homes_and_time(
+    monkeypatch: pytest.MonkeyPatch, free: Callable[..., list[str]], said: str
+) -> None:
+    calls = Calls()
+    monkeypatch.setattr(tick, "reaper", SimpleNamespace(scratch_homes=lambda slug, task: (slug, task, "homes")))
+    monkeypatch.setattr(tick, "retire_watch", SimpleNamespace(retire_unless_gone=calls.fn("retire_unless_gone", False)))
+    store, agent, runtime = _store(calls), _agent(harness="claude", account="a1"), SimpleNamespace()
+    actions = free("sw", store, "ledger", runtime, {}, agent, NOW)
+    assert actions == [f"could not retire eng@1-1{said}, retrying next tick"]
+    assert calls[0] == ("retire_unless_gone", (store, runtime, agent, ("sw", "t1", "homes"), NOW))
