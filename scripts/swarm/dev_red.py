@@ -29,7 +29,7 @@ def latest(repo_dir: str, run: Callable = subprocess.run) -> dict | None:
         "swarm.dev_red",
         ["api", ENDPOINT, "--jq", JQ],
         run,
-        cwd=repo_dir,
+        **github_reads.location(repo_dir),
         capture_output=True,
         text=True,
         check=True,
