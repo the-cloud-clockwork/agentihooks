@@ -609,3 +609,57 @@ def test_a_suspect_remote_agent_that_answers_again_is_watched_as_working(monkeyp
         ("put_agent", ("sw", working)),
         ("watch_agent", ("sw", store, "ledger", runtime, {}, working, NOW)),
     ]
+
+
+def _freeing(monkeypatch: pytest.MonkeyPatch, calls: Calls, retired: bool) -> tuple[Any, Any]:
+    """Patch the seams freeing an agent reads and return its store and runtime."""
+    monkeypatch.setattr(tick, "reaper", SimpleNamespace(scratch_homes=lambda slug, task: (slug, task, "homes")))
+    monkeypatch.setattr(tick, "_drop", calls.fn("drop", ", task reopened"))
+    monkeypatch.setattr(tick, "content_refusal", SimpleNamespace(handoff=calls.fn("handoff")))
+    monkeypatch.setattr(tick, "resume", SimpleNamespace(free_seat=calls.fn("free_seat")))
+    monkeypatch.setattr(tick, "outage", SimpleNamespace(clear_pane=calls.fn("clear_pane")))
+    return _store(calls), SimpleNamespace(retire=calls.fn("retire", retired))
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize("retired", [True, False])
+def test_an_agent_refusing_content_is_handed_off_and_its_task_dropped(
+    monkeypatch: pytest.MonkeyPatch, retired: bool
+) -> None:
+    calls = Calls()
+    store, runtime = _freeing(monkeypatch, calls, retired)
+    agent, rows = _agent(), dict(ROWS)
+    actions = agents._free_refused("sw", store, "ledger", runtime, rows, agent, NOW)
+    expected: list[tuple[Any, ...]] = [("retire", (agent,), {"homes": ("sw", "t1", "homes")})]
+    if retired:
+        assert actions == ["freed eng@1-1 after repeated content refusals, task reopened"]
+        expected += [
+            ("handoff", (store, "sw", agent, NOW)),
+            ("drop", ("sw", store, "ledger", rows, agent), {"refund": True}),
+        ]
+    else:
+        assert actions == ["could not retire eng@1-1 after repeated content refusals, retrying next tick"]
+    assert calls == expected
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+@pytest.mark.parametrize("retired", [True, False])
+def test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane(
+    monkeypatch: pytest.MonkeyPatch, retired: bool
+) -> None:
+    calls = Calls()
+    store, runtime = _freeing(monkeypatch, calls, retired)
+    agent, rows = _agent(), dict(ROWS)
+    actions = agents._free_stuck("sw", store, "ledger", runtime, rows, agent, NOW)
+    expected: list[tuple[Any, ...]] = [("retire", (agent,), {"homes": ("sw", "t1", "homes")})]
+    if retired:
+        assert actions == ["freed the seat of eng@1-1, stuck on a provider error, task reopened"]
+        expected += [
+            ("free_seat", (store, "sw", agent, NOW)),
+            ("clear_pane", (store, "sw", "eng@1-1")),
+            ("drop", ("sw", store, "ledger", rows, agent), {"refund": True}),
+        ]
+    else:
+        assert actions == ["could not retire eng@1-1, stuck on a provider error, retrying next tick"]
+        expected.append(("put_agent", ("sw", agent)))
+    assert calls == expected

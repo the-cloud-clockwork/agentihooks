@@ -215,7 +215,15 @@
         "tests/tick/steps/test_reap_watch.py::test_a_working_or_waiting_verdict_resets_the_idle_count",
         "tests/tick/steps/test_reap_watch.py::test_the_operator_a_ledger_probe_or_gc_holds_the_idle_count",
         "tests/tick/steps/test_reap_watch.py::test_an_idle_agent_counts_its_idle_ticks_and_logs_each_one",
-        "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped"
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped",
+        "tests/tick/steps/test_reap_watch.py::test_an_owner_is_restored_only_for_a_live_current_agent_that_holds_its_claim",
+        "tests/tick/steps/test_reap_watch.py::test_a_refused_retire_is_recorded_with_its_refusal_and_retried",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_awaiting_a_decision_or_a_starting_master_is_not_judged",
+        "tests/tick/steps/test_reap_watch.py::test_a_live_local_agent_has_its_owner_restored_then_is_watched",
+        "tests/tick/steps/test_reap_watch.py::test_a_missing_agent_with_a_pending_recovery_keeps_its_lease",
+        "tests/tick/steps/test_reap_watch.py::test_a_suspect_remote_agent_that_answers_again_is_watched_as_working",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_refusing_content_is_handed_off_and_its_task_dropped",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane"
       ]
     },
     {
