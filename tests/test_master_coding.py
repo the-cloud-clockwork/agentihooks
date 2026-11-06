@@ -374,3 +374,21 @@ def test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker(
     monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
     hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "echo hi"}, "session_id": SID})
     assert master_coding.is_open(SID)
+
+
+def test_the_shell_guard_refuses_another_sessions_push_during_panic(unseated, monkeypatch):
+    import fakeredis
+
+    from hooks.context import blocker_window
+    from scripts.swarm import panic
+    from scripts.swarm.store import RedisStore
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda environ=None: redis)
+    panic.engage(RedisStore(redis), "60 errors in the last hour", True, [], 0)
+    monkeypatch.setattr("hooks.context.local_test_guard.check_local_tests", Mock())
+    monkeypatch.setattr("hooks.context.swarm_wait_nudge.check_github_watch", Mock())
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git push origin x"}, "session_id": "engineer-session"}
+    with pytest.raises(hook_manager.BlockAction) as refused:
+        hook_manager._check_shell_guards(payload)
+    assert str(refused.value) == blocker_window.FROZEN.format(reason="60 errors in the last hour")
