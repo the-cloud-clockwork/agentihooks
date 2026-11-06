@@ -62,7 +62,7 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
     monkeypatch.setattr(live_binding, "relaunch_assignment", lambda agent, task, config: {"task": agent.task})
     monkeypatch.setattr(master_retire, "hold", lambda *args: "")
     monkeypatch.setattr(
-        tick, "_reported_gone", lambda hives, agent, now_ms: isinstance(hives, tick.reports.Reports) and now_ms < 0
+        tick, "_reported_gone", lambda store, agent, now_ms: isinstance(store, _Recorder) and now_ms < 0
     )
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [])
     monkeypatch.setattr(
@@ -120,7 +120,7 @@ def test_verification_retires_a_master_its_hive_reports_gone_in_one_pass_without
     monkeypatch.setattr(
         tick,
         "_reported_gone",
-        lambda hives, agent, now_ms: isinstance(hives, tick.reports.Reports) and now_ms == 5 and agent.name == "dead",
+        lambda held, agent, now_ms: held is store and now_ms == 5 and agent.name == "dead",
     )
     calls: list[tuple[Any, ...]] = []
     store = _Recorder(calls, {"key": "sw:launch-assignments"})

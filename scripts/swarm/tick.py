@@ -417,11 +417,19 @@ def _hive_lost(slug, store, agent, now_ms):
     return not fresh and (wait is None or wait["until"] <= now_ms)
 
 
-def _reported_gone(hives: reports.Reports, agent: AgentRecord, now_ms: int) -> bool:
+def _reported_gone(store: RedisStore, agent: AgentRecord, now_ms: int) -> bool:
     """True when a hive report observed after the launch shows the agent's process gone or no longer lists it."""
+    hives = reports.Reports(store.redis)
     report = hives.read(agent.hive) if agent.hive else None
     fresh = report is not None and report.get("observed_at", 0) >= (agent.launched_at or agent.started_at)
     return hives.gone(agent) or (fresh and hives.vanished(agent, now_ms))
+
+
+def _retire_unless_gone(slug: str, store: RedisStore, runtime: Any, agent: AgentRecord, now_ms: int) -> bool:
+    """True when the hive report shows the agent gone, else whether the runtime retired it."""
+    if _reported_gone(store, agent, now_ms):
+        return True
+    return runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
 
 
 def _retire_ended(
@@ -434,8 +442,7 @@ def _retire_ended(
     now_ms: int,
 ) -> list[str]:
     master_retire.forget(store, slug, agent.name)
-    hives = reports.Reports(store.redis)
-    removed = hives.removed(agent, now_ms) or _reported_gone(hives, agent, now_ms)
+    removed = reports.Reports(store.redis).removed(agent, now_ms) or _reported_gone(store, agent, now_ms)
     if not removed and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
@@ -573,7 +580,7 @@ def _refusal_due(slug, store, rows, agent, observed, now_ms):
 
 
 def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    if not _retire_unless_gone(slug, store, runtime, agent, now_ms):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     content_refusal.handoff(store, slug, agent, now_ms)
     return [
@@ -586,7 +593,7 @@ def _free_revoked(slug, store, ledger, runtime, rows, agent, now_ms):
     if agent.lane == MASTER:
         revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
         return [f"recycled master {agent.name} in its seat: {account} was revoked"]
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    if not _retire_unless_gone(slug, store, runtime, agent, now_ms):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     revoked_seats.worker_handoff(store, slug, agent, now_ms)
     return [
@@ -723,7 +730,7 @@ def _stuck_on_provider(slug, store, agent, observed, exhausted, now_ms):
 
 
 def _free_stuck(slug, store, ledger, runtime, rows, agent, now_ms):
-    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+    if not _retire_unless_gone(slug, store, runtime, agent, now_ms):
         store.put_agent(slug, agent)
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     resume.free_seat(store, slug, agent, now_ms)
@@ -1491,7 +1498,7 @@ def _retire_master(slug, store, runtime, master, now_ms):
     live = master.name in runtime.live_names()
     if held := master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
         return held
-    if not runtime.retire(master, homes=reaper.scratch_homes(slug, master.task)):
+    if not _retire_unless_gone(slug, store, runtime, master, now_ms):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"

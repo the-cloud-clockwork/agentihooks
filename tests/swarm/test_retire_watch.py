@@ -152,6 +152,38 @@ def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired
         assert retired == [name] and [a.name for a in store.agents("sw")] == [name]
 
 
+@pytest.mark.parametrize(("listed", "expected"), [(False, "retired"), (True, "could not retire")])
+def test_a_stopping_swarm_retires_a_master_its_hive_no_longer_lists_without_a_runtime_call(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, listed: bool, expected: str
+) -> None:
+    import json
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive import reports
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _retire_master
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    name = store.next_name("sw", "master")
+    started = store.start_execution("sw", AgentRecord(name, "master", "master", seat="master@sw", started_at=1))
+    master = replace(started, hive="workstation")
+    store.put_agent("sw", master)
+    now = reports.STARTUP_MS + 10
+    report = {"names": ["other", name] if listed else ["other"], "observed_at": now, "executions": {}}
+    store.redis.set(reports.key("workstation"), json.dumps(report))
+    retired: list[str] = []
+    runtime = SimpleNamespace(live_names=lambda: set(), retire=lambda agent, homes: retired.append(agent.name) or False)
+
+    outcome = _retire_master("sw", store, runtime, master, now)
+
+    if expected == "retired":
+        assert outcome == f"retired {name}" and retired == [] and store.agents("sw") == []
+    else:
+        assert outcome == f"could not retire {name}, retrying next tick" and retired == [name]
+
+
 def test_failures_are_kept_per_swarm(store):
     for at in (1, 2, 3):
         retire_watch.failed(store, "other", NAME, REFUSED, at)
