@@ -37,7 +37,8 @@ def _phase_plan(phase: dict, doc: dict, limit: int) -> list[str]:
         "The phase plan is already published. Add one task per slice with task add --plan-slice <name> and do not "
         f"publish it again: {', '.join(names)}"
         if names
-        else "None: write and publish the plan before adding tasks."
+        else "None: the published phase plan holds no slice anchors, so write the slice as a plan with anchors and "
+        "publish it before adding tasks."
     )
     return [
         _bounded("Phase plan", f"{pointer}\n{plan_read.chunk(text, ref['lines'], margin=0)}", limit),

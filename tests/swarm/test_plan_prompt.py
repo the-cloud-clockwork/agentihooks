@@ -25,7 +25,7 @@ def test_planner_instructions_keep_the_output_contract():
     for paragraph in (
         "Work it end to end, then stop:",
         "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",
-        "2. Slice only phase p1. Edit no code. Write the slice as a markdown plan: the plan you leave plan mode with, or plan.md in your work folder.",
+        "2. Slice only phase p1. Edit no code. Unless steering.md lists slice names, write the slice as a markdown plan: the plan you leave plan mode with, or plan.md in your work folder.",
         "3. When steering.md lists slice names, the phase plan is already published: reuse those slices and do not publish again. Otherwise publish the plan before adding tasks: agentihooks ledger --slug demo --as planner@abcdef-0001 publish-plan <plan file> --phase p1. It opens a GitHub issue where the repo has issues, else a ledger artifact, links and comments the phase, and every task you add in this phase carries the link.",
         '4. Add one task per slice with agentihooks ledger --slug demo --as planner@abcdef-0001 task add <id> <title> --phase p1 --plan-slice <slice name> --lane <eng or ci> --kind <kind> --description "<scope and Done when sentence>" --depends-on <ids> --territory <areas>; include --must, --check and --judge for work beyond code.',
         "5. Keep each code or ci task to one pull request, at most six territory areas and twelve tasks in the slice.",

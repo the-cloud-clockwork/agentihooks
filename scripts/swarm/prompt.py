@@ -692,8 +692,8 @@ def plan_steps(me: str, led: str, name: str, phase: str) -> list[str]:
     return [
         "Work it end to end, then stop:",
         "1. Read steering.md: project and mission intent, dependency phase evidence and any review note.",
-        f"2. Slice only phase {phase}. Edit no code. Write the slice as a markdown plan: the plan you leave plan mode "
-        "with, or plan.md in your work folder.",
+        f"2. Slice only phase {phase}. Edit no code. Unless steering.md lists slice names, write the slice as a "
+        "markdown plan: the plan you leave plan mode with, or plan.md in your work folder.",
         "3. When steering.md lists slice names, the phase plan is already published: reuse those slices and do not "
         f"publish again. Otherwise publish the plan before adding tasks: {led} publish-plan <plan file> --phase "
         f"{phase}. {PUBLISHED}, links and comments the phase, and every task you add in this phase carries the link.",

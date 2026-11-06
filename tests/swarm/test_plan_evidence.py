@@ -234,6 +234,7 @@ def test_phase_plan_chunk_is_bounded(monkeypatch):
     task, doc = _ingested()
     text = ledger_workspace.steering(task, doc)
     assert "[Cut Phase plan:" in text
+    assert "[Cut Slice names:" in text
     assert "- Second slice" not in text
 
 
@@ -244,7 +245,10 @@ def test_phase_plan_without_slice_anchors_says_none(monkeypatch):
     task, doc = _ingested("13-14")
     text = ledger_workspace.steering(task, doc)
     assert "## Later\n- Not this phase\n" in text
-    assert "Slice names\nNone: write and publish the plan before adding tasks.\n" in text
+    assert (
+        "Slice names\nNone: the published phase plan holds no slice anchors, so write the slice as a plan with "
+        "anchors and publish it before adding tasks.\n"
+    ) in text
 
 
 def test_unreadable_phase_plan_names_the_reason(monkeypatch):
