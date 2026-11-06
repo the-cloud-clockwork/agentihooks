@@ -10,6 +10,7 @@ from typing import Any
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
 from scripts.tick.deadline import Deadline
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
 
 Get = Callable[[str], Any]
@@ -527,8 +528,8 @@ STEPS = (
         feature="swarm-tick-agents-reap",
     ),
     CallStep("recover outages", "agents", _recover_outages, LISTED, ROWS),
-    CallStep("strays", "agents", _strays_step, frozenset({"stopped branch"}), pass_domains("config")),
-    CallStep("failed panes", "agents", _failed_panes),
+    CallStep("strays", "agents", _strays_step, frozenset({"drained resume"}), pass_domains("config"), lane=SLOW),
+    CallStep("failed panes", "agents", _failed_panes, lane=SLOW),
     CallStep(
         "orphans",
         "tasks",
@@ -537,8 +538,8 @@ STEPS = (
         frozenset({TASKS}) | pass_domains("config", "rows"),
         frozenset({TASKS}),
     ),
-    CallStep("conversations", "close", _conversations_step),
-    CallStep("session models", "close", _session_models_step),
+    CallStep("conversations", "close", _conversations_step, lane=SLOW),
+    CallStep("session models", "close", _session_models_step, lane=SLOW),
     CallStep("handoff transfers", "close", _transfers),
 )
 

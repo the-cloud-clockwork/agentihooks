@@ -18,6 +18,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
 
@@ -155,12 +156,12 @@ STEPS = (
     CallStep("inbox relay", "wrapper probes", held(_inbox_relay)),
     CallStep("launch slots", "wrapper probes", held(_launch_slots)),
     CallStep("outage probes", "wrapper probes", held(_outage_probes)),
-    CallStep("hive ledger", "wrapper probes", held(_hive_ledger)),
+    CallStep("hive ledger", "wrapper probes", held(_hive_ledger), lane=SLOW),
     CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
-    CallStep("host pressure", "wrapper health", held(_host_pressure)),
-    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog)),
-    CallStep("ledger probe", "wrapper health", held(_ledger_probe)),
-    CallStep("prompt backlog", "wrapper health", held(_prompt_backlog)),
+    CallStep("host pressure", "wrapper health", held(_host_pressure), lane=SLOW),
+    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog), lane=SLOW),
+    CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
+    CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
     CallStep(
