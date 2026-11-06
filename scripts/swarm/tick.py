@@ -157,8 +157,8 @@ from scripts.tick.steps.masters import (  # noqa: F401
     _woken,
     place_master,
     respawn_master,
-    run_group,
 )
+from scripts.tick.steps.masters import _run_group as run_group
 from scripts.tick.steps.observe import (  # noqa: F401
     _acknowledging,
     _collect_acks,

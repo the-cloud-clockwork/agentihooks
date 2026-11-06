@@ -53,7 +53,7 @@ MASTERED = (
     "place_master",
     "_under_tick_lock",
     "_PassView",
-    "run_group",
+    "_run_group",
     "_print_actions",
     "_codex_hook_order",
 )
@@ -65,7 +65,7 @@ MOVED = [(claims, name) for name in CLAIMED] + [(masters, name) for name in MAST
 def test_tick_reexports_the_moved_name(module: ModuleType, name: str) -> None:
     moved = getattr(module, name)
     assert moved.__module__ == module.__name__
-    assert getattr(tick, name) is moved
+    assert getattr(tick, name.removeprefix("_") if name == "_run_group" else name) is moved
 
 
 @pytest.mark.feature("swarm-tick-claims-and-masters")

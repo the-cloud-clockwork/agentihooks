@@ -474,7 +474,7 @@ class _PassView:
         return self._state.get(key) if domain == steps.PASS else None
 
 
-def run_group(name: str, **state: Any) -> list[str]:
+def _run_group(name: str, **state: Any) -> list[str]:
     """Run the registered steps of tick group ``name`` with ``state``, applying their task writes, returning actions.
 
     Actions of slow lane steps that end after the group returns are printed when they end.
