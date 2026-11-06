@@ -87,7 +87,7 @@ def run(environ: Mapping[str, str], state: Path = STATE) -> None:
     while True:
         try:
             store: Any = connect()
-            for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since):
+            for line in check(store, environ, runtime.live_names, int(time.time() * 1000), down_since, start):
                 print(line, flush=True)
             state.parent.mkdir(parents=True, exist_ok=True)
             state.write_text(json.dumps(down_since))
