@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.671 · 2026-11-06
+
+### 2026-11-06 · f3203edbbe0a · #9839 · @agenticore-app
+
+**Notice and watch steps on the slow lane, lanes sized for the minute**
+
+This change moves notice and watch steps off the critical path and onto the slow lane, since nothing on the critical path actually depends on them, keeping each pass lane within the one-minute budget (60s critical, 59s slow). To satisfy the registry validator's rule against unordered readers and writers of the same pass domain, several steps' needs were reordered to point at the correct upstream step. site_edges now adds a barrier only where declared reads and writes genuinely cross, and run_tick goldens were regenerated to reflect the steps now running on the slow lane.
+
 ## v2.17.669 · 2026-11-06
 
 ### 2026-11-06 · db0748fb4973 · #9850 · @nestorcolt
