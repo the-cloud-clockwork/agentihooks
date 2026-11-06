@@ -762,6 +762,10 @@ def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_
     assert reissued.generation == stale.generation + 1
     assert reissued.execution_id != stale.execution_id
     assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), stale.execution_id)) == {
+        "reason": "hive launch failed: stale_epoch",
+        "generation": stale.generation,
+    }
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
     reaped = (
         f"reap:fixture:{stale.execution_id}:{stale.generation}"

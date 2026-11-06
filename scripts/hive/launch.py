@@ -411,7 +411,7 @@ class HiveLaunch:
         if order.epoch != self.held.epoch:
             return True
         ack = self.orders.ack(order)
-        return ack is not None and ack.status != "live" and ack.failure == STALE_EPOCH
+        return ack is not None and ack.failure == STALE_EPOCH
 
     def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
         self.reap(order, previous)
@@ -500,7 +500,6 @@ class HiveLaunch:
                 else:
                     self.reap(order, previous)
                 self.end(previous, f"hive launch failed: {STALE_EPOCH}")
-                self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
                 self.reap(order, previous)
                 self.end(previous, "hive launch order abandoned")

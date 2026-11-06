@@ -1,5 +1,6 @@
 import time
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -492,7 +493,9 @@ def test_beat_keeps_beating_through_a_hosted_lease_outage(
             raise lease.LeaseUnavailable("hosted controller lease is unavailable: timed out")
 
     monkeypatch.setattr(lease, "renew", renew)
-    assert lease.beat(store, "sw", held, Stop(clock, 0, 2)) is None
+    assert held is not None
+    stop: Any = Stop(clock, 0, 2)
+    assert lease.beat(store, "sw", held, stop) is None
     assert renewals == [(store, "sw", held)] * 2
 
 
@@ -511,6 +514,7 @@ def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(
     import io
     import json
     import urllib.error
+    from email.message import Message
 
     from scripts.swarm import ledger_client
     from scripts.swarm_ledger.api import client
@@ -523,7 +527,7 @@ def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(
         if isinstance(raised, OSError):
             raise raised
         body = json.dumps({"error": {"code": "stale_controller", "message": "stale"}}).encode()
-        raise urllib.error.HTTPError("https://ledger.example", int(raised), "failed", {}, io.BytesIO(body))
+        raise urllib.error.HTTPError("https://ledger.example", int(raised), "failed", Message(), io.BytesIO(body))
 
     monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example")
     monkeypatch.setattr(ledger_client, "_ledger", lambda: Ledger())
