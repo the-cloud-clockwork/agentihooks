@@ -212,6 +212,14 @@ def _not_modified(output: str | bytes | None) -> bool:
     return bool(re.match(pattern, output))
 
 
+def location(repo: str) -> dict[str, Any]:
+    """The run options that point a gh read at repo: a checkout path as its working directory, an owner and name
+    through GH_REPO with no working directory."""
+    if Path(repo).is_absolute():
+        return {"cwd": repo}
+    return {"env": {**os.environ, "GH_REPO": repo}}
+
+
 def rest(
     caller: str, args: list[str], run: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run, **options: Any
 ) -> subprocess.CompletedProcess[Any]:
