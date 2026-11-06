@@ -884,6 +884,16 @@ def test_a_merged_recorded_task_skips_group_members_done_or_gone(merging):
     assert ledger.rows["t3"] == {"id": "t3", "state": "done", "claimed_by": "", "pr_url": URL, "awaiting": ""}
 
 
+@pytest.mark.parametrize("live", [{"state": "open", "claimed_by": ""}, {"pr_url": "https://github.com/o/r/pull/9"}])
+def test_a_merged_recorded_task_the_ledger_moved_since_the_pass_read_is_left_alone(merging, live):
+    rows = {"t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL}}
+    ledger = Ledger({"t1": {**rows["t1"], **live}})
+    before = dict(ledger.rows["t1"])
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == []
+    assert ledger.rows["t1"] == before
+
+
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
 def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
     merging.rows["t1"]["kind"] = kind

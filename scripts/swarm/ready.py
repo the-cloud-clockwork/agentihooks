@@ -236,7 +236,7 @@ def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, 
         return []
     if ledger_kinds.after(row) and ledger_kinds.unmet(row):
         return []
-    if row.get("split") and done_gate.refusal(row, url, run.github):
+    if row.get("split") and done_gate.refusal(row, "", run.github):
         return []
     if (intent.Verdicts(run.slug, intent.NAME).read(task_id) or {}).get("verdict") == intent.FAIL:
         return []
