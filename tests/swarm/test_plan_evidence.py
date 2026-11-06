@@ -188,3 +188,70 @@ def test_planner_steering_uses_utf8_in_an_ascii_locale(tmp_path, monkeypatch):
         capture_output=True,
     )
     assert b"\xc3\xb1" in (tmp_path / "steering.md").read_bytes()
+
+
+PLAN = (
+    "# Plan\n\n## Ingest\n\n<!-- slice: one -->\n### one\n- First slice\n\n"
+    "<!-- slice: two -->\n### two\n- Second slice\n\n## Later\n- Not this phase\n"
+)
+PLAN_URL = "https://ledger.example/artifacts/demo/plan-file"
+
+
+def _ingested(lines: str = "3-12") -> tuple[dict, dict]:
+    task = {"id": "plan", "title": "Slice", "kind": "plan", "phase": "ingest"}
+    doc = {
+        "overview": "Intent",
+        "phases": [{"id": "ingest", "title": "Ingest", "plan_ref": {"artifact": PLAN_URL, "lines": lines}}],
+        "tasks": [],
+        "artifacts": [{"plan": True, "file": {"id": "plan-file"}}],
+    }
+    return task, doc
+
+
+def test_planner_steering_carries_the_phase_plan_chunk_and_slice_names(monkeypatch):
+    from scripts.swarm_ledger import ledger_artifacts
+
+    monkeypatch.delenv("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", raising=False)
+    monkeypatch.setattr(ledger_artifacts, "read", lambda slug, file_id: PLAN.encode())
+    task, doc = _ingested()
+    text = ledger_workspace.steering(task, doc)
+    assert (
+        "Phase plan\nRead the whole phase plan with agentihooks plan read --phase ingest.\n"
+        "## Ingest\n\n<!-- slice: one -->\n### one\n- First slice\n\n<!-- slice: two -->\n### two\n- Second slice\n"
+    ) in text
+    assert (
+        "Slice names\nThe phase plan is already published. Add one task per slice with task add --plan-slice "
+        "<name> and do not publish it again: one, two"
+    ) in text
+    assert "Not this phase" not in text
+
+
+def test_phase_plan_chunk_is_bounded(monkeypatch):
+    from scripts.swarm_ledger import ledger_artifacts
+
+    monkeypatch.setenv("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", "80")
+    monkeypatch.setattr(ledger_artifacts, "read", lambda slug, file_id: PLAN.encode())
+    task, doc = _ingested()
+    text = ledger_workspace.steering(task, doc)
+    assert "[Cut Phase plan:" in text
+    assert "- Second slice" not in text
+
+
+def test_phase_plan_without_slice_anchors_says_none(monkeypatch):
+    from scripts.swarm_ledger import ledger_artifacts
+
+    monkeypatch.setattr(ledger_artifacts, "read", lambda slug, file_id: PLAN.encode())
+    task, doc = _ingested("13-14")
+    text = ledger_workspace.steering(task, doc)
+    assert "## Later\n- Not this phase\n" in text
+    assert "Slice names\nNone: write and publish the plan before adding tasks.\n" in text
+
+
+def test_unreadable_phase_plan_names_the_reason(monkeypatch):
+    task, doc = _ingested()
+    doc["artifacts"] = []
+    text = ledger_workspace.steering(task, doc)
+    assert (
+        "Phase plan\nRead the whole phase plan with agentihooks plan read --phase ingest.\n"
+        "It cannot be read here: plan artifact is missing or is not marked as a plan\n"
+    ) in text
