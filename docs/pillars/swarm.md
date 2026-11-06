@@ -4526,8 +4526,9 @@ tick units:
 
 1. Cancels the scheduled tick cron.
 2. Retires an `agentihooks-swarm` timer and service an older install left.
-3. Disables and deletes `agentihooks-swarm-waits.timer`, `agentihooks-swarm-waits.service`,
-   `agentihooks-tick-watch.service` and `agentihooks-inbox-waker.service`, then reloads the user systemd manager.
+3. Disables `agentihooks-swarm-waits.timer`, `agentihooks-tick-watch.service` and
+   `agentihooks-inbox-waker.service`, deletes those three unit files and `agentihooks-swarm-waits.service`, which only
+   its timer starts, then reloads the user systemd manager.
 
 The `agentihooks-scheduler` and `agentihooks-quota-prober` services stay, and the workstation keeps the herdr client,
 its master and the agents it hosts as a hive. The [delivery guard](#scheduled-tick-delivery-guard) reports nothing
@@ -4544,8 +4545,9 @@ agentihooks swarm my-swarm tick
 ```
 
 On a workstation whose swarms are all served in Anton, `list-unit-files` lists `agentihooks-scheduler.service` and
-`agentihooks-quota-prober.service` and none of the four retired units. `agentihooks swarm <id> tick` exits 1 for a served swarm and runs
-one pass for a local one. More on the controller side: [Retire the workstation tick](../reference/deployment-modes.md#retire-the-workstation-tick).
+`agentihooks-quota-prober.service` and none of the four retired units. `agentihooks swarm <id> tick` exits 1 for a
+served swarm and runs one pass for a local one. More on the controller side:
+[Retire the workstation tick](../reference/deployment-modes.md#retire-the-workstation-tick).
 
 | Symptom | Cause | Fix |
 |---|---|---|
