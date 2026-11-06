@@ -256,6 +256,7 @@
         "tests/tick/steps/test_master_placement_ops.py::test_recover_master_adopts_a_live_master_of_this_swarm_code",
         "tests/tick/steps/test_master_placement_ops.py::test_recover_master_prefers_the_seat_occupant_and_keeps_its_execution_record",
         "tests/tick/steps/test_master_placement_ops.py::test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_execution_record",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_adopts_a_legacy_named_master_of_this_swarm",
         "tests/tick/steps/test_master_placement_ops.py::test_place_master_starts_the_master_on_its_deployment_under_the_lock",
         "tests/tick/steps/test_master_placement_ops.py::test_respawn_master_drops_gone_leads_then_adopts_or_spawns",
         "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_is_never_taken_for_a_stopping_swarm",

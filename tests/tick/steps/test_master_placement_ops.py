@@ -40,6 +40,18 @@ class Calls(list[tuple[Any, ...]]):
         return [call[0] for call in self]
 
 
+def _given(result: Callable[..., Any]) -> Callable[..., Any]:
+    """Return a fake that refuses a missing argument and answers ``result`` called with its arguments."""
+
+    def call(*args: Any, **kwargs: Any) -> Any:
+        """Refuse a None argument, then answer the result."""
+        assert None not in args
+        assert None not in kwargs.values()
+        return result(*args, **kwargs)
+
+    return call
+
+
 def _master_record(name: str = "master@abc123-0001", **fields: Any) -> AgentRecord:
     """Return a lead master record named ``name`` with ``fields`` replaced."""
     base: dict[str, Any] = {"name": name, "lane": MASTER, "task": MASTER, "seat": SEAT}
@@ -58,13 +70,13 @@ def _store(
     return SimpleNamespace(
         redis=redis,
         seats=seats,
-        agents=lambda slug: list(agents or []),
-        execution_occupants=lambda slug: dict(occupants or {}),
+        agents=_given(lambda slug: list(agents or [])),
+        execution_occupants=_given(lambda slug: dict(occupants or {})),
         put_agent=calls.fn("put_agent"),
         drop_agent=calls.fn("drop_agent"),
         clear_handoff=calls.fn("clear_handoff"),
-        handoff=lambda slug, task: "handoff text",
-        peer=lambda slug: "peer",
+        handoff=_given(lambda slug, task: "handoff text"),
+        peer=_given(lambda slug: "peer"),
         key=lambda slug, kind: f"{slug}/{kind}",
     )
 
@@ -107,7 +119,7 @@ def test_retire_master_returns_the_hold_without_retiring(monkeypatch: pytest.Mon
         seen.append((slug, master.name, reason, live, now_ms))
         return "held"
 
-    monkeypatch.setattr(tick.master_retire, "hold", hold)
+    monkeypatch.setattr(tick.master_retire, "hold", _given(hold))
     master = _master_record()
     assert masters._retire_master("sw", _store(calls), _runtime(calls, {master.name}), master, NOW) == "held"
     assert seen == [("sw", master.name, "the swarm is stopping", True, NOW)]
@@ -126,7 +138,7 @@ def test_retire_master_drops_the_master_only_once_retired(
     monkeypatch: pytest.MonkeyPatch, retired: bool, said: str, dropped: bool
 ) -> None:
     calls = Calls()
-    monkeypatch.setattr(tick.master_retire, "hold", lambda *args: None)
+    monkeypatch.setattr(tick.master_retire, "hold", _given(lambda *args: None))
     monkeypatch.setattr(tick.reaper, "scratch_homes", lambda slug, task: [f"{slug}:{task}"])
     master = _master_record()
     runtime = _runtime(calls, retired=retired)
@@ -138,7 +150,9 @@ def test_retire_master_drops_the_master_only_once_retired(
 @pytest.mark.feature("swarm-tick-master-placement")
 def test_a_stopping_swarm_waits_for_its_workers_then_retires_each_master(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
-    monkeypatch.setattr(tick, "_retire_master", lambda slug, store, runtime, master, now_ms: f"retired {master.name}")
+    monkeypatch.setattr(
+        tick, "_retire_master", _given(lambda slug, store, runtime, master, now_ms: f"retired {master.name}")
+    )
     config = SimpleNamespace(state="stopping")
     worker = AgentRecord("engineer@abc123-0002", "eng", "t1")
     first, second = _master_record(), _master_record("master@abc123-0003", seat="master-2@sw")
@@ -156,8 +170,8 @@ def _starts(monkeypatch: pytest.MonkeyPatch, pending: dict[str, Any], blocked: b
     """Patch the master start record to answer ``pending`` and ``blocked`` and record its writes."""
     calls = Calls()
     start = SimpleNamespace(
-        read=lambda store, slug: pending,
-        blocked=lambda found, now_ms: blocked,
+        read=_given(lambda store, slug: pending),
+        blocked=_given(lambda found, now_ms: blocked),
         begin=calls.fn("begin"),
         withdraw=calls.fn("withdraw"),
         failed=calls.fn("start failed", ["master start failed"]),
@@ -176,11 +190,11 @@ def _seats(
 ) -> None:
     """Patch the seat spawn module with the given refusals and placement."""
     spawn = SimpleNamespace(
-        placed_elsewhere=lambda runtime, lane, held: elsewhere,
-        no_slot=lambda config, runtime, lane: slot,
-        host_hold=lambda slug, store, now_ms, lane: host,
-        place=place,
-        room_refused=lambda exc: room,
+        placed_elsewhere=_given(lambda runtime, lane, held: elsewhere),
+        no_slot=_given(lambda config, runtime, lane: slot),
+        host_hold=_given(lambda slug, store, now_ms, lane: host),
+        place=_given(place) if place else None,
+        room_refused=_given(lambda exc: room),
         SeatFailed=tick.seat_spawn.SeatFailed,
     )
     monkeypatch.setattr(tick, "seat_spawn", spawn)
@@ -244,7 +258,9 @@ def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
 
     _seats(monkeypatch, host="host held", place=place, room=True)
     config = SimpleNamespace(state="running")
-    assert masters._master("sw", config, _store(calls), _runtime(calls), NOW, past_host=past_host) == said
+    store, runtime = _store(calls), _runtime(calls)
+    started = masters._master("sw", config, store, runtime, NOW, past_host=True) if past_host else None
+    assert (started or masters._master("sw", config, store, runtime, NOW)) == said
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
@@ -301,7 +317,7 @@ def _placement(monkeypatch: pytest.MonkeyPatch, calls: Calls, pending: dict[str,
 
     _seats(monkeypatch, place=place)
     monkeypatch.setattr(
-        tick, "transfers", SimpleNamespace(attach=lambda store, slug, record: f"transfer {record.name}")
+        tick, "transfers", SimpleNamespace(attach=_given(lambda store, slug, record: f"transfer {record.name}"))
     )
     monkeypatch.setattr(
         tick,
@@ -312,14 +328,14 @@ def _placement(monkeypatch: pytest.MonkeyPatch, calls: Calls, pending: dict[str,
         tick,
         "master_move",
         SimpleNamespace(
-            pinned=lambda store, slug, task, transfer: {**task, "pinned": transfer},
+            pinned=_given(lambda store, slug, task, transfer: {**task, "pinned": transfer}),
             placed=calls.fn("move placed"),
-            account_moved=lambda slug, launched, record: [f"moved {launched['id']}"],
+            account_moved=_given(lambda slug, launched, record: [f"moved {launched['id']}"]),
         ),
     )
-    monkeypatch.setattr(tick, "primed", lambda store, slug, seat, task: {**task, "primed": seat})
+    monkeypatch.setattr(tick, "primed", _given(lambda store, slug, seat, task: {**task, "primed": seat}))
     monkeypatch.setattr(tick, "launch_check", SimpleNamespace(begin=calls.fn("launch check")))
-    monkeypatch.setattr("scripts.swarm.master_launch._filled", lambda task, config: {**task, "filled": True})
+    monkeypatch.setattr("scripts.swarm.master_launch._filled", _given(lambda task, config: {**task, "filled": True}))
     return starts, prepared
 
 
@@ -449,6 +465,17 @@ def test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_exe
     assert calls == [("put_agent", ("sw", adopted)), ("occupy", (SEAT, "master@abc123-0004", NOW))]
 
 
+@pytest.mark.feature("swarm-tick-master-placement")
+@pytest.mark.usefixtures("placed")
+def test_recover_master_adopts_a_legacy_named_master_of_this_swarm() -> None:
+    calls = Calls()
+    config = SimpleNamespace(code=CODE)
+    said = masters._recover_master("sw", config, _store(calls), _runtime(calls, {"sw-master-2"}), NOW)
+    assert said == ["adopted live master sw-master-2"]
+    adopted = AgentRecord("sw-master-2", MASTER, MASTER, started_at=NOW, seat=SEAT, pane_id="placed sw-master-2")
+    assert calls == [("put_agent", ("sw", adopted)), ("occupy", (SEAT, "sw-master-2", NOW))]
+
+
 @pytest.fixture
 def unlocked(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     """Run each act under a fake tick lock with config ``running`` and record its slug, store and caller."""
@@ -458,7 +485,7 @@ def unlocked(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
         seen.append((slug, caller))
         return act(SimpleNamespace(state="running", name="config"), "held")
 
-    monkeypatch.setattr(tick, "_under_tick_lock", locked)
+    monkeypatch.setattr(tick, "_under_tick_lock", _given(locked))
     return seen
 
 
@@ -470,7 +497,7 @@ def test_place_master_starts_the_master_on_its_deployment_under_the_lock(
     monkeypatch.setattr(controller, "deployment_for", lambda config, env: f"deploy {config.name}")
     monkeypatch.setattr(controller, "FencedRuntime", lambda *args: fenced.append(args) or "fenced")
     monkeypatch.setattr(
-        tick, "_master", lambda slug, config, store, runtime, now_ms: [f"{runtime} {config.name} {now_ms}"]
+        tick, "_master", _given(lambda slug, config, store, runtime, now_ms: [f"{runtime} {config.name} {now_ms}"])
     )
     assert masters.place_master("sw", "store", "runtime", NOW) == [f"fenced config {NOW}"]
     assert fenced == [("store", "sw", "held", "runtime", "deploy config")]
@@ -493,8 +520,8 @@ def test_respawn_master_drops_gone_leads_then_adopts_or_spawns(
     runtime = SimpleNamespace(live_names=lambda: {live.name})
     fenced: list[tuple[Any, ...]] = []
     monkeypatch.setattr(controller, "FencedRuntime", lambda *args: fenced.append(args) or runtime)
-    monkeypatch.setattr(tick, "_recover_master", lambda slug, config, store, runtime, now_ms: recovered)
-    monkeypatch.setattr(tick, "_master", lambda slug, config, store, runtime, now_ms: ["spawned"])
+    monkeypatch.setattr(tick, "_recover_master", _given(lambda slug, config, store, runtime, now_ms: recovered))
+    monkeypatch.setattr(tick, "_master", _given(lambda slug, config, store, runtime, now_ms: ["spawned"]))
     assert masters.respawn_master("sw", store, "runtime", NOW) == [f"dropped the gone master {gone.name}", *said]
     assert calls == [("drop_agent", ("sw", gone.name))]
     assert fenced == [(store, "sw", "held", "runtime", controller.LOCAL)]
@@ -507,7 +534,7 @@ def _lock(
     """Patch the lease and tick lock and return a store whose config states are ``states`` in order."""
     calls = Calls()
     configs = iter(SimpleNamespace(state=state) for state in states)
-    store = SimpleNamespace(config=lambda slug: next(configs), ensure_code=lambda slug: next(configs))
+    store = SimpleNamespace(config=_given(lambda slug: next(configs)), ensure_code=_given(lambda slug: next(configs)))
 
     @contextmanager
     def held_pass(store: Any, slug: str, lease_held: Any) -> Iterator[None]:
