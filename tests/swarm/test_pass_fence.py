@@ -15,7 +15,7 @@ class _Store:
 
 
 def _wrapper(state: dict[str, Any]) -> Any:
-    wrapper = object.__new__(cli._Wrapper)
+    wrapper: Any = object.__new__(cli._Wrapper)
     wrapper.held = "held"
     wrapper.beating = "beating"
     wrapper.state = state
