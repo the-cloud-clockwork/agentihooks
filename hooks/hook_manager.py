@@ -1075,10 +1075,11 @@ def _inject_after_tool(payload: dict) -> None:
 
 
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
-    _master_registry()
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
+        from scripts.swarm.safety_nudge import record
 
+        record(os.environ)
         beat(state)
         if prompt is not None:
             heard(prompt)
@@ -1086,15 +1087,6 @@ def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None
             report(payload.get("model", ""))
     except Exception as e:
         log("swarm heartbeat failed", {"error": str(e)})
-
-
-def _master_registry() -> None:
-    try:
-        from scripts.swarm.safety_nudge import record
-
-        record(os.environ)
-    except Exception as e:
-        log("master registry refresh failed", {"error": str(e)})
 
 
 def _swarm_outcome(payload: dict) -> None:

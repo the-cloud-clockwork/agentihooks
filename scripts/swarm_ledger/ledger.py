@@ -417,9 +417,9 @@ def mine(state, name):
 def cmd_join(args: argparse.Namespace) -> None:
     send(args, "join", role=args.role)
     if args.role == "orchestrator":
-        from scripts.swarm import safety_nudge
+        from scripts.swarm_ledger.adapters.swarm import Swarm
 
-        safety_nudge.record(os.environ)
+        Swarm().safety_nudge.record(os.environ)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 

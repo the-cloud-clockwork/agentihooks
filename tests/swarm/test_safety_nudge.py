@@ -60,15 +60,15 @@ class FakeCron:
 @pytest.mark.feature("master-safety-nudge")
 def test_a_master_in_a_herdr_pane_is_recorded_and_dead_masters_are_dropped(tmp_path: Path) -> None:
     proc = _proc(tmp_path, 11, 22)
-    safety_nudge.record(_master(tmp_path, "master@demo-1", "p1"), pid=11, now=100, proc=proc)
+    safety_nudge.record(_master(tmp_path, "master@abc123-0001", "p1"), pid=11, now=100, proc=proc)
     (proc / "11").rmdir()
-    safety_nudge.record(_master(tmp_path, "master@demo-2", "p2", "codex"), pid=22, now=200, proc=proc)
+    safety_nudge.record(_master(tmp_path, "master@abc123-0002", "p2", "codex"), pid=22, now=200, proc=proc)
 
     entries = json.loads((tmp_path / "home" / safety_nudge.REGISTRY).read_text())
 
     assert entries == {
-        "master@demo-2": {
-            "seat": "master@demo-2",
+        "master@abc123-0002": {
+            "seat": "master@abc123-0002",
             "slug": "demo",
             "harness": "codex",
             "pane": "p2",
@@ -81,8 +81,8 @@ def test_a_master_in_a_herdr_pane_is_recorded_and_dead_masters_are_dropped(tmp_p
 @pytest.mark.feature("master-safety-nudge")
 def test_a_session_that_is_not_a_master_in_a_pane_is_never_recorded(tmp_path: Path) -> None:
     proc = _proc(tmp_path, 11)
-    worker = _master(tmp_path, "eng-1@demo-3", "p1")
-    outside = _env(tmp_path, AGENTIHOOKS_AGENT_NAME="master@demo-1", AGENTIHOOKS_SWARM="demo")
+    worker = _master(tmp_path, "ci@abc123-0003", "p1")
+    outside = _env(tmp_path, AGENTIHOOKS_AGENT_NAME="master@abc123-0001", AGENTIHOOKS_SWARM="demo")
 
     assert safety_nudge.record(worker, pid=11, now=1, proc=proc) is None
     assert safety_nudge.record(outside, pid=11, now=1, proc=proc) is None
@@ -102,7 +102,7 @@ def test_an_unreadable_registry_reads_as_empty(tmp_path: Path) -> None:
 def test_a_round_nudges_idle_claude_and_codex_masters_and_skips_busy_or_typed_panes(tmp_path: Path) -> None:
     proc = _proc(tmp_path, 1, 2, 3, 4, 5)
     for pid, pane, target in ((1, "p1", ""), (2, "p2", "codex"), (3, "p3", ""), (4, "p4", ""), (5, "p5", "")):
-        safety_nudge.record(_master(tmp_path, f"master@demo-{pid}", pane, target), pid=pid, now=10, proc=proc)
+        safety_nudge.record(_master(tmp_path, f"master@abc123-000{pid}", pane, target), pid=pid, now=10, proc=proc)
     (proc / "5").rmdir()
     herdr = FakeHerdr({"p1": "idle", "p2": "done", "p3": "working", "p4": "idle"}, typed={"p4": "half a line"})
 
@@ -117,7 +117,7 @@ def test_a_round_nudges_idle_claude_and_codex_masters_and_skips_busy_or_typed_pa
     }
     logged = [json.loads(line) for line in (tmp_path / "home" / "logs" / safety_nudge.LOG).read_text().splitlines()]
     assert [(e["pane"], e["outcome"], e["at"]) for e in logged] == [(r["pane"], r["outcome"], 3600) for r in results]
-    assert "master@demo-5" not in json.loads((tmp_path / "home" / safety_nudge.REGISTRY).read_text())
+    assert "master@abc123-0005" not in json.loads((tmp_path / "home" / safety_nudge.REGISTRY).read_text())
 
 
 @pytest.mark.feature("master-safety-nudge")
@@ -129,7 +129,7 @@ def test_safety_nudge_text_is_the_operator_words() -> None:
 def test_a_herdr_failure_is_logged_as_failed_and_the_round_goes_on(tmp_path: Path) -> None:
     proc = _proc(tmp_path, 1, 2)
     for pid in (1, 2):
-        safety_nudge.record(_master(tmp_path, f"master@demo-{pid}", f"p{pid}"), pid=pid, now=10, proc=proc)
+        safety_nudge.record(_master(tmp_path, f"master@abc123-000{pid}", f"p{pid}"), pid=pid, now=10, proc=proc)
 
     class Broken(FakeHerdr):
         def agent_status(self, agent: safety_nudge.Pane) -> str:
@@ -167,9 +167,9 @@ def test_install_works_for_a_user_with_no_table(tmp_path: Path) -> None:
 @pytest.mark.feature("master-safety-nudge")
 def test_check_reports_the_job_and_the_pane_of_this_master(tmp_path: Path) -> None:
     proc = _proc(tmp_path, 1, 2)
-    me = _master(tmp_path, "master@demo-1", "p1")
+    me = _master(tmp_path, "master@abc123-0001", "p1")
     safety_nudge.record(me, pid=1, now=10, proc=proc)
-    safety_nudge.record(_master(tmp_path, "master@demo-2", "p2"), pid=2, now=10, proc=proc)
+    safety_nudge.record(_master(tmp_path, "master@abc123-0002", "p2"), pid=2, now=10, proc=proc)
 
     missing = safety_nudge.check(me, runner=FakeCron([]), proc=proc)
     found = safety_nudge.check(me, runner=FakeCron([f"0 * * * * x {safety_nudge.MARKER}"]), proc=proc)

@@ -178,3 +178,9 @@ class Swarm:
         from scripts.swarm import ledger_cutover
 
         return ledger_cutover
+
+    @property
+    def safety_nudge(self):
+        from scripts.swarm import safety_nudge
+
+        return safety_nudge
