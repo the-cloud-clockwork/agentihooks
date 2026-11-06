@@ -589,7 +589,8 @@ returned steps keep their order, name, group, lane, budget and action; only
 
 With steps `a1` and `a2` in group `a`, `b1` in `b` needing `a1`, and `c1` in
 `c`, `site_edges(steps, ("a", "b", "c"))` gives `b1` the needs `a1` and `a2`
-and `c1` the need `b1`. With sites `("a", "empty", "b")`, `b1` needs `a1`.
+and `c1` the need `b1`. With sites `("a", "empty", "b")`, `b1` still needs `a1` and `a2`: the
+empty site changes nothing, and `c1`, outside the sites, keeps no needs.
 
 #### Site gates
 
@@ -630,32 +631,44 @@ state.
 
 `run_tick` still runs the `before` group and the `closing` group through
 `run_group`, before and after the graph. The checks the hand written pass ran
-between groups are now site hooks and `shut` rules:
+between groups are now site hooks and `shut` rules. The table lists every site
+of `run_tick` in pass order; `tick` runs only the tick sites and their hooks.
+Tick sites not listed have no hook.
 
-| Site | Hook |
-| --- | --- |
-| `start` | Loads the master move modules, starts the pass process scan in `run_tick`, sets `now_ms` and `due`, adds the task appliers |
-| `agents` | Shuts the site and every later tick site when observation left `config`, `doc` or `rows` out of the box |
-| `tasks` | Shuts the site and every later tick site when the drained resume left `config` out of the box |
-| `wrapper health` | Holds the ledger view and fences the runtime the rest of the pass uses |
-| `wrapper commands` | Starts the spawn stall watch, closed when the graph returns |
-| `wrapper phases` | Ends the pass when the ledger is binned or gone, else reads its pass state |
-| `wrapper intent` | Reads the pass state and config the intent check judges against |
-| `wrapper relay` | Ends the tick's process scan, raises what the intent check held and keeps its view and checked actions |
-| `wrapper view` | Reads the pass state, config and task rows again for the view, events and metrics sites |
-| `wrapper metrics` | Hands metrics the number of actions the pass counted so far |
+| Order in `run_tick` | Site | Hook |
+| --- | --- | --- |
+| 1 | `wrapper probes` | None |
+| 2 | `wrapper health` | Holds the ledger view and fences the runtime the rest of the pass uses |
+| 3 | `wrapper commands` | Starts the spawn stall watch, closed when the graph returns |
+| 4 | `wrapper phases` | Ends the pass when the ledger is binned or gone, else reads its pass state and clears the halt marks |
+| 5 | `wrapper refresh` | None |
+| 6 | `wrapper intent` | Reads the pass state and config the intent check judges against |
+| 7 | `wrapper reboot` | None |
+| 8 | `start` (tick) | Loads the master move modules, starts the pass process scan in `run_tick`, sets `now_ms` and `due`, adds the task appliers |
+| 11 | `agents` (tick) | Shuts the site and every later tick site when observation left `config`, `doc` or `rows` out of the box |
+| 14 | `tasks` (tick) | Shuts the site and every later tick site when the drained resume left `config` out of the box |
+| 25 | `wrapper relay` | Ends the tick's process scan, raises what the intent check held and keeps its view and checked actions |
+| 26 | `wrapper view` | Reads the pass state, config and task rows again for the view, events and metrics sites |
+| 27 | `wrapper events` | None |
+| 28 | `wrapper metrics` | Hands metrics the number of actions the pass counted so far |
+
+`wrapper intent` joins `wrapper relay`: the sites from `wrapper reboot` through
+the tick sites do not wait for it, and only `wrapper relay` does.
 
 `TickSites.shut` shuts every step once a step held an exception in the box,
-every tick site after `start` once the stopped branch finished the pass, and
+every tick site after `start` once the stopped branch finished the pass or a
+value the tick reads was left out, and
 the `master seats` and `placement` sites while the swarm sleeps. The wrapper's
 `shut` also shuts every site after `wrapper probes` once the ledger health probe
-stored `stop`. After the graph, the held exception is raised as before, and
+stored `stop`, and every site once the pass ended because the ledger was
+binned or gone. After the graph, the held exception is raised as before, and
 `tick` returns no actions when a value it reads was left out.
 
 The `masters.run_site` runner and its per site box are gone; the master sites
 share the pass box. Placement no longer holds the host placement lock around
 its sites: each step of `placement notices` (quota notice), `placement acks`,
-`master seats`, `placement` and `dispatch seat` takes `tick.PLACING` in its own
+`master seats`, `placement` (every step but `bottleneck remedy`) and
+`dispatch seat` takes `tick.PLACING` in its own
 body through `scripts.tick.steps.tasks.placing`.
 
 ## Pass state
@@ -1161,7 +1174,7 @@ The delivered proof and limitations are recorded in
 | --- | --- |
 | `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
-| Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
+| Spawn takes longer than forty seconds to start | Check the site barriers of the [flat pass graph](#the-flat-pass-graph) first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
 | `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
 | A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
