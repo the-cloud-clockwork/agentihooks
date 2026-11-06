@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.666 · 2026-11-06
+
+### 2026-11-06 · a01068212818 · #9874 · @agenticore-app
+
+**Grade the coverage promotion test in one process under a signal timeout**
+
+This change fixes the coverage promotion test that was hanging CI by forcing it to grade coverage in a single process instead of forking a ProcessPoolExecutor, since the fork was happening inside a multi-threaded xdist worker and never completing within the thread-based timeout. It also adds a module-level signal-based timeout of 30 seconds, which can actually interrupt a stuck call unlike the previous approach, ensuring the test fails fast rather than hanging the whole unit shard and blocking merges.
+
+### 2026-11-06 · bf87516dd72c · #9776 · @nestorcolt
+
+**Retire the workstation tick units for swarms served in Anton**
+
+This change stops the workstation from redundantly ticking swarms that now run on the Anton controller, which previously logged a misleading error every minute. It detects controller-served swarms from their stored api_url, and when no swarm needs local handling, removes the tick cron, waits timer and service, tick watcher, and inbox waker, while keeping the scheduler, quota prober, heartbeat, and herdr client intact. Local swarms still get their units restored on start, the CLI now refuses to manually tick a controller-served swarm, and the doctor's stale-tick check no longer false-positives on retired workstations.
+
 ## v2.17.665 · 2026-11-06
 
 ### 2026-11-06 · 7e9726556ba6 · #9847 · @nestorcolt
