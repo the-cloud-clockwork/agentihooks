@@ -226,7 +226,7 @@ def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
 
 
 def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
-    """Close a code or ci task whose recorded pull request merged outside the merge pass.
+    """Close an unsplit code or ci task whose recorded pull request merged outside the merge pass.
 
     The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
     that kept the seat, which removes it when it leaves.
@@ -236,7 +236,7 @@ def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, 
         return []
     if ledger_kinds.after(row) and ledger_kinds.unmet(row):
         return []
-    if row.get("split") and done_gate.refusal(row, "", run.github):
+    if row.get("split"):
         return []
     if (intent.Verdicts(run.slug, intent.NAME).read(task_id) or {}).get("verdict") == intent.FAIL:
         return []

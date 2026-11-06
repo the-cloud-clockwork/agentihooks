@@ -854,11 +854,11 @@ def test_a_merged_recorded_task_with_a_failed_intent_verdict_stays_in_pr(merging
     [
         ({"contract": {"after": "no"}, "proof": {}}, {}, True),
         ({"contract": {"after": "yes"}, "proof": {"command": "probe", "output": "ok"}}, {}, True),
-        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {}, True),
+        ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {}, False),
         ({"split": ["1-2", "3-4"], "split_pulls": ["https://github.com/o/r/pull/8", URL]}, {"8": RUNNING}, False),
     ],
 )
-def test_a_merged_recorded_task_closes_only_once_its_proof_and_split_halves_are_complete(
+def test_a_merged_recorded_task_closes_only_with_its_proof_and_leaves_split_tasks_to_swarm_done(
     merging, change, pulls, closes
 ):
     known = {URL: MERGED, "https://github.com/o/r/pull/8": MERGED}
