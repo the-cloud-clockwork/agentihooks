@@ -18,14 +18,14 @@ from scripts.gates import log as gate_log
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import blockers, timing
-from scripts.swarm.health import early_ends
+from scripts.swarm.health import early_ends, spawn_stall, urgent_hold
 
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
 KEY = "panic-call"
-LAUNCH_KEY = "spawn-stall"
+LAUNCH_KEY = spawn_stall.KEY
 MERGE_KEY = "merge-stall"
-URGENT_KEY = "urgent-hold"
+URGENT_KEY = urgent_hold.KEY
 SPAWN_STALL = "spawn stall"
 SENDER = "swarm"
 MASTER = "master"
@@ -63,7 +63,7 @@ def _stored(store: Any, slug: str, key: str) -> dict[str, Any]:
 
 
 def read(store: Any, slug: str) -> dict[str, Any]:
-    """Return the saved state: ``asked``, the hours already asked per signal, and ``early``, the early end streak start."""
+    """Return the saved state: ``asked`` hours per signal and the ``early`` streak start."""
     return _stored(store, slug, KEY)
 
 
@@ -130,7 +130,8 @@ def question(slug: str, signal: Signal, at: int) -> str:
 
 def _ask(store: Any, slug: str, mode: str, text: str, ref: str, at: int) -> str:
     if mode != "enforce":
-        row = gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=text, now_ms=at)  # pyright: ignore[reportUnknownMemberType]
+        who = Who(name=SENDER)
+        row = gate_log.Row.of(GATE.name, "observe", who, reason=text, now_ms=at)  # pyright: ignore[reportUnknownMemberType]
         gate_log.append(slug, row)  # pyright: ignore[reportUnknownMemberType]
         return f"panic call: logged {text}"
     master = str(seat_address(slug, MASTER))

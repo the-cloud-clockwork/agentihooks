@@ -15,19 +15,20 @@ from scripts.swarm.ledger_client import LedgerGone, pass_state
 from scripts.swarm.store import RedisStore
 
 STALL_MS = 600_000
+KEY = "spawn-stall"
 REF = "spawn-stall:"
 LOCAL_CAP = "local cap"
 LOCAL_REFUSAL = "spawn-stall-local"
 
 
 def read(store, slug: str) -> dict:
-    raw = store.redis.get(store.key(slug, "spawn-stall"))
+    raw = store.redis.get(store.key(slug, KEY))
     return json.loads(raw) if raw else {}
 
 
 def save(store, slug: str, state: dict) -> None:
     timing.keep()
-    store.redis.set(store.key(slug, "spawn-stall"), json.dumps(state))
+    store.redis.set(store.key(slug, KEY), json.dumps(state))
 
 
 def eligible(store: RedisStore, slug: str, ledger: Any, at: int, runtime: Any, since: int | None = None) -> bool:
