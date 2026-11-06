@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.678 · 2026-11-06
+
+### 2026-11-06 · c115a32d08c8 · #9931 · @agenticore-app
+
+**Cover the blocker window refusal in the shell guards**
+
+This change restores coverage lost when the master tools change stopped the blocker window from denying the master, which had left the `BlockAction` raise in `_check_shell_guards` untested and failing the coverage ratchet on promotion. It adds a targeted test simulating panic mode holding the fleet, confirming that a non-master session's `git push` is correctly refused with the exact frozen message, ensuring the next promotion run passes and the master outage fixes can release.
+
+### 2026-11-06 · b8fb324b101d · #9924 · @agenticore-app
+
+**Skip the merge stall read in a pod without the checkout**
+
+The hosted controller pod runs without a workstation checkout, which previously caused the merge stall GitHub read to fail every tick with a FileNotFoundError and count as a failed step. This change detects the pod environment via the AGENTIHOOKS_POD_NAME variable set by the controller chart, and when the checkout is missing in that context, records the read as skipped with an explanatory message instead of failing, mirroring how a missing gh binary is already handled. Outside a pod, a missing checkout still fails the step as before, so this only quiets noise from an expected, unfixable condition in hosted deployments.
+
+### 2026-11-06 · 2e7d00b43f5b · #9927 · @agenticore-app
+
+**Lock the master outage fixes against regression**
+
+This change turns the five fixes from the 6 November master outage into permanent, enforced guarantees rather than tests that could quietly be deleted or unmarked. It adds feature-map.json entries linking each regression (master fallback tick, panic tool retention, tick pass fencing, pod controller hive placement, starting master hooks) to its marked pytest tests, adds a semgrep incident rule forcing every subprocess.run in master_fallback to pass timeout= (the cause of the 19:42Z hang), bounds the systemctl calls accordingly, and corrects the docs to state the master keeps every tool during panic while only other sessions freeze.
+
+### 2026-11-06 · 89e576d87748 · #9910 · @nestorcolt
+
+**Keep a starting master whose own hooks beat**
+
+This fixes a false-positive retirement where a healthy, locally-started master was killed because the hosted controller never received a hive report for it—even though the master was actively heartbeating via its own hooks. Previously `master_start.observe` only trusted `runtime.reported()`, so a controller-side reporting gap could wrongly tear down a working master and reopen an outage. Now a heartbeat written by the master's own hooks at or after launch also counts as confirmation of successful startup, so masters running fine on the workstation but invisible to the controller's report pipeline are correctly kept alive instead of retired.
+
 ## v2.17.677 · 2026-11-06
 
 ### 2026-11-06 · b71beb085c1e · #9913 · @nestorcolt
