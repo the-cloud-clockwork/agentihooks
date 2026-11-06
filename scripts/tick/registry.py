@@ -225,7 +225,7 @@ def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]
     return tuple(found)
 
 
-def _crossed(first: Step, second: Step) -> bool:
+def crossed(first: Step, second: Step) -> bool:
     """Return whether ``first`` and ``second`` declare a domain that one writes and the other reads or writes."""
     return bool(first.writes & (second.reads | second.writes) or first.reads & second.writes)
 

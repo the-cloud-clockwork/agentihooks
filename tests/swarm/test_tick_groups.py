@@ -163,7 +163,7 @@ def test_each_tick_site_needs_every_step_of_the_site_before(store: RedisStore, m
     for before, after in zip(filled, filled[1:], strict=False):
         for step in steps:
             if step.group == after:
-                crossed = {other.name for other in members[before] if registry._crossed(other, step)}
+                crossed = {other.name for other in members[before] if registry.crossed(other, step)}
                 crossings += len(crossed)
                 assert crossed <= step.needs, (before, step.name)
                 assert all(order.index(name) < order.index(step.name) for name in crossed)
@@ -247,7 +247,7 @@ def test_the_intent_site_joins_the_wrapper_at_the_relay(
     assert intent
     for step in steps:
         if step.group == "wrapper relay":
-            assert {other.name for other in intent if registry._crossed(other, step)} <= step.needs
+            assert {other.name for other in intent if registry.crossed(other, step)} <= step.needs
         elif step.group in ("wrapper reboot", "start"):
             assert not {other.name for other in intent} & step.needs
     assert cli.INTENT_JOINS == {"wrapper intent": "wrapper relay"}
