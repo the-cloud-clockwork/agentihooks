@@ -484,6 +484,8 @@ def test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims(mon
     monkeypatch.setattr(tick, "_running", lambda agents, rows, lane: [])
     monkeypatch.setattr(tick, "ready_in_order", ready)
     rows, doc = {"t1": {"id": "t1"}}, {"tasks": {}}
+    config: Any = SimpleNamespace()
+    store: Any = "store"
     with pytest.raises(_ReadyRead):
-        place._spawn_order("sw", SimpleNamespace(), "store", [], rows, doc, SimpleNamespace())
+        place._spawn_order("sw", config, store, [], rows, doc, SimpleNamespace())
     assert asked == [("sw", "store", rows, doc, "eng", "dispatched", "claims")]

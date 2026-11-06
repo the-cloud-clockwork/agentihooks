@@ -340,9 +340,6 @@
   "step rank pass: no effects",
   "step rank pass: no feature",
   "step rank pass: no lane",
-  "step spawn: no effects",
-  "step spawn: no feature",
-  "step spawn: no lane",
   "step time left: no effects",
   "step time left: no feature",
   "step time left: no writes"
