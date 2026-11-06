@@ -73,6 +73,7 @@ def test_a_parked_task_waits_until_every_parked_dependency_is_done() -> None:
     assert territory._parked({"parked_on": ["a", "b"]}, rows) is True
     assert territory._parked({"parked_on": ["a"]}, rows) is False
     assert territory._parked({}, rows) is False
+    assert territory._parked({"parked_on": ["a", "gone"]}, rows) is True
 
 
 @pytest.mark.feature("swarm-tick-territory")
@@ -80,7 +81,10 @@ def test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere() -> N
     row = {"branch": "b1", "branch_repo": "https://example.test/other.git"}
     key = stack.repo_key(row["branch_repo"])
     assert territory._stacked_dep("d1", {"branch": "b1"}, "repo", lambda repo: "x") == {"task": "d1", "branch": "b1"}
-    assert territory._stacked_dep("d1", row, "repo", lambda repo: key) == {"task": "d1", "branch": "b1"}
+    assert territory._stacked_dep("d1", row, "repo", lambda repo: key if repo == "repo" else "") == {
+        "task": "d1",
+        "branch": "b1",
+    }
     elsewhere = {"task": "d1", "branch": "b1", "repo": "https://example.test/other.git"}
     assert territory._stacked_dep("d1", row, "repo", lambda repo: "local") == elsewhere
 
@@ -157,6 +161,14 @@ def test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff(
     assert store.asked == [("sw", "t1")]
     assert taken == [(store, "sw", "engineer@1-1")]
     assert store.refunded == ([("sw", "t1", "engineer@1-1", 7)] if refunded else [])
+
+
+@pytest.mark.feature("swarm-tick-territory")
+def test_refund_parked_reads_a_task_missing_from_the_rows_as_not_parked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tick.preempt, "take_victim", lambda store, slug, name: False)
+    store = _RefundStore({"reason": "context"})
+    territory._refund_parked("sw", store, {"t0": {"state": "claimed"}}, AgentRecord("engineer@1-1", "eng", "t1"))
+    assert store.refunded == []
 
 
 class _SettleStore:
@@ -265,8 +277,38 @@ def test_a_swarm_with_work_or_workers_or_not_running_does_not_drain(monkeypatch:
 
 
 @pytest.mark.feature("swarm-tick-territory")
+def test_settle_hands_its_own_slug_store_ledger_rows_doc_and_config_to_each_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(tick, "_claimable", lambda *args: seen.append(("claimable", *args)) or [])
+    monkeypatch.setattr(tick, "_end_awaiting_seats", lambda *args: seen.append(("end", *args)))
+    monkeypatch.setattr(tick.freeze, "fix_phase", lambda config: seen.append(("fix", config)) or "fix")
+    monkeypatch.setattr(tick.freeze, "notice", lambda doc, rows, fix: seen.append(("notice", doc, fix)) or "n")
+    store, ledger = _SettleStore([_agent("master@1-1", "master", "finished")]), _Ledger()
+    rows: dict[str, dict[str, Any]] = {"t1": {"state": "done"}}
+    doc: dict[str, Any] = {"doc": 1}
+    running, stopping = SimpleNamespace(state="running"), SimpleNamespace(state="stopping")
+    assert _settled(running, store, ledger, rows, doc) == ["drained"]
+    assert seen == [
+        *(("claimable", "sw", store, rows, doc, lane) for lane in ("eng", "ci", "plan")),
+        ("fix", running),
+        ("notice", doc, "fix"),
+    ]
+    seen.clear()
+    assert _settled(stopping, store, ledger, rows, doc) == []
+    assert seen == [("end", "sw", store, ledger, rows, store.held)]
+
+
+@pytest.mark.feature("swarm-tick-territory")
 def test_sharing_names_each_running_task_with_a_shared_area_and_its_claimant(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tick, "_ended", lambda agent, rows: agent.name == "engineer@1-9")
+    ended: list[object] = []
+
+    def ended_agent(agent: Any, rows: object) -> bool:
+        ended.append(rows)
+        return agent.name == "engineer@1-9"
+
+    monkeypatch.setattr(tick, "_ended", ended_agent)
     rows = {
         "t1": {"id": "t1", "state": "claimed", "territory": ["scripts/swarm"]},
         "t2": {"id": "t2", "state": "claimed", "territory": ["scripts/swarm/tick.py"]},
@@ -286,6 +328,7 @@ def test_sharing_names_each_running_task_with_a_shared_area_and_its_claimant(mon
         {"task": "t6", "claimant": "engineer@1-6", "areas": ["scripts/swarm"]},
     ]
     assert territory._sharing({"id": "t9"}, rows, agents) == []
+    assert len(ended) == 6 and all(seen is rows for seen in ended)
 
 
 @pytest.mark.feature("swarm-tick-territory")
