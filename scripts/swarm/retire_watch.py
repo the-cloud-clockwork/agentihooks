@@ -67,11 +67,12 @@ def reported_gone(store: Any, agent: "AgentRecord", now_ms: int) -> bool:
 
     if not agent.hive and not reports.host(agent):
         return False
-    raw: str | None = store.redis.get(reports.key(agent.hive)) if agent.hive else None
-    observed: int = json.loads(raw).get("observed_at", 0) if raw else -1
-    fresh = observed >= (agent.launched_at or agent.started_at)
     hives = reports.Reports(store.redis)
-    return hives.gone(agent) or (fresh and hives.vanished(agent, now_ms))
+    if hives.gone(agent):
+        return True
+    raw: str | None = store.redis.get(reports.key(agent.hive)) if agent.hive else None
+    launched = agent.launched_at or agent.started_at
+    return bool(raw) and json.loads(raw).get("observed_at", 0) >= launched and hives.vanished(agent, now_ms)
 
 
 def retire_unless_gone(store: "RedisStore", runtime: Any, agent: "AgentRecord", homes: Any, now_ms: int) -> bool:

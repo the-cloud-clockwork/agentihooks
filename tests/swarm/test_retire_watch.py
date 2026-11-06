@@ -108,6 +108,8 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
         ({"hive": "workstation"}, False, 1, "retired"),
         ({"hive": "workstation"}, False, 0, "could not retire"),
         ({"hive": "workstation"}, True, 10, "could not retire"),
+        ({"hive": "workstation"}, False, None, "could not retire"),
+        ({"hive": "absent"}, False, 10, "could not retire"),
     ],
 )
 def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired_in_one_pass_without_a_runtime_call(
@@ -115,7 +117,7 @@ def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired
     monkeypatch: pytest.MonkeyPatch,
     placed: dict[str, Any],
     listed: bool,
-    observed: int,
+    observed: int | None,
     expected: str,
 ) -> None:
     import json
@@ -135,6 +137,8 @@ def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired
     now = reports.STARTUP_MS + 10
     names = ["other", name] if listed else ["other"]
     report = {"names": names, "pane_ids": [], "observed_at": observed, "started_at": 0, "executions": {}}
+    if observed is None:
+        del report["observed_at"]
     store.redis.set(reports.key("workstation"), json.dumps(report))
     refusal = {"process": 1, "refusal": "no herdr server is running"}
     retire_watch.failed(store, "sw", name, refusal, 1)
