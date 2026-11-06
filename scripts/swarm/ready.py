@@ -211,6 +211,8 @@ def merge_pass(run, rows):
                 if pull is not None and pull.state == "OPEN" and pull.merge_problem:
                     found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
                     actions += _unmergeable(run, row, found, pull)
+                if pull is not None and pull.state == "MERGED":
+                    actions += _close_merged(run, rows, row)
             continue
         found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
@@ -218,6 +220,30 @@ def merge_pass(run, rows):
             continue
         actions += _advance(run, rows, row, found)
     return actions
+
+
+def _close_merged(run: Pass, rows: dict, row: dict) -> list[str]:
+    """Close a code or ci task whose recorded pull request merged outside the merge pass, in the pass rows too."""
+    task_id, url = row["id"], row["pr_url"]
+    if row.get("awaiting") or ledger_kinds.kind(row) not in GATED:
+        return []
+    if ledger_kinds.after(row) and ledger_kinds.unmet(row):
+        return []
+    if row.get("split") and done_gate.refusal(row, url, run.github):
+        return []
+    fields = {"state": "done", "pr_url": url, "awaiting": ""}
+    live = run.ledger.update_task(run.slug, task_id, fields, if_state=("pr",), if_match={"pr_url": url})
+    if live.get("state") != "done":
+        return []
+    rows[task_id] = {**rows[task_id], **fields}
+    finished = [task_id]
+    for member in row.get("group_members") or []:
+        if member in rows and rows[member].get("state") != "done":
+            run.ledger.update_task(run.slug, member, fields)
+            rows[member] = {**rows[member], **fields}
+            finished.append(member)
+    run.store.clear_handoff(run.slug, task_id)
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows)]
 
 
 def _leave(run, task_id, row):
