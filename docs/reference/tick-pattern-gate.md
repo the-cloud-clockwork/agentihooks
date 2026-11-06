@@ -16,7 +16,11 @@ The gate shipped in
 narrowed grading to the files a pull request touches;
 [pull request 9726](https://github.com/the-cloud-clockwork/agentihooks/pull/9726)
 removed the bootstrap path, so a base without the allowlist and a dev without
-the grader both fail.
+the grader both fail;
+[pull request 9794](https://github.com/the-cloud-clockwork/agentihooks/pull/9794)
+added a second run in the `Tick equivalence` workflow for every pull request
+that touches a tick input (see
+[The tick equivalence run](#the-tick-equivalence-run)).
 
 ## What it measures
 
@@ -219,6 +223,92 @@ allowlist` and exactly one error:
 A graded file or budgets file that does not parse, a failed `git ls-files`,
 a tree with no tracked Python files, an unreadable file or invalid allowlist
 JSON prints only `::error::<reason>` and exits 1 with no summary line.
+
+### The tick equivalence run
+
+A pull request that touches a tick input is graded a second time inside the
+`Tick equivalence` workflow, beside the catalogue checks and the scenario
+replay. The run is reached through the `Writer lock` workflow, which the
+Tests workflow calls as its `writer-lock` job:
+
+1. On a `pull_request` event, the `inputs` job of `Writer lock` runs the step
+   `Select tick guard inputs`. It lists the paths that changed between the
+   merge base of the pull request base and its head
+   (`git diff --name-only --no-renames`) and sets its `tick` output to `true`
+   when any path matches an entry of `TICK_INPUTS`.
+2. The `tick` job then calls `.github/workflows/tick-equivalence.yml`. With no
+   match, or on any other event (merge group, push to `dev`, dispatch of
+   `Writer lock`), the job is skipped.
+3. A red step in `Tick equivalence` fails the `tick` job, which fails the
+   `writer-lock` job. `Gate — Required` requires `writer-lock` to succeed on
+   every pull request, so the pull request cannot enter the merge queue.
+
+`TICK_INPUTS` holds these entries:
+
+```
+scripts/tick/* scripts/swarm/tick*.py scripts/swarm/scheduled_tick.py
+scripts/swarm/store.py scripts/swarm/lease.py scripts/swarm/ledger_client.py scripts/swarm/health/*
+tests/swarm/test_tick.py tests/swarm/test_delivery.py
+tests/swarm/tick_scenarios/* tests/swarm/tick_equivalence.sh tests/swarm/test_tick_load.py
+.github/workflows/tick-equivalence.yml .github/workflows/writer-lock.yml
+scripts/tick_pattern.py scripts/size_limits.py tests/TICK_PATTERN_ALLOWLIST.json tests/tick/*
+profiles/package/skills/tick-step/* profiles/package/rules/tick-pattern.md docs/reference/tick-step-catalogue.md
+```
+
+The last two lines are the tick pattern inputs pull request 9794 added: the
+grader, `scripts/size_limits.py` (the grader reads its tracked file set
+through it), the allowlist, the tick unit tests, the `tick-step` skill, the
+`tick-pattern` rule and the tick step catalogue page
+`docs/reference/tick-step-catalogue.md`. Each entry is a bash `[[ == ]]` pattern, so `*` also matches `/`:
+`tests/tick/*` selects `tests/tick/steps/test_common.py`, and
+`tests/swarm/tick_scenarios/*` selects the scenario steps index
+`tests/swarm/tick_scenarios/steps.json`. A path is matched whole, so
+`tests/test_tick_pattern_other.py` and `profiles/package/rules/delivery-tiers.md`
+do not select the run.
+
+`Tick equivalence` runs these steps in order, each without a condition or
+`continue-on-error`, so the first red step ends the run:
+
+| Step | Command | Grader copy |
+| --- | --- | --- |
+| `Refuse tick steps without a feature entry and a scenario` | `python -m scripts.tick.catalogue check` | Head |
+| `Hold the unmapped tick steps to a shrink only list from the base grader copy` | `python -m scripts.tick.catalogue shrink --base … --head …` | Base, else head |
+| `Hold the tick step pattern from the base grader copy` | `python -m scripts.tick_pattern --base … --head …` | Base, else head |
+| `Replay tick scenarios on base and head concurrently and check the dropped action` | `bash head/tests/swarm/tick_equivalence.sh` | Head |
+| `Hold the simulated tick load to its pass budget` | `tests/swarm/test_tick_load.py` | Head |
+
+The workflow checks the pull request head out at `head/` and the pull
+request base commit at `base/`. The pattern step is:
+
+```bash
+grader=head
+if [[ -f base/scripts/tick_pattern.py ]]; then
+  grader=base
+fi
+cd "$grader"
+python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
+```
+
+It grades with the same rules and prints the same output as the lint job
+(see [Output](#output)), so a red pattern step names the offence, for example:
+
+```
+::error::scripts/swarm/tick.py adds def _planted_pattern_offence; the base allowlist does not hold it
+```
+
+Two differences from the lint job:
+
+- `--base` is the pull request base commit (`github.event.pull_request.base.sha`),
+  not the merge base. On a branch behind `dev` the two runs can therefore
+  grade against different allowlists; merge `dev` into the branch when only
+  one of them is red.
+- When the base commit has no `scripts/tick_pattern.py`, the head's copy
+  grades instead of failing, the same fallback the catalogue shrink step
+  uses. The lint job stays the strict check: it fails when the protected
+  copy lacks the grader.
+
+The run does not execute the tick step scaffold's `--check` round trip; that
+check is a separate follow up.
 
 ### Threshold pins
 
