@@ -18,12 +18,11 @@ from scripts.tick.steps import PASS, masters
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "swarm-tick-masters-moved"
 MOVED = ("_master_down", "_woken", "_night_watch", "_PassView", "_run_group", "_print_actions", "_codex_hook_order")
 SEAT = "master@sw"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 @pytest.mark.parametrize("name", MOVED)
 def test_tick_reexports_the_moved_name(name: str) -> None:
     moved = getattr(masters, name)
@@ -31,14 +30,14 @@ def test_tick_reexports_the_moved_name(name: str) -> None:
     assert getattr(tick, "run_group" if name == "_run_group" else name) is moved
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_the_tick_module_holds_no_moved_definition() -> None:
     text = Path(str(tick.__file__)).read_text(encoding="utf-8")
     names = (*MOVED, "run_group")
     assert [name for name in names if f"\ndef {name}(" in text or f"\nclass {name}" in text] == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_the_step_wrappers_call_the_moved_operations_through_the_tick_module() -> None:
     calls: list[tuple[Any, ...]] = []
 
@@ -125,7 +124,7 @@ def _store(agents: list[AgentRecord] | None = None) -> SimpleNamespace:
     return SimpleNamespace(redis="redis", agents=lambda slug: list(agents or []) if slug == "sw" else [])
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_woken_reads_pending_operator_lines_at_the_master_seat(
     inbox: type[_Inbox], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -160,7 +159,7 @@ def _runtime(*live: str) -> SimpleNamespace:
 NOW = 10 * tick.STARTUP_GRACE_MS
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 @pytest.mark.parametrize(
     ("agents", "live", "state"),
     [
@@ -179,7 +178,7 @@ def test_master_down_stays_quiet_while_a_master_lives_starts_or_the_swarm_stops(
     assert ledger.notified == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_master_down_tells_each_waiting_operator_line_once_and_returns_taken_lines(inbox: type[_Inbox]) -> None:
     agents = [
         _master("m1", NOW - tick.STARTUP_GRACE_MS - 1),
@@ -208,7 +207,7 @@ def test_master_down_tells_each_waiting_operator_line_once_and_returns_taken_lin
     assert ledger.notified == [("sw", tick.MASTER_DOWN)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_master_down_says_nothing_when_every_line_was_told(inbox: type[_Inbox]) -> None:
     inbox.items = [_Item("told")]
     inbox.histories = {"told": [{"event": tick.DOWN_TOLD}]}
@@ -230,7 +229,7 @@ class _WatchStore:
         return f"config of {slug}"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 @pytest.mark.parametrize(("alerted", "deleted"), [(True, ["sw:master-start"]), (False, [])])
 def test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_the_host(
     monkeypatch: pytest.MonkeyPatch, alerted: bool, deleted: list[str]
@@ -258,7 +257,7 @@ def test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_t
     assert started == [("sw", "config of sw", store, "runtime", 7, {"past_host": True})]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_the_pass_view_reads_only_the_pass_domain() -> None:
     view = masters._PassView({"slug": "sw"})
     assert view.read(PASS, "slug") == "sw"
@@ -266,7 +265,7 @@ def test_the_pass_view_reads_only_the_pass_domain() -> None:
     assert view.read(Domain("other"), "slug") is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 @pytest.mark.parametrize(("state", "box"), [({"box": {"raised": 1}}, {"raised": 1}), ({}, {})])
 def test_run_group_runs_the_registered_steps_and_notes_the_left_box(
     monkeypatch: pytest.MonkeyPatch, state: dict[str, Any], box: dict[str, Any]
@@ -305,7 +304,7 @@ def test_run_group_runs_the_registered_steps_and_notes_the_left_box(
     assert printed == [(box, ("late",))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 def test_print_actions_prints_actions_failures_and_the_held_exception(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -319,7 +318,7 @@ def test_print_actions_prints_actions_failures_and_the_held_exception(
     assert capsys.readouterr().out == "did a\ndid b\n"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-masters-moved")
 @pytest.mark.parametrize(("moved", "found"), [([], []), (["a", "b"], ["{path}: a, b"])])
 def test_codex_hook_order_reports_the_hooks_it_restored(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, moved: list[str], found: list[str]

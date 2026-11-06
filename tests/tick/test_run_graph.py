@@ -15,6 +15,7 @@ from scripts.tick.step import Step as Stepping
 pytestmark = pytest.mark.unit
 
 PASS = Domain("pass")
+SHARED = frozenset({Domain("pass:shared")})
 
 
 class View:
@@ -49,7 +50,12 @@ def _needs(steps: tuple[Stepping, ...]) -> dict[str, frozenset[str]]:
 
 
 def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> None:
-    steps = (Step("a1", "a"), Step("a2", "a"), Step("b1", "b", needs=frozenset({"a1"})), Step("c1", "c"))
+    steps = (
+        Step("a1", "a", writes=SHARED),
+        Step("a2", "a", reads=SHARED),
+        Step("b1", "b", needs=frozenset({"a1"}), writes=SHARED),
+        Step("c1", "c", reads=SHARED),
+    )
     edged = registry.site_edges(steps, ("a", "b", "c"))
     assert _needs(edged) == {
         "a1": frozenset(),
@@ -60,19 +66,30 @@ def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> Non
 
 
 def test_site_edges_skip_an_empty_site_and_leave_steps_outside_the_table_alone() -> None:
-    steps = (Step("a1", "a"), Step("b1", "b"), Step("x1", "x", needs=frozenset({"a1"})))
+    steps = (Step("a1", "a", writes=SHARED), Step("b1", "b", reads=SHARED), Step("x1", "x", needs=frozenset({"a1"})))
     edged = registry.site_edges(steps, ("a", "empty", "b"))
     assert _needs(edged) == {"a1": frozenset(), "b1": frozenset({"a1"}), "x1": frozenset({"a1"})}
 
 
 def test_site_edges_drop_a_need_on_a_step_of_a_later_site_and_keep_one_outside_the_table() -> None:
     steps = (
-        Step("a1", "a", needs=frozenset({"b1", "x1"})),
-        Step("b1", "b", needs=frozenset({"x1"})),
+        Step("a1", "a", needs=frozenset({"b1", "x1"}), writes=SHARED),
+        Step("b1", "b", needs=frozenset({"x1"}), reads=SHARED),
         Step("x1", "x"),
     )
     edged = registry.site_edges(steps, ("a", "b"))
     assert _needs(edged) == {"a1": frozenset({"x1"}), "b1": frozenset({"a1", "x1"}), "x1": frozenset()}
+
+
+def test_site_edges_hold_every_site_joining_the_same_later_site() -> None:
+    first, second = Domain("pass:first"), Domain("pass:second")
+    steps = (
+        Step("a1", "a", writes=frozenset({first})),
+        Step("b1", "b", writes=frozenset({second})),
+        Step("c1", "c", reads=frozenset({first, second})),
+    )
+    edged = registry.site_edges(steps, ("a", "b", "c"), {"a": "c", "b": "c"})
+    assert _needs(edged) == {"a1": frozenset(), "b1": frozenset(), "c1": frozenset({"a1", "b1"})}
 
 
 def test_a_handed_off_step_runs_when_the_gate_given_it_and_the_records_opens_it_and_it_does_not_rest() -> None:
@@ -145,8 +162,8 @@ def test_run_graph_overlaps_a_step_with_no_edge_and_holds_a_barrier_step_until_i
 
     steps = registry.site_edges(
         (
-            Step("probe", "probes", timed("probe", release)),
-            Step("observe", "observe", timed("observe")),
+            Step("probe", "probes", timed("probe", release), writes=SHARED),
+            Step("observe", "observe", timed("observe"), reads=SHARED),
             Step("intent", "judge", freeing),
         ),
         ("probes", "observe"),
