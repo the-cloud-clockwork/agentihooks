@@ -405,9 +405,12 @@ class _Wrapper:
         self.watching.callback(self.ticks.close)
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the wrapper's health, commands, phases, intent, relay, view and metrics sites."""
+        """Return the checks run before the wrapper's probes, health, commands, phases, intent, relay, view and metrics
+        sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
+        later site's step may spawn before its hook runs."""
         return {
-            "wrapper health": self._fence,
+            "wrapper probes": self._fence,
+            "wrapper health": self._hold,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
             "wrapper intent": self._judge,
@@ -445,11 +448,15 @@ class _Wrapper:
             note_left(self.box, self.seen.values())
             raise
 
+    def _hold(self) -> bool:
+        """Hold the pass's ledger view."""
+        _hold_view(self.beating, self.slug, self.ledger)
+        return True
+
     def _fence(self) -> bool:
-        """Hold the pass's ledger view and fence the runtime the rest of the pass uses."""
+        """Fence the runtime the rest of the pass uses."""
         from scripts.swarm import controller
 
-        _hold_view(self.beating, self.slug, self.ledger)
         deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
         runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
         self.state["runtime"] = runtime
