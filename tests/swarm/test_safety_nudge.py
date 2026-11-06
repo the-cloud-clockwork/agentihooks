@@ -184,6 +184,7 @@ def test_agentihooks_safety_nudge_is_a_delegated_command() -> None:
     assert cli_delegates.delegated_cli(["safety-nudge", "round"]) is safety_nudge.main
 
 
+@pytest.mark.feature("master-safety-nudge")
 def test_home_defaults_to_the_agentihooks_folder_under_the_user_home(tmp_path: Path) -> None:
     root = Path.home() / ".agentihooks"
 
