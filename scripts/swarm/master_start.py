@@ -84,7 +84,7 @@ def hooked(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
     from scripts.swarm import idle
 
     read = idle.heartbeat  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    beat = cast("dict[str, int] | None", read(store.redis, slug, agent.name))
+    beat = cast(dict[str, int] | None, read(store.redis, slug, agent.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     return beat is not None and beat["at"] >= (agent.launched_at or agent.started_at)
 
 
