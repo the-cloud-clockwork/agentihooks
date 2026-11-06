@@ -184,15 +184,13 @@ def test_agentihooks_safety_nudge_is_a_delegated_command() -> None:
     assert cli_delegates.delegated_cli(["safety-nudge", "round"]) is safety_nudge.main
 
 
-@pytest.mark.feature("master-safety-nudge")
-def test_home_defaults_to_the_agentihooks_folder_under_the_user_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_home_defaults_to_the_agentihooks_folder_under_the_user_home(tmp_path: Path) -> None:
+    root = Path.home() / ".agentihooks"
 
-    assert safety_nudge.home({}) == tmp_path / ".agentihooks"
-    assert safety_nudge.registry_path({}) == tmp_path / ".agentihooks" / safety_nudge.REGISTRY
-    assert safety_nudge.log_path({}) == tmp_path / ".agentihooks" / "logs" / safety_nudge.LOG
+    assert safety_nudge.home({}) == root
+    assert safety_nudge.home({"AGENTIHOOKS_HOME": str(tmp_path)}) == tmp_path
+    assert safety_nudge.registry_path({}) == root / safety_nudge.REGISTRY
+    assert safety_nudge.log_path({}) == root / "logs" / safety_nudge.LOG
 
 
 @pytest.mark.feature("master-safety-nudge")
