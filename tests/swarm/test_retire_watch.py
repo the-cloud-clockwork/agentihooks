@@ -98,6 +98,53 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     assert ["pane", "close", "w1:p1"] not in calls
 
 
+@pytest.mark.parametrize(
+    ("placed", "listed", "expected"),
+    [
+        ({"runtime_target": {"host_id": "workstation"}, "pane_id": "w5M:p1KX"}, False, "retired"),
+        ({"hive": "workstation"}, False, "retired"),
+        ({"hive": "workstation"}, True, "could not retire"),
+    ],
+)
+def test_an_ended_master_its_hive_reports_gone_is_retired_in_one_pass_without_a_runtime_call(
+    store, monkeypatch, placed, listed, expected
+):
+    import json
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive import reports
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _retire_ended
+    from tests.swarm.test_tick import FakeLedger
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    name = store.next_name("sw", "master")
+    started = store.start_execution("sw", AgentRecord(name, "master", "master", seat="master@sw", started_at=1))
+    agent = replace(started, state="finished", **placed)
+    store.put_agent("sw", agent)
+    now = reports.STARTUP_MS + 10
+    names = ["other", name] if listed else ["other"]
+    report = {"names": names, "pane_ids": [], "observed_at": now, "started_at": 0, "executions": {}}
+    store.redis.set(reports.key("workstation"), json.dumps(report))
+    retire_watch.failed(store, "sw", name, {"process": 1, "refusal": "no herdr server is running"}, 1)
+    retired: list[str] = []
+    refusal = {"process": 1, "refusal": "no herdr server is running"}
+    runtime = SimpleNamespace(
+        retire=lambda agent, homes: retired.append(agent.name) or False, refusal=lambda agent: refusal
+    )
+    ledger = FakeLedger([])
+
+    actions = _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, now)
+
+    if expected == "retired":
+        assert actions == [f"retired {name}"]
+        assert retired == [] and store.agents("sw") == [] and retire_watch.rows(store, "sw") == []
+    else:
+        assert actions == [f"could not retire {name}, retrying next tick"]
+        assert retired == [name] and [a.name for a in store.agents("sw")] == [name]
+
+
 def test_failures_are_kept_per_swarm(store):
     for at in (1, 2, 3):
         retire_watch.failed(store, "other", NAME, REFUSED, at)
