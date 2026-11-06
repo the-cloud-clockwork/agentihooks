@@ -61,8 +61,9 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
     )
     monkeypatch.setattr(live_binding, "relaunch_assignment", lambda agent, task, config: {"task": agent.task})
     monkeypatch.setattr(master_retire, "hold", lambda *args: "")
-    monkeypatch.setattr(tick.reports.Reports, "gone", lambda self, agent: False)
-    monkeypatch.setattr(tick.reports.Reports, "vanished", lambda self, agent, now_ms: False)
+    monkeypatch.setattr(
+        tick, "_reported_gone", lambda hives, agent, now_ms: isinstance(hives, tick.reports.Reports) and now_ms < 0
+    )
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [])
     monkeypatch.setattr(
         tick,
@@ -116,7 +117,11 @@ def test_verification_retires_a_master_its_hive_reports_gone_in_one_pass_without
     dead.lane = alive.lane = "master"
     seen = _verify_seams(monkeypatch, [dead, alive])
     monkeypatch.setattr(live_binding, "record", lambda store, slug, agent, facts, now_ms: ["process"])
-    monkeypatch.setattr(tick.reports.Reports, "gone", lambda self, agent: agent.name == "dead")
+    monkeypatch.setattr(
+        tick,
+        "_reported_gone",
+        lambda hives, agent, now_ms: isinstance(hives, tick.reports.Reports) and now_ms == 5 and agent.name == "dead",
+    )
     calls: list[tuple[Any, ...]] = []
     store = _Recorder(calls, {"key": "sw:launch-assignments"})
     store.redis = _Recorder(calls, {}, "redis.")

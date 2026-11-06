@@ -417,6 +417,13 @@ def _hive_lost(slug, store, agent, now_ms):
     return not fresh and (wait is None or wait["until"] <= now_ms)
 
 
+def _reported_gone(hives: reports.Reports, agent: AgentRecord, now_ms: int) -> bool:
+    """True when a hive report observed after the launch shows the agent's process gone or no longer lists it."""
+    report = hives.read(agent.hive) if agent.hive else None
+    fresh = report is not None and report.get("observed_at", 0) >= (agent.launched_at or agent.started_at)
+    return hives.gone(agent) or (fresh and hives.vanished(agent, now_ms))
+
+
 def _retire_ended(
     slug: str,
     store: RedisStore,
@@ -428,7 +435,7 @@ def _retire_ended(
 ) -> list[str]:
     master_retire.forget(store, slug, agent.name)
     hives = reports.Reports(store.redis)
-    removed = hives.removed(agent, now_ms) or hives.gone(agent) or hives.vanished(agent, now_ms)
+    removed = hives.removed(agent, now_ms) or _reported_gone(hives, agent, now_ms)
     if not removed and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
         retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]

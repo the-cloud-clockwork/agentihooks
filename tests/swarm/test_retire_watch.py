@@ -99,15 +99,22 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
 
 
 @pytest.mark.parametrize(
-    ("placed", "listed", "expected"),
+    ("placed", "listed", "observed", "expected"),
     [
-        ({"runtime_target": {"host_id": "workstation"}, "pane_id": "w5M:p1KX"}, False, "retired"),
-        ({"hive": "workstation"}, False, "retired"),
-        ({"hive": "workstation"}, True, "could not retire"),
+        ({"runtime_target": {"host_id": "workstation"}, "pane_id": "w5M:p1KX"}, False, 10, "retired"),
+        ({"hive": "workstation"}, False, 10, "retired"),
+        ({"hive": "workstation"}, False, 1, "retired"),
+        ({"hive": "workstation"}, False, 0, "could not retire"),
+        ({"hive": "workstation"}, True, 10, "could not retire"),
     ],
 )
-def test_an_ended_master_its_hive_reports_gone_is_retired_in_one_pass_without_a_runtime_call(
-    store: RedisStore, monkeypatch: pytest.MonkeyPatch, placed: dict[str, object], listed: bool, expected: str
+def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired_in_one_pass_without_a_runtime_call(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    placed: dict[str, object],
+    listed: bool,
+    observed: int,
+    expected: str,
 ) -> None:
     import json
     from dataclasses import replace
@@ -125,7 +132,7 @@ def test_an_ended_master_its_hive_reports_gone_is_retired_in_one_pass_without_a_
     store.put_agent("sw", agent)
     now = reports.STARTUP_MS + 10
     names = ["other", name] if listed else ["other"]
-    report = {"names": names, "pane_ids": [], "observed_at": now, "started_at": 0, "executions": {}}
+    report = {"names": names, "pane_ids": [], "observed_at": observed, "started_at": 0, "executions": {}}
     store.redis.set(reports.key("workstation"), json.dumps(report))
     refusal = {"process": 1, "refusal": "no herdr server is running"}
     retire_watch.failed(store, "sw", name, refusal, 1)
