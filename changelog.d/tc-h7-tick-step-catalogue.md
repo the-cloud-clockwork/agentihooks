@@ -1,0 +1,1 @@
+The tick step catalogue page lists every registered tick step with its group, lane, budget, interval, needs, effects and feature. `python -m scripts.tick.catalogue render` writes it from the registry, and a docs test fails when a step changes without a re-render.
