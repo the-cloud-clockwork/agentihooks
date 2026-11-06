@@ -9,7 +9,7 @@ from scripts.swarm import cli, reboot, tick_heartbeat
 from scripts.swarm.health import early_ends
 from scripts.swarm.store import RedisStore
 from scripts.tick import engine
-from scripts.tick.step import Context
+from scripts.tick.step import Context, Result
 from scripts.tick.steps import Left, PassBox, host, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -25,23 +25,21 @@ def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
     swarm, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
     release = Event()
-    real = engine.run_group
 
     def slow_boot(*args: Any) -> list[str]:
         release.wait(30.0)
         return []
 
-    def group(
-        name: str, ctx: Context, steps: Any = None, apply: Any = None, finished: Any = None
-    ) -> tuple[engine.StepRecord, ...]:
-        if name == "wrapper relay":
-            return (engine.StepRecord("page relay", 0.0, 0.01, abandoned=True),)
-        return real(name, ctx, steps, apply, finished)
+    def slow_relay(ctx: Context) -> Result:
+        release.wait(30.0)
+        return Result()
 
     step = next(step for step in host.STEPS if step.name == "reboot pass")
+    relay = next(step for step in host.STEPS if step.name == "page relay")
     monkeypatch.setattr(step, "floor_s", 0.01)
+    monkeypatch.setattr(relay, "floor_s", 0.01)
+    monkeypatch.setattr(relay, "run", slow_relay)
     monkeypatch.setattr(reboot, "boot_pass", slow_boot)
-    monkeypatch.setattr(engine, "run_group", group)
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
@@ -52,9 +50,10 @@ def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
         assert "page relay" in actions[0]
     finally:
         release.set()
-        worker = engine._RUNNING.get(("sw", "reboot pass"))
-        if worker is not None:
-            worker.join(30.0)
+        for name in ("reboot pass", "page relay"):
+            worker = engine._RUNNING.get(("sw", name))
+            if worker is not None:
+                worker.join(30.0)
 
 
 @pytest.mark.feature("swarm-tick-early-end-stamp")
