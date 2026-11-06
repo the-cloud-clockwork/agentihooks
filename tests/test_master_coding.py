@@ -355,6 +355,7 @@ def test_the_shell_guard_blocks_a_master_ruleset_call(master, monkeypatch):
         hook_manager._check_shell_guards({"tool_name": "Bash", "tool_input": {"command": "gh ruleset list"}})
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker(master, monkeypatch):
     import fakeredis
 
