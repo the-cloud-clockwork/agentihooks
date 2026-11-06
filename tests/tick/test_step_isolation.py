@@ -244,6 +244,7 @@ def test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step() -> N
     assert broken == [], f"{len(broken)} of {len(CRITICAL_STEPS)} critical steps wait on the slow lane: {broken}"
 
 
+@pytest.mark.feature("swarm-tick-step-isolation")
 def test_site_barriers_of_the_pass_graph_hold_no_critical_step_on_a_slow_step() -> None:
     sites = scripts.swarm.cli.PASS_SITES
     order = {site: index for index, site in enumerate(sites)}
