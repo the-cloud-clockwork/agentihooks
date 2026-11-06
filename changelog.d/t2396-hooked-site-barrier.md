@@ -1,1 +1,1 @@
-Tick passes no longer end early on no step stored judged: a site with a hook keeps its whole barrier, so the relay and view hooks run after the intent check.
+Tick site barriers hold every step of the earlier site again, whatever a step declares: the quiet pass and site hooks read pass values no declaration names, and the pruned barrier let them run before those values existed.

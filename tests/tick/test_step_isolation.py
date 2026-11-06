@@ -268,7 +268,7 @@ def test_pass_lanes_are_sized_for_the_minute() -> None:
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-def test_site_edges_keep_only_barriers_whose_reads_and_writes_cross() -> None:
+def test_site_edges_keep_every_barrier_step_whatever_the_steps_declare() -> None:
     rows, doc = Domain("pass:rows"), Domain("pass:doc")
     writer = TimedStep("writer", 1.0, group="a", writes=frozenset({rows}))
     reader = TimedStep("reader", 1.0, group="a", reads=frozenset({doc}))
@@ -279,21 +279,21 @@ def test_site_edges_keep_only_barriers_whose_reads_and_writes_cross() -> None:
         "writer": frozenset(),
         "reader": frozenset(),
         "after": frozenset({"writer", "reader"}),
-        "free": frozenset(),
+        "free": frozenset({"writer", "reader"}),
     }
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-def test_a_hooked_site_keeps_its_whole_barrier_whatever_its_steps_declare() -> None:
+def test_a_step_declaring_nothing_still_waits_for_the_site_before_it() -> None:
     rows = Domain("pass:rows")
     writer = TimedStep("writer", 1.0, group="a", writes=frozenset({rows}))
     free = TimedStep("free", 1.0, group="b")
     other = TimedStep("other", 1.0, group="c")
-    edged = registry.site_edges((writer, free, other), ("a", "b", "c"), hooked=frozenset({"b"}))
+    edged = registry.site_edges((writer, free, other), ("a", "b", "c"))
     assert {step.name: step.needs for step in edged} == {
         "writer": frozenset(),
         "free": frozenset({"writer"}),
-        "other": frozenset(),
+        "other": frozenset({"free"}),
     }
 
 
@@ -302,8 +302,7 @@ def test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read() -
     sites = scripts.swarm.cli.PASS_SITES
     order = {site: index for index, site in enumerate(sites)}
     found = sorted((s for s in registry.steps() if s.group in order), key=lambda s: order[s.group])
-    hooked = frozenset({"wrapper relay", "wrapper view"})
-    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS, hooked)
+    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS)
     by_name = {step.name: step for step in edged}
     assert "intent check" in by_name["outbox migration"].needs
     assert "intent check" in by_name["page relay"].needs
@@ -311,17 +310,12 @@ def test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read() -
 
 
 @pytest.mark.feature("swarm-tick-step-isolation")
-def test_run_sites_hands_site_edges_the_sites_its_gate_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.tick import sites as tick_sites
-
-    seen: list[frozenset[str]] = []
-
-    def edges(steps: object, names: object, joins: object = None, hooked: frozenset[str] = frozenset()) -> tuple[()]:
-        seen.append(hooked)
-        return ()
-
-    monkeypatch.setattr(tick_sites.step_registry, "site_edges", edges)
-    monkeypatch.setattr(tick_sites.engine, "run_graph", lambda *args, **kwargs: ())
-    gate = engine.SiteGate({"wrapper relay": lambda: True}, lambda step: False)
-    tick_sites.run_sites(("wrapper relay",), {}, {}, gate, {})
-    assert seen == [frozenset({"wrapper relay"})]
+def test_the_quiet_pass_waits_for_the_steps_of_the_sites_before_it() -> None:
+    sites = scripts.swarm.cli.PASS_SITES
+    order = {site: index for index, site in enumerate(sites)}
+    found = sorted((s for s in registry.steps() if s.group in order), key=lambda s: order[s.group])
+    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS)
+    by_name = {step.name: step for step in edged}
+    quiet = by_name["quiet pass"]
+    assert quiet.needs
+    assert all(order[by_name[name].group] < order[quiet.group] for name in quiet.needs)
