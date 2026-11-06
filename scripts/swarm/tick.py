@@ -15,7 +15,6 @@ from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from importlib import import_module
 from typing import Any, Protocol
 
 import scripts.tick.steps.agents  # noqa: F401
@@ -100,9 +99,7 @@ from scripts.swarm_v2 import masters as master_seats
 from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import masters as master_steps
 from scripts.tick.steps import observe as observe_steps
-from scripts.tick.steps import place
 from scripts.tick.steps import tasks as task_steps
 from scripts.tick.steps.agents import (  # noqa: F401
     _drop_remote,
@@ -127,6 +124,8 @@ from scripts.tick.steps.agents import (  # noqa: F401
     _watch_idle,
     _watch_remote,
 )
+
+from scripts.tick import sites as tick_sites  # isort: skip
 from scripts.tick.steps.common import (
     _collected,  # noqa: F401
     _current_owner,
@@ -323,43 +322,13 @@ def _print_actions(box: Mapping[str, object], records: tuple[engine.StepRecord, 
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    for name in MASTER_MOVE_MODULES:
-        import_module(name)
     box: dict[str, Any] = steps.PassBox()
-    passing = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "now_ms": now_ms, "box": box}
-    actions = run_group("start", **passing)
+    state: dict[str, Any] = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "box": box}
+    sites = tick_sites.TickSites(state, box, task_steps.appliers(state), lambda: now_ms)
+    gate = engine.SiteGate(sites.hooks(), sites.shut)
+    records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
     observe_steps.raise_held(box)
-    if "finished" in box:
-        return actions
-    actions += run_group(observe_steps.PASS_SETUP, **passing)
-    actions += run_group("observe", **passing)
-    observe_steps.raise_held(box)
-    config, doc, rows, due = box["config"], box["doc"], box["rows"], store.key(slug, SPAWN_DUE)
-    passing |= {"rows": rows, "doc": doc, "due": due}
-    actions += run_group("agents", **passing, config=config)
-    actions.extend(master_steps.run_masters(locals()))
-    actions += run_group(task_steps.DRAINED, **passing, config=config)
-    task_steps.raise_held(box)
-    config, sleeping = box["config"], task_steps.sleeping_of(box)
-    actions += run_group("tasks", **passing, config=config)
-    actions += run_group(task_steps.REOPENS, **passing, config=config)
-    actions += run_group(task_steps.TASK_PASSES, **passing, config=config)
-    task_steps.raise_held(box)
-    with PLACING:
-        run_group("place")
-        actions += run_group(place.NOTICES, **passing, config=config)
-        actions += run_group(place.ACKS, **passing, config=config, sleeping=sleeping)
-        task_steps.raise_held(box)
-        if not sleeping:
-            actions.extend(master_steps.run_seats(locals()))
-            actions += run_group(place.PLACEMENT, **passing, config=config)
-            task_steps.raise_held(box)
-        actions.extend(master_steps.run_dispatch(locals()))
-    actions.extend(master_steps.run_watch(locals()))
-    passing["rows"] = box["rows"]
-    actions += run_group(task_steps.CLOSE, **passing, config=config)
-    task_steps.raise_held(box)
-    return actions
+    return [] if sites.left else steps.actions(records)
 
 
 def _codex_hook_order():

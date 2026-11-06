@@ -1,0 +1,1 @@
+The tick engine gains `engine.run_graph`, which runs a whole step list in the one schedule `run_group` uses for a single group, and `registry.site_edges`, which gives every step of a group site a barrier edge to each step of the previous non-empty site, so the group order of today's pass can run as one flat graph.
