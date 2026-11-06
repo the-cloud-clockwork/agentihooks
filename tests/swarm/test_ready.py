@@ -1,7 +1,7 @@
 import copy
 import json
 import subprocess
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import TypeVar
 
 import pytest
@@ -801,23 +801,24 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
 
 
 def test_a_merged_recorded_pull_request_closes_its_task_and_unparks_its_dependent_in_one_pass(merging):
-    rows = {
+    tasks = {
         "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL, "group_members": ["t3"]},
         "t2": {"id": "t2", "state": "open", "claimed_by": "", "parked_on": ["t1"]},
         "t3": {"id": "t3", "state": "pr", "claimed_by": "", "pr_url": URL},
     }
-    ledger = Ledger(copy.deepcopy(rows))
+    rows = MappingProxyType(copy.deepcopy(tasks))
+    ledger = Ledger(tasks)
     ready.save(merging.store, "sw", "t1", ready.held_record(URL, HEAD, TOP, "engineer@a1b2c3-0002", NOW))
     run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
-    assert claim_hold.waits(rows["t2"], rows) == "it waits on task t1"
+    assert claim_hold.waits(ledger.rows["t2"], ledger.rows) == "it waits on task t1"
     assert ready.merge_pass(run, rows) == [f"task t1 done, {URL} merged"]
     assert ledger.rows["t1"]["state"] == "done" and ledger.rows["t3"]["state"] == "done"
-    assert rows["t1"]["state"] == "done" and rows["t3"]["state"] == "done"
-    assert claim_hold.waits(rows["t2"], rows) == ""
+    assert ledger.rows["t1"]["awaiting"] == "" and ledger.rows["t3"]["pr_url"] == URL
+    assert claim_hold.waits(ledger.rows["t2"], ledger.rows) == ""
     assert merging.store.handoff("sw", "t1") == ""
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.shell.calls == []
-    assert ready.merge_pass(run, rows) == []
+    assert ready.merge_pass(run, MappingProxyType(copy.deepcopy(ledger.rows))) == []
 
 
 @pytest.mark.parametrize(

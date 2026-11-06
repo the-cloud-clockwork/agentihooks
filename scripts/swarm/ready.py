@@ -8,7 +8,7 @@ reopen the task for the next engineer, who continues from the stored handoff.
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -222,10 +222,11 @@ def merge_pass(run, rows):
     return actions
 
 
-def _close_merged(run: Pass, rows: dict, row: dict) -> list[str]:
-    """Close a code or ci task whose recorded pull request merged outside the merge pass, in the pass rows too.
+def _close_merged(run: Pass, rows: Mapping[str, dict], row: dict) -> list[str]:
+    """Close a code or ci task whose recorded pull request merged outside the merge pass.
 
-    Its worktree stays with the owner that kept the seat, which removes it when it leaves.
+    The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
+    that kept the seat, which removes it when it leaves.
     """
     task_id, url = row["id"], row["pr_url"]
     if row.get("awaiting") or ledger_kinds.kind(row) not in GATED:
@@ -238,16 +239,15 @@ def _close_merged(run: Pass, rows: dict, row: dict) -> list[str]:
     live = run.ledger.update_task(run.slug, task_id, fields, if_state=("pr",), if_match={"pr_url": url})
     if live.get("state") != "done":
         return []
-    rows[task_id] = {**rows[task_id], **fields}
     finished = [task_id]
     for member in row.get("group_members") or []:
         if member in rows and rows[member].get("state") != "done":
             run.ledger.update_task(run.slug, member, fields)
-            rows[member] = {**rows[member], **fields}
             finished.append(member)
     run.store.clear_handoff(run.slug, task_id)
     forget(run.store, run.slug, task_id)
-    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows)]
+    closed = {**rows, **{done: {**rows[done], **fields} for done in finished}}
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, closed)]
 
 
 def _leave(run, task_id, row):
