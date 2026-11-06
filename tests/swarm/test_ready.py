@@ -894,6 +894,16 @@ def test_a_merged_recorded_task_the_ledger_moved_since_the_pass_read_is_left_alo
     assert ledger.rows["t1"] == before
 
 
+def test_a_merged_recorded_close_keeps_the_earlier_actions_of_the_pass(merging):
+    rows = {
+        "t0": {"id": "t0", "state": "pr", "claimed_by": "", "pr_url": URL, "awaiting": "merge"},
+        "t1": {"id": "t1", "state": "pr", "claimed_by": AGENT, "pr_url": URL},
+    }
+    ledger = Ledger(copy.deepcopy(rows))
+    run = ready.Pass(merging.store, "sw", ledger, {URL: MERGED}.get, {URL: MERGED}.get, NOW)
+    assert ready.merge_pass(run, rows) == ["task t0 left the merge pass", f"task t1 done, {URL} merged"]
+
+
 @pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
 def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
     merging.rows["t1"]["kind"] = kind
