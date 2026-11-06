@@ -277,13 +277,32 @@ def test_the_refresh_job_starts_only_on_a_scheduled_tick(monkeypatch: pytest.Mon
     assert calls == [("call", refresh_job.start, STORE, "sw")]
 
 
-def test_the_intent_check_keeps_its_judgement_in_the_box(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_intent_check_keeps_its_judgement_in_its_judging_box(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
-    state = _pass(box, inbox="inbox", doc="doc", config="config")
+    judging: dict[str, Any] = {"doc": "judged doc", "config": "judged config"}
+    state = _pass(box, inbox="inbox", doc="doc", config="config", judging=judging)
     assert _run("wrapper intent", calls, state, monkeypatch) == []
-    assert calls == [("intent", "inbox", STORE, "sw", "doc", "ledger", "config")]
-    assert box == {"judged": ("view", "checked")}
+    assert calls == [("intent", "inbox", STORE, "sw", "judged doc", "ledger", "judged config")]
+    assert judging == {"doc": "judged doc", "config": "judged config", "judged": ("view", "checked")}
+    assert box == {}
+
+
+def test_the_intent_check_holds_what_it_raises_in_its_judging_box(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    box: dict[str, Any] = {}
+    judging: dict[str, Any] = {}
+
+    def boom(cli: Any, get: Any) -> None:
+        calls.append(("boom", cli))
+        raise RuntimeError("judge down")
+
+    monkeypatch.setattr(host, "import_module", lambda name: "cli")
+    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
+    assert host.held(boom, host.JUDGING)(None, {"box": box, host.JUDGING: judging}.get) == []
+    assert calls == [("boom", "cli")]
+    assert box == {}
+    assert isinstance(judging["raised"], RuntimeError)
 
 
 def test_the_reboot_pass_boots_with_the_fenced_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:

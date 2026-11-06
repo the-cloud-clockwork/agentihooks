@@ -17,7 +17,7 @@ from scripts.swarm.store import SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
-from scripts.tick.steps.tasks import RANK, WriteStep, held, rank_writes
+from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
 dispatcher: Any = import_module("scripts.swarm.dispatcher")
@@ -251,22 +251,31 @@ def _release_admission(slug: str, runtime: Any, task: dict[str, Any]) -> None:
 
 
 STEPS = (
-    CallStep("quota notice", NOTICES, held(_quota_notice), RESUMED, CONFIG_DOC),
+    CallStep("quota notice", NOTICES, held(placing(_quota_notice)), RESUMED, CONFIG_DOC),
     CallStep("lost runner", NOTICES, held(_lost_runner), RESUMED, pass_domains("config"), lane=SLOW),
     CallStep("time left", NOTICES, held(_time_left), RESUMED, CONFIG_DOC, lane=SLOW),
-    CallStep("collect acks", ACKS, held(_collect_acks), RESUMED, CONFIG_DOC),
-    CallStep("codex hook order", ACKS, held(_codex_hook_order), frozenset({"sleeping"}), pass_domains("sleeping")),
-    WriteStep("rank pass", PLACEMENT, held(_rank_pass), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC),
+    CallStep("collect acks", ACKS, held(placing(_collect_acks)), RESUMED, CONFIG_DOC),
+    CallStep(
+        "codex hook order", ACKS, held(placing(_codex_hook_order)), frozenset({"sleeping"}), pass_domains("sleeping")
+    ),
+    WriteStep(
+        "rank pass", PLACEMENT, held(placing(_rank_pass)), writes=frozenset({RANK}), needs=RESUMED, reads=CONFIG_DOC
+    ),
     CallStep(
         "bottleneck remedy", PLACEMENT, held(_bottleneck_remedy), frozenset({"ledger state"}), pass_domains("doc")
     ),
     CallStep(
-        "preempt", PLACEMENT, held(_preempt), PREEMPT_NEEDS, frozenset({AGENTS}) | TASK_STATE, frozenset({AGENTS})
+        "preempt",
+        PLACEMENT,
+        held(placing(_preempt)),
+        PREEMPT_NEEDS,
+        frozenset({AGENTS}) | TASK_STATE,
+        frozenset({AGENTS}),
     ),
     CallStep(
         "spawn",
         PLACEMENT,
-        held(_spawn),
+        held(placing(_spawn)),
         budgets.SPAWN_NEEDS,
         frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
         PLACED | pass_domains("rows"),
