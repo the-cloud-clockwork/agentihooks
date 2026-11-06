@@ -244,6 +244,21 @@ def test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step() -> N
     assert broken == [], f"{len(broken)} of {len(CRITICAL_STEPS)} critical steps wait on the slow lane: {broken}"
 
 
+def test_site_barriers_of_the_pass_graph_hold_no_critical_step_on_a_slow_step() -> None:
+    sites = scripts.swarm.cli.PASS_SITES
+    order = {site: index for index, site in enumerate(sites)}
+    found = sorted((s for s in registry.steps() if s.group in order), key=lambda s: order[s.group])
+    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS)
+    by_name = {step.name: step for step in edged}
+    slow = {name for name, step in by_name.items() if step.lane == engine.SLOW}
+    broken = sorted(
+        f"{name} needs {sorted(_upstream(name, by_name) & slow)}"
+        for name in CRITICAL_STEPS & by_name.keys()
+        if _upstream(name, by_name) & slow
+    )
+    assert broken == [], f"{len(broken)} critical steps wait on the slow lane through site barriers: {broken}"
+
+
 @pytest.mark.feature("swarm-tick-step-isolation")
 def test_pass_lanes_are_sized_for_the_minute() -> None:
     assert pool.CRITICAL_S == 60.0

@@ -124,9 +124,16 @@ def test_run_sites_runs_the_registered_steps_of_its_sites_in_site_order_through_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ran: list[str] = []
+    earlier = frozenset(actions_of(name) for name in ("a1", "a2", "b1"))
     found = [
-        _Marker(name, group, _recorder(ran, lambda get, name=name: name, [name]))
-        for name, group in (("c1", "c"), ("b1", "b"), ("a1", "a"), ("a2", "a"), ("x1", "x"))
+        _Marker(name, group, _recorder(ran, lambda get, name=name: name, [name]), reads=reads)
+        for name, group, reads in (
+            ("c1", "c", earlier),
+            ("b1", "b", frozenset()),
+            ("a1", "a", frozenset()),
+            ("a2", "a", frozenset()),
+            ("x1", "x", frozenset()),
+        )
     ]
     _with(monkeypatch, *found, real=False)
     seen = _graphs(monkeypatch)
