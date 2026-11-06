@@ -234,6 +234,24 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
 
 
+def test_a_member_writes_every_key_family_the_fenced_retire_batch_touches(admin):
+    from fnmatch import fnmatchcase
+
+    from scripts.swarm import fencing
+    from scripts.tick.ports.records import FencedBatch, RecordWrite
+
+    sections = (*fencing.LOADED, fencing.ARCHIVE, fencing.ARCHIVED_NAMES)
+    port = fencing._port(store.RedisStore(admin))
+    batch = FencedBatch(tuple(RecordWrite("put", section, "engineer@0001-0001", 0, {}) for section in sections))
+    keys, _ = port.batch_call("proof", batch)
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    assert f"{ROOT}:swarm:{{proof}}:fence:revision" in keys
+    assert len(keys) == 4 + len(sections)
+    for key in keys:
+        assert any(fnmatchcase(key, pattern) for pattern in patterns), key
+
+
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
     grant = auth.mint(admin, "laptop", PUBLIC)
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
