@@ -32,6 +32,7 @@
         "tests/swarm/test_safety_nudge.py::test_check_lists_every_live_master_for_a_caller_that_is_not_registered",
         "tests/swarm/test_safety_nudge.py::test_main_runs_each_action_and_prints_its_json",
         "tests/swarm/test_safety_nudge.py::test_main_install_prints_the_installed_line",
+        "tests/swarm/test_safety_nudge.py::test_main_usage_names_the_agentihooks_command",
         "tests/swarm/test_safety_nudge.py::test_main_refuses_an_unknown_action",
         "tests/swarm/test_safety_nudge.py::test_the_ledger_adapter_records_the_master",
         "tests/swarm/test_safety_nudge.py::test_only_an_orchestrator_join_records_the_master"

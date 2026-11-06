@@ -1,6 +1,7 @@
 """The operating system safety nudge: master registry, one nudge round, the hourly job install and its check."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class FakeHerdr:
         self.statuses = statuses
         self.typed = typed or {}
         self.prompts: list[tuple[str, str, str]] = []
+        self.seats: list[str] = []
 
     def agent_status(self, agent: safety_nudge.Pane) -> str:
         return self.statuses[agent.pane_id]
@@ -41,6 +43,7 @@ class FakeHerdr:
 
     def prompt(self, agent: safety_nudge.Pane, text: str) -> None:
         self.prompts.append((agent.pane_id, agent.harness, text))
+        self.seats.append(agent.name)
 
 
 class FakeCron:
@@ -53,6 +56,7 @@ class FakeCron:
             if self.lines is None:
                 return subprocess.CompletedProcess(args, 1, "", "no table for user")
             return subprocess.CompletedProcess(args, 0, "".join(f"{line}\n" for line in self.lines), "")
+        assert args[1] == "-"
         self.lines = str(kwargs["input"]).splitlines()
         return subprocess.CompletedProcess(args, 0, "", "")
 
@@ -109,6 +113,7 @@ def test_a_round_nudges_idle_claude_and_codex_masters_and_skips_busy_or_typed_pa
     results = safety_nudge.run_round(_env(tmp_path), herdr=herdr, now=3600, proc=proc)
 
     assert herdr.prompts == [("p1", "claude", safety_nudge.TEXT), ("p2", "codex", safety_nudge.TEXT)]
+    assert herdr.seats == ["master@abc123-0001", "master@abc123-0002"]
     assert {r["pane"]: r["outcome"] for r in results} == {
         "p1": "sent",
         "p2": "sent",
@@ -360,10 +365,26 @@ def test_main_runs_each_action_and_prints_its_json(
 def test_main_install_prints_the_installed_line(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(safety_nudge, "install", lambda environ: "the line")
+    seen: list[dict[str, str]] = []
+
+    def fake(environ: dict[str, str]) -> str:
+        seen.append(environ)
+        return "the line"
+
+    monkeypatch.setenv("AGENTIHOOKS_SAFETY_PROBE", "on")
+    monkeypatch.setattr(safety_nudge, "install", fake)
 
     assert safety_nudge.main(["install"]) == 0
     assert json.loads(capsys.readouterr().out) == {"installed": "the line"}
+    assert seen[0]["AGENTIHOOKS_SAFETY_PROBE"] == "on"
+
+
+@pytest.mark.feature("master-safety-nudge")
+def test_main_usage_names_the_agentihooks_command(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        safety_nudge.main(["--help"])
+
+    assert capsys.readouterr().out.startswith("usage: agentihooks safety-nudge ")
 
 
 @pytest.mark.feature("master-safety-nudge")
@@ -401,5 +422,5 @@ def test_only_an_orchestrator_join_records_the_master(
 
     ledger.cmd_join(SimpleNamespace(slug="demo", name="master@abc123-0001", role=role))
 
-    assert len(seen) == recorded
+    assert seen == [os.environ] * recorded
     assert json.loads(capsys.readouterr().out)["role"] == role

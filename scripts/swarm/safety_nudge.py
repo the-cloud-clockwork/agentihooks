@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 TEXT = "Safety Nudge: In case the main tick or controller is down"
 REGISTRY = "master-registry.json"
@@ -82,10 +82,11 @@ def load(path: Path) -> dict[str, Entry]:
         data: Any = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
-    if not isinstance(data, dict):
+    try:
+        items: Any = data.items()
+    except AttributeError:
         return {}
-    found = cast(dict[str, Any], data)
-    return {str(name): entry for name, entry in found.items() if isinstance(entry, dict)}
+    return {str(name): entry for name, entry in items if isinstance(entry, dict)}
 
 
 def save(path: Path, entries: dict[str, Entry]) -> None:
