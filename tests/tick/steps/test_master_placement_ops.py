@@ -16,7 +16,6 @@ from scripts.tick.steps import masters
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "swarm-tick-master-placement"
 MOVED = ("_master", "_recover_master", "_retire_master", "respawn_master", "place_master", "_under_tick_lock")
 SEAT = "master@sw"
 CODE = "abc123"
@@ -43,7 +42,8 @@ class Calls(list[tuple[Any, ...]]):
 
 def _master_record(name: str = "master@abc123-0001", **fields: Any) -> AgentRecord:
     """Return a lead master record named ``name`` with ``fields`` replaced."""
-    return AgentRecord(**({"name": name, "lane": MASTER, "task": MASTER, "seat": SEAT} | fields))
+    base: dict[str, Any] = {"name": name, "lane": MASTER, "task": MASTER, "seat": SEAT}
+    return AgentRecord(**(base | fields))
 
 
 def _store(
@@ -85,7 +85,7 @@ def placed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick, "placed_record", lambda record, placed: replace(record, pane_id=str(placed)))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize("name", MOVED)
 def test_tick_reexports_the_moved_master_operation(name: str) -> None:
     moved = getattr(masters, name)
@@ -93,13 +93,13 @@ def test_tick_reexports_the_moved_master_operation(name: str) -> None:
     assert getattr(tick, name) is moved
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_module_holds_no_moved_master_operation() -> None:
     text = Path(str(tick.__file__)).read_text(encoding="utf-8")
     assert [name for name in MOVED if f"\ndef {name}(" in text] == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_retire_master_returns_the_hold_without_retiring(monkeypatch: pytest.MonkeyPatch) -> None:
     calls, seen = Calls(), []
 
@@ -114,7 +114,7 @@ def test_retire_master_returns_the_hold_without_retiring(monkeypatch: pytest.Mon
     assert calls == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize(
     ("retired", "said", "dropped"),
     [
@@ -135,7 +135,7 @@ def test_retire_master_drops_the_master_only_once_retired(
     assert (("drop_agent", ("sw", master.name)) in calls) is dropped
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_stopping_swarm_waits_for_its_workers_then_retires_each_master(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     monkeypatch.setattr(tick, "_retire_master", lambda slug, store, runtime, master, now_ms: f"retired {master.name}")
@@ -186,7 +186,7 @@ def _seats(
     monkeypatch.setattr(tick, "seat_spawn", spawn)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize(
     ("agents", "blocked", "live", "said"),
     [
@@ -209,7 +209,7 @@ def test_a_master_starts_only_once_the_old_lead_ended(
     assert masters._master("sw", config, _store(calls, agents), _runtime(calls, live), NOW) == said
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_seated_non_lead_master_never_holds_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     _starts(monkeypatch, {})
@@ -219,7 +219,7 @@ def test_a_seated_non_lead_master_never_holds_the_start(monkeypatch: pytest.Monk
     assert masters._master("sw", config, _store(calls, [other]), _runtime(calls), NOW) == ["placed on another hive"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_master_without_a_slot_is_recorded_as_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     _starts(monkeypatch, {})
@@ -229,7 +229,7 @@ def test_a_master_without_a_slot_is_recorded_as_waiting(monkeypatch: pytest.Monk
     assert calls == [("hdel", (tick.MASTER_WAITING, "sw")), ("hset", (tick.MASTER_WAITING, "sw", NOW))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize(("past_host", "said"), [(False, ["host held"]), (True, ["the master waits: no room"])])
 def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
     monkeypatch: pytest.MonkeyPatch, past_host: bool, said: list[str]
@@ -247,7 +247,7 @@ def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
     assert masters._master("sw", config, _store(calls), _runtime(calls), NOW, past_host=past_host) == said
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_master_refused_for_room_withdraws_its_start(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     starts = _starts(monkeypatch, {"task": {"id": MASTER}})
@@ -265,7 +265,7 @@ def test_a_master_refused_for_room_withdraws_its_start(monkeypatch: pytest.Monke
     assert starts == [("withdraw", (store, "sw", {"task": {"id": MASTER}}))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_a_failed_master_spawn_marks_the_transfer_and_affinity_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     starts = _starts(monkeypatch, {})
@@ -323,7 +323,7 @@ def _placement(monkeypatch: pytest.MonkeyPatch, calls: Calls, pending: dict[str,
     return starts, prepared
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_a_reported_master_is_working_and_clears_its_start(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
@@ -357,7 +357,7 @@ def test_a_reported_master_is_working_and_clears_its_start(monkeypatch: pytest.M
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_an_unreported_master_is_starting_and_keeps_its_pending_start(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
@@ -379,7 +379,7 @@ def test_an_unreported_master_is_starting_and_keeps_its_pending_start(monkeypatc
     assert calls[-1] == ("hdel", ("sw/launch-assignments", MASTER))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_recover_master_leaves_a_live_lead_alone() -> None:
     calls = Calls()
     lead = _master_record(state="working")
@@ -388,7 +388,7 @@ def test_recover_master_leaves_a_live_lead_alone() -> None:
     assert calls == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_recover_master_finds_no_candidate_among_finished_or_foreign_names() -> None:
     calls = Calls()
     done = _master_record(state="finished")
@@ -398,7 +398,7 @@ def test_recover_master_finds_no_candidate_among_finished_or_foreign_names() -> 
     assert calls == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_recover_master_adopts_a_live_master_of_this_swarm_code() -> None:
     calls = Calls()
@@ -417,7 +417,7 @@ def test_recover_master_adopts_a_live_master_of_this_swarm_code() -> None:
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_recover_master_prefers_the_seat_occupant_and_keeps_its_execution_record() -> None:
     calls = Calls()
@@ -432,7 +432,7 @@ def test_recover_master_prefers_the_seat_occupant_and_keeps_its_execution_record
     assert calls == [("put_agent", ("sw", replace(held, pane_id=f"placed {occupant}")))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.usefixtures("placed")
 def test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_execution_record() -> None:
     calls = Calls()
@@ -462,7 +462,7 @@ def unlocked(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     return seen
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_place_master_starts_the_master_on_its_deployment_under_the_lock(
     monkeypatch: pytest.MonkeyPatch, unlocked: list[tuple[Any, ...]]
 ) -> None:
@@ -477,7 +477,7 @@ def test_place_master_starts_the_master_on_its_deployment_under_the_lock(
     assert unlocked == [("sw", "place master")]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize(("recovered", "said"), [(["adopted"], ["adopted"]), ([], ["spawned"])])
 def test_respawn_master_drops_gone_leads_then_adopts_or_spawns(
     monkeypatch: pytest.MonkeyPatch, unlocked: list[tuple[Any, ...]], recovered: list[str], said: list[str]
@@ -523,7 +523,7 @@ def _lock(
     return store, calls
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize("state", ["stopping", "stopped"])
 def test_the_tick_lock_is_never_taken_for_a_stopping_swarm(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     store, calls = _lock(monkeypatch, [state])
@@ -531,21 +531,21 @@ def test_the_tick_lock_is_never_taken_for_a_stopping_swarm(monkeypatch: pytest.M
     assert calls == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_waits_without_a_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running"], held=None)
     assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
     assert calls == [("acquire", ("sw", "hive"))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_waits_when_another_pass_holds_it(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running"], token=None)
     assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
     assert calls == [("acquire", ("sw", "hive")), ("take", ("sw", "held", 30, "caller"))]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize("state", ["stopping", "stopped"])
 def test_the_tick_lock_releases_without_acting_once_the_swarm_stops(
     monkeypatch: pytest.MonkeyPatch, state: str
@@ -556,7 +556,7 @@ def test_the_tick_lock_releases_without_acting_once_the_swarm_stops(
     assert "held pass" not in calls.names()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_acts_inside_the_held_pass_and_releases(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running", "running"])
 
@@ -574,7 +574,7 @@ def test_the_tick_lock_acts_inside_the_held_pass_and_releases(monkeypatch: pytes
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_releases_when_the_act_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running", "running"])
 
