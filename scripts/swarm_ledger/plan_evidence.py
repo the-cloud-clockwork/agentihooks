@@ -21,6 +21,30 @@ def _bounded(title, text, limit):
     return f"{title}\n{text[:limit]}\n[Cut {title}: {len(text) - limit} characters omitted]"
 
 
+def _phase_plan(phase: dict, doc: dict, limit: int) -> list[str]:
+    ref = phase.get("plan_ref")
+    if not ref:
+        return []
+    from scripts.swarm_ledger import plan_ranges, plan_read
+
+    pointer = f"Read the whole phase plan with {plan_read.COMMAND} --phase {phase['id']}."
+    try:
+        text = plan_ranges.stored_text(ref, doc)
+    except (ValueError, OSError) as exc:
+        return [f"Phase plan\n{pointer}\nIt cannot be read here: {exc}"]
+    names = plan_ranges.slice_anchors(text, ref["lines"])
+    listed = (
+        "The phase plan is already published. Add one task per slice with task add --plan-slice <name> and do not "
+        f"publish it again: {', '.join(names)}"
+        if names
+        else "None: write and publish the plan before adding tasks."
+    )
+    return [
+        _bounded("Phase plan", f"{pointer}\n{plan_read.chunk(text, ref['lines'], margin=0)}", limit),
+        _bounded("Slice names", listed, limit),
+    ]
+
+
 def evidence(task: dict, doc: dict) -> str:
     limit = int(os.environ.get("AGENTIHOOKS_PLAN_EVIDENCE_CHARS", "6000"))
     phases = {phase["id"]: phase for phase in doc["phases"]}
@@ -43,4 +67,5 @@ def evidence(task: dict, doc: dict) -> str:
     review = phase.get("review") or {}
     if review.get("state") == "sent_back":
         lines.append(_bounded("Review note", review.get("note", ""), limit))
+    lines.extend(_phase_plan(phase, doc, limit))
     return "\n\n".join(lines) + "\n"
