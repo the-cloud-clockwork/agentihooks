@@ -62,6 +62,7 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
     monkeypatch.setattr(live_binding, "relaunch_assignment", lambda agent, task, config: {"task": agent.task})
     monkeypatch.setattr(master_retire, "hold", lambda *args: "")
     monkeypatch.setattr(tick.reports.Reports, "gone", lambda self, agent: False)
+    monkeypatch.setattr(tick.reports.Reports, "vanished", lambda self, agent, now_ms: False)
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [])
     monkeypatch.setattr(
         tick,

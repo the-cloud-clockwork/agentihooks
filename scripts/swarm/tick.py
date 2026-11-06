@@ -417,7 +417,15 @@ def _hive_lost(slug, store, agent, now_ms):
     return not fresh and (wait is None or wait["until"] <= now_ms)
 
 
-def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
+def _retire_ended(
+    slug: str,
+    store: RedisStore,
+    ledger: Any,
+    runtime: Any,
+    rows: dict[str, dict[str, Any]],
+    agent: AgentRecord,
+    now_ms: int,
+) -> list[str]:
     master_retire.forget(store, slug, agent.name)
     hives = reports.Reports(store.redis)
     removed = hives.removed(agent, now_ms) or hives.gone(agent) or hives.vanished(agent, now_ms)

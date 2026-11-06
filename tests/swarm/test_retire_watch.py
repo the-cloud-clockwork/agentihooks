@@ -107,8 +107,8 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     ],
 )
 def test_an_ended_master_its_hive_reports_gone_is_retired_in_one_pass_without_a_runtime_call(
-    store, monkeypatch, placed, listed, expected
-):
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, placed: dict[str, object], listed: bool, expected: str
+) -> None:
     import json
     from dataclasses import replace
     from types import SimpleNamespace
@@ -127,9 +127,9 @@ def test_an_ended_master_its_hive_reports_gone_is_retired_in_one_pass_without_a_
     names = ["other", name] if listed else ["other"]
     report = {"names": names, "pane_ids": [], "observed_at": now, "started_at": 0, "executions": {}}
     store.redis.set(reports.key("workstation"), json.dumps(report))
-    retire_watch.failed(store, "sw", name, {"process": 1, "refusal": "no herdr server is running"}, 1)
-    retired: list[str] = []
     refusal = {"process": 1, "refusal": "no herdr server is running"}
+    retire_watch.failed(store, "sw", name, refusal, 1)
+    retired: list[str] = []
     runtime = SimpleNamespace(
         retire=lambda agent, homes: retired.append(agent.name) or False, refusal=lambda agent: refusal
     )
