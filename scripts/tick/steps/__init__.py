@@ -139,6 +139,7 @@ def note_left(box: object, records: Iterable[StepRecord]) -> None:
 
 MODULES = (
     "scripts.tick.steps.agents",
+    "scripts.tick.steps.claims",
     "scripts.tick.steps.common",
     "scripts.tick.steps.host",
     "scripts.tick.steps.masters",
