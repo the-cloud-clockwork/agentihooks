@@ -5,9 +5,10 @@
 {{- fail "hub.bus.url is required with the nats backend when nats.enabled is false: the hub reads every reactor's events from that address" }}
 {{- end }}
 {{- $reload := list }}
-{{- range $hub.secretEnv }}
+{{- range (concat .Values.secretEnv $hub.secretEnv) }}
 {{- $reload = append $reload .secretName }}
 {{- end }}
+{{- $reload = concat $reload .Values.envFromSecrets }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -144,6 +144,15 @@ def secret_env_problems(chart: str) -> list[str]:
     reload = deployment["metadata"].get("annotations", {}).get(RELOAD)
     if reload != "hub-bus":
         return [f"a hub with hub.secretEnv reloads on {reload}, expected its credential secret hub-bus once"]
+    shared = ["--set", "secretEnv[0].name=AGENTIHOOKS_BUS_CREDENTIALS", "--set", "secretEnv[0].secretName=swarm-bus"]
+    shared += ["--set", "secretEnv[0].key=credentials", "--set", "envFromSecrets[0]=swarm-env"]
+    rendered = render(chart, *ENABLED, *secret, *shared)
+    if rendered.returncode:
+        return [f"a hub with shared secret env fails to render: {rendered.stderr.strip()}"]
+    reload = hubs(rendered.stdout)[0]["metadata"].get("annotations", {}).get(RELOAD, "")
+    expected_secrets = ["hub-bus", "swarm-bus", "swarm-env"]
+    if sorted(reload.split(",")) != expected_secrets:
+        return [f"a hub with shared secret env reloads on {reload}, expected each of {expected_secrets} once"]
     return []
 
 
