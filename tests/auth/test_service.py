@@ -142,6 +142,62 @@ def test_a_cloudflare_access_operator_exchanges_for_an_operator_token(served):
     checked.assert_called_once_with("assertion")
 
 
+class PageCredential:
+    def __init__(self, credential: str | None) -> None:
+        self.credential = credential
+        self.asked: list[str] = []
+
+    def token(self, slug: str) -> str | None:
+        self.asked.append(slug)
+        return self.credential
+
+
+PAGE = "page-credential-of-the-ledger"
+
+
+def test_outside_edge_mode_the_page_credential_opens_an_operator_session(served, monkeypatch):
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+    repository = PageCredential(PAGE)
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=repository):
+        status, reply = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 200
+    assert reply["data"]["principal"] == ""
+    assert reply["data"]["expires_in"] == tokens.TTL_S
+    assert repository.asked == [SLUG]
+    signed = {"Authorization": f"Bearer {reply['data']['token']}"}
+    assert authority.caller(signed, "", SLUG) == ""
+
+
+def test_outside_edge_mode_a_wrong_page_credential_is_refused(served, monkeypatch):
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(PAGE)):
+        status, reply = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": "not-the-page-credential"})
+
+    assert status == 403
+    assert reply["error"]["code"] == "forbidden"
+
+
+def test_outside_edge_mode_a_ledger_without_a_page_credential_refuses(served, monkeypatch):
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(None)):
+        status, _ = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 403
+
+
+def test_inside_edge_mode_the_page_credential_is_never_read_or_accepted(served):
+    reads = patch("scripts.swarm_ledger.storage.default", side_effect=AssertionError("read the page credential"))
+
+    with reads:
+        status, _ = post(served, f"/v1/ledgers/{SLUG}/token", **{"X-Ledger-Token": PAGE})
+
+    assert status == 403
+
+
 def test_the_service_keeps_verifying_legacy_credentials_with_the_legacy_switch_off(served, hive, monkeypatch):
     store, _ = hive
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "off")

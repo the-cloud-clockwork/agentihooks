@@ -75,3 +75,29 @@ def test_the_controller_credential_passes_until_the_switch_is_off(monkeypatch):
 def test_an_empty_controller_credential_is_refused_without_a_lookup(credential):
     with patch.object(authority.ports, "hive", side_effect=AssertionError("looked up")):
         assert authority.controller_credential(credential) is False
+
+
+class Ledgers:
+    def __init__(self, credential: str | None) -> None:
+        self.credential = credential
+        self.asked: list[str] = []
+
+    def token(self, slug: str) -> str | None:
+        self.asked.append(slug)
+        return self.credential
+
+
+@pytest.mark.parametrize(("stored", "expected"), [("page", "page"), (None, "")])
+def test_outside_edge_mode_the_page_credential_comes_from_the_ledger(monkeypatch, stored, expected):
+    monkeypatch.setenv("SWARM_AUTH_MODE", "local")
+    ledgers = Ledgers(stored)
+
+    with patch("scripts.swarm_ledger.storage.default", return_value=ledgers):
+        assert authority.page_credential(SLUG) == expected
+
+    assert ledgers.asked == [SLUG]
+
+
+def test_inside_edge_mode_the_page_credential_is_never_read(edge):
+    with patch("scripts.swarm_ledger.storage.default", side_effect=AssertionError("read the page credential")):
+        assert authority.page_credential(SLUG) == ""
