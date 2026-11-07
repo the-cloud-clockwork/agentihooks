@@ -2,6 +2,7 @@
 
 import os
 import re
+from importlib import import_module
 from typing import Any
 
 SERVER = "agentihooks"
@@ -9,17 +10,22 @@ CULTURE_URI = "swarm://{slug}/culture"
 SEAT_URI = "swarm://{slug}/seats/{seat}"
 
 
-def _store() -> Any:
-    from scripts.swarm.store import connect
+def _module(name: str) -> Any:
+    """A swarm module, imported on first use so listing never loads it."""
+    return import_module(name)
 
-    return connect()
+
+def _store() -> Any:
+    return _module("scripts.swarm.store").connect()
+
+
+def _withhold(slug: str, task: dict[str, Any]) -> dict[str, Any]:
+    return _module("scripts.swarm.priming_trace").withhold(slug, task)
 
 
 def _address(slug: str, seat: str) -> str:
     """The full seat address for a seat label or address, refused when it belongs to another swarm."""
-    from scripts.inbox.seats import seat_address
-
-    address = seat if "@" in seat else seat_address(slug, seat)
+    address = seat if "@" in seat else f"{seat}@{slug}"
     if not address.endswith(f"@{slug}"):
         raise ValueError(f"{seat} is not a seat of swarm {slug}")
     return address
@@ -27,26 +33,21 @@ def _address(slug: str, seat: str) -> str:
 
 def culture_text(store: Any, slug: str) -> str:
     """The swarm culture with every line under a confirmed correction withheld, as the opening prompt carries it."""
-    from scripts.swarm.priming_trace import withhold
-
     text = store.culture.get(slug) or ""
-    return withhold(slug, {"seat": "", "culture": text, "learned": []})["culture"]
+    return _withhold(slug, {"seat": "", "culture": text, "learned": []})["culture"]
 
 
 def seat_text(store: Any, slug: str, seat: str) -> str:
     """The seat's latest recap and its learned notes, canon first, data counted and not shown."""
-    from scripts.swarm.priming_trace import withhold
-    from scripts.swarm.prompt import learned_lines
-
     address = _address(slug, seat)
     recaps = store.memory.recaps(address)
-    learned = withhold(slug, {"seat": address, "culture": "", "learned": store.memory.learned(address)})["learned"]
+    learned = _withhold(slug, {"seat": address, "culture": "", "learned": store.memory.learned(address)})["learned"]
     lines = [f"Seat {address}."]
     if recaps:
         lines += [f"Latest recap, by {recaps[0]['occupant']} on task {recaps[0]['task']}:", recaps[0]["text"]]
     else:
         lines.append("Latest recap: none, no occupant of this seat left one.")
-    notes = learned_lines(learned)
+    notes: list[str] = _module("scripts.swarm.prompt").learned_lines(learned)
     return "\n".join([*lines, re.sub(r"^\d+\. ", "", notes[0]), *notes[1:]]) + "\n"
 
 
@@ -62,9 +63,7 @@ def reread_line(engine: str, slug: str, label: str) -> str:
 
 
 def _caller_seat(store: Any, slug: str) -> str:
-    from scripts.gates import Who
-
-    name = store.names.resolve(Who.from_env().name)
+    name = store.names.resolve(_module("scripts.gates").Who.from_env().name)
     agent = next((agent for agent in store.agents(slug) if agent.name == name), None)
     return agent.seat if agent is not None else ""
 
@@ -102,24 +101,27 @@ def priming(store: Any, engine: str, swarm: str, seat: str) -> str:
 
 def register(mcp: Any) -> None:
     """Register the culture and seat resource templates and the swarm_culture prompt."""
+    mcp.resource(CULTURE_URI, name="swarm_culture", mime_type="text/markdown")(swarm_culture_resource)
+    mcp.resource(SEAT_URI, name="swarm_seat", mime_type="text/markdown")(swarm_seat_resource)
+    mcp.prompt(name="swarm_culture")(swarm_culture)
 
-    @mcp.resource(CULTURE_URI, name="swarm_culture", mime_type="text/markdown")
-    def swarm_culture_resource(slug: str) -> str:
-        """The swarm culture shared by every seat, with lines under a confirmed correction withheld."""
-        return culture_text(_store(), slug)
 
-    @mcp.resource(SEAT_URI, name="swarm_seat", mime_type="text/markdown")
-    def swarm_seat_resource(slug: str, seat: str) -> str:
-        """A seat's latest recap and learned notes, canon first, data counted and not shown."""
-        return seat_text(_store(), slug, seat)
+def swarm_culture_resource(slug: str) -> str:
+    """The swarm culture shared by every seat, with lines under a confirmed correction withheld."""
+    return culture_text(_store(), slug)
 
-    @mcp.prompt(name="swarm_culture")
-    def swarm_culture(engine: str = "", swarm: str = "", seat: str = "") -> str:
-        """The swarm culture and this seat's memory, closing with how this engine rereads them.
 
-        Args:
-            engine: claude or codex; under stdio empty means AGENTIHOOKS_TARGET.
-            swarm: the swarm slug; under stdio empty means AGENTIHOOKS_SWARM.
-            seat: a seat label or address; under stdio empty means the caller's registered seat.
-        """
-        return priming(_store(), engine, swarm, seat)
+def swarm_seat_resource(slug: str, seat: str) -> str:
+    """A seat's latest recap and learned notes, canon first, data counted and not shown."""
+    return seat_text(_store(), slug, seat)
+
+
+def swarm_culture(engine: str = "", swarm: str = "", seat: str = "") -> str:
+    """The swarm culture and this seat's memory, closing with how this engine rereads them.
+
+    Args:
+        engine: claude or codex; under stdio empty means AGENTIHOOKS_TARGET.
+        swarm: the swarm slug; under stdio empty means AGENTIHOOKS_SWARM.
+        seat: a seat label or address; under stdio empty means the caller's registered seat.
+    """
+    return priming(_store(), engine, swarm, seat)

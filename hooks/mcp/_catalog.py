@@ -4,10 +4,11 @@ import subprocess
 import sys
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 
 @cache
-def get_catalog() -> dict[str, dict[str, list[dict]]]:
+def get_catalog() -> dict[str, dict[str, list[dict[str, Any]]]]:
     result = subprocess.run(
         [
             sys.executable,

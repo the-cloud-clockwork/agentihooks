@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from importlib.metadata import version
+from typing import Any
 
 from hooks.mcp import _resolve_categories
 from hooks.mcp._catalog import CAPABILITIES, PROTOCOL_VERSIONS, get_catalog
@@ -14,7 +15,7 @@ _LISTINGS = {
 }
 
 
-def list_tools() -> list[dict]:
+def list_tools() -> list[dict[str, Any]]:
     catalog = get_catalog()["tools"]
     categories = _resolve_categories()
     unknown = [category for category in categories if category not in catalog]
@@ -40,7 +41,7 @@ def list_tools() -> list[dict]:
     return list(tools.values())
 
 
-def list_served(kind: str) -> list[dict]:
+def list_served(kind: str) -> list[dict[str, Any]]:
     """The resources, resource templates or prompts the requested categories serve, from the startup catalog."""
     catalog = get_catalog()[kind]
     return [item for category in dict.fromkeys(_resolve_categories()) for item in catalog.get(category, [])]

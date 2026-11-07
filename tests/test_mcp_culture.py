@@ -149,21 +149,28 @@ def test_under_a_network_transport_every_argument_is_required(monkeypatch: pytes
 
 
 def test_the_server_serves_the_templates_and_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp.types import TextContent
+
     from hooks.mcp import build_server
 
     monkeypatch.setattr(culture, "_store", _store)
     _correct(f"culture:{SLUG}#2", f"- {BAD}", {"swarm": SLUG, "line": 2})
     server = build_server(["culture"])
 
-    async def served() -> tuple[list, list, str, str, str]:
+    async def served() -> tuple[list[str], list[tuple[str, list[str]]], object, object, object]:
         templates = [t.uriTemplate for t in await server.list_resource_templates()]
         prompts = [(p.name, [a.name for a in p.arguments or []]) for p in await server.list_prompts()]
-        culture_read = await server.read_resource("swarm://sw/culture")
-        seat_read = await server.read_resource("swarm://sw/seats/eng-2")
+        culture_read = list(await server.read_resource("swarm://sw/culture"))
+        seat_read = list(await server.read_resource("swarm://sw/seats/eng-2"))
         prompt = await server.get_prompt("swarm_culture", {"engine": "claude", "swarm": SLUG, "seat": "eng-2"})
-        return templates, prompts, culture_read[0].content, seat_read[0].content, prompt.messages[0].content.text
+        return templates, prompts, culture_read[0].content, seat_read[0].content, prompt.messages[0].content
 
-    templates, prompts, culture_body, seat_body, message = asyncio.run(served())
+    templates, prompts, culture_body, seat_body, content = asyncio.run(served())
+
+    assert isinstance(culture_body, str)
+    assert isinstance(seat_body, str)
+    assert isinstance(content, TextContent)
+    message = content.text
 
     assert sorted(templates) == ["swarm://{slug}/culture", "swarm://{slug}/seats/{seat}"]
     assert prompts == [("swarm_culture", ["engine", "swarm", "seat"])]
