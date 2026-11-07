@@ -642,10 +642,12 @@ def run_tick(
             run_group(report_steps.CLOSING_GROUP, **closing, failure=sys.exception())
             host_steps.raise_held(published)
         finally:
-            beating.close()
-            timing.BEFORE_STEP.reset(keeping)
-            tick_stop.drop(token)
-            controller.release_tick_lock(store, slug, token, "pass")
+            try:
+                beating.close()
+            finally:
+                timing.BEFORE_STEP.reset(keeping)
+                tick_stop.drop(token)
+                controller.release_tick_lock(store, slug, token, "pass")
 
 
 def cmd_list(store, args):
