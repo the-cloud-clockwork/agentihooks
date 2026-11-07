@@ -1500,7 +1500,8 @@ def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_c
     agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, LAUNCHED + remote.reports.STARTUP_MS)
 
     busy = capacity._busy(remote.store.agents("fixture"))[agent.lane]
-    assert (remote.store.agents("fixture") == [], busy) == (gone, int(not gone))
+    assert (remote.store.agents("fixture") == []) is gone
+    assert busy == int(not gone)
     assert remote.runtime.retire.called is (ended and not gone)
     assert (remote.store.claimant("fixture", "task") is None) is gone
 
