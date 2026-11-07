@@ -1869,7 +1869,7 @@
       "id": "controller-survives-ledger-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-timeout",
-      "behaviour": "When a controller pass raises LedgerUnreachable, such as a ledger read timeout, the run loop logs it, ends that pass, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1.",
+      "behaviour": "When a controller pass raises LedgerUnreachable, such as a ledger read timeout, the run loop logs it, ends that pass, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1. The startup proof swarm run and control service host before the loop are outside this seam.",
       "seam": "scripts.swarm.controller.main run loop",
       "tests": [
         "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass",

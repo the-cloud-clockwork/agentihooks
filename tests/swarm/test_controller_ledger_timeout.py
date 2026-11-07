@@ -5,11 +5,22 @@ import threading
 import pytest
 
 from scripts import operator_env
-from scripts.swarm import controller, tick_stop
+from scripts.swarm import controller, ledger_client, tick_stop
 from scripts.swarm.ledger_client import LedgerUnreachable
 from scripts.swarm_v2 import control_service, proof_swarm
 
 TIMEOUT = "ledger rig-grade-swarm: ledger server not answering on http://ledger:8765: The read operation timed out"
+
+
+class TimedOutLedger:
+    """A ledger module double whose server read times out the way the in-cluster ledger did."""
+
+    class Missing(Exception):
+        """The ledger module's missing ledger error."""
+
+    @staticmethod
+    def call(slug: str, ops: list[dict] | None, service: bool = False) -> dict:
+        raise SystemExit("ledger server not answering on http://ledger:8765: The read operation timed out")
 
 
 class Ended(Exception):
@@ -50,11 +61,12 @@ def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
     passes: list[int] = []
     waits: list[float] = []
     monkeypatch.setattr(controller, "scheduled_wait", waits.append)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: TimedOutLedger)
 
     def tick_once(store: str, running: Service) -> dict:
         passes.append(len(passes) + 1)
         if len(passes) == 1:
-            raise LedgerUnreachable(TIMEOUT)
+            ledger_client.LedgerClient(service=True).state("rig-grade-swarm")
         raise Ended
 
     monkeypatch.setattr(controller, "tick_once", tick_once)
