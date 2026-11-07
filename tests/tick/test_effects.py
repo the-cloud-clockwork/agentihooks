@@ -106,9 +106,12 @@ def test_call_and_write_steps_declare_their_effects_and_feature() -> None:
 
 
 @pytest.mark.feature("swarm-tick-declared-effects")
-def test_only_the_reap_step_declares_its_effects_yet() -> None:
+def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     declared = {step.name: step.effects for step in registry.steps() if step.effects}
-    assert declared == {"reap": frozenset({"ledger", "runtime", "inbox"})}
+    assert declared == {
+        "reap": frozenset({"ledger", "runtime", "inbox"}),
+        "spawn": frozenset({"ledger", "runtime", "coordination", "inbox"}),
+    }
 
 
 @pytest.mark.feature("swarm-tick-declared-effects")
