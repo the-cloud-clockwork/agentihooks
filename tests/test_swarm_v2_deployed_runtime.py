@@ -606,9 +606,9 @@ class QuotaPods(PoolPods):
 
 
 def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quota_with_no_pool_declared(
-    tmp_path, monkeypatch
-):
-    def own_node(*args, **kwargs):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def own_node(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("the deployed controller read its own node")
 
     monkeypatch.setattr(host_budget, "read_host", own_node)
@@ -621,7 +621,7 @@ def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quot
     finally:
         service.stop()
 
-    assert pods.selectors == []
+    assert pods.selectors == [""]
     assert (decision["host"]["room"], decision["host"]["limit"], decision["host"]["reason"]) == (
         2,
         "quota pods",
