@@ -993,3 +993,24 @@ def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_w
         "state": "finished",
         "next": "stop now; the swarm closes this session",
     }
+
+
+class OneFreeSlot(FakeRuntime):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> object:
+        if lane != tick_module.MASTER and self.spawned:
+            raise tick_module.SpawnError(
+                "no hive has room, and the local machine runs 4 of its 4 agents", "unavailable"
+            )
+        return super().spawn(config, lane, name, task)
+
+
+def test_a_pending_dispatcher_takes_the_next_free_slot_ahead_of_a_waiting_lane_task() -> None:
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0))
+    store.update(SLUG, state="running", autonomy="full")
+    runtime = OneFreeSlot()
+    tick(SLUG, store, PriorityLedger([{"id": "t1"}]), runtime, NOW)
+    assert [(lane, task) for lane, _, task in runtime.spawned] == [(dispatch_seat.LANE, dispatch_seat.SEAT)]
+    assert len(seats(store)) == 1
