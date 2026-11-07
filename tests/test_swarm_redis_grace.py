@@ -2,11 +2,13 @@
 
 import time
 from pathlib import Path
+from types import ModuleType
+from typing import cast
 
 import pytest
 
 from scripts.swarm import controller, controller_probes, redis_grace
-from scripts.swarm.store import SwarmError, Unreachable
+from scripts.swarm.store import RedisStore, SwarmError, Unreachable
 
 pytestmark = pytest.mark.unit
 
@@ -23,8 +25,12 @@ class Clock:
         return self.now
 
 
+STORE = cast(RedisStore, None)
+PROOF = ModuleType("proof_swarm")
+
+
 def refused() -> None:
-    raise SwarmError("Redis is unreachable (connection refused)")
+    raise Unreachable("Redis is unreachable (connection refused)")
 
 
 @pytest.fixture
@@ -145,7 +151,7 @@ def test_the_pass_loop_keeps_running_through_redis_errors_inside_the_window(monk
     calls = passes(monkeypatch, [redis.ConnectionError("refused"), redis.ConnectionError("refused"), StopLoop()])
 
     with pytest.raises(StopLoop):
-        controller._passes(None, None, None, False, redis_grace.Outage(30, Clock()))
+        controller._passes(STORE, None, PROOF, False, redis_grace.Outage(30, Clock()))
     assert len(calls) == 3
     assert "inside the Redis grace window" in capsys.readouterr().err
 
@@ -158,7 +164,7 @@ def test_the_pass_loop_ends_once_redis_errors_outlast_the_window(monkeypatch):
     monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: setattr(clock, "now", clock.now + 31))
 
     with pytest.raises(Unreachable, match="past the 30s grace window"):
-        controller._passes(None, None, None, False, redis_grace.Outage(30, clock))
+        controller._passes(STORE, None, PROOF, False, redis_grace.Outage(30, clock))
     assert len(calls) == 2
 
 
@@ -167,7 +173,7 @@ def test_a_single_pass_reports_a_tolerated_redis_error_as_failed(monkeypatch):
 
     passes(monkeypatch, [redis.ConnectionError("refused")])
 
-    assert controller._passes(None, None, None, True, redis_grace.Outage(30, Clock())) == 1
+    assert controller._passes(STORE, None, PROOF, True, redis_grace.Outage(30, Clock())) == 1
 
 
 def test_a_pass_that_reaches_redis_clears_a_probe_outage(home, monkeypatch):
@@ -176,7 +182,7 @@ def test_a_pass_that_reaches_redis_clears_a_probe_outage(home, monkeypatch):
     marker.write_text(str(time.time() - 500))
     monkeypatch.setattr(controller, "_pass", lambda store, service, proof_swarm: None)
 
-    assert controller._passes(None, None, None, True, redis_grace.Outage(30, Clock())) == 0
+    assert controller._passes(STORE, None, PROOF, True, redis_grace.Outage(30, Clock())) == 0
     assert not marker.exists()
 
 
