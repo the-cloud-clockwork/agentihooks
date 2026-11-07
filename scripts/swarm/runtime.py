@@ -1361,7 +1361,7 @@ class HerdrRuntime:
         if host in ("", hive_id()):
             carrying = [pid for pid in held if _carries(pid, name)]
             return not self.reap(carrying).refusal and len(carrying) == len(held)
-        identity = ",".join(self.hive.executions_of(host, name))
+        identity = ",".join(self.hive.executions_of(host, name)) if self.hive is not None else ""
         order = CommandOrder(f"reap:{name}:{identity}" if identity else f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:

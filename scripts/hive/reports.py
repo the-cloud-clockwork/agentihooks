@@ -120,10 +120,11 @@ class Reports:
 
     def executions_of(self, hive: str, name: str) -> list[str]:
         """Each execution the hive reports under the name, as its execution id and generation, sorted."""
-        report = self.read(hive) or {}
+        report = cast("dict[str, object]", json.loads(cast("str", self.redis.get(key(hive))) or "{}"))
+        executions = cast("dict[str, dict[str, object]]", report.get("executions", {}))
         return sorted(
             f"{execution}:{entry.get('generation', 0)}"
-            for execution, entry in report.get("executions", {}).items()
+            for execution, entry in executions.items()
             if entry.get("name") == name
         )
 

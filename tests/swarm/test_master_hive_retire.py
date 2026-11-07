@@ -37,7 +37,7 @@ class ControllerRuntime(AffinityRuntime):
         self.herdr.reap_name = self.reap_name
         self.herdr.end = self.end
         self.herdr._order = self.order
-        self.herdr.hive = SimpleNamespace(holder=self.holder, redis=store.redis)
+        self.herdr.hive = SimpleNamespace(holder=self.holder, executions_of=lambda hive, name: [], redis=store.redis)
 
     def holder(self, name: str) -> str:
         return WORKSTATION if name in self.live else ""
