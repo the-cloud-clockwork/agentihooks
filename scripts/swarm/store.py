@@ -101,6 +101,7 @@ class SwarmConfig:
     placement_nodes: int = 0
     repo_origin: str = ""
     tick_mode: str = SEQUENTIAL_TICK
+    control_url: str = ""
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
@@ -276,6 +277,7 @@ class RedisStore:
             int(raw.get("placement_nodes") or 0),
             raw.get("repo_origin", ""),
             raw.get("tick_mode") or SEQUENTIAL_TICK,
+            raw.get("control_url", ""),
         )
 
     def update(self, slug, **changes):
