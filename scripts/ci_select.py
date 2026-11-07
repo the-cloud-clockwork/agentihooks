@@ -97,7 +97,7 @@ def recorded_tests(manifest: dict[str, Any], changed: list[str]) -> set[str]:
     records: dict[str, Record] = manifest["tests"]
     units = {index for index, unit in enumerate(names) if unit.partition("::")[0] in changed}
     lists = {tuple(found.get("files", [])) for found in records.values()}
-    read = set(changed) - cast(set[str], set.intersection(*map(set, lists)))
+    read = set(changed) - cast(set[str], cast("Any", set).intersection(*map(set, lists)))
     return {
         test.partition("::")[0]
         for test, found in records.items()
@@ -264,10 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         changed = changed_files(args.root, args.base, args.head)
         manifest = None
         if args.repository and not needs_full_suite(changed) and not all(is_doc(path) for path in changed):
-            if found := cast(
-                "tuple[dict[str, Any], dict[str, Any]] | None",
-                find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
-            ):
+            if found := find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")):
                 run, manifest = found
                 print(f"Recorded coverage from dev run {run['id']} adds runtime dependent tests.")
         scope, legs = decide(

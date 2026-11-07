@@ -9,13 +9,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context.account_sessions import API_ACCOUNT
 from scripts import operator_env, session_bands
@@ -102,7 +102,7 @@ class RouteDecision:
 
     @property
     def account(self) -> str:
-        return API_ACCOUNT if self.kind == API else self.credential.account
+        return API_ACCOUNT if self.kind == API else cast("Credential", self.credential).account
 
 
 @dataclass(frozen=True)
@@ -179,14 +179,17 @@ def cached_observations(
     path = cache_file or _cache_path(os.environ if environ is None else environ)
     with _cache_lock(path):
         cache = _read_cache(path)
-    modes = cache.get("modes") if isinstance(cache.get("modes"), dict) else {}
+    modes = cast("dict[str, Any]", cache.get("modes") if isinstance(cache.get("modes"), dict) else {})
     mode_data = modes.get("fable" if include_fable else "normal")
-    entries = mode_data.get("accounts") if isinstance(mode_data, dict) else None
-    observations = []
+    entries = cast(
+        "dict[str, Any] | None",
+        cast("dict[str, Any]", mode_data).get("accounts") if isinstance(mode_data, dict) else None,
+    )
+    observations: list[tuple[float, ProbeResult]] = []
     for entry in (entries or {}).values():
-        result = _result_from_data(entry.get("result")) if isinstance(entry, dict) else None
-        if result is not None and isinstance(entry.get("observed_at"), (int, float)):
-            observations.append((float(entry["observed_at"]), result))
+        result = _result_from_data(cast("dict[str, Any]", entry).get("result")) if isinstance(entry, dict) else None
+        if result is not None and isinstance(cast("dict[str, Any]", entry).get("observed_at"), (int, float)):
+            observations.append((float(cast("dict[str, Any]", entry)["observed_at"]), result))
     return observations
 
 
@@ -195,22 +198,22 @@ def _cache_path(environ: Mapping[str, str]) -> Path:
     return root / "claude-router-cache.json"
 
 
-def _window_data(window: QuotaWindow) -> dict:
+def _window_data(window: QuotaWindow) -> dict[str, Any]:
     return {"used": window.used, "resets_at": window.resets_at}
 
 
 def _window_from_data(data: object) -> QuotaWindow:
     if not isinstance(data, dict):
         return QuotaWindow()
-    used = data.get("used")
-    resets_at = data.get("resets_at")
+    used = cast("dict[str, Any]", data).get("used")
+    resets_at = cast("dict[str, Any]", data).get("resets_at")
     return QuotaWindow(
         used=float(used) if isinstance(used, (int, float)) else None,
         resets_at=int(resets_at) if isinstance(resets_at, (int, float)) else None,
     )
 
 
-def _result_data(result: ProbeResult) -> dict:
+def _result_data(result: ProbeResult) -> dict[str, Any]:
     return {
         "account": result.account,
         "provider_status": result.provider_status,
@@ -227,8 +230,9 @@ def _result_data(result: ProbeResult) -> dict:
 
 
 def _result_from_data(data: object) -> ProbeResult | None:
-    if not isinstance(data, dict) or not isinstance(data.get("account"), str):
+    if not isinstance(data, dict) or not isinstance(cast("dict[str, Any]", data).get("account"), str):
         return None
+    data = cast("dict[str, Any]", data)
     margin = data.get("margin")
     return ProbeResult(
         account=data["account"],
@@ -247,15 +251,19 @@ def _result_from_data(data: object) -> ProbeResult | None:
     )
 
 
-def _read_cache(path: Path) -> dict:
+def _read_cache(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) and data.get("version") == 1 else {"version": 1, "modes": {}}
+        return (
+            cast("dict[str, Any]", data)
+            if isinstance(data, dict) and cast("dict[str, Any]", data).get("version") == 1
+            else {"version": 1, "modes": {}}
+        )
     except (OSError, json.JSONDecodeError):
         return {"version": 1, "modes": {}}
 
 
-def _write_cache(path: Path, data: dict) -> None:
+def _write_cache(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -275,7 +283,7 @@ def _write_cache(path: Path, data: dict) -> None:
 
 
 @contextlib.contextmanager
-def _cache_lock(path: Path):
+def _cache_lock(path: Path) -> Generator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
     with lock_path.open("a+", encoding="utf-8") as handle:
@@ -318,8 +326,8 @@ def _child_environment(credential: Credential, environ: Mapping[str, str]) -> di
     return child
 
 
-def _window(info: dict, name: str) -> QuotaWindow:
-    raw = (info.get("unifiedWindows") or {}).get(name) or {}
+def _window(info: dict[str, Any], name: str) -> QuotaWindow:
+    raw = cast("dict[str, Any]", cast("dict[str, Any]", info.get("unifiedWindows") or {}).get(name) or {})
     utilization = raw.get("utilization")
     reset = raw.get("resetsAt")
     return QuotaWindow(
@@ -353,10 +361,10 @@ def _state(
 
 
 def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool = False) -> ProbeResult:
-    rate_info: dict = {}
+    rate_info: dict[str, Any] = {}
     model = "?"
-    usage: dict = {}
-    model_usage: dict = {}
+    usage: dict[str, Any] = {}
+    model_usage: dict[str, Any] = {}
 
     for line in output.splitlines():
         try:
@@ -365,6 +373,7 @@ def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool 
             continue
         if not isinstance(event, dict):
             continue
+        event = cast("dict[str, Any]", event)
         if event.get("type") == "rate_limit_event" and isinstance(event.get("rate_limit_info"), dict):
             rate_info = event["rate_limit_info"]
         elif event.get("type") == "system" and event.get("subtype") == "init":
@@ -385,16 +394,17 @@ def parse_probe(account: str, output: str, elapsed_ms: int, include_fable: bool 
     fable = _window(rate_info, "seven_day_overage_included")
     provider_status = str(rate_info.get("status") or "unknown")
     state, margin = _state(provider_status, five_hour, seven_day, fable if include_fable else None)
-    # Keep probe context telemetry for future session retirement when a reused session nears its context limit.
     context_used = None
     if usage:
         context_used = sum(
             int(usage.get(key) or 0)
             for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
         )
-    selected_model_usage = model_usage.get(model) if isinstance(model_usage.get(model), dict) else None
+    selected_model_usage = (
+        cast("dict[str, Any]", model_usage.get(model)) if isinstance(model_usage.get(model), dict) else None
+    )
     if selected_model_usage is None and len(model_usage) == 1:
-        selected_model_usage = next(iter(model_usage.values()))
+        selected_model_usage = cast("dict[str, Any]", next(iter(model_usage.values())))
     context_capacity = None
     if isinstance(selected_model_usage, dict) and isinstance(selected_model_usage.get("contextWindow"), (int, float)):
         context_capacity = int(selected_model_usage["contextWindow"])
@@ -452,7 +462,7 @@ def probe_credential(
         return _error_result(credential.account, f"claude exited {completed.returncode}", elapsed_ms)
     result = parse_probe(credential.account, completed.stdout, elapsed_ms, include_fable)
     if result.state == "UNKNOWN":
-        return ProbeResult(**{**result.__dict__, "error": "rate-limit windows unavailable"})
+        return ProbeResult(**cast("dict[str, Any]", {**result.__dict__, "error": "rate-limit windows unavailable"}))
     return result
 
 
@@ -492,7 +502,7 @@ def probe_account_metadata(
     environ: Mapping[str, str],
     claude_bin: str,
     secrets: list[str],
-) -> dict:
+) -> dict[str, Any]:
     command = _probe_command(model, claude_bin, include_partial=True)
     started = time.monotonic()
     try:
@@ -515,8 +525,8 @@ def probe_account_metadata(
         return_code, error = None, f"probe timed out after {timeout:g}s"
 
     safe_stdout = _redact(stdout, secrets)
-    events = []
-    non_json = []
+    events: list[Any] = []
+    non_json: list[str] = []
     for line in safe_stdout.splitlines():
         try:
             events.append(json.loads(line))
@@ -543,7 +553,7 @@ def collect_account_metadata(
     timeout: float = 60,
     environ: Mapping[str, str] | None = None,
     claude_bin: str = "claude",
-) -> dict:
+) -> dict[str, Any]:
     active_env = os.environ if environ is None else environ
     model = "fable" if include_fable else "haiku"
     secrets = [credential.token for credential in credentials]
@@ -570,11 +580,11 @@ def collect_account_metadata(
 
 
 def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
-    if not isinstance(entry, dict) or not isinstance(entry.get("observed_at"), (int, float)):
+    if not isinstance(entry, dict) or not isinstance(cast("dict[str, Any]", entry).get("observed_at"), (int, float)):
         return False
-    if now - float(entry["observed_at"]) >= CACHE_TTL_SECONDS:
+    if now - float(cast("dict[str, Any]", entry)["observed_at"]) >= CACHE_TTL_SECONDS:
         return False
-    result = _result_from_data(entry.get("result"))
+    result = _result_from_data(cast("dict[str, Any]", entry).get("result"))
     if result is None:
         return False
     windows = [result.five_hour, result.seven_day, *([result.fable] if include_fable else [])]
@@ -589,12 +599,16 @@ def _current_tokens(environ: Mapping[str, str]) -> set[str]:
     return {credential.env_name for credential in discover_credentials(filled)}
 
 
-def _drop_tokenless(modes: dict, probed: set[str], current: set[str]) -> None:
+def _drop_tokenless(modes: dict[str, Any], probed: set[str], current: set[str]) -> None:
     if not current:
         return
     for data in modes.values():
-        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
-            data["accounts"] = {name: entry for name, entry in data["accounts"].items() if name in probed | current}
+        if isinstance(data, dict) and isinstance(cast("dict[str, Any]", data).get("accounts"), dict):
+            data["accounts"] = {
+                name: entry
+                for name, entry in cast("dict[str, Any]", data["accounts"]).items()
+                if name in probed | current
+            }
 
 
 def collect_results(
@@ -617,15 +631,17 @@ def collect_results(
     with _cache_lock(path):
         cache = _read_cache(path)
         modes = cache.setdefault("modes", {})
-        mode_data = modes.get(mode) if isinstance(modes.get(mode), dict) else {}
-        entries = mode_data.get("accounts") if isinstance(mode_data.get("accounts"), dict) else {}
+        mode_data = cast("dict[str, Any]", modes.get(mode)) if isinstance(modes.get(mode), dict) else {}
+        entries = (
+            cast("dict[str, Any]", mode_data.get("accounts")) if isinstance(mode_data.get("accounts"), dict) else {}
+        )
         cached: dict[str, ProbeResult] = {}
         missing: list[Credential] = []
 
         for credential in credentials:
             entry = entries.get(credential.env_name)
-            result = _result_from_data(entry.get("result")) if isinstance(entry, dict) else None
-            if not refresh and result is not None and _entry_is_fresh(entry, timestamp, include_fable):
+            result = _result_from_data(cast("dict[str, Any]", entry).get("result")) if isinstance(entry, dict) else None
+            if not refresh and result is not None and _entry_is_fresh(cast("object", entry), timestamp, include_fable):
                 cached[credential.env_name] = result
             else:
                 missing.append(credential)
@@ -694,7 +710,8 @@ def auth_rejected(output: str) -> bool:
         except json.JSONDecodeError:
             continue
         if isinstance(event, dict) and (
-            event.get("api_error_status") in AUTH_REJECTED or event.get("error") == AUTH_FAILED
+            cast("dict[str, Any]", event).get("api_error_status") in AUTH_REJECTED
+            or cast("dict[str, Any]", event).get("error") == AUTH_FAILED
         ):
             return True
     return False
@@ -751,8 +768,8 @@ def rank_results(results: list[ProbeResult], include_fable: bool = False) -> lis
 
 @dataclass(frozen=True)
 class ClaudeTokenSource:
-    options: Mapping[str, Any] = field(default_factory=dict)
-    sessions: Mapping[str, int] = field(default_factory=dict)
+    options: Mapping[str, Any] = field(default_factory=cast("Callable[[], dict[str, Any]]", dict))
+    sessions: Mapping[str, int] = field(default_factory=cast("Callable[[], dict[str, int]]", dict))
     exclude: frozenset[str] = frozenset()
     held: "Reservation | None" = None
 
@@ -761,7 +778,9 @@ class ClaudeTokenSource:
         if not credentials:
             return [], "cached"
         timing = {} if now is None else {"now": now}
-        return collect_results(credentials, **self.options, environ=environ, **timing)
+        return collect_results(
+            credentials, **cast("dict[str, Any]", self.options), environ=environ, **cast("dict[str, Any]", timing)
+        )
 
     def cap(self, result: ProbeResult, now: float) -> int | None:
         if self.held is not None and self.held.closes(result.account, result.seven_day.used):
@@ -846,7 +865,7 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         timestamp = time.time() if options.get("now") is None else options["now"]
         excluded = set(options.get("exclude", ()))
         reserve = {slug.strip() for slug in environ.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",")}
-        fable = options.get("include_fable")
+        fable = cast("bool", options.get("include_fable"))
         open_results = [
             result for result in exc.results if result.account not in excluded and is_routable(result, timestamp, fable)
         ]
@@ -882,8 +901,8 @@ def launch_environment(decision: RouteDecision, environ: Mapping[str, str]) -> d
     if decision.kind == API:
         child = envs.api_child(environ)
     else:
-        child = _child_environment(decision.credential, environ)
-        child[decision.credential.env_name] = decision.credential.token
+        child = _child_environment(cast("Credential", decision.credential), environ)
+        child[cast("Credential", decision.credential).env_name] = cast("Credential", decision.credential).token
     child["AGENTIHOOKS_ROUTE_ACCOUNT"] = decision.account
     return child
 
@@ -892,7 +911,7 @@ def format_selection(decision: RouteDecision, include_fable: bool = False) -> st
     if decision.kind == API:
         sessions = f"sessions={decision.sessions}/{decision.max_sessions}"
         return f"[agenti] account={API_ACCOUNT} kind={API} {sessions} source={decision.source}"
-    result = decision.result
+    result = cast("ProbeResult", decision.result)
     parts = [
         f"account={result.account}",
         f"routing_left={_percent(result.routing_left)}",
@@ -916,7 +935,7 @@ def requested_model(extra_args: list[str], settings_path: Path | None = None) ->
     path = settings_path or claude_home() / "settings.json"
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
-        return str(settings.get("model") or "") if isinstance(settings, dict) else ""
+        return str(cast("dict[str, Any]", settings).get("model") or "") if isinstance(settings, dict) else ""
     except (OSError, json.JSONDecodeError):
         return ""
 
@@ -1021,7 +1040,7 @@ def render_table(
         headers.extend(["FABLE LEFT", "FABLE RESET"])
     if observed is not None:
         headers.append("AGE")
-    rows = []
+    rows: list[list[str]] = []
     for rank, result in enumerate(rank_results(results, include_fable), 1):
         cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [

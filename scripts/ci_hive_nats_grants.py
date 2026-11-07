@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -59,8 +59,8 @@ def _subjects(value: Any) -> frozenset[str]:
 def _direction(rules: Any) -> dict[str, frozenset[str]]:
     if not isinstance(rules, dict):
         rules = {"allow": rules}
-    allow = _subjects(rules.get("allow"))
-    return {"allow": allow or EVERYTHING, "deny": _subjects(rules.get("deny"))}
+    allow = _subjects(cast("dict[str, Any]", rules).get("allow"))
+    return {"allow": allow or EVERYTHING, "deny": _subjects(cast("dict[str, Any]", rules).get("deny"))}
 
 
 def _rendered(agentihooks: str, script: str, function: str) -> dict[str, dict[str, frozenset[str]]]:
