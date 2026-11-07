@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Call, Decision, Who
@@ -20,6 +20,8 @@ from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
@@ -230,14 +232,13 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
+        store, progress, failed, found = self.connect(), False, [], trees(self.root(), who.name)
         frozen = self.frozen(store)
         holding = [tree for tree in found if tree.unpushed and own_pull(tree, task)]
-        checks = self.checks(task) if holding else ""
-        for tree in found:
-            if checks and tree in holding:
-                owed = owed or tree.dirty
-                continue
+        checks = self.checks(str(task["pr_url"])) if holding else ""
+        held = holding if checks else []
+        owed = any(tree.dirty for tree in held)
+        for tree in [tree for tree in found if tree not in held]:
             if tree.unpushed and frozen:
                 failed.append(PANIC_HELD.format(path=tree.path))
             elif tree.unpushed and (refused := self.held(tree)):
@@ -259,13 +260,12 @@ class PushStop:
         self.notify(store, who, reason)
         return Decision.deny(" ".join([reason, *failed]))
 
-    def checks(self, task: Any) -> str:
+    def checks(self, url: str) -> str:
         """The task pull request's link while its checks run and none is red, when the one push gate refuses a push,
         else ''."""
         from scripts.gates.one_push import never_started
 
-        url = str(task.get("pr_url") or "")
-        pull = cast("PullRequest | None", self.github()(url) if url else None)
+        pull = self.github()(url)
         if pull is None or pull.state != "OPEN" or pull.red or pull.queued or not pull.running:
             return ""
         return "" if never_started(pull) else url
@@ -380,7 +380,7 @@ class PushStop:
 
         return LedgerClient()
 
-    def github(self):
+    def github(self) -> "Callable[[str], PullRequest | None]":
         from scripts.swarm.ledger_events import view
 
         return self._github or view

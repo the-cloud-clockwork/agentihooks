@@ -121,7 +121,8 @@ def test_the_template_is_the_operator_text():
 
 
 def test_a_fresh_worktree_with_no_work_stops_freely(rig):
-    assert rig.stop().allowed
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (True, "")
     assert rig.remote_head() == ""
     assert rig.inbox() == []
 
