@@ -793,6 +793,26 @@ def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
     assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
 
 
+def test_a_failed_name_reap_does_not_answer_a_reap_of_the_same_name_for_a_new_execution(remote):
+    from scripts.hive.orders import Consumer, Orders
+
+    _publish(remote)
+    runtime, agent = remote.runtime, remote.agent
+    stream = Orders(remote.redis).commands(HIVE)
+    assert runtime.reap_name(agent.name) is False
+    hive = Mock()
+    hive.herdr.reap_name.return_value = False
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
+    remote.agent = replace(agent, execution_id="execution-two", generation=agent.generation + 1)
+    _publish(remote)
+    assert runtime.reap_name(agent.name) is False
+    assert len(remote.redis.xrange(stream)) == 1
+    hive.herdr.reap_name.return_value = True
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
+    assert hive.herdr.reap_name.call_count == 2
+    assert runtime.reap_name(agent.name) is True
+
+
 def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
     from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
 
