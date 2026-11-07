@@ -5,6 +5,7 @@ session's pushes, reruns, dispatches and deploys; a session on the head branch o
 reruns and dispatches.
 Fails open on a store error."""
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -130,7 +131,7 @@ def _freezes(tokens: list[str]) -> bool:
     return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
 
 
-def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str = "") -> str | None:
+def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
     if tool_name != "Bash":
         return None
     from hooks.context.shell_commands import commands
@@ -152,8 +153,6 @@ def _spares(tokens: list[str]) -> bool:
 
 def _git(cwd: str, *args: str) -> str:
     """Return one git read's output in the session's directory, or an empty string when it fails."""
-    import subprocess
-
     try:
         found = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
@@ -176,8 +175,12 @@ def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
     """Return whether the session works in the repository and on the head branch of a registered fix pull request."""
     from scripts.swarm.stack import repo_key
 
-    branch = _git(cwd, "branch", "--show-current") if cwd and fixes else ""
-    origin = _git(cwd, "remote", "get-url", "origin") if branch else ""
+    if not (cwd and fixes):
+        return False
+    branch = _git(cwd, "branch", "--show-current")
+    if not branch:
+        return False
+    origin = _git(cwd, "remote", "get-url", "origin")
     if not origin:
         return False
     changes = f"{repo_key(origin)}/pull/"

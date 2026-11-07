@@ -684,6 +684,116 @@ def test_panic_refuses_a_push_outside_a_git_checkout(
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
 
 
+def _git_runs(monkeypatch: pytest.MonkeyPatch, outcome: Any) -> list[tuple[list[str], dict[str, Any]]]:
+    from types import SimpleNamespace
+
+    runs: list[tuple[list[str], dict[str, Any]]] = []
+
+    def run(args: list[str], **kwargs: Any) -> Any:
+        runs.append((args, kwargs))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(
+        blocker_window, "subprocess", SimpleNamespace(run=run, SubprocessError=subprocess.SubprocessError)
+    )
+    return runs
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_git_read_runs_in_the_session_directory_within_five_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    runs = _git_runs(monkeypatch, SimpleNamespace(returncode=0, stdout=" fix-branch\n"))
+    assert blocker_window._git("/work", "branch", "--show-current") == "fix-branch"
+    assert runs == [
+        (["git", "branch", "--show-current"], {"cwd": "/work", "capture_output": True, "text": True, "timeout": 5})
+    ]
+
+
+@pytest.mark.parametrize("outcome", [OSError("no git"), subprocess.TimeoutExpired("git", 5)])
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_git_read_that_cannot_run_reads_empty(monkeypatch: pytest.MonkeyPatch, outcome: BaseException) -> None:
+    _git_runs(monkeypatch, outcome)
+    assert blocker_window._git("/work", "branch") == ""
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_failed_git_read_reads_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    _git_runs(monkeypatch, SimpleNamespace(returncode=128, stdout="fix-branch"))
+    assert blocker_window._git("/work", "branch") == ""
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_an_unreadable_fix_reads_as_no_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm.store import SwarmError
+
+    def fix_branch(url: str) -> str:
+        assert url == FIX
+        raise SwarmError("cannot read")
+
+    monkeypatch.setattr(panic, "fix_branch", fix_branch)
+    assert blocker_window._fix_branch(FIX) == ""
+
+
+def _reads(monkeypatch: pytest.MonkeyPatch, answers: dict[tuple[str, ...], str]) -> list[tuple[str, ...]]:
+    asked: list[tuple[str, ...]] = []
+
+    def git(cwd: str, *args: str) -> str:
+        assert cwd == "/work"
+        asked.append(args)
+        return answers[args]
+
+    def fix_branch(url: str) -> str:
+        assert url == FIX
+        return ""
+
+    monkeypatch.setattr(blocker_window, "_git", git)
+    monkeypatch.setattr(blocker_window, "_fix_branch", fix_branch)
+    return asked
+
+
+@pytest.mark.parametrize(("cwd", "fixes"), [("", (FIX,)), ("/work", ())])
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_no_directory_or_no_fix_reads_no_git(monkeypatch: pytest.MonkeyPatch, cwd: str, fixes: tuple[str, ...]) -> None:
+    asked = _reads(monkeypatch, {})
+    assert blocker_window._on_fix_branch(cwd, fixes) is False
+    assert asked == []
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_detached_checkout_reads_no_origin_and_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _reads(monkeypatch, {("branch", "--show-current"): ""})
+    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert asked == [("branch", "--show-current")]
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_checkout_without_an_origin_stays_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _reads(monkeypatch, {("branch", "--show-current"): "fix-branch", ("remote", "get-url", "origin"): ""})
+    assert blocker_window._on_fix_branch("/work", (FIX,)) is False
+    assert asked == [("branch", "--show-current"), ("remote", "get-url", "origin")]
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_the_frozen_check_reads_the_branch_in_the_given_directory(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, tuple[str, ...]]] = []
+
+    def on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
+        seen.append((cwd, fixes))
+        return True
+
+    monkeypatch.setattr(blocker_window, "_on_fix_branch", on_fix_branch)
+    panic.engage(store, "reason", False, [FIX], 0)
+    assert blocker_window._frozen("Bash", {"command": "git push"}, "/work") is None
+    assert seen == [("/work", (FIX,))]
+
+
 @pytest.mark.parametrize("command", ["git status", "gh run list", "kubectl get pods", "echo push", ""])
 def test_panic_lets_other_commands_through(store, command):
     panic.engage(store, "reason", True, [], 0)
@@ -701,7 +811,7 @@ def test_panic_freezes_only_bash(store):
 
 def test_a_frozen_check_fails_open_without_a_store(monkeypatch):
     monkeypatch.setattr(blocker_window, "_store", lambda: None)
-    assert blocker_window._frozen("Bash", {"command": "git push"}) is None
+    assert blocker_window._frozen("Bash", {"command": "git push"}, "") is None
 
 
 def test_freezes_matches_command_prefixes():
