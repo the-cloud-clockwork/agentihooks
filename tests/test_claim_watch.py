@@ -196,6 +196,30 @@ def test_an_unreachable_redis_keeps_the_session_and_is_not_asked_again_inside_th
     assert spawn.calls == []
 
 
+def test_a_cached_claim_of_another_agent_stops_again_without_a_read_even_in_the_same_second() -> None:
+    redis, spawn = Pushed(OTHER), Spawn()
+    stop = claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) == stop
+    redis.holder = NAME
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) == stop
+    assert claim_watch.check(ENV, redis, 1000.5, spawn) == stop
+    assert redis.reads == [KEY]
+
+
+def test_the_session_environment_chooses_the_redis_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+
+    def client(environ: object) -> Pushed:
+        seen.append(environ)
+        return Pushed(NAME)
+
+    monkeypatch.setattr(claim_watch, "_client", client)
+
+    assert claim_watch.check(ENV, None, 1000.0, Spawn()) is None
+    assert seen == [ENV]
+
+
 def test_no_redis_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claim_watch, "_client", lambda environ: None)
 
