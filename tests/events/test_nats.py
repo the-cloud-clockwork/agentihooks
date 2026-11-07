@@ -468,6 +468,26 @@ def test_the_bus_connects_without_reconnecting(url, monkeypatch):
     connect.assert_called_once_with(url, allow_reconnect=False)
 
 
+def test_a_reconnecting_bus_ends_its_first_connect_when_no_server_answers(monkeypatch):
+    monkeypatch.setattr(nats, "FIRST_CONNECT_RETRIES", 1)
+    url = f"nats://127.0.0.1:{nats_server.free_port()}"
+    outcome: list[BaseException] = []
+
+    def first_connect() -> None:
+        try:
+            nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
+        except BaseException as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=first_connect, daemon=True)
+    worker.start()
+    worker.join(timeout=60)
+    assert not worker.is_alive()
+    [error] = outcome
+    assert isinstance(error, ConnectionError)
+    assert str(error) == f"nats: no server at {url} answered the first connect within 1 retries"
+
+
 def test_close_closes_the_server_connection(url):
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
     connection = opened._nc
