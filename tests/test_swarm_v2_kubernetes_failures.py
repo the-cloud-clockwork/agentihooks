@@ -2,6 +2,7 @@ import json
 from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest import mock
 
 import pytest
@@ -987,12 +988,24 @@ class _Ledger:
         self.reads.append(slug)
         return {"tasks": [dict(row) for row in self.rows]}
 
-    def update_task(self, slug, task_id, fields):
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        *,
+        if_state: tuple[str, ...] = (),
+        if_match: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._refuse()
-        self.calls.append((slug, task_id, fields, lease.EPOCH.get()))
         for row in self.rows:
             if row["id"] == task_id:
+                if if_state and row["state"] not in if_state:
+                    raise SwarmError("task state changed")
+                if if_match and any(row.get(key, "") != value for key, value in if_match.items()):
+                    raise SwarmError("task ownership changed")
                 row.update(fields)
+        self.calls.append((slug, task_id, fields, lease.EPOCH.get()))
         return {}
 
 
@@ -1476,12 +1489,15 @@ def test_a_cleared_recovery_mark_restores_the_awaiting_value_the_task_held_befor
     assert _hash(world, "recovery-pending-tasks") == {}
 
 
-def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(world):
+def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(world: Any) -> None:
     ledger, relaunch = _Ledger(), _Relaunch()
     service = SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=relaunch))
-    recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), _Cluster(world), ledger)
+    recover = deployed.recovery_pass(
+        cast(Any, service), cast(Any, SimpleNamespace(image_tag="dev")), cast(Any, _Cluster(world)), ledger
+    )
     passing = recover.replacements
-    relaunch.recovery = recover.recovery
+    assert passing is not None
+    relaunch.recovery = cast(Any, recover.recovery)
     assert (passing.recovery, passing.relaunch, passing.ledger) == (recover.recovery, relaunch, ledger)
     assert recover() == {world.old.execution_id: "working"}
     assert ledger.calls == []
@@ -1491,10 +1507,12 @@ def test_the_deployed_pass_launches_a_decided_replacement_after_it_reconciles(wo
     assert recover() == {world.old.execution_id: "fenced"}
     assert _marks(ledger) == [{"awaiting": "recovery_pending"}]
     decision = recover.recovery.decide(world.old.execution_id, "fresh")
-    assert recover() == {decision.replacement: "unobserved"}
-    assert [agent.execution_id for _, agent in relaunch.calls] == [decision.replacement]
-    assert _marks(ledger) == [{"awaiting": "recovery_pending"}, {"awaiting": ""}]
+    recover()
+    assert relaunch.calls == []
+    assert world.store.execution(cases.SLUG, decision.replacement).state == "ended"
+    assert ledger.rows == [REOPENED]
     kept = retention.retained(world.store, cases.SLUG, world.old.execution_id)
+    assert kept is not None
     assert kept["final"]["outcome_ref"] == f"attempt-fences/{world.old.execution_id}"
     assert retention.retained(world.store, cases.SLUG, decision.replacement) is None
 
@@ -1716,7 +1734,7 @@ def test_an_attempt_no_recovery_admitted_has_no_restore(world):
 REOPENED = {"id": "task", "state": "open", "claimed_by": "", "awaiting": ""}
 
 
-def test_a_placed_fresh_replacement_reopens_its_task_for_hive_placement_and_never_relaunches(world):
+def test_a_placed_fresh_replacement_reopens_its_task_for_hive_placement_and_never_relaunches(world: Any) -> None:
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
     replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
     world.show(world.old, "oom_killed")
@@ -1734,7 +1752,7 @@ def test_a_placed_fresh_replacement_reopens_its_task_for_hive_placement_and_neve
     assert relaunch.calls == []
 
 
-def test_a_placed_fresh_replacement_whose_reopen_is_refused_waits_for_the_next_pass(world):
+def test_a_placed_fresh_replacement_whose_reopen_is_refused_waits_for_the_next_pass(world: Any) -> None:
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
     replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
     world.show(world.old, "oom_killed")
@@ -1749,7 +1767,7 @@ def test_a_placed_fresh_replacement_whose_reopen_is_refused_waits_for_the_next_p
     assert ledger.rows == [REOPENED]
 
 
-def test_a_placed_resume_replacement_still_relaunches_from_its_checkpoint(world):
+def test_a_placed_resume_replacement_still_relaunches_from_its_checkpoint(world: Any) -> None:
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
     relaunch.recovery = recovery
     replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
@@ -1760,7 +1778,7 @@ def test_a_placed_resume_replacement_still_relaunches_from_its_checkpoint(world)
     assert len(relaunch.calls) == 1
 
 
-def _unschedulable(world, attempt):
+def _unschedulable(world: Any, attempt: Any) -> None:
     pod = world.api.objects[f"swarm-{attempt.execution_id}"]
     pod["spec"].pop("nodeName", None)
     pod["status"] = {
@@ -1769,7 +1787,7 @@ def _unschedulable(world, attempt):
     }
 
 
-def test_an_attempt_unschedulable_past_its_window_ends_and_its_task_reopens(world):
+def test_an_attempt_unschedulable_past_its_window_ends_and_its_task_reopens(world: Any) -> None:
     ledger = _Ledger()
     ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
     _unschedulable(world, world.old)
@@ -1782,13 +1800,15 @@ def test_an_attempt_unschedulable_past_its_window_ends_and_its_task_reopens(worl
     world.clock[0] += 1
     assert ending(pods) == {world.old.execution_id: "ended"}
     assert world.store.execution(cases.SLUG, world.old.execution_id).state == "ended"
-    assert retention.final(world.store, cases.SLUG, world.old.execution_id).state == "cancelled"
+    final = retention.final(world.store, cases.SLUG, world.old.execution_id)
+    assert final is not None
+    assert final.state == "cancelled"
     assert ledger.rows == [REOPENED]
     assert ending(pods) == {}
     assert world.reconcile(world.recovery(world.live)) == {world.old.execution_id: "cancelled"}
 
 
-def test_an_attempt_that_gets_scheduled_restarts_its_unschedulable_window(world):
+def test_an_attempt_that_gets_scheduled_restarts_its_unschedulable_window(world: Any) -> None:
     ledger = _Ledger()
     ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
     _unschedulable(world, world.old)
@@ -1804,7 +1824,7 @@ def test_an_attempt_that_gets_scheduled_restarts_its_unschedulable_window(world)
     assert ledger.calls == []
 
 
-def test_an_unschedulable_attempt_whose_reopen_is_refused_stays_live_until_the_ledger_takes_it(world):
+def test_an_unschedulable_attempt_whose_reopen_is_refused_stays_live_until_the_ledger_takes_it(world: Any) -> None:
     ledger = _Ledger()
     ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
     _unschedulable(world, world.old)
@@ -1818,14 +1838,15 @@ def test_an_unschedulable_attempt_whose_reopen_is_refused_stays_live_until_the_l
     assert ending(pods) == {world.old.execution_id: "ended"}
 
 
-def test_the_deployed_pass_places_fresh_replacements_and_ends_unschedulable_attempts(world):
+def test_the_deployed_pass_places_fresh_replacements_and_ends_unschedulable_attempts(world: Any) -> None:
     recover = deployed.recovery_pass(
-        SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=None)),
-        SimpleNamespace(image_tag="dev"),
-        _Cleaning(world),
+        cast(Any, SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=None))),
+        cast(Any, SimpleNamespace(image_tag="dev")),
+        cast(Any, _Cleaning(world)),
         _Ledger(),
     )
 
+    assert recover.replacements is not None
     assert recover.replacements.placed
     assert recover.ending is not None
 

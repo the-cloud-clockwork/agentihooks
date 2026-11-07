@@ -3,11 +3,11 @@ attempt's task waits on recovery on the ledger."""
 
 from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, PENDING, Decision, Recovery
+from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, NODE_LOST, PENDING, Decision, Recovery
 from scripts.swarm_v2.kubernetes.unschedulable import reopen
 from scripts.swarm_v2.runtime.base import SpawnRequest, Status
 
@@ -26,9 +26,17 @@ STARTED = (Status.OK, Status.AMBIGUOUS)
 
 
 class TaskLedger(Protocol):
-    def state(self, slug: str) -> dict: ...
+    def state(self, slug: str) -> dict[str, Any]: ...
 
-    def update_task(self, slug: str, task_id: str, fields: dict) -> dict: ...
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        *,
+        if_state: tuple[str, ...] = (),
+        if_match: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
@@ -63,9 +71,9 @@ class Replacements:
         self.controller.require()
         if occupant.execution_id != successor.execution_id:
             self._launched(decision)
-            self.store.redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
+            cast(Any, self.store).redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
             return SUPERSEDED
-        if self.placed and decision.mode == FRESH:
+        if self.placed and (decision.mode == FRESH or decision.reason == NODE_LOST):
             return self._place(decision, successor)
         task = {
             "id": successor.task,
@@ -91,7 +99,7 @@ class Replacements:
         if not reopen(self.store, self.slug, self.controller, self.ledger, successor):
             return DEFERRED
         self._launched(decision)
-        self.store.redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
+        cast(Any, self.store).redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
         return PLACED
 
     def _row(self, task: str) -> dict:
