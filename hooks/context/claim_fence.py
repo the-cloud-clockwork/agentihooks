@@ -5,7 +5,7 @@ from contextlib import suppress
 from hashlib import sha256
 from pathlib import Path
 from threading import Thread
-from time import monotonic, sleep
+from time import monotonic, sleep, time
 
 from hooks.context.account_sessions import agent_pid
 from scripts.events.config import BusConfig
@@ -15,7 +15,7 @@ VARIABLE = "AGENTIHOOKS_CLAIM_FENCE"
 ATTEMPTS = 3
 DELAY = 0.2
 BOUND = 1.0
-CHECK_FAILED = "Claim ownership could not be verified; agent actions are blocked."
+CACHE_SECONDS = 5.0
 REVOKED = "Claim ownership changed; this agent is ending."
 
 
@@ -70,16 +70,17 @@ def marker(raw: str) -> Path:
     return home / "claim-fence" / sha256(raw.encode()).hexdigest()
 
 
-def cached(raw: str) -> bool:
-    """Return whether this claim generation was already seen held."""
-    return marker(raw).exists()
+def fresh(raw: str) -> bool:
+    """Return whether this claim generation was seen held within the last CACHE_SECONDS."""
+    try:
+        return time() - marker(raw).stat().st_mtime < CACHE_SECONDS
+    except OSError:
+        return False
 
 
 def remember(raw: str) -> None:
     """Record that this claim generation was seen held."""
     path = marker(raw)
-    if path.exists():
-        return
     with suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
@@ -87,14 +88,13 @@ def remember(raw: str) -> None:
 
 def check(payload: dict) -> str | None:
     raw = os.environ.get(VARIABLE)
-    if not raw or payload.get("hook_event_name") == "SessionEnd":
+    if not raw or payload.get("hook_event_name") == "SessionEnd" or fresh(raw):
         return None
     held = bounded(raw)
     if held:
         remember(raw)
+    if held is not False:
         return None
-    if held is None:
-        return None if cached(raw) else CHECK_FAILED
     terminate(agent_pid())
     return REVOKED
 
