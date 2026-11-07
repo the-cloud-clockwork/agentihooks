@@ -501,8 +501,10 @@ class _Wrapper:
         return True
 
     def _reread(self) -> bool:
-        """Read the pass state, config and task rows again for the view, events and metrics sites."""
-        self._noted(self.box, "agents")
+        """List the agents when the lane dropped the page relay, then read the pass state, config and task rows again
+        for the view, events and metrics sites."""
+        if "agents" not in self.box:
+            self.box["agents"] = host_steps.listed(self.store, self.slug)
         doc = timing.call(ledger_client.pass_state, self.ledger, self.slug)
         self.box.update(doc=doc, config=self.store.config(self.slug), rows={t["id"]: t for t in doc["tasks"]})
         return True
