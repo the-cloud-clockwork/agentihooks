@@ -1864,6 +1864,23 @@
         "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
+    },
+    {
+      "id": "swarm-tick-database-ledger",
+      "origin": "operator",
+      "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
+      "behaviour": "While the database URL setting names the shared ledger database, a tick pass serves its ledger export, resource reads and operations in process through the ledger server's own route code over the shared ledger repository, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; without the setting the tick calls the ledger server.",
+      "seam": "scripts.swarm_ledger.api.local_client.LocalResourceClient, chosen by scripts.swarm_ledger.ledger_route.tick for the tick ledger port adapter and the pass LedgerClient",
+      "tests": [
+        "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set",
+        "tests/tick/test_database_ledger.py::test_the_port_exports_the_ledger_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_a_stale_controller_write_is_refused_as_the_server_refuses_it",
+        "tests/tick/test_database_ledger.py::test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server"
+      ]
     }
   ],
   "unmapped_rules": [
