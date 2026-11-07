@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from scripts.profiles import connectors
@@ -46,7 +47,7 @@ def test_list_walks_every_page_with_the_given_headers(monkeypatch):
     pages = {None: (["a", "b"], "p2"), "p2": (["c"], "p3"), "p3": ([], None)}
 
     @asynccontextmanager
-    async def client(url, *, http_client=None):
+    async def client(url, *, http_client: httpx.AsyncClient):
         seen["client"] = (url, http_client.headers["H"], http_client.timeout.connect, http_client.timeout.read)
         yield "r", "w", None
 
