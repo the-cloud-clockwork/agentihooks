@@ -1,8 +1,13 @@
 """The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name."""
 
+from typing import TYPE_CHECKING
+
 from scripts.gates import lift, log
-from scripts.gates.base import Decision
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.budget import Budget
+
+if TYPE_CHECKING:
+    from scripts.gates.verdicts import Verdicts
 
 LAUNCH_TOOLS = frozenset({"Agent", "Task"})
 CONTINUE_TOOLS = frozenset({"SendMessage"})
@@ -26,7 +31,7 @@ class SubagentBudget:
     def matches(self, call):
         return call.tool in LAUNCH_TOOLS or call.tool in CONTINUE_TOOLS
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task):
             return Decision()
         counter, cap = (

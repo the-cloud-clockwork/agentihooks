@@ -649,7 +649,9 @@ def test_redirections_and_their_targets_are_never_read_as_remote_or_refspec() ->
     assert positionals(["origin", "2>/dev/null", "task"]) == ["origin", "task"]
 
 
-def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull_request(tree, tmp_path, monkeypatch):
+def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull_request(
+    tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import io
     from unittest.mock import patch
 
@@ -669,3 +671,15 @@ def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull
     lift.lift_agent(ME, "subagents", tmp_path, pull={"url": URL, "head": "a1"})
     assert launch("spec-reader") == 0
     assert gate().decide(bash("gh pr ready", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_spent_budget_never_reads_the_head_lift_for_a_launch_that_names_no_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.gates import lift
+
+    asked: list[str] = []
+    monkeypatch.setattr(lift, "head_lifted", lambda slug, task, gate, home=None: asked.append(task) or True)
+    budget = SubagentBudget(launches=0)
+    decision = budget.decide(Call(tool="Agent", tool_input={"name": "helper"}), ME, state(tmp_path))
+    assert (decision.allowed, asked) == (False, [])
