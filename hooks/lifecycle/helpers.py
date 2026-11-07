@@ -13,9 +13,23 @@ TTL_S = 3600
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 
 
+def safe(name: str) -> str:
+    """The name as one plain path component, never a dot entry."""
+    plain = SAFE.sub("_", name)
+    return "_" if plain in {".", ".."} else plain
+
+
 def folder(session: str, home: Path | None = None) -> Path:
     """The folder holding the session's live helper records."""
-    return (home or _home()) / "helpers" / SAFE.sub("_", session)
+    return (home or _home()) / "helpers" / safe(session)
+
+
+def fresh(record: Path, moment: float) -> bool:
+    """Whether the record is younger than the time to live; one cleared while it is read counts as gone."""
+    try:
+        return moment - record.stat().st_mtime < TTL_S
+    except FileNotFoundError:
+        return False
 
 
 def start(session: str, agent: str, home: Path | None = None) -> None:
@@ -24,13 +38,13 @@ def start(session: str, agent: str, home: Path | None = None) -> None:
         return
     path = folder(session, home)
     path.mkdir(parents=True, exist_ok=True)
-    (path / SAFE.sub("_", agent)).touch()
+    (path / safe(agent)).touch()
 
 
 def stop(session: str, agent: str, home: Path | None = None) -> None:
     """Clear the helper's record."""
     if session and agent:
-        (folder(session, home) / SAFE.sub("_", agent)).unlink(missing_ok=True)
+        (folder(session, home) / safe(agent)).unlink(missing_ok=True)
 
 
 def live(session: str, home: Path | None = None, now: float | None = None) -> bool:
@@ -39,4 +53,4 @@ def live(session: str, home: Path | None = None, now: float | None = None) -> bo
     if path is None or not path.is_dir():
         return False
     moment = time.time() if now is None else now
-    return any(moment - record.stat().st_mtime < TTL_S for record in path.iterdir())
+    return any(fresh(record, moment) for record in path.iterdir())

@@ -172,23 +172,29 @@ def test_dirty_work_still_pushes_the_commits_it_holds(rig):
     assert rig.remote_head() == head
 
 
-def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(rig, tmp_path):
+def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(monkeypatch, rig, tmp_path):
+    from hooks import config, hook_manager
     from hooks.lifecycle import helpers
 
-    home = tmp_path / "home"
+    for flag in ("CI_MANIFESTO_ENABLED", "BRAIN_ENABLED", "BROADCAST_ENABLED", "BRAIN_WRITER_ENABLED"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(helpers, "_home", lambda: tmp_path / "home")
+    helper = {"session_id": "main", "agent_id": "reader", "agent_type": "code-reviewer"}
+
+    def stop(session):
+        rig.gate.started = time.monotonic()
+        return rig.gate.decide(Call("", session=session), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
+
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
-    rig.gate._helpers = lambda session: helpers.live(session, home)
     head = rig.commit()
     (rig.tree / "readme").write_text("reviewed\n")
-    helpers.start("main", "reader", home)
-    rig.gate.started = time.monotonic()
-    assert rig.gate.decide(Call("", session="main"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path)).allowed
+    hook_manager.on_subagent_start(helper)
+    assert stop("main").allowed
     assert rig.remote_head() == head
     assert rig.inbox() == []
-    assert rig.gate.decide(Call("", session="other"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path)).reason == TEMPLATE
-    helpers.stop("main", "reader", home)
-    rig.gate.started = time.monotonic()
-    decision = rig.gate.decide(Call("", session="main"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
+    assert stop("other").reason == TEMPLATE
+    hook_manager.on_subagent_stop(helper)
+    decision = stop("main")
     assert (decision.allowed, decision.reason) == (False, TEMPLATE)
 
 

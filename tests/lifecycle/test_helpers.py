@@ -39,3 +39,16 @@ def test_ids_cannot_escape_the_helpers_folder(tmp_path):
     helpers.start("../up", "../../out", tmp_path)
     assert helpers.live("../up", tmp_path)
     assert sorted(path.name for path in tmp_path.iterdir()) == ["helpers"]
+
+
+def test_dot_ids_stay_inside_the_helpers_folder(tmp_path):
+    helpers.start("..", "reader", tmp_path)
+    helpers.start(".", "..", tmp_path)
+    assert helpers.live("..", tmp_path)
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["helpers"]
+    assert [path.name for path in (tmp_path / "helpers").iterdir()] == ["_"]
+    assert sorted(path.name for path in (tmp_path / "helpers" / "_").iterdir()) == ["_", "reader"]
+
+
+def test_a_record_cleared_while_it_is_read_counts_as_gone(tmp_path):
+    assert not helpers.fresh(tmp_path / "gone", 0)
