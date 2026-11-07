@@ -17,6 +17,7 @@ import sys
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 _PLACEHOLDER = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
@@ -119,7 +120,7 @@ def mcp_spec_credential_hits(name: str, spec: dict) -> list[str]:
     return findings
 
 
-def sanitize_env_and_headers(name: str, spec: dict, target_file: str) -> dict:
+def sanitize_env_and_headers(name: str, spec: dict[str, Any], target_file: str) -> dict[str, Any]:
     """A copy of *spec* with credential-shaped env and header VALUES removed.
 
     The per-field counterpart of :func:`drop_if_credentialed`, for the claude
@@ -158,7 +159,7 @@ def sanitize_env_and_headers(name: str, spec: dict, target_file: str) -> dict:
     return spec
 
 
-def drop_if_credentialed(name: str, spec: dict, target_file: str) -> bool:
+def drop_if_credentialed(name: str, spec: dict[str, Any], target_file: str) -> bool:
     """True when *spec* must be dropped; warns with the finding list."""
     findings = mcp_spec_credential_hits(name, spec)
     if not findings:
