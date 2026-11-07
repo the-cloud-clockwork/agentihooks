@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.704 · 2026-11-07
+
+### 2026-11-07 · 4572e84f89a5 · #10007 · @agenticore-app
+
+**Spawn moves to an account with room when the chosen account's reservation is full**
+
+When a hive spawn is refused because its chosen account's reservation is full, the system now releases that hive's admission and local slot and retries placement with the refused accounts excluded, rather than aborting the whole spawn attempt. This lets `HiveLaunch.spawn` fall through to another account with available room in the same pass, with `_select` filtering out refused accounts and `_reselect` keeping the pass cache accurate so retries aren't double-charged across hives. If every account is full, the last refusal is preserved and admission is cleanly released, avoiding stuck reservations.
+
 ## v2.17.702 · 2026-11-07
 
 ### 2026-11-07 · 14c9069428ef · #9993 · @nestorcolt
