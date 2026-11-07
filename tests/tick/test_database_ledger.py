@@ -1,4 +1,5 @@
-"""The tick's ledger traffic served in process from the shared ledger repository with no ledger server running."""
+"""The tick's ledger traffic served in process by the ledger server's route code over the server's own repository,
+with no ledger server running; which repository the database URL selects is the storage module's seam."""
 
 import sys
 import urllib.error
