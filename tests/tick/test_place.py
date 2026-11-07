@@ -320,6 +320,7 @@ SPAWN_CLUSTER = (
     "_Pass",
     "_pass_reclaim",
     "Launch",
+    "_prepare",
     "_launch",
     "_launch_all",
     "_retry_successor",
