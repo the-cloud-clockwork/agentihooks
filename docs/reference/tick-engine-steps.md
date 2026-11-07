@@ -855,6 +855,88 @@ that is not woken ends the pass in the `stopped branch` step of the `start`
 group, which makes its own `_close_space` call, and never reaches the `close`
 group.
 
+## Shared helpers (`scripts.tick.steps.common`)
+
+The helpers that the step modules and the tick module both call live in
+`scripts.tick.steps.common`. They moved there from `scripts.swarm.tick`
+with the same behavior, their references to tick module names turned into
+`tick.<name>` lookups, in
+[pull request 9708](https://github.com/the-cloud-clockwork/agentihooks/pull/9708),
+the first sweep of top level definitions out of the tick module. The tick
+module imports each one back, so `scripts.swarm.tick.<name>` and
+`scripts.tick.steps.common.<name>` are the same function object and every
+existing caller, such as `tick.skip_refused(...)` in a step module, keeps
+working with no import change.
+
+| Helper | What it does |
+| --- | --- |
+| `skip_refused(function, *args)` | Calls `function` through `timing.call`. A `LedgerRefused` or a Redis read timeout prints the reason to stderr and returns the single action `skipped <module>.<name>: the ledger refused its write` or `skipped <module>.<name>: its Redis read timed out` instead of raising |
+| `skip_dropped(function, *args)` | Calls `function` through `timing.call` up to twice on a Redis connection drop or timeout, returning its actions or `[]`. Two failures return `skipped <module>.<name>: its Redis connection dropped or timed out twice` |
+| `_operator_line(item)` | True for an inbox item from `operator` that is not an fyi control notice (a ref starting with `control_notifications.CONTROL_REF`); the tick wakes a swarm on such a line |
+| `_drop(slug, store, ledger, rows, agent, refund=False)` | Releases the agent's claim and drops the agent. While the agent still holds an active task that is not awaiting merge, it reopens the task guarded on the claimant and claim generation it read, and with `refund=True` gives back the held life when the task has a claim to refund and the ledger row still matches. Settles the agent's inbox as `stopped`, moving its items to the seat only when the task reopened. Returns `, task <id> reopened` or an empty string |
+| `_collected(slug, store, ledger, rows, agent)` | For a master, saves the task ids of `rows` under the swarm's `master-retired-tasks` key, then calls `_drop` |
+| `_still_held(row, expected)` | True when the row is active and its `claimed_by` and `claim_generation` (missing counts as 0) match `expected`; a missing row is not held |
+| `_follow(slug, store, runtime, agent, pid)` | Returns an `(agent, actions)` tuple. With no process id: `(agent, [])`. Otherwise it calls `_rebind`: when that finds the pane, `(rebound agent, ["rebound <agent> to its resumed process <pid> in pane <pane>"])`; when it does not, `(None, ["held <agent> until one pane holds its resumed process <pid>"])` |
+| `_rebind(slug, store, runtime, agent, pid)` | Finds the panes whose conversation is the agent's, ignoring pane ids that contain a slash. With exactly one, stores the agent on that pane with `pid` in its profile validation and returns it; otherwise returns `None` |
+| `_ended(agent, rows)` | True for an agent in state `finished`, or for a non master agent whose task row has `done` set, is in state `done`, `blocked` or `handoff`, or awaits verify with no claimant |
+| `_current_owner(agent, row)` | True when the row is unclaimed or claimed by this agent |
+| `_reopen(slug, ledger, rows, task_id, expected=None)` | Sets the task `open` and unclaimed only while it is active, and, with `expected`, only while its claimant and generation still match. Updates `rows[task_id]` with the live row the ledger returns, so `task_id` must be a key of `rows`, and reports whether it is now `open` |
+
+### How the helpers reach the tick module
+
+`scripts.swarm.tick` imports the common module at its top, so the common
+module cannot import the tick module at its own top. It binds `tick` with
+`import_module("scripts.swarm.tick")` on its last line instead, and every
+helper looks up what it uses on that module when it runs: `tick.timing`,
+`tick.LedgerRefused`, `tick.ACTIVE`, `tick.MASTER`, `tick.awaiting_merge`,
+`tick.exits`, `tick.InboxStore` and `tick.control_notifications`.
+
+A helper that calls a sibling helper calls it through the tick module as well:
+`_collected` calls `tick._drop`, `_drop` calls `tick._still_held` and
+`tick._reopen`, and `_follow` calls `tick._rebind`. A test that patches the
+name on `scripts.swarm.tick` therefore reaches every caller, including the
+moved helpers:
+
+```python
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.swarm import tick
+from scripts.tick.steps import common
+
+
+def test_follow_holds_when_no_pane_rebinds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tick, "_rebind", lambda *args: None)
+    agent = SimpleNamespace(name="engineer@1-1")
+    assert common._follow("slug", "store", "runtime", agent, 7) == (
+        None,
+        ["held engineer@1-1 until one pane holds its resumed process 7"],
+    )
+```
+
+Patch the tick module, never `scripts.tick.steps.common`: the helpers do not
+read their siblings from the common module, so a patch there changes nothing
+that runs in a pass.
+
+### Adding or moving a shared helper
+
+1. Move the function into `scripts/tick/steps/common.py` with the same
+   behavior, add full type annotations, and replace every bare reference to a tick module
+   name with `tick.<name>`, including sibling helpers.
+2. Add the name to the `from scripts.tick.steps.common import (...)` block in
+   `scripts/swarm/tick.py`. Mark a name the tick module no longer calls itself
+   with `# noqa: F401`; it stays imported so `tick.<name>` and test patches
+   keep working.
+3. Run `python -m scripts.tick_pattern --write` and commit the shrunk
+   `tests/TICK_PATTERN_ALLOWLIST.json` with the move. The
+   [tick pattern gate](tick-pattern-gate.md) records each top level `def` in
+   the tick module, so every moved helper removes its `def <name>` line
+   from the tick module's list; pull request 9708 removed eleven.
+4. Add a test to `tests/tick/steps/test_common.py` under the
+   `swarm-tick-common-helpers` feature and list it in that entry of
+   `feature-map.json`.
+
 ## Steps that return writes
 
 Under the parallel engine two steps of one group can run at the same time, so a
@@ -1059,7 +1141,7 @@ by the engine and does not leave the pass.
 
 ## Adding a step
 
-Run the scaffold from the repository root with every field the pattern needs; see
+Run the [step scaffold](tick-step-scaffold.md) from the repository root with every field the pattern needs; see
 [Tick step skill and rule](tick-step-skill.md):
 
 ```bash
@@ -1169,6 +1251,7 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
 | `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
 | `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
+| `tests/tick/steps/test_common.py` | Each of the eleven helpers is defined in `scripts.tick.steps.common` and is the same object on `scripts.swarm.tick`; a patch on the tick module reaches `_follow`; the held, owner, ended, operator line, reopen, rebind, follow, skip, drop and collected behavior described under [Shared helpers](#shared-helpers-scriptstickstepscommon) |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
 | `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
@@ -1199,7 +1282,9 @@ The delivered proof and limitations are recorded in
 | `wait on needs that never end` | `_eager` was called directly with steps that need each other and none waits on a handed off step of an earlier group; `run_group` refuses the same steps earlier with `Dependency cycle`. Fix the `needs` cycle |
 | `RuntimeError: cannot schedule new futures after shutdown` from a step or fan out | The submit ran after its pass ended, for example from a worker that outlived the pass. The pass executors close at pass end; start such work inside a pass |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
-| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
+| A test patch on `scripts.tick.steps.common._rebind` (or another helper) has no effect | The helpers call their siblings through `scripts.swarm.tick`; patch the name there |
+| `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
+| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
