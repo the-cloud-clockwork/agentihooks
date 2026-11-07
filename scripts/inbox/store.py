@@ -1201,7 +1201,8 @@ def _entry(state, by, reason, at, session_id=""):
     return json.dumps(entry)
 
 
-def connect(environ=None):
+def connect(environ: Any = None, client: Any = None) -> "InboxStore":
+    """Open the inbox on the swarm Redis, through `client` when the caller holds its own client factory."""
     import redis
 
     from scripts.inbox import outbox
@@ -1209,7 +1210,7 @@ def connect(environ=None):
     from scripts.swarm.store import redis_client
 
     try:
-        store = InboxStore(redis_client(environ), session_id=receiving_session(environ))
+        store = InboxStore((client or redis_client)(environ), session_id=receiving_session(environ))
     except redis.RedisError as exc:
         raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
     outbox.flush(store)
