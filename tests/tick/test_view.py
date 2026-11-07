@@ -4,6 +4,7 @@ from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -244,7 +245,8 @@ def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
         "overview",
     )
     assert view.PARTS is schemas.LEDGER_PARTS
-    assert routes.SINCE_SCHEMA["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
+    schema = cast("dict[str, dict[str, dict[str, dict[str, list[str]]]]]", routes.SINCE_SCHEMA)
+    assert schema["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
 
 
 class Whole:
