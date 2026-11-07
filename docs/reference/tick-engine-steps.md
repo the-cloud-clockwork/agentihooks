@@ -1141,7 +1141,7 @@ by the engine and does not leave the pass.
 
 ## Adding a step
 
-Run the scaffold from the repository root with every field the pattern needs; see
+Run the [step scaffold](tick-step-scaffold.md) from the repository root with every field the pattern needs; see
 [Tick step skill and rule](tick-step-skill.md):
 
 ```bash
@@ -1284,7 +1284,7 @@ The delivered proof and limitations are recorded in
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
 | A test patch on `scripts.tick.steps.common._rebind` (or another helper) has no effect | The helpers call their siblings through `scripts.swarm.tick`; patch the name there |
 | `AttributeError: module 'scripts.swarm.tick' has no attribute ...` from a common helper | A moved helper names a tick module attribute that no longer exists there; import it back into the tick module or reference its new home |
-| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
+| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
