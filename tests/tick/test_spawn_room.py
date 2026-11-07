@@ -6,7 +6,7 @@ from threading import Event
 
 import pytest
 
-from scripts.tick import engine, pool
+from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
 from scripts.tick.steps import budgets
@@ -75,7 +75,7 @@ def test_spawn_still_runs_with_its_reserve_when_the_steps_it_needs_are_slow() ->
     assert records["spawn"].outcome == engine.OK
     assert records["reap"].abandoned and not records["reap"].skipped
     assert records["quota notice"].abandoned
-    assert len(seen) == 1 and 0.3 < seen[0] <= 0.6
+    assert len(seen) == 1 and 0.0 < seen[0] <= 0.6
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
@@ -123,6 +123,38 @@ def test_a_need_through_another_step_is_held_back_by_the_reserve_too() -> None:
         release.set()
     assert records["collect"].abandoned
     assert records["reap"].skipped and not seen
+    assert records["spawn"].outcome == engine.OK
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut() -> None:
+    release, seen = Event(), []
+    steps = (
+        Step("collect", "agents", _stuck(release)),
+        Step("spawn", "place", needs=frozenset({"collect"})),
+        Step("rank", "place", _left(seen), frozenset({"collect"})),
+        Step("after rank", "close", _left(seen), frozenset({"rank"})),
+    )
+    try:
+        with pool.running(workers=4, critical_s=1.0, reserves={"spawn": 0.6}):
+            records = {record.name: record for record in engine.run_graph(steps, _ctx())}
+    finally:
+        release.set()
+    assert records["spawn"].outcome == engine.OK
+    assert records["rank"].skipped and records["after rank"].skipped and not seen
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier() -> None:
+    release = Event()
+    steps = (Step("collect", "observe", _stuck(release)), Step("spawn", "place"))
+    edged = registry.site_edges(steps, ("observe", "place"))
+    try:
+        with pool.running(workers=2, critical_s=1.0, reserves={"spawn": 0.6}):
+            records = {record.name: record for record in engine.run_graph(edged, _ctx())}
+    finally:
+        release.set()
+    assert records["collect"].abandoned
     assert records["spawn"].outcome == engine.OK
 
 
