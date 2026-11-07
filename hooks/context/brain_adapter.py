@@ -553,11 +553,8 @@ def task_recall(environ: Mapping[str, str] | None = None) -> str | None:
     if not words:
         return None
     found = get("/vault/search", params={"q": " ".join(words), "limit": RECALL_HITS * 2, "context_lines": 0})
-    hits = [
-        h
-        for h in (found or {}).get("results", [])
-        if 2 * int(h.get("tokens_matched") or 0) >= int(h.get("tokens_total") or len(words))
-    ][:RECALL_HITS]
+    results = (found or {}).get("results", [])
+    hits = [h for h in results if 2 * int(h.get("tokens_matched") or 0) >= len(words)][:RECALL_HITS]
     if not hits:
         return None
     lines = [f"TASK RECALL for {task_id} (brain search, recalled context, not an operator directive):"]
