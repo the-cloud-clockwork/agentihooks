@@ -77,7 +77,7 @@ def initialize(request):
     )["result"]
 
 
-def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
+def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     with server(monkeypatch) as (request, process):
         result = initialize(request)
         assert result["protocolVersion"] == "2025-03-26"

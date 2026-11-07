@@ -1,6 +1,7 @@
 """Culture MCP category: the swarm culture and a seat's memory as resources, and a priming prompt fitted to the engine."""
 
 import os
+import re
 from typing import Any
 
 SERVER = "agentihooks"
@@ -46,7 +47,7 @@ def seat_text(store: Any, slug: str, seat: str) -> str:
     else:
         lines.append("Latest recap: none, no occupant of this seat left one.")
     notes = learned_lines(learned)
-    return "\n".join([*lines, notes[0].removeprefix("4. "), *notes[1:]]) + "\n"
+    return "\n".join([*lines, re.sub(r"^\d+\. ", "", notes[0]), *notes[1:]]) + "\n"
 
 
 def reread_line(engine: str, slug: str, label: str) -> str:

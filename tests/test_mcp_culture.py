@@ -134,7 +134,7 @@ def test_under_stdio_empty_arguments_fall_back_to_the_session(monkeypatch: pytes
     assert culture.resolve(_store(), "", "", "") == ("codex", SLUG, SEAT)
 
 
-def test_under_stdio_the_engine_defaults_to_claude(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_under_stdio_the_engine_defaults_to_claude() -> None:
     assert culture.resolve(_store(), "", SLUG, "eng-2")[0] == "claude"
 
 
