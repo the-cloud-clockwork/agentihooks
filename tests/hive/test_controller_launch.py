@@ -1512,9 +1512,7 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     environ = {"fixture": "scope"}
     with patch.object(launch, "os", SimpleNamespace(environ=environ)):
         selected = setup.launcher.select(config, "eng", task)
-    setup.herdr._profile_decision.assert_called_once_with(
-        config, "eng", config.lanes["eng"], task, saved, saved, environ
-    )
+    setup.herdr._profile_decision.assert_called_once_with(config, "eng", task, saved, saved, environ, frozenset())
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
     assert selected.account.harness == ("claude" if harness == "auto" else harness)
@@ -1543,7 +1541,7 @@ def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
     ):
         assert setup.launcher.select(setup.config, "eng", task).hive == "remote"
     transfer.assert_called_once_with(task)
-    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", {}, task, saved, saved, {})
+    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", task, saved, saved, {}, frozenset())
 
 
 def test_initial_placement_reads_global_account_reports_without_a_credential_probe(setup):

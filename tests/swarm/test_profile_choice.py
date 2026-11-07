@@ -9,6 +9,17 @@ from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
 REAL_INSTALLED = profile_choice.installed
+
+
+def _choose(
+    lane: str, lane_config: dict, task: dict, environ: dict, hosted: frozenset[str] = frozenset()
+) -> profile_choice.ProfileDecision:
+    """Choose through a swarm configuration whose given lane carries the given settings."""
+    return profile_choice.choose(
+        store.SwarmConfig("sw", "repo", 1, 1, lanes={lane: lane_config}), lane, task, environ, hosted
+    )
+
+
 REMEDY = (
     "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, "
     "or split the task into one public responsibility each, then reopen it"
@@ -72,7 +83,7 @@ def ledger_file(monkeypatch, tmp_path):
 
 def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("explicit profile asked classifier"))
-    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, {**TASK, "profile": "qa"}, {})
+    decision = _choose("eng", {"profile": "engineer"}, {**TASK, "profile": "qa"}, {})
     assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
 
 
@@ -100,7 +111,7 @@ def test_the_decision_the_tick_recorded_is_reused_without_the_classifier(monkeyp
 )
 def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane, lanes, expected):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("fixed lane asked classifier"))
-    decision = profile_choice.choose("sw", lane, lanes, {"id": "t9", "title": "Fix the page layout"}, {})
+    decision = _choose(lane, lanes, {"id": "t9", "title": "Fix the page layout"}, {})
     assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
 
 
@@ -120,7 +131,7 @@ CI_PROOF_TASKS = [
 @pytest.mark.parametrize("task", CI_PROOF_TASKS)
 def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model_call(monkeypatch, task):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("CI proof task asked the classifier"))
-    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, task, {})
+    decision = _choose("eng", {"profile": "engineer"}, task, {})
     assert decision == profile_choice.ProfileDecision(
         "engineer",
         "proof contract",
@@ -140,20 +151,20 @@ def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model
 )
 def test_a_task_without_the_push_field_still_asks_the_classifier(asked, ledger_file, task):
     calls = asked("qa")
-    decision = profile_choice.choose("sw", "eng", {}, task, {})
+    decision = _choose("eng", {}, task, {})
     assert (decision.profile, decision.source, len(calls)) == ("qa", "classifier", 1)
 
 
 def test_a_pinned_lane_or_task_profile_wins_over_a_ci_proof(monkeypatch):
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("pinned profile asked classifier"))
     task = CI_PROOF_TASKS[0]
-    assert profile_choice.choose("sw", "eng", {}, {**task, "profile": "qa"}, {}).source == "task"
-    assert profile_choice.choose("sw", "eng", {"profile": "qa"}, task, {}).profile == "qa"
+    assert _choose("eng", {}, {**task, "profile": "qa"}, {}).source == "task"
+    assert _choose("eng", {"profile": "qa"}, task, {}).profile == "qa"
 
 
 def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_and_intent(asked, ledger_file):
     calls = asked("frontend", confidence=0.83)
-    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, TASK, {})
+    decision = _choose("eng", {"profile": "engineer"}, TASK, {})
     state, questions, kwargs = calls[0]
     assert kwargs == {"purpose": "profile-pick"}
     assert set(questions) == {"responsibility"}
@@ -185,7 +196,7 @@ def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_a
 
 def test_bare_task_state_and_question_name_empty_fields(asked, ledger_file):
     calls = asked("engineer")
-    profile_choice.choose("sw", "eng", {}, {"id": "t9"}, {})
+    _choose("eng", {}, {"id": "t9"}, {})
     state, questions, _ = calls[0]
     assert questions["responsibility"].instructions.startswith('Task t9 "": which responsibility')
     assert state == {
@@ -221,7 +232,7 @@ def test_close_summary_is_not_parent_intent_and_missing_ledger_is_empty(monkeypa
 )
 def test_contradictory_keywords_never_override_the_classifier(asked, title, answer):
     asked(answer)
-    decision = profile_choice.choose("sw", "eng", {}, {**TASK, "title": title, "description": title}, {})
+    decision = _choose("eng", {}, {**TASK, "title": title, "description": title}, {})
     assert decision.profile == answer
 
 
@@ -229,7 +240,7 @@ def test_contradictory_keywords_never_override_the_classifier(asked, title, answ
 def test_mixed_or_unclear_responsibility_refuses_with_actionable_reason(asked, choice):
     asked(choice, confidence=0.97)
     with pytest.raises(profile_choice.ProfileUnresolved) as raised:
-        profile_choice.choose("sw", "eng", {}, TASK, {})
+        _choose("eng", {}, TASK, {})
     assert str(raised.value) == (
         f"task t9 profile is unresolved: pplx-decider-v1-27b answered {choice} with confidence 0.97, "
         f"the floor is 0.60: {REMEDY}"
@@ -247,7 +258,7 @@ def test_mixed_or_unclear_responsibility_refuses_with_actionable_reason(asked, c
 )
 def test_low_confidence_takes_the_lane_default_profile(asked, choice, confidence, floor):
     asked(choice, confidence=confidence)
-    decision = profile_choice.choose("sw", "eng", {}, TASK, floor)
+    decision = _choose("eng", {}, TASK, floor)
     shown = float(floor.get("AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE", 0.6))
     assert decision == profile_choice.ProfileDecision(
         "engineer",
@@ -263,7 +274,7 @@ def test_low_confidence_takes_the_lane_default_profile(asked, choice, confidence
 
 def test_an_answer_without_confidence_takes_the_lane_default(asked):
     asked("frontend", confidence=None)
-    decision = profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
+    decision = _choose("eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "0.001"})
     assert (decision.profile, decision.source, decision.confidence) == ("engineer", "lane default", None)
     assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
 
@@ -274,7 +285,7 @@ def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_pa
     monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked with a malformed floor"))
     with pytest.raises(profile_choice.ProfileUnresolved) as refused:
-        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
+        _choose("eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
     assert str(refused.value) == (
         "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
         "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
@@ -298,13 +309,13 @@ def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_pat
 
 def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
     calls = asked("frontend", confidence=0.1)
-    decision = profile_choice.choose("sw", "eng", {}, {**TASK, "profile": "qa"}, {})
+    decision = _choose("eng", {}, {**TASK, "profile": "qa"}, {})
     assert (decision.profile, decision.source) == ("qa", "task") and calls == []
 
 
 def test_confidence_at_floor_is_accepted(asked):
     asked("engineer", confidence=0.6)
-    decision = profile_choice.choose("sw", "eng", {}, TASK, {})
+    decision = _choose("eng", {}, TASK, {})
     assert (decision.profile, decision.source) == ("engineer", "classifier")
 
 
@@ -315,7 +326,7 @@ def test_an_unreachable_classifier_gives_the_claim_its_lane_profile_and_records_
         raise ClassifierUnavailable("no decision backend answered")
 
     monkeypatch.setattr(profile_choice, "decide", unavailable)
-    decision = profile_choice.choose("sw", "eng", {}, TASK, {})
+    decision = _choose("eng", {}, TASK, {})
     assert decision == profile_choice.ProfileDecision(
         "engineer",
         "classifier unavailable",
@@ -332,7 +343,7 @@ def test_missing_profile_refuses_with_reason(monkeypatch, asked, lane, task, pro
     asked("frontend")
     monkeypatch.setattr(profile_choice, "installed", lambda name: name != profile)
     with pytest.raises(profile_choice.ProfileUnresolved) as raised:
-        profile_choice.choose("sw", lane, {}, task, {})
+        _choose(lane, {}, task, {})
     assert str(raised.value) == (
         f"task t9 needs profile {profile}, which is not installed: install it with agentihooks init or {REMEDY}"
     )
@@ -350,10 +361,10 @@ def test_installed_asks_the_profile_resolver(monkeypatch):
 def test_a_bundle_only_profile_a_placement_target_hosts_is_not_refused(monkeypatch):
     monkeypatch.setattr(profile_choice, "installed", lambda name: name != "frontend")
     task = {**TASK, "profile": "frontend"}
-    decision = profile_choice.choose("sw", "eng", {}, task, {}, hosted=frozenset({"brain", "frontend"}))
+    decision = _choose("eng", {}, task, {}, hosted=frozenset({"brain", "frontend"}))
     assert decision == profile_choice.ProfileDecision("frontend", "task", "explicit task profile")
     with pytest.raises(profile_choice.ProfileUnresolved):
-        profile_choice.choose("sw", "eng", {}, task, {}, hosted=frozenset({"brain"}))
+        _choose("eng", {}, task, {}, hosted=frozenset({"brain"}))
 
 
 def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, ledger_file):

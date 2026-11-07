@@ -607,10 +607,7 @@ class HerdrRuntime:
     ) -> profile_choice.ProfileDecision:
         decision = profile_choice.kept(task, saved, relaunch)
         if decision is None:
-            chosen, overlays_config = config.lanes.get(lane, {}), getattr(config, "overlays", {})
-            decision = timing.call(
-                profile_choice.choose, config.slug, lane, chosen, task, environ, overlays_config, hosted
-            )
+            decision = timing.call(profile_choice.choose, config, lane, task, environ, hosted)
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or self._bundle_revision())

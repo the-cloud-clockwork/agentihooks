@@ -25,13 +25,13 @@ def snapshot(environ: Mapping[str, str], home: Path, state: Path, repos: list[st
     bundle = installed.get("bundle", {}).get("path")
     identity = origin(Path(bundle)) if bundle else ""
     claude = home / ".claude"
-    linked = {profile["name"] for profile in installed.get("linked_profiles", [])}
-    shipped = set(_names(Path(bundle) / "profiles")) if bundle else set()
+    linked: list[str] = [profile["name"] for profile in installed.get("linked_profiles", [])]
+    shipped = _names(Path(str(bundle)) / "profiles") if bundle else []
     return {
         "accounts": sorted(name for name, value in environ.items() if name.startswith(TOKEN_PREFIXES) and value),
         "settings": _settings(state),
         "bundle": [identity] if identity else [],
-        "profiles": sorted(linked | shipped),
+        "profiles": sorted({*linked, *shipped}),
         "rules": _names(claude / "rules"),
         "skills": _names(claude / "skills"),
         "mcp": sorted(installed.get("managed_mcp_servers", [])),

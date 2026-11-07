@@ -2,11 +2,15 @@
 
 from collections.abc import Collection
 from dataclasses import asdict, dataclass, replace
+from typing import TYPE_CHECKING
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
 from scripts.swarm import overlays
 from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm_ledger import ledger_close
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import SwarmConfig
 
 CLASSIFIED_LANE = "eng"
 PURPOSE = "profile-pick"
@@ -46,23 +50,17 @@ def preferred(profile: str) -> tuple[str, ...]:
 
 
 def choose(
-    slug: str,
-    lane: str,
-    lane_config: dict,
-    task: dict,
-    environ: dict,
-    role_overlays: dict | None = None,
-    hosted: Collection[str] = (),
+    config: "SwarmConfig", lane: str, task: dict, environ: dict, hosted: Collection[str] = ()
 ) -> ProfileDecision:
     """Decide the launch profile; it counts as installed when this host resolves it or a placement target hosts it."""
-    decision = pick(slug, lane, lane_config, task, environ)
+    decision = pick(config.slug, lane, config.lanes.get(lane, {}), task, environ)
     if decision.profile not in hosted and not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
-            f"agentihooks init or {_remedy(slug, task)}"
+            f"agentihooks init or {_remedy(config.slug, task)}"
         )
     try:
-        return replace(decision, overlays=overlays.chosen(decision.profile, task, role_overlays or {}))
+        return replace(decision, overlays=overlays.chosen(decision.profile, task, config.overlays))
     except ValueError as exc:
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 

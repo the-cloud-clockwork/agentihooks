@@ -114,12 +114,16 @@ def loaded_hives(store: RedisStore) -> list[dict]:
     return hives
 
 
-def hosted_profiles(redis: Any, hives: list[dict]) -> dict[str, frozenset[str]]:
+def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
     """The profiles each given hive advertises in its configuration snapshot, bundle profiles included."""
-    return {hive["id"]: frozenset((hive_config.read(redis, hive["id"]) or {}).get("profiles", [])) for hive in hives}
+    advertised: dict[str, frozenset[str]] = {}
+    for hive in hives:
+        snapshot: dict[str, list[str]] = hive_config.read(redis, str(hive["id"])) or {}
+        advertised[str(hive["id"])] = frozenset(snapshot.get("profiles", []))
+    return advertised
 
 
-def hosting(hives: list[dict], profile: str, advertised: dict[str, frozenset[str]]) -> list[dict]:
+def hosting(hives: list[dict[str, Any]], profile: str, advertised: dict[str, frozenset[str]]) -> list[dict[str, Any]]:
     """The hives that can launch a profile this host cannot resolve: only those advertising it."""
     if profile_choice.installed(profile) or not any(profile in names for names in advertised.values()):
         return hives
@@ -322,18 +326,15 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] not in (excluded or ())]
         advertised = hosted_profiles(self.store.redis, hives)
-        hosted = frozenset().union(*advertised.values())
+        hosted: frozenset[str] = frozenset().union(*advertised.values())
         decision = self.herdr._profile_decision(config, lane, task, saved, saved, dict(os.environ), hosted)
-        role = ROLE_PROFILES.get(decision.profile, decision.profile)
+        profile: str = decision.profile
+        role = ROLE_PROFILES.get(profile, profile)
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
             return self._record_wait(lane, task, refused)
         listed = tuple(hives)
-        hives = [
-            hive
-            for hive in hosting(hives, decision.profile, advertised)
-            if placement.hosts(lane, hive, (decision.profile,))
-        ]
+        hives = [hive for hive in hosting(hives, profile, advertised) if placement.hosts(lane, hive, (profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "auto"
         auto = harness == "auto"
         if auto:

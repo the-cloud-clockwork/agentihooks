@@ -927,10 +927,10 @@ def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeyp
 
     observed = []
 
-    def choose(slug, lane, chosen, task, environ, overlays, hosted):
-        assert slug == "sw"
+    def choose(config, lane, task, environ, hosted):
+        assert config.slug == "sw"
         assert lane == "eng"
-        assert overlays == {}
+        assert config.overlays == {}
         assert hosted == ()
         assert task == {"id": "t1", "title": "x"}
         observed.append("profile")
