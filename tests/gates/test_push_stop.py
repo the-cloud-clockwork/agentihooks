@@ -78,6 +78,7 @@ def rig(tmp_path):
         root=root,
         now=lambda: NOW,
         clock=lambda: ticks.pop(0) if ticks else time.monotonic(),
+        github=lambda url: None,
     )
 
     def stop(who=WHO, started=None):
