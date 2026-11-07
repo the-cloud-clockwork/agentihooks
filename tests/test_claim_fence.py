@@ -318,3 +318,30 @@ def test_a_cached_answer_covers_only_its_own_claim_generation(monkeypatch: pytes
     finally:
         release.set()
     kill.assert_not_called()
+
+
+def test_a_late_read_trusts_the_cached_answer_until_the_bus_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    with patch.object(claim_fence, "open_bus", return_value=bus):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    current = bus.state("spoke-work").get("claim-a")
+    bus.state("spoke-work").update("claim-a", b'{"state":"claimed"}', current.revision)
+    release = threading.Event()
+    try:
+        with (
+            patch.object(claim_fence, "open_bus", side_effect=_stalled_bus(release)),
+            patch.object(claim_fence, "terminate") as kill,
+        ):
+            assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    finally:
+        release.set()
+    kill.assert_not_called()
+    with (
+        patch.object(claim_fence, "open_bus", return_value=bus),
+        patch.object(claim_fence, "agent_pid", return_value=4321),
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
+    kill.assert_called_once_with(4321)
