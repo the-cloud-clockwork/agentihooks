@@ -53,10 +53,12 @@ def now_ms(store: RedisStore) -> int:
     return document.now_ms()
 
 
-def _address(slug):
+def _address(slug: str) -> str:
+    """The ledger route the lease goes through; none once the shared swarm database is configured."""
     from scripts.swarm_ledger.ledger_route import url
+    from scripts.swarm_ledger.repository.postgres import URL
 
-    return url(slug)
+    return "" if os.environ.get(URL) else url(slug)
 
 
 def _remote(slug, action, fields=None):
