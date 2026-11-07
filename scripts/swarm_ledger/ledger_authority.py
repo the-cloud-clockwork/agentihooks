@@ -102,6 +102,15 @@ def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str 
     return agent if _same(token, agent_token(secret, slug, agent)) else None
 
 
+def page_credential(slug: str) -> str:
+    """The ledger's page credential outside edge mode, the operator's local credential; edge mode never reads it."""
+    if environ.get("SWARM_AUTH_MODE") == "edge":
+        return ""
+    from scripts.swarm_ledger import storage
+
+    return storage.default().token(slug) or ""
+
+
 def access_operator(assertion) -> bool:
     team = environ.get("SWARM_ACCESS_TEAM", "").removeprefix("https://")
     audience = environ.get("SWARM_ACCESS_AUD")
