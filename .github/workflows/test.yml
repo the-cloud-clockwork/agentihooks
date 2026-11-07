@@ -2836,9 +2836,11 @@ jobs:
       - name: Hold the mapped feature tests
         if: ${{ !cancelled() }}
         run: |
-          if grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
-            cd "$RUNNER_TEMP/grader"
+          if ! grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
+            echo "::error::The protected grader carries no feature map validator that grades against the base, so nothing trusted can grade."
+            exit 1
           fi
+          cd "$RUNNER_TEMP/grader"
           python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"
 
       # dev's copy holds the pin list, so a pull request cannot unpin the threshold it loosens.
