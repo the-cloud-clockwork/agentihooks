@@ -1820,6 +1820,30 @@
       ]
     },
     {
+      "id": "panic-fix-branch-pushes",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-push",
+      "behaviour": "While fleet panic is on, a push, rerun or dispatch from a session whose branch is the head branch of a registered fix pull request goes through, and the same command from any other branch stays frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix",
+        "tests/swarm/test_panic.py::test_panic_still_refuses_a_push_from_any_other_branch",
+        "tests/swarm/test_panic.py::test_the_hook_payload_cwd_decides_the_fix_branch_push",
+        "tests/swarm/test_panic.py::test_a_same_named_branch_in_another_repository_stays_frozen",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_when_the_fix_cannot_be_read",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_outside_a_git_checkout",
+        "tests/swarm/test_panic.py::test_a_git_read_runs_in_the_session_directory_within_five_seconds",
+        "tests/swarm/test_panic.py::test_a_git_read_that_cannot_run_reads_empty",
+        "tests/swarm/test_panic.py::test_a_failed_git_read_reads_empty",
+        "tests/swarm/test_panic.py::test_an_unreadable_fix_reads_as_no_branch",
+        "tests/swarm/test_panic.py::test_no_directory_or_no_fix_reads_no_git",
+        "tests/swarm/test_panic.py::test_a_detached_checkout_reads_no_origin_and_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_checkout_without_an_origin_stays_frozen",
+        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",

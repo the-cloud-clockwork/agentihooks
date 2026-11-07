@@ -1,0 +1,6 @@
+{
+  "hooks/mcp/culture.py:hooks.mcp.culture.x_seat_text:247d7f56dbe0a1976dbbef061db656ca7799cbb03618769bdae79be6d45911d9": {
+    "reader": "standards_reader",
+    "reason": "withhold uses the slug only inside the culture loop; seat_text passes no culture and reads only the learned field, which keys on the unchanged seat, so the slug value never reaches output."
+  }
+}
