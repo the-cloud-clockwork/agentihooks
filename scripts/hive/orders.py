@@ -72,6 +72,7 @@ SENT = {"sent": "1"}
 OPENING, DIGEST, SEEDS = prompt.CARRIED, "hive_opening_digest", "hive_seeds"
 ORIGIN = "hive_origin"
 RESTARTED = "restarted"
+STALE_EPOCH = "stale_epoch"
 POD = uuid.uuid4().hex
 POD_SECONDS = 45
 ACK_MARGIN_MS = 30000
@@ -300,7 +301,7 @@ class Consumer:
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
-            return Ack("failed", {}, "stale_epoch")
+            return Ack("failed", {}, STALE_EPOCH)
         from redis.exceptions import NoPermissionError
 
         try:
