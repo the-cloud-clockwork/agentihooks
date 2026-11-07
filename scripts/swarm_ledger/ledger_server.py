@@ -18,7 +18,7 @@ import argparse
 import errno
 import functools
 import html
-import http.client
+import email.message
 import http.cookies
 import http.server
 import importlib
@@ -36,7 +36,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import cast
@@ -237,13 +237,13 @@ SESSION_COOKIE = "ledger-session-"
 SESSION_TARGET = re.compile(r"/api/(?:v1/ledgers/)?(?!v1/)([a-z0-9][a-z0-9-]*)")
 
 
-def session_slug(path: str, headers: Mapping[str, str]) -> str:
+def session_slug(path: str, headers: email.message.Message) -> str:
     """The ledger a request targets: its X-Ledger-Slug header, else the ledger named in its API path."""
     match = SESSION_TARGET.match(path)
     return headers.get("X-Ledger-Slug") or (match.group(1) if match else "")
 
 
-def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
+def session_credential(headers: email.message.Message, path: str) -> None:
     """Carry the page session cookie of the targeted ledger as the credential of a same origin request naming none."""
     if headers.get("Authorization") or headers.get("X-Ledger-Token") or not headers.get("Cookie"):
         return
@@ -263,7 +263,7 @@ def session_credential(headers: http.client.HTTPMessage, path: str) -> None:
         headers["X-Ledger-Token"] = value
 
 
-def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
+def auth_session(url: str, slug: str, headers: email.message.Message) -> tuple[int, str | None, int | None]:
     """Exchange the browser's operator assertion at the auth service: 200 with its signed token and lifetime, 403 when
     it refuses the operator, 503 when it cannot answer."""
     forwarded = {name: headers[name] for name in ("Cf-Access-Jwt-Assertion",) if headers.get(name)}
@@ -280,7 +280,7 @@ def auth_session(url: str, slug: str, headers: Mapping[str, str]) -> tuple[int, 
     return 200, f"bearer:{data['token']}", data["expires_in"]
 
 
-def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None, int | None]:
+def page_session(slug: str, headers: email.message.Message) -> tuple[int, str | None, int | None]:
     """The status, session credential and lifetime for a page session on the ledger.
 
     With an auth service and an operator assertion, or in edge mode, the credential is the auth service's signed
@@ -293,7 +293,7 @@ def page_session(slug: str, headers: Mapping[str, str]) -> tuple[int, str | None
         return auth_session(url, slug, headers)
     if edge or not switch.legacy(os.environ):
         return 503, None, None
-    credential = repository.token(slug)
+    credential = cast("str | None", repository.token(slug))
     return (200, f"page:{credential}", None) if credential else (503, None, None)
 
 

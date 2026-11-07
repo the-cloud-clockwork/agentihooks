@@ -104,7 +104,8 @@ def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
     token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
-    assert token not in body
+    assert token is not None
+    assert token not in str(body)
     assert "ledger-token" not in body
     assert f'<meta name="ledger-page" content="{core.page_version()}">' in body
     assert "<title>Shell &lt;ledger&gt;</title>" in body

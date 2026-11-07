@@ -61,7 +61,7 @@ def send_with_cookie(
 def write(live: dict, **headers: str) -> int:
     """An operator chat write carrying only the given headers as its credential."""
     op = {"op": "add", "id": uuid.uuid4().hex, "thread": "chat", "text": "Through the session"}
-    body = json.dumps({"ops": [op]})
+    body = json.dumps({"ops": [op]}).encode()
     status, _, _ = send(live, "PUT", f"/api/{SLUG}?view=agent", body, **{"Content-Type": "application/json", **headers})
     return status
 
@@ -189,7 +189,7 @@ def test_an_unmarked_cookie_carries_no_credential(live: dict) -> None:
 def test_the_page_renews_its_session_before_it_expires() -> None:
     api = (server.core.HOME.parent / "static" / "js" / "api.js").read_text(encoding="utf-8")
     functions = "\n".join(
-        re.search(rf"(export (?:async )?function {name}\(.*?\n\}})", api, re.S).group(1).removeprefix("export ")
+        next(re.finditer(rf"(export (?:async )?function {name}\(.*?\n\}})", api, re.S)).group(1).removeprefix("export ")
         for name in ("openSession", "keepSession")
     )
     probe = (
