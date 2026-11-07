@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_session_credential:f93c1a5dc3bf7e939c9cc4a4fd12e1bbd3c465f1523d1ffc2c0859f0a5c42f07": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the X-Ledger-Token name read through email.message.Message.get, which matches header names case insensitively, so the same header value is read and the guard behaves identically."
+  }
+}

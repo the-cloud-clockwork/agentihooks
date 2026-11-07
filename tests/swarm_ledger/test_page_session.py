@@ -198,6 +198,16 @@ def test_a_named_ledger_token_keeps_the_session_cookie_out() -> None:
     assert headers.get_all("X-Ledger-Token") == ["named"]
 
 
+def test_a_cookie_of_an_unknown_kind_sets_no_credential() -> None:
+    headers = email.message.Message()
+    headers["Cookie"] = f"ledger-session-{SLUG}=other:from-cookie"
+
+    server.session_credential(headers, f"/api/{SLUG}")
+
+    assert headers.get("Authorization") is None
+    assert headers.get("X-Ledger-Token") is None
+
+
 def test_the_page_renews_its_session_before_it_expires() -> None:
     api = (server.core.HOME.parent / "static" / "js" / "api.js").read_text(encoding="utf-8")
     functions = "\n".join(
