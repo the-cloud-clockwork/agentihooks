@@ -73,7 +73,7 @@ def marker(raw: str) -> Path:
 def fresh(raw: str) -> bool:
     """Return whether this claim generation was seen held within the last CACHE_SECONDS."""
     try:
-        return time() - marker(raw).stat().st_mtime < CACHE_SECONDS
+        return 0 <= time() - marker(raw).stat().st_mtime < CACHE_SECONDS
     except OSError:
         return False
 

@@ -133,7 +133,7 @@ def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monk
 
 
 @pytest.mark.parametrize("recovers", [True, False])
-def test_a_failed_claim_state_read_is_retried_before_blocking(monkeypatch, recovers):
+def test_a_failed_claim_state_read_is_retried_before_passing(monkeypatch, recovers):
     from hooks.context import claim_fence
 
     bus = Mock()
