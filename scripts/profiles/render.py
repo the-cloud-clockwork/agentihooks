@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -19,8 +19,8 @@ from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, bundle_copy, connectors, homes, plugins, sources
 from scripts.swarm import brain_binding
+from scripts.targets import claude_target
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
-from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
@@ -87,7 +87,7 @@ def _resolve(name: str) -> Path | None:
 def _resolve_chain(names: list[str]) -> list[tuple[str, Path]]:
     if bundle_copy.current() is None:
         return cast(ModuleType, _install_module())._resolve_profile_chain(",".join(names))
-    return [(name, _resolve(name)) for name in profile_chain.expand_profiles(names, _resolve)]
+    return [(name, cast(Path, _resolve(name))) for name in profile_chain.expand_profiles(names, _resolve)]
 
 
 def declared(name: str) -> list[str]:
@@ -98,7 +98,7 @@ def declared(name: str) -> list[str]:
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    managed = brain_binding.current(os.environ) is not None
+    managed = cast(dict[str, object] | None, brain_binding.current(os.environ)) is not None
     always = [name, *(o for o in declared(name) if managed or o != brain_binding.OVERLAY)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
     dirs = _resolve_chain([*always, *worn])
@@ -109,7 +109,7 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
 def _bundle() -> Path | None:
     _i = cast(ModuleType, _install_module())
     bundle = bundle_copy.current() or _i._get_bundle_path()
-    linked = (_i._load_state().get("bundle") or {}).get("path")
+    linked: Any = (_i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
         raise ValueError(
             f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
@@ -122,7 +122,7 @@ def _user() -> Path | None:
         return bundle_copy.current_user()
     _i = cast(ModuleType, _install_module())
     user = _i._get_user_bundle_path()
-    linked = (_i._load_state().get("user_bundle") or {}).get("path")
+    linked: Any = (_i._load_state().get("user_bundle") or {}).get("path")
     if user is None and linked:
         raise ValueError(
             f"linked user bundle {linked} is missing; relink it with agentihooks bundle link --user <path> before rendering"
@@ -135,7 +135,7 @@ def _shared() -> Path | None:
         return bundle_copy.current_shared()
     _i = cast(ModuleType, _install_module())
     shared = _i._get_shared_bundle_path()
-    linked = (_i._load_state().get("shared_bundle") or {}).get("path")
+    linked: Any = (_i._load_state().get("shared_bundle") or {}).get("path")
     if shared is None and linked:
         raise ValueError(
             f"linked shared bundle {linked} is missing; relink it with agentihooks bundle link --shared <path> "
@@ -189,9 +189,9 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
         "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
         "hosted_ledger": os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL", ""),
-        "swarm_brain": brain_binding.current(os.environ),
+        "swarm_brain": cast(dict[str, object] | None, brain_binding.current(os.environ)),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
-        **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
+        **({"browser": cast(dict[str, object], browser.spec())} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
     }
 
@@ -247,8 +247,8 @@ def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dic
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed
-    apply_langfuse_env(doc, dirs, None)
-    apply_collector_env(doc)
+    cast(Callable[[dict[str, Any], list[tuple[str, Path]], Path | None], None], apply_langfuse_env)(doc, dirs, None)
+    cast(Callable[[dict[str, Any]], None], apply_collector_env)(doc)
     return doc
 
 
@@ -257,10 +257,10 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Se
     doc = claude_environment(_settings("claude", bundle, dirs), dirs)
     default_home = claude_home(_global_env())
     global_settings = default_home / "settings.json"
-    personal = _i.load_json(global_settings) if global_settings.exists() else {}
+    personal: dict[str, Any] = _i.load_json(global_settings) if global_settings.exists() else {}
     # Claude reads the default home as an ancestor project folder when the working folder sits under it.
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
-    settings = settings_document(doc)
+    settings: dict[str, Any] = cast(Callable[[dict[str, Any]], dict[str, Any]], claude_target.settings_document)(doc)
     chain = [n for n, _ in dirs]
     enabled_plugins = _plugins(chain, settings.get("enabledPlugins") or {}, kept)
     if browser.enabled(chain):
@@ -278,12 +278,14 @@ def _plugins(chain: list[str], layered: dict[str, Any], kept: Sequence[str] = ()
     return plugins.allowed(plugins.carried(chain, operator.get("enabledPlugins") or {}), layered, kept)
 
 
-def _home_plugins(prior: Path | None, computed: dict) -> list[str]:
+def _home_plugins(prior: Path | None, computed: dict[str, bool]) -> list[str]:
     if prior is None:
         return []
-    home = (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
+    home: dict[str, bool] = cast(
+        dict[str, bool], (_read_json(prior / "claude" / "settings.json") or {}).get("enabledPlugins") or {}
+    )
     written = _read_json(prior / "claude" / PLUGINS)
-    return plugins.kept(home, computed if written is None else written)
+    return plugins.kept(home, cast(dict[str, bool], computed if written is None else written))
 
 
 def _channels(channels: str, dirs: list[tuple[str, Path]]) -> str:
@@ -324,7 +326,9 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
         else server
         for name, server in servers.items()
     }
-    return brain_binding.apply(browser.configure(servers, [name for name, _ in dirs]), os.environ)
+    return cast(Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]], brain_binding.apply)(
+        browser.configure(servers, [name for name, _ in dirs]), os.environ
+    )
 
 
 def _seed(src: Path) -> dict[str, Any]:
@@ -339,7 +343,7 @@ def _seed(src: Path) -> dict[str, Any]:
     return doc
 
 
-def _claude_json(out: Path, servers: dict) -> None:
+def _claude_json(out: Path, servers: dict[str, Any]) -> None:
     _i = cast(ModuleType, _install_module())
     dst = out / ".claude.json"
     doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
@@ -511,14 +515,16 @@ def _link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings: dict) -> dict[str, Any]:
-    doc = {k: v for k, v in settings.items() if k != "mcp_servers"}
+def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings: dict[str, Any]) -> dict[str, Any]:
+    doc: dict[str, Any] = {k: v for k, v in settings.items() if k != "mcp_servers"}
     doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
     doc["sqlite_home"] = str(operator)
     doc["features"]["hooks"] = True
     source = f"{operator / 'hooks.json'}:"
-    state = (installed.get("hooks") or {}).get("state") or {}
-    trusted = {f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)}
+    state: dict[str, Any] = cast(dict[str, Any], (installed.get("hooks") or {}).get("state") or {})
+    trusted: dict[str, Any] = {
+        f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)
+    }
     for key, value in trusted_state(operator / "hooks.json", out / "hooks.json").items():
         trusted[key] = {**trusted.get(key, {}), **value}
     if trusted:
