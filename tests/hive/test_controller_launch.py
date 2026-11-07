@@ -66,10 +66,25 @@ def test_the_profile_check_sees_the_profiles_its_target_hives_advertise(setup):
     setup.store.redis.set(hive_config._key("remote"), json.dumps({"profiles": ["brain", "frontend"]}))
     setup.store.redis.set(hive_config._key("other"), json.dumps({"profiles": ["qa"]}))
     setup.store.redis.set(hive_config._key("gone"), json.dumps({"profiles": ["smith"]}))
-    hives = [hive for hive in setup.launcher.hives() if hive["id"] != "gone"]
-    assert launch.hosted_profiles(setup.store.redis, hives) == frozenset({"brain", "frontend", "qa"})
+    hives = [hive for hive in setup.launcher.hives() if hive["id"] in ("remote", "other", "silent")]
+    assert launch.hosted_profiles(setup.store.redis, [*hives, {"id": "silent"}]) == {
+        "remote": frozenset({"brain", "frontend"}),
+        "other": frozenset({"qa"}),
+        "silent": frozenset(),
+    }
     setup.launcher._select(setup.config, "eng", {"id": "task"}, excluded={"gone"})
     assert setup.herdr._profile_decision.call_args.args[-1] == frozenset({"brain", "frontend", "qa"})
+
+
+def test_a_profile_only_target_hives_hold_places_only_on_a_hive_advertising_it(setup, monkeypatch):
+    from scripts.hive import launch
+
+    monkeypatch.setattr(launch.profile_choice, "installed", lambda name: name != "frontend")
+    hives = [{"id": "remote"}, {"id": "other"}, {"id": "silent"}]
+    advertised = {"remote": frozenset({"frontend"}), "other": frozenset({"qa"})}
+    assert launch.hosting(hives, "frontend", advertised) == [{"id": "remote"}]
+    assert launch.hosting(hives, "engineer", advertised) == hives
+    assert launch.hosting(hives, "frontend", {"other": frozenset({"qa"})}) == hives
 
 
 def test_selects_an_advertised_claude_slot(setup):
