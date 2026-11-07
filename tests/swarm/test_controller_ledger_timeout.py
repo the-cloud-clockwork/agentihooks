@@ -41,6 +41,20 @@ class Service:
         self.ticks += 1
 
 
+class Stderr:
+    """A standard error double that records each write and flush in order."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def write(self, text: str) -> int:
+        self.events.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.events.append("<flush>")
+
+
 @pytest.fixture
 def service(monkeypatch: pytest.MonkeyPatch) -> Service:
     running = Service()
@@ -54,12 +68,14 @@ def service(monkeypatch: pytest.MonkeyPatch) -> Service:
     return running
 
 
-@pytest.mark.feature("controller-survives-ledger-timeout")
 def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], service: Service
+    monkeypatch: pytest.MonkeyPatch, service: Service
 ) -> None:
     passes: list[int] = []
     waits: list[float] = []
+    stderr = Stderr()
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "7")
+    monkeypatch.setattr(controller.sys, "stderr", stderr)
     monkeypatch.setattr(controller, "scheduled_wait", waits.append)
     monkeypatch.setattr(ledger_client, "_ledger", lambda: TimedOutLedger)
 
@@ -73,8 +89,10 @@ def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
     with pytest.raises(Ended):
         controller.main(["run"])
     assert passes == [1, 2]
-    assert waits and waits[0] > 0
-    assert "The read operation timed out" in capsys.readouterr().err
+    assert waits == [7.0]
+    written = [index for index, text in enumerate(stderr.events) if "The read operation timed out" in text]
+    assert written
+    assert "<flush>" in stderr.events[written[0] :]
     assert service.ticks == 0
     assert service.stopped == 1
 
