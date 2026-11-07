@@ -1030,7 +1030,13 @@
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
-        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
+        "tests/swarm/test_focus_budget.py::test_focus_record_order_breaks_ties_within_one_rank_band",
+        "tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task",
+        "tests/swarm/test_focus_budget.py::test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank"
       ]
     },
     {
