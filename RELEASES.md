@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.701 · 2026-11-07
+
+### 2026-11-07 · 64def43b5c0f · #9391 · @agenticore-app
+
+**Publish controller recovery over TLS for callers outside the cluster**
+
+The controller previously advertised only its in-cluster plain-http address for recovery callbacks, which hive pods couldn't reach past the network policy and the workstation couldn't resolve, breaking restore decisions with "controller could not be reached" errors. This change adds a second TLS listener on the controller serving just the recovery routes, publishes that address as swarm config `control_url`, and has restore decisions prefer and verify it against the ledger CA. The chart gains matching TLS config (secret, port, public URL, `ingressFrom`) and now fails fast on a missing `ingressFrom`, so recovery commands work correctly from both hives and the workstation.
+
 ## v2.17.700 · 2026-11-07
 
 ### 2026-11-07 · fc1e8bd4a01c · #10003 · @agenticore-app
