@@ -1,7 +1,7 @@
 """A lane reserve: the steps a reserved step needs run against their lane less its reserve, so it still starts."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import Event
 
 import pytest
@@ -173,25 +173,22 @@ def test_a_shorter_critical_lane_reserves_the_same_share_for_spawn() -> None:
     assert dict(pool.reserved(0.6)) == {"spawn": pytest.approx(0.2)}
 
 
-class Lanes:
-    def __init__(self, lane: Deadline) -> None:
-        self.held = lane
-
-    def lane(self, name: str) -> Deadline:
-        return self.held
+def critical_pass(lane: Deadline) -> pool.Pass:
+    with pool.running() as found:
+        return replace(found, critical=lane)
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
 def test_a_lane_less_its_reserve_keeps_the_lane_clock() -> None:
-    lane = engine._lane_of(Step("a", "g"), Lanes(Deadline(100.0, lambda: 90.0)), {"a": 4.0})
+    lane = engine._lane_of(Step("a", "g"), critical_pass(Deadline(100.0, lambda: 90.0)), {"a": 4.0})
     assert lane.expires_at == 96.0
     assert lane.remaining == 6.0
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
 def test_a_step_whose_whole_lane_ran_out_drops_its_dependents_with_its_needs_intact() -> None:
-    assert engine._drops(Step("a", "g"), set(), Lanes(Deadline(100.0, lambda: 100.0)))
-    assert not engine._drops(Step("a", "g"), set(), Lanes(Deadline(100.0, lambda: 90.0)))
+    assert engine._drops(Step("a", "g"), set(), critical_pass(Deadline(100.0, lambda: 100.0)))
+    assert not engine._drops(Step("a", "g"), set(), critical_pass(Deadline(100.0, lambda: 90.0)))
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
