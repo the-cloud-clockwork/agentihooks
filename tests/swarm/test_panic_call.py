@@ -254,3 +254,141 @@ def test_a_planted_two_hour_no_launch_window_sends_the_master_the_panic_question
     assert len(asked) == 1
     assert f"No agent launch on swarm {SLUG} for 120 minutes" in asked[0].text
     assert spawn_stall.read(store, SLUG)["since"] == START - 2 * HOUR
+
+
+ENGINEER = "engineer@1-1"
+
+
+def urgent_claim(store, at, **fields):
+    from scripts.swarm.health import urgent_hold
+
+    task = {"id": "t9", "title": "fix the outage", "phase": "p1", "lane": "eng", "rank": "urgent"}
+    found = {
+        "overview": "o",
+        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
+        "tasks": [{**task, "state": "claimed", "claimed_by": ENGINEER, **fields}],
+    }
+    urgent_hold.observe(store, SLUG, found, at)
+
+
+def claimant(store, started_at, lane="eng"):
+    from scripts.swarm.store import AgentRecord
+
+    store.put_agent(SLUG, AgentRecord(ENGINEER, lane, "t9", started_at=started_at))
+
+
+def test_urgent_hold_records_only_urgent_claimed_tasks_with_their_claimant(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = {
+        "overview": "o",
+        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
+        "tasks": [
+            {
+                "id": "a",
+                "title": "hot",
+                "phase": "p1",
+                "lane": "eng",
+                "rank": "urgent",
+                "state": "claimed",
+                "claimed_by": ENGINEER,
+            },
+            {"id": "b", "title": "calm", "phase": "p1", "lane": "eng", "state": "claimed", "claimed_by": "x"},
+            {
+                "id": "c",
+                "title": "review",
+                "phase": "p1",
+                "lane": "eng",
+                "rank": "urgent",
+                "state": "pr",
+                "claimed_by": "y",
+            },
+            {
+                "id": "d",
+                "title": "gone",
+                "phase": "p1",
+                "lane": "eng",
+                "rank": "urgent",
+                "state": "claimed",
+                "claimed_by": "z",
+                "out_of_scope": True,
+            },
+        ],
+    }
+    urgent_hold.observe(store, SLUG, found, START)
+    assert urgent_hold.read(store, SLUG)["claimed"] == {
+        "a": {"title": "hot", "claimed_by": ENGINEER, "state": "claimed"}
+    }
+
+
+def test_no_urgent_claim_leaves_the_stored_hold_without_a_claimed_key(store):
+    from scripts.swarm.health import urgent_hold
+
+    urgent_hold.observe(store, SLUG, {"overview": "o", "phases": [], "tasks": []}, START)
+    assert urgent_hold.read(store, SLUG) == {"at": START, "tasks": {}}
+
+
+def test_an_urgent_claim_quiet_past_the_stale_window_is_a_signal_from_its_last_progress(store):
+    urgent_claim(store, START)
+    claimant(store, START - 30 * MINUTE)
+    found = panic_call.signals(store, SLUG, START, {})[0]
+    assert [(signal.name, signal.since, signal.after) for signal in found] == [
+        ("Urgent task fix the outage claim quiet", START - 30 * MINUTE, 30 * MINUTE)
+    ]
+    assert found[0].evidence == f"claimed by {ENGINEER} with no ledger change for 30 minutes"
+
+
+def test_an_urgent_claim_inside_the_stale_window_or_with_a_declared_wait_is_no_signal(store):
+    from scripts.swarm import idle
+
+    urgent_claim(store, START)
+    claimant(store, START - 30 * MINUTE + 1)
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+    claimant(store, START - 2 * HOUR)
+    idle.declare_wait(store.redis, SLUG, ENGINEER, START + HOUR, "checks on the pull request", START)
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+
+
+def test_a_quiet_claim_by_another_agent_or_lane_is_no_signal(store):
+    urgent_claim(store, START, claimed_by="engineer@1-2")
+    claimant(store, START - 2 * HOUR)
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+    urgent_claim(store, START)
+    claimant(store, START - 2 * HOUR, lane="master")
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+    claimant(store, 0)
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+
+
+def test_the_stale_window_follows_the_health_setting(store, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_STALE_MINUTES", "50")
+    urgent_claim(store, START)
+    claimant(store, START - 45 * MINUTE)
+    assert panic_call.signals(store, SLUG, START, {})[0] == []
+    found = panic_call.signals(store, SLUG, START + 5 * MINUTE, {})[0]
+    assert [signal.after for signal in found] == [50 * MINUTE]
+
+
+def test_a_quiet_urgent_claim_is_asked_at_the_stale_window_and_once_each_hour_after(store):
+    enforce(store)
+    urgent_claim(store, START)
+    claimant(store, START)
+    assert panic_call.step(store, SLUG, START + 30 * MINUTE - 1) == []
+    assert len(panic_call.step(store, SLUG, START + 30 * MINUTE)) == 1
+    assert panic_call.step(store, SLUG, START + 89 * MINUTE) == []
+    assert len(panic_call.step(store, SLUG, START + 90 * MINUTE)) == 1
+    assert len(items(store)) == 2
+
+
+def test_a_planted_quiet_urgent_claim_sends_the_master_one_panic_question_in_one_watch_pass(store, monkeypatch):
+    enforce(store)
+    urgent_claim(store, START)
+    claimant(store, START - 45 * MINUTE)
+    monkeypatch.setattr(spawn_stall, "eligible", lambda *args: False)
+    with spawn_stall.watch(store, SLUG, None, lambda: START, None):
+        pass
+    asked = [item for item in items(store) if item.text.startswith("Is this a panic mode call?")]
+    assert len(asked) == 1
+    assert f"Urgent task fix the outage claim quiet on swarm {SLUG} for 45 minutes" in asked[0].text
+    assert f"claimed by {ENGINEER} with no ledger change for 45 minutes" in asked[0].text
+    assert asked[0].ref == f"panic-call:{SLUG}:Urgent task fix the outage claim quiet|{START - 45 * MINUTE}:1"
