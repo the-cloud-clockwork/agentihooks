@@ -149,7 +149,7 @@ def listed(store: Any, slug: str) -> list[Any]:
 def _page_relay(cli: Any, get: Get) -> None:
     agents = listed(get("store"), get("slug"))
     get("box")["agents"] = agents
-    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]  # pyright: ignore[reportUnknownMemberType]
+    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]
 
 
 def _tick_view(cli: Any, get: Get) -> None:
