@@ -2744,3 +2744,14 @@ def test_a_legacy_placement_refusal_without_seen_at_is_fresh_from_its_start() ->
         ["capacity skipped eng task e0: fresh placement refusal: no hive for eng has room"],
     )
     assert expired == (ready, [])
+
+
+def test_a_placement_refusal_seen_again_stays_fresh_from_its_last_sighting() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive", "started_at": 0, "seen_at": placement_waits.FRESH_MS}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 2 * placement_waits.FRESH_MS - 1)
+    assert fresh == ({"eng": []}, ["capacity skipped eng task e0: fresh placement refusal: no hive"])
