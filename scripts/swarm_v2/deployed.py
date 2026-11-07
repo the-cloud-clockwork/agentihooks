@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
@@ -15,7 +15,7 @@ from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
 from scripts.swarm_v2.kubernetes.adapter import KubernetesRuntime
-from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, SecretKeys
+from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccounts, HarnessRoutes, SecretKeys
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.completion import Completion
@@ -156,7 +156,8 @@ class Workers:
         return {"memory_mib": profile["limits"]["memory_mib"], "cpu_millis": cpu}
 
     def launch(self, request: SpawnRequest) -> dict:
-        task, shape = request.task, self.requested
+        task: dict[str, Any] = request.task
+        shape = self.requested
         return {
             "task_id": task["id"],
             "swarm_id": request.config.slug,
@@ -164,7 +165,7 @@ class Workers:
             "grant_ref": f"grant-{task['execution_id']}",
             "controller_epoch": task["controller_epoch"],
             "project_id": self.terms.project_ids[0],
-            "harness": HARNESS,
+            "harness": task.get("harness", HARNESS),
             "image_digest": image_tag.resolve(self.policy["image_repository"], self.image_tag),
             "profile": self.profile,
             "memory_mib": shape["memory_mib"],
@@ -224,8 +225,10 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
         controller, grants, capacity, fleet, None, workers.grants(environ, slug, verify, controller.store)
     )
     api = pod_api(environ, workers.policy["namespace"])
-    keys = SecretKeys(api)
-    route = AccountRoute(keys, QuotaObservations(controller.store, slug, verify), partial(_held, capacity), HARNESS)
+    quota, held = QuotaObservations(controller.store, slug, verify), partial(_held, capacity)
+    route = HarnessRoutes(
+        {harness: AccountRoute(SecretKeys(api, harness), quota, held, harness) for harness in ("claude", "codex")}
+    )
     launcher.accounts = route.choose
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
@@ -245,7 +248,8 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     runtime.router.placement = replace(runtime.router.placement, master_seats=seats)
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
     runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
-    launcher.planned = partial(runtime.herdr_runtime.planned_account, agent=HARNESS)
+    launcher.planned = runtime.herdr_runtime.planned_account
+    launcher.planned_harness = partial(_planned_harness, runtime.herdr_runtime)
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)
     return runtime
@@ -285,6 +289,11 @@ def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> Term
 
 def _held(capacity: AccountCapacity) -> dict[str, int]:
     return fleet_held(capacity.store, capacity.clock())
+
+
+def _planned_harness(herdr: HerdrRuntime, task_id: str) -> str | None:
+    """The harness the tick's quota plan placed the task on, read as the hive launcher reads it."""
+    return getattr(herdr, "_quota_tasks", {}).get(task_id)
 
 
 class GrantRelease:
