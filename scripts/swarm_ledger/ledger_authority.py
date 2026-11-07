@@ -26,7 +26,7 @@ def connect(environ=None):
     return ports.swarm().store.connect(environ)
 
 
-def agent_token(admin, slug, name):
+def agent_token(admin: str, slug: str, name: str) -> str:
     return hmac.new(admin.encode(), f"{slug}\n{name}".encode(), hashlib.sha256).hexdigest()
 
 
