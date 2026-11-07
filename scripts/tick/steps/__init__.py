@@ -18,10 +18,12 @@ DEADLINE = "deadline"
 
 
 class Declared(TypedDict, total=False):
-    """What a step declares beyond its graph: the ports it may write through and its feature map id."""
+    """What a step declares beyond its graph: the ports it may write through, its feature map id and whether it is
+    kept, run even after its lane expired or a step it needs was dropped."""
 
     effects: frozenset[str]
     feature: str
+    kept: bool
 
 
 class CallStep:
@@ -45,6 +47,7 @@ class CallStep:
         self.lane = lane
         self.effects = declared.get("effects", frozenset())
         self.feature = declared.get("feature", "")
+        self.kept = declared.get("kept", False)
         self.name = name
         self.needs = needs
         self.group = group

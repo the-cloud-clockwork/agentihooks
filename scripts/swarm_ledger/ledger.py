@@ -216,11 +216,23 @@ def launch_token(slug, name):
         raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
 
 
-def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
+def client(
+    slug: str, service: bool = False, timeout: float = REQUEST_TIMEOUT, headers: dict[str, str] | None = None
+) -> Any:
+    """The ledger API client for slug: in process over the shared database inside a database pass, else HTTP."""
     from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.tick.adapters import database_ledger
 
-    client = ResourceClient(base(slug), credentials(slug, service), timeout)
-    return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
+    if database_ledger.serving():
+        return database_ledger.client(base(slug), timeout)
+    return ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
+
+
+def request(
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+) -> dict[str, Any]:
+    found = client(slug, service, timeout)
+    return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 
 
 def resource(
@@ -232,11 +244,9 @@ def resource(
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
-    from scripts.swarm_ledger.api.client import ResourceClient
-
-    def read():
-        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
-        return client.collection(slug, path) if collection else client.request(slug, path)["data"]
+    def read() -> Any:
+        found = client(slug, service, timeout, headers)
+        return found.collection(slug, path) if collection else found.request(slug, path)["data"]
 
     return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
@@ -270,6 +280,13 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
+    """One ledger read or write: in process over the shared database inside a database pass, else to the server."""
+    from scripts.tick.adapters import database_ledger
+
+    return (database_call if database_ledger.serving() else server_call)(slug, ops, service)
+
+
+def server_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
@@ -301,6 +318,14 @@ def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = Fal
         if talking or joining:
             return queue(slug, ops, service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
+
+
+def database_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
+    """One ledger read or write in process over the shared database, a refusal exiting as the server's."""
+    try:
+        return request(slug, ops, service)
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
 
 
 def talk(ops: list[dict[str, Any]] | None) -> bool:

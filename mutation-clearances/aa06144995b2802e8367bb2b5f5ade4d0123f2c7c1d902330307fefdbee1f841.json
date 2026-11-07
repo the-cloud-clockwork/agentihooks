@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/unschedulable.py:scripts.swarm_v2.kubernetes.unschedulable.x\u01c1Unschedulable\u01c1__init__:b4d045f4979f97211817a6e607cad9f79a0a8573926a12b966fe2b58e3cf8912": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "typing.cast returns its second argument unchanged; changing its type argument from Any to None changes no runtime output."
+  }
+}

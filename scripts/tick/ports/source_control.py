@@ -57,6 +57,8 @@ class RollupCheck:
 
 @dataclass(frozen=True)
 class OpenChange:
+    """An open pull request and its newest commit's checks, empty also when the reader may not see them."""
+
     url: str
     checks: tuple[RollupCheck, ...]
 

@@ -641,14 +641,14 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
         for agent in store.agents(slug)
         if agent.execution_id and agent.runtime_target.get("host_id") == local_id
     ]
-    report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
-    if not hosted:
-        return report
     from scripts.swarm_v2.runtime.process import local_namespace, started_ms
 
+    report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     report["observed_at"] = int(time.time() * 1000)
-    report["process_namespace"] = local_namespace()
     report["started_at"] = started_ms()
+    if not hosted:
+        return report
+    report["process_namespace"] = local_namespace()
     report["pane_ids"] = _pane_ids(herdr)
     facts = herdr.bindings([agent for _, agent in hosted])
     report["panes"] = herdr.conversations() or {}
