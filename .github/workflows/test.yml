@@ -2846,7 +2846,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if ! grep -qs -- '"--base"' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then
-            echo "::error::dev carries no feature map validator that grades against the base, so nothing trusted can grade."
+            echo "::error::The protected grader carries no feature map validator that grades against the base, so nothing trusted can grade."
             exit 1
           fi
           cd "$RUNNER_TEMP/grader"

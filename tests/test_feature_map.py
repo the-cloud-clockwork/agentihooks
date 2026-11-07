@@ -772,6 +772,7 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
         step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == "Hold the mapped feature tests"
     )
     assert step["if"] == "${{ !cancelled() }}"
+    assert step["run"].startswith('if ! grep -qs -- \'"--base"\' "$RUNNER_TEMP/grader/scripts/feature_map.py"; then\n')
     assert (
         step["run"]
         .strip()
