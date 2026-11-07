@@ -25,8 +25,9 @@ def refresh(index: KnowledgeIndex, document: Document, now: int) -> Refresh:
 
 
 def stale(index: KnowledgeIndex, now: int) -> bool:
-    """True once the last refresh is at least the refresh window old."""
-    return now - index.refreshed_at() >= REFRESH_SECONDS * 1000
+    """True before the first refresh and once the last refresh is at least the refresh window old."""
+    last = index.refreshed_at()
+    return last is None or now - last >= REFRESH_SECONDS * 1000
 
 
 def _hit(hit: Hit) -> Document:

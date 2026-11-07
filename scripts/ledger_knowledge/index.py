@@ -115,11 +115,11 @@ class KnowledgeIndex:
         added = sum(chunk.key not in known for chunk, _ in fresh)
         return Refresh(added, len(fresh) - added, len(gone), len(chunks) - len(fresh))
 
-    def refreshed_at(self) -> int:
-        """Epoch milliseconds of the last refresh, zero before the first."""
+    def refreshed_at(self) -> int | None:
+        """Epoch milliseconds of the last refresh, None before the first."""
         with self._connect() as connection:
             row = connection.execute("SELECT value FROM meta WHERE name = 'refreshed_at'").fetchone()
-        return row[0] if row else 0
+        return row[0] if row else None
 
     def _chunk(self, connection: sqlite3.Connection, key: str) -> Chunk | None:
         row = connection.execute(f"SELECT {COLUMNS} FROM chunks WHERE key = ?", (key,)).fetchone()

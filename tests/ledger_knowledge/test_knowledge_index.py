@@ -53,7 +53,7 @@ def test_the_index_file_and_its_folder_are_created(tmp_path: Path) -> None:
     built = index(tmp_path)
     assert built.path == tmp_path / "deep" / "slug.sqlite3"
     assert built.path.is_file()
-    assert built.refreshed_at() == 0
+    assert built.refreshed_at() is None
     built.refresh([ROOT], 5)
     assert index(tmp_path).get(ROOT.key) == ROOT
 
