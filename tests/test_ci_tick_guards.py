@@ -111,7 +111,11 @@ def test_tick_equivalence_runs_characterisation_equivalence_and_load_budget() ->
 
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
     steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
-    [pattern] = [step for step in steps if "scripts.tick_pattern" in step.get("run", "")]
+    [pattern] = [
+        step
+        for step in steps
+        if "scripts.tick_pattern" in step.get("run", "") and "scripts.tick.new_step" not in step.get("run", "")
+    ]
     assert (
         'python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"'
         in pattern["run"]
@@ -121,3 +125,34 @@ def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> 
     [catalogue] = [step for step in steps if step.get("run") == "python -m scripts.tick.catalogue check"]
     assert catalogue["working-directory"] == "head"
     assert all("if" not in step and "continue-on-error" not in step for step in (pattern, catalogue))
+
+
+def test_tick_equivalence_round_trips_a_scaffolded_step_and_skips_only_before_the_scaffold() -> None:
+    steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
+    [step] = [step for step in steps if "python -m scripts.tick.new_step" in step.get("run", "")]
+    run = step["run"]
+    assert "if" not in step and "continue-on-error" not in step and "|| true" not in run
+    assert step["env"]["PYTHONPATH"] == "${{ runner.temp }}/scaffold-round-trip"
+    skip = (
+        "if [[ ! -f head/scripts/tick/new_step.py ]]; then\n"
+        "  if [[ -f base/scripts/tick/new_step.py ]]; then\n"
+        '    echo "::error::The head removes the step scaffold the base holds"\n'
+        "    exit 1\n"
+        "  fi\n"
+        '  echo "::notice::'
+    )
+    assert run.startswith(skip)
+    assert run.count("exit 0") == 1
+    assert 'cp -a head "$copy"' in run
+    assert "xargs -r -d '\\n' git add -- < written.txt" in run
+    order = [
+        'assert scripts.__file__.startswith(sys.argv[1] + "/")',
+        'python -m scripts.tick.new_step "round trip probe"',
+        'python -m scripts.tick.new_step --check "round trip probe"',
+        "python -m scripts.tick.catalogue check",
+        'if [[ -f "$GITHUB_WORKSPACE/base/scripts/tick_pattern.py" ]]; then',
+        'cd "$grader"',
+        'python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/head" --head "$copy"',
+    ]
+    assert [run.index(each) for each in order] == sorted(run.index(each) for each in order)
+    assert steps.index(step) < next(i for i, each in enumerate(steps) if "tick_equivalence.sh" in each.get("run", ""))

@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -372,6 +373,7 @@ def test_server_closes_its_socket_and_cancels_the_watch_on_exit(tmp_path, monkey
     monkeypatch.setattr(ledger_server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(ledger_server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     httpd = Mock()
     factory = Mock(return_value=httpd)
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", factory)

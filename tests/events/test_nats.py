@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import pytest
+from nats import errors as nats_errors
 from nats.js import api
 from nats.js.errors import APIError, BucketNotFoundError, NotFoundError
 
@@ -465,7 +466,62 @@ def test_the_bus_connects_without_reconnecting(url, monkeypatch):
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
     opened.close()
-    connect.assert_called_once_with(url, allow_reconnect=False)
+    connect.assert_called_once_with(
+        url,
+        allow_reconnect=False,
+        max_reconnect_attempts=1,
+        reconnect_time_wait=0,
+        connect_timeout=nats.FIRST_CONNECT_S,
+        error_cb=nats._unreported,
+    )
+
+
+def test_a_reconnecting_client_bounds_its_first_connect_and_a_first_connect_tries_twice_quickly():
+    assert nats.connect_options(BusConfig(backend="nats", reconnect=True)) == {
+        "allow_reconnect": True,
+        "max_reconnect_attempts": 5,
+    }
+    assert nats.connect_options(BusConfig(backend="nats")) == {
+        "allow_reconnect": False,
+        "max_reconnect_attempts": 1,
+        "reconnect_time_wait": 0,
+        "connect_timeout": 2,
+        "error_cb": nats._unreported,
+    }
+    assert nats.FIRST_CONNECT_S == 2
+
+
+@pytest.mark.parametrize("error", [OSError("refused"), asyncio.TimeoutError(), nats_errors.NoServersError()], ids=str)
+def test_a_connection_error_is_left_to_the_caller(caplog, error):
+    caplog.set_level("DEBUG")
+    assert asyncio.run(nats._unreported(error)) is None
+    assert [record for record in caplog.records if record.name == "scripts.events.nats"] == []
+
+
+def test_any_other_client_error_is_logged_in_one_line(caplog):
+    caplog.set_level("DEBUG")
+    error = nats_errors.AuthorizationError()
+    asyncio.run(nats._unreported(error))
+    assert [
+        (record.name, record.levelname, record.msg, record.args, record.getMessage(), record.exc_info)
+        for record in caplog.records
+        if record.name != "asyncio"
+    ] == [("scripts.events.nats", "ERROR", "%s", (error,), "nats: authorization failed", None)]
+
+
+def test_an_unreachable_bus_raises_and_logs_no_connect_attempt(caplog):
+    caplog.set_level("DEBUG")
+    with pytest.raises(ConnectionError, match="answered the first connect within"):
+        nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
+    assert [record.getMessage() for record in caplog.records if record.name.startswith("nats")] == []
+
+
+@pytest.mark.wall_clock
+def test_an_unreachable_bus_gives_up_within_seconds():
+    started = time.monotonic()
+    with pytest.raises(ConnectionError, match="answered the first connect within"):
+        nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
+    assert time.monotonic() - started < nats.FIRST_CONNECT_S * 2
 
 
 def test_a_reconnecting_bus_ends_its_first_connect_when_no_server_answers(monkeypatch):

@@ -563,3 +563,52 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     assert asked == [(NOW_MS / 1000, False)]
     assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
+
+
+def _harness_routes(
+    claude_keys: set[str], codex_keys: set[str], held: dict[str, int] | None = None
+) -> approved.HarnessRoutes:
+    _, observations = _quota()
+    return approved.HarnessRoutes(
+        {
+            harness: approved.AccountRoute(
+                lambda keys=keys: frozenset(keys), observations, lambda: dict(held or {}), harness
+            )
+            for harness, keys in (("claude", claude_keys), ("codex", codex_keys))
+        }
+    )
+
+
+def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_seats() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal", "beta-business"}, {"beta-business": 1})
+    rows = approved.FleetAccounts(routes, 6)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account("claude", "akey", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "alpha-personal", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "beta-business", "OPEN", 1, None, None, 6),
+    ]
+    assert [capacity.free_seats(row) for row in rows] == [6, 6, 5]
+
+
+def test_a_launch_account_comes_from_the_route_of_its_harness() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal"})
+    assert routes.choose(2, None, None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "akey", None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "other") is None
+
+
+def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predecessor_to_their_route() -> None:
+    store, observations = _quota()
+    claude = approved.AccountRoute(lambda: frozenset({"akey", "bkey"}), observations, lambda: {"bkey": 1}, "claude")
+    routes = approved.HarnessRoutes({"claude": claude})
+    _observe(store, "akey")
+
+    assert routes.rows(4, NOW_MS / 1000) == claude.rows(4, NOW_MS / 1000)
+    assert routes.rows(4, NOW_MS / 1000)[0].week_resets_at == NOW_MS // 1000 + 48 * HOUR
+    assert routes.banded_rows(4, NOW_MS / 1000) == claude.banded_rows(4, NOW_MS / 1000)
+    assert [row.name for row in routes.banded_rows(4, NOW_MS / 1000)] == ["akey", "bkey"]
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "bkey", None, "claude") == "bkey"
+    assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))
+    assert routes.choose(2, None, ("claude", "akey"), "claude") != "akey"
