@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.695 · 2026-11-07
+
+### 2026-11-07 · 16a03370e50c · #9957 · @agenticore-app
+
+**Restore feature suite and swarm smoke images from the Actions cache**
+
+This change caches the Redis, Postgres, and swarm runtime images (Python base, NATS) in GitHub Actions cache so CI stops repeatedly pulling them from public registries, which had been failing with "toomanyrequests" rate-limit errors and breaking both the feature suite and promotion runs. On a cache miss it pulls once, saves the images, and loads them locally thereafter with `--pull never` or `PULL_REUSE_LOCAL`; a failed load falls back to pulling. This makes CI resilient to registry throttling, at the cost of needing to bump the cache key version if a saved archive ever becomes corrupt.
+
 ## v2.17.694 · 2026-11-07
 
 ### 2026-11-07 · 58f463bd4497 · #9900 · @agenticore-app
