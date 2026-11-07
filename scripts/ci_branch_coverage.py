@@ -11,6 +11,7 @@ import zipfile
 import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.ci_branch_plan import COMMIT, LEG
 from scripts.ci_budget import rate_limit
@@ -30,9 +31,11 @@ class Unusable(ValueError):
 
 
 def _run_entry(entry: object) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    entry = cast(dict[str, Any], entry)
     return (
-        isinstance(entry, dict)
-        and type(entry.get("run")) is int
+        type(entry.get("run")) is int
         and type(entry.get("attempt")) is int
         and isinstance(entry.get("commit"), str)
         and bool(COMMIT.fullmatch(entry["commit"]))
@@ -41,15 +44,22 @@ def _run_entry(entry: object) -> bool:
 
 
 def contributions(plan: object, deselected: object) -> dict[tuple[int, int], tuple[str, set[str]]]:
-    if not isinstance(plan, dict) or not isinstance(plan.get("runs"), list) or not _strings(plan.get("tests")):
+    if not isinstance(plan, dict):
         raise Unusable("the branch plan has no runs and tests lists")
-    if not isinstance(deselected, dict) or not _strings(deselected.get("branch", [])):
+    plan = cast(dict[str, Any], plan)
+    if not isinstance(plan.get("runs"), list) or not _strings(plan.get("tests")):
+        raise Unusable("the branch plan has no runs and tests lists")
+    if not isinstance(deselected, dict):
+        raise Unusable("the deselected tests hold no valid branch list")
+    deselected = cast(dict[str, Any], deselected)
+    if not _strings(deselected.get("branch", [])):
         raise Unusable("the deselected tests hold no valid branch list")
     carried = set(plan["tests"]).intersection(deselected.get("branch", []))
     runs: dict[tuple[int, int], tuple[str, set[str]]] = {}
     for entry in plan["runs"]:
         if not _run_entry(entry):
             raise Unusable("the branch plan holds a malformed run")
+        entry = cast(dict[str, Any], entry)
         commit, tests = runs.setdefault((entry["run"], entry["attempt"]), (entry["commit"], set()))
         if commit != entry["commit"]:
             raise Unusable(f"pull request run {entry['run']} names two commits")
@@ -57,8 +67,8 @@ def contributions(plan: object, deselected: object) -> dict[tuple[int, int], tup
     return {key: found for key, found in runs.items() if found[1]}
 
 
-def artifacts(repository: str, run: int, attempt: int) -> list[dict]:
-    found = []
+def artifacts(repository: str, run: int, attempt: int) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
     for page in itertools.count(1):
         listed = json.loads(_api(f"repos/{repository}/actions/runs/{run}/artifacts?per_page={PAGE}&page={page}"))
         for item in listed["artifacts"]:
@@ -67,9 +77,12 @@ def artifacts(repository: str, run: int, attempt: int) -> list[dict]:
                 found.append(item)
         if len(listed["artifacts"]) < PAGE:
             return found
+    raise AssertionError("unreachable")
 
 
-def carry(repository: str, artifact: dict, tests: set[str], moved: dict[str, dict[int, int] | None], out: Path) -> int:
+def carry(
+    repository: str, artifact: dict[str, Any], tests: set[str], moved: dict[str, dict[int, int] | None], out: Path
+) -> int:
     data = _api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip", timeout=TIMEOUT)
     with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as staged:
         try:
@@ -104,7 +117,7 @@ def _warn(key: tuple[int, int], reason: object) -> None:
 
 def _start(
     pool: ThreadPoolExecutor, args: argparse.Namespace, key: tuple[int, int], commit: str, tests: set[str]
-) -> tuple[dict, list[tuple[str, Future]]] | None:
+) -> tuple[dict[str, dict[int, int] | None], list[tuple[str, Future[int]]]] | None:
     run, attempt = key
     try:
         moved = _moved(args.repo, commit)
@@ -115,14 +128,20 @@ def _start(
     if not listed:
         _warn(key, "it kept no unexpired branch-coverage-3.12 artifact")
         return None
-    started = []
+    started: list[tuple[str, Future[int]]] = []
     for item in listed:
-        out = args.out / f"branch-{run}" / f"{ARTIFACT.fullmatch(item['name'])[1]}-{attempt}"
+        out = args.out / f"branch-{run}" / f"{cast('re.Match[str]', ARTIFACT.fullmatch(item['name']))[1]}-{attempt}"
         started.append((item["name"], pool.submit(carry, args.repository, item, tests, moved, out)))
     return moved, started
 
 
-def _finish(key: tuple[int, int], commit: str, tests: set[str], moved: dict, started: list[tuple[str, Future]]) -> None:
+def _finish(
+    key: tuple[int, int],
+    commit: str,
+    tests: set[str],
+    moved: dict[str, dict[int, int] | None],
+    started: list[tuple[str, Future[int]]],
+) -> None:
     captures = used = 0
     for name, future in started:
         try:

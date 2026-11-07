@@ -3,20 +3,21 @@ import json
 import statistics
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from scripts.ci_minutes import seconds
 from scripts.ci_storage import rows
 
 
-def measure(repo: str, count: int, until: str, since: str = "") -> dict:
+def measure(repo: str, count: int, until: str, since: str = "") -> dict[str, Any]:
     pulls = rows(f"repos/{repo}/pulls?state=closed&base=dev&sort=updated&direction=desc&per_page=100", None)
     merged = sorted(
         (pr for pr in pulls if pr["merged_at"] and since < pr["merged_at"] <= until),
         key=lambda pr: pr["merged_at"],
         reverse=True,
     )[:count]
-    measured = []
+    measured: list[dict[str, Any]] = []
     for pr in merged:
         branch = quote(pr["head"]["ref"], safe="")
         runs = rows(
@@ -24,7 +25,7 @@ def measure(repo: str, count: int, until: str, since: str = "") -> dict:
             "workflow_runs",
         )
         runs = [run for run in runs if run["created_at"] <= pr["merged_at"]]
-        stats = []
+        stats: list[dict[str, Any]] = []
         for run in runs:
             jobs = rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
             for job in jobs:
@@ -48,7 +49,7 @@ def measure(repo: str, count: int, until: str, since: str = "") -> dict:
                 "jobs": stats,
             }
         )
-    values = [pr["minutes"] for pr in measured]
+    values: list[float] = [pr["minutes"] for pr in measured]
     return {
         "count": len(measured),
         "requested": count,

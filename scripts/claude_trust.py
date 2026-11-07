@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
+from typing import Any, cast
 
 WAIT_NOTICE = "the session will wait at Claude's folder trust question until someone answers it in its pane"
 
@@ -17,19 +18,20 @@ def allowed(environ: dict[str, str]) -> bool:
     return environ.get("AGENTIHOOKS_TRUST_LAUNCH_DIR", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-def _read(config: Path) -> dict:
+def _read(config: Path) -> dict[str, Any]:
     if not config.exists():
         return {}
-    data = json.loads(config.read_text(encoding="utf-8"))
+    data: Any = json.loads(config.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{config} does not hold a JSON object")
-    return data
+    return cast(dict[str, Any], data)
 
 
-def _trusted(data: dict, directory: Path) -> bool:
+def _trusted(data: dict[str, Any], directory: Path) -> bool:
     projects = data.get("projects")
     if not isinstance(projects, dict):
         return False
+    projects = cast(dict[str, Any], projects)
     return any(
         isinstance(projects.get(str(path)), dict) and projects[str(path)].get("hasTrustDialogAccepted") is True
         for path in _scope(directory)
@@ -44,7 +46,7 @@ def _scope(directory: Path):
             return
 
 
-def _write(config: Path, data: dict) -> None:
+def _write(config: Path, data: dict[str, Any]) -> None:
     fd, temp = tempfile.mkstemp(dir=config.parent, prefix=".claude.json.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -76,9 +78,11 @@ def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
         projects = data.setdefault("projects", {})
         if not isinstance(projects, dict):
             raise ValueError(f"{config} projects is not a JSON object")
+        projects = cast(dict[str, Any], projects)
         entry = projects.setdefault(str(directory), {})
         if not isinstance(entry, dict):
             raise ValueError(f"{config} entry for {directory} is not a JSON object")
+        entry = cast(dict[str, Any], entry)
         entry["hasTrustDialogAccepted"] = True
         _write(config, data)
         return True
