@@ -4,6 +4,7 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.ci_queue_fail_fast import logged_loss
 from scripts.ci_queue_retry import SHARD, base_name
@@ -12,8 +13,10 @@ LEG = re.compile(r"\((\S+), (\d+)\)$")
 FAILED = ("failure", "cancelled", "timed_out")
 
 
-def classify(jobs: list[dict], lost: Callable[[dict], bool]) -> tuple[list[tuple[str, int]], list[str]]:
-    legs, kept = [], []
+def classify(
+    jobs: list[dict[str, Any]], lost: Callable[[dict[str, Any]], bool]
+) -> tuple[list[tuple[str, int]], list[str]]:
+    legs, kept = cast(list[tuple[str, int]], []), cast(list[str], [])
     for job in jobs:
         if base_name(job["name"]) != SHARD or job.get("conclusion") not in FAILED:
             continue
@@ -25,7 +28,9 @@ def classify(jobs: list[dict], lost: Callable[[dict], bool]) -> tuple[list[tuple
     return legs, kept
 
 
-def decide(jobs: list[dict], plan: list[dict], lost: Callable[[dict], bool]) -> tuple[list[dict], str]:
+def decide(
+    jobs: list[dict[str, Any]], plan: list[dict[str, Any]], lost: Callable[[dict[str, Any]], bool]
+) -> tuple[list[dict[str, Any]], str]:
     legs, kept = classify(jobs, lost)
     if kept:
         return [], f"failed without a runner loss signature: {', '.join(kept)}"

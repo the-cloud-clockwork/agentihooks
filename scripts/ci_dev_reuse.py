@@ -4,6 +4,7 @@ import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from scripts import ci_reuse
 
@@ -15,7 +16,7 @@ def artifact_names() -> set[str]:
     return names
 
 
-def _record(evidence: Path, run: dict) -> dict:
+def _record(evidence: Path, run: dict[str, Any]) -> dict[str, Any]:
     folder = evidence / str(run["id"])
     record = ci_reuse._proof(folder / "proof.zip")
     jobs = ci_reuse._lines(folder / "jobs.jsonl")
@@ -36,7 +37,7 @@ def _record(evidence: Path, run: dict) -> dict:
     return record
 
 
-def _usable(run: dict, repository: str, event: str) -> bool:
+def _usable(run: dict[str, Any], repository: str, event: str) -> bool:
     return (
         run["event"] == event
         and run["status"] == "completed"
@@ -46,7 +47,7 @@ def _usable(run: dict, repository: str, event: str) -> bool:
     )
 
 
-def _complete(evidence: Path, run: dict) -> bool:
+def _complete(evidence: Path, run: dict[str, Any]) -> bool:
     folder = evidence / str(run["id"])
     artifacts = ci_reuse._lines(folder / "artifacts.jsonl")
     if any(item["name"].startswith("reused-branch-") for item in artifacts):
@@ -67,17 +68,17 @@ def select_source(evidence: Path, head: str, repository: str) -> int | None:
         return None
     if not isinstance(runs, list):
         return None
-    for run in runs:
+    for run in cast(list[Any], runs):
         if not isinstance(run, dict):
             continue
         try:
-            if not _usable(run, repository, "merge_group") or run["head_sha"] != head:
+            if not _usable(cast(dict[str, Any], run), repository, "merge_group") or run["head_sha"] != head:
                 continue
-            record = _record(evidence, run)
+            record = _record(evidence, cast(dict[str, Any], run))
             if record["commit"] != head:
                 continue
             if record["reused"]:
-                folder = evidence / str(run["id"])
+                folder = evidence / str(cast(dict[str, Any], run)["id"])
                 source = json.loads((folder / "source.json").read_text())
                 logged = re.findall(r"(?m)^\S+ run=([0-9]+)$", (folder / "reuse.log").read_text())
                 if logged != [str(source["id"])] or not _usable(source, repository, "pull_request"):
@@ -90,11 +91,11 @@ def select_source(evidence: Path, head: str, repository: str) -> int | None:
                 ):
                     continue
                 run = source
-            if _complete(evidence, run):
+            if _complete(evidence, cast(dict[str, Any], run)):
                 print(f"Reusing unit artifacts from passed queue evidence on {head}: run {run['id']}")
-                return run["id"]
+                return cast(dict[str, Any], run)["id"]
         except ci_reuse.UNUSABLE + (TypeError, AttributeError) as exc:
-            print(f"No dev unit reuse from run {run.get('id')}: {exc}")
+            print(f"No dev unit reuse from run {cast(dict[str, Any], run).get('id')}: {exc}")
     return None
 
 

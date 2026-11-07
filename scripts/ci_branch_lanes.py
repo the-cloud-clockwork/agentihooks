@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -44,7 +45,7 @@ def git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
 
 
-def api(*args: str) -> dict:
+def api(*args: str) -> dict[str, Any]:
     return json.loads(subprocess.run(["gh", "api", *args], capture_output=True, check=True).stdout or "{}")
 
 
@@ -68,18 +69,18 @@ def branch_only(head: str, root: Path, include_edits: bool = False) -> list[str]
 
 
 def lane_problem(block: object, name: object = None) -> str | None:
-    if isinstance(block, dict) and called_lane(block, name):
-        block = {**block, "group": GROUP, "queue": "max"}
-    if not isinstance(block, dict) or " ".join(str(block.get("group")).split()) != GROUP:
+    if isinstance(block, dict) and called_lane(cast(dict[str, Any], block), name):
+        block = {**cast(dict[str, Any], block), "group": GROUP, "queue": "max"}
+    if not isinstance(block, dict) or " ".join(str(cast(dict[str, Any], block).get("group")).split()) != GROUP:
         return "has no shared hosted lane concurrency group"
-    if block.get("queue") != "max":
+    if cast(dict[str, Any], block).get("queue") != "max":
         return "queues on the lane without queue: max"
-    if block.get("cancel-in-progress") not in (None, False):
+    if cast(dict[str, Any], block).get("cancel-in-progress") not in (None, False):
         return "may cancel other runs on the shared lane"
     return None
 
 
-def called_lane(block: dict, name: object) -> bool:
+def called_lane(block: dict[str, Any], name: object) -> bool:
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9 ]+", name):
         return False
     own = re.fullmatch(
@@ -93,25 +94,26 @@ def called_lane(block: dict, name: object) -> bool:
     return own is not None and block.get("queue") == f"${{{{ github.workflow == '{name}' && 'max' || 'single' }}}}"
 
 
-def events(workflow: dict) -> list:
+def events(workflow: dict[Any, Any]) -> list[Any]:
     return [workflow[key] for key in ("on", True) if key in workflow]
 
 
 def unfiltered(on: object) -> object:
-    if not isinstance(on, dict) or not isinstance(on.get("pull_request"), dict):
-        return on
-    kept = {key: value for key, value in on["pull_request"].items() if key not in PATH_FILTERS}
-    return {**on, "pull_request": kept or None}
+    if not isinstance(on, dict) or not isinstance(cast(dict[Any, Any], on).get("pull_request"), dict):
+        return cast(object, on)
+    kept = {key: value for key, value in cast(dict[Any, Any], on)["pull_request"].items() if key not in PATH_FILTERS}
+    return {**cast(dict[Any, Any], on), "pull_request": kept or None}
 
 
 def deletes_path_filters(base: object, head: object) -> bool:
-    old, new = (on.get("pull_request") if isinstance(on, dict) else None for on in (base, head))
+    old, new = (cast(dict[Any, Any], on).get("pull_request") if isinstance(on, dict) else None for on in (base, head))
     return not isinstance(new, dict) or all(
-        key not in new or isinstance(old, dict) and old.get(key) == new[key] for key in PATH_FILTERS
+        key not in new or isinstance(old, dict) and cast(dict[Any, Any], old).get(key) == cast(dict[Any, Any], new)[key]
+        for key in PATH_FILTERS
     )
 
 
-def same_events(baseline: dict, workflow: dict) -> bool:
+def same_events(baseline: dict[Any, Any], workflow: dict[Any, Any]) -> bool:
     if events(baseline) == events(workflow):
         return True
     # Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests.
@@ -120,16 +122,16 @@ def same_events(baseline: dict, workflow: dict) -> bool:
     )
 
 
-def without_path_filters(workflow: dict) -> dict:
+def without_path_filters(workflow: dict[Any, Any]) -> dict[Any, Any]:
     return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
 
 
-def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+def per_run_mutation_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
-    baseline = (trusted.get("jobs") or {}).get(name)
+    baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
     if trusted.get("name") != "Mutation preflight" or name not in stages or not isinstance(baseline, dict):
         return False
-    if job.get("runs-on") != baseline.get("runs-on"):
+    if job.get("runs-on") != cast(dict[Any, Any], baseline).get("runs-on"):
         return False
     stage, index = stages[name]
     group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
@@ -142,24 +144,24 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
     return block in ({"group": group}, superseded)
 
 
-def dedicated_chart_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+def dedicated_chart_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
     return (
         trusted.get("name") == "Helm chart release"
         and events(trusted) == [{"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}}]
         and name in {"package", "kind", "publish"}
-        and job == (trusted.get("jobs") or {}).get(name)
+        and job == (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
         and block == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
     )
 
 
-def flake_history_group(name: str, block: object, job: dict, trusted: dict) -> bool:
-    baseline = (trusted.get("jobs") or {}).get(name)
+def flake_history_group(name: str, block: object, job: dict[str, Any], trusted: dict[Any, Any]) -> bool:
+    baseline = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name)
     return (
         trusted.get("name") == "Tests"
         and name == "flake-budget"
         and isinstance(baseline, dict)
         and {key: value for key, value in job.items() if key != "concurrency"}
-        == {key: value for key, value in baseline.items() if key != "concurrency"}
+        == {key: value for key, value in cast(dict[Any, Any], baseline).items() if key != "concurrency"}
         and block == {"group": "flake-history", "queue": "max", "cancel-in-progress": False}
     )
 
@@ -167,31 +169,31 @@ def flake_history_group(name: str, block: object, job: dict, trusted: dict) -> b
 def problems(workflow: object, baseline: object = None, ancestor: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
-    jobs = workflow.get("jobs") or {}
+    jobs = cast(dict[Any, Any], workflow).get("jobs") or cast(dict[Any, Any], {})
     if not isinstance(jobs, dict):
         return ["has no jobs mapping"]
     trusted = (
-        baseline
+        cast(dict[Any, Any], baseline)
         if isinstance(baseline, dict)
-        and baseline.get("name") == workflow.get("name")
-        and same_events(baseline, workflow)
-        else {}
+        and cast(dict[Any, Any], baseline).get("name") == cast(dict[Any, Any], workflow).get("name")
+        and same_events(cast(dict[Any, Any], baseline), cast(dict[Any, Any], workflow))
+        else cast(dict[Any, Any], {})
     )
     inherited = (
-        ancestor
+        cast(dict[Any, Any], ancestor)
         if isinstance(ancestor, dict)
-        and ancestor.get("name") == workflow.get("name")
-        and same_events(ancestor, workflow)
-        and ancestor.get("concurrency") == workflow.get("concurrency")
-        else {}
+        and cast(dict[Any, Any], ancestor).get("name") == cast(dict[Any, Any], workflow).get("name")
+        and same_events(cast(dict[Any, Any], ancestor), cast(dict[Any, Any], workflow))
+        and cast(dict[Any, Any], ancestor).get("concurrency") == cast(dict[Any, Any], workflow).get("concurrency")
+        else cast(dict[Any, Any], {})
     )
-    found = []
-    for name, job in jobs.items():
-        job = job if isinstance(job, dict) else {}
-        if name in (inherited.get("jobs") or {}) and job == inherited["jobs"][name]:
+    found: list[str] = []
+    for name, job in cast(dict[Any, Any], jobs).items():
+        job = cast(dict[str, Any], job) if isinstance(job, dict) else cast(dict[str, Any], {})
+        if name in (inherited.get("jobs") or cast(dict[Any, Any], {})) and job == inherited["jobs"][name]:
             continue
-        block = job.get("concurrency", workflow.get("concurrency"))
-        base_job = (trusted.get("jobs") or {}).get(name, {})
+        block = job.get("concurrency", cast(dict[Any, Any], workflow).get("concurrency"))
+        base_job = (trusted.get("jobs") or cast(dict[Any, Any], {})).get(name, cast(dict[Any, Any], {}))
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
         if dedicated_chart_group(name, block, job, trusted) or flake_history_group(name, block, job, trusted):
             continue
@@ -199,7 +201,7 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
             continue
         if (
             trusted.get("name") == "Tests"
-            and name in (trusted.get("jobs") or {})
+            and name in (trusted.get("jobs") or cast(dict[Any, Any], {}))
             and any(
                 block
                 == {
@@ -211,9 +213,13 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
             )
         ):
             continue
-        if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
+        if (
+            trusted
+            and (name in (trusted.get("jobs") or cast(dict[Any, Any], {})) or base_block is not None)
+            and block == base_block
+        ):
             continue
-        problem = lane_problem(block, workflow.get("name"))
+        problem = lane_problem(block, cast(dict[Any, Any], workflow).get("name"))
         if problem:
             found.append(f"job {name} {problem}")
     return found
@@ -221,20 +227,20 @@ def problems(workflow: object, baseline: object = None, ancestor: object = None)
 
 def runner_labels(runner: object) -> list[str]:
     if isinstance(runner, dict):
-        group = runner.get("group")
-        labels = runner.get("labels") or []
+        group = cast(dict[Any, Any], runner).get("group")
+        labels = cast(dict[Any, Any], runner).get("labels") or cast(list[Any], [])
         runner = [
-            *([] if group is None or group in PUBLIC_GROUPS else [f"group {group}"]),
+            *(cast(list[Any], []) if group is None or group in PUBLIC_GROUPS else [f"group {group}"]),
             *([labels] if isinstance(labels, str) else labels),
         ]
     if isinstance(runner, str):
         runner = [runner]
-    found = []
-    for item in runner if isinstance(runner, list) else []:
+    found: list[str] = []
+    for item in cast(list[Any], runner) if isinstance(runner, list) else cast(list[Any], []):
         text = str(item)
         bare = ACTOR_TEST.sub("", LITERAL.sub("", text))
         fixed = "[" not in bare and set(NAME.findall(bare)) <= FIXED_NAMES
-        selected = SELECTED.findall(text) if "${{" in text and fixed else []
+        selected = SELECTED.findall(text) if "${{" in text and fixed else cast(list[Any], [])
         found += selected or [text]
     return found
 
@@ -244,11 +250,11 @@ def private_runners(runner: object) -> list[str]:
 
 
 def runner_problems(workflow: object) -> list[str]:
-    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    jobs = cast(dict[Any, Any], workflow).get("jobs") if isinstance(workflow, dict) else None
     return [
         f"job {name} asks for private runner label {', '.join(found)}"
-        for name, job in (jobs.items() if isinstance(jobs, dict) else [])
-        if isinstance(job, dict) and (found := private_runners(job.get("runs-on")))
+        for name, job in (cast(dict[Any, Any], jobs).items() if isinstance(jobs, dict) else cast(list[Any], []))
+        if isinstance(job, dict) and (found := private_runners(cast(dict[Any, Any], job).get("runs-on")))
     ]
 
 
@@ -265,16 +271,24 @@ def grade(text: str, baseline: str | None = None, ancestor: str | None = None) -
 
 
 def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, ...] = ()) -> list[str]:
-    if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs", {}), dict):
+    if not isinstance(workflow, dict) or not isinstance(
+        cast(dict[Any, Any], workflow).get("jobs", cast(dict[Any, Any], {})), dict
+    ):
         return []
-    found = []
-    for name, job in (workflow.get("jobs") or {}).items():
+    found: list[str] = []
+    for name, job in (cast(dict[Any, Any], workflow).get("jobs") or cast(dict[Any, Any], {})).items():
         if not isinstance(job, dict):
             continue
-        call = job.get("uses")
+        call = cast(dict[Any, Any], job).get("uses")
         if not isinstance(call, str) or not call.startswith(f"./{WORKFLOWS}/"):
             continue
-        if lane_problem(job.get("concurrency", workflow.get("concurrency")), workflow.get("name")) is None:
+        if (
+            lane_problem(
+                cast(dict[Any, Any], job).get("concurrency", cast(dict[Any, Any], workflow).get("concurrency")),
+                cast(dict[Any, Any], workflow).get("name"),
+            )
+            is None
+        ):
             continue
         path = call[2:]
         if path in seen:
@@ -285,8 +299,8 @@ def reusable_problems(head: str, root: Path, workflow: object, seen: tuple[str, 
             found.append(f"job {name} calls {path}: does not parse as YAML")
             continue
         if isinstance(called, dict):
-            called = {**called, "name": workflow.get("name")}
-        issues = problems(called) if not (root / path).exists() else []
+            called = {**cast(dict[Any, Any], called), "name": cast(dict[Any, Any], workflow).get("name")}
+        issues = problems(called) if not (root / path).exists() else cast(list[str], [])
         issues.extend(reusable_problems(head, root, called, (*seen, path)))
         found.extend(f"job {name} calls {path}: {issue}" for issue in issues)
     return found
@@ -306,7 +320,11 @@ def refused(head: str, root: Path) -> dict[str, list[str]]:
     if not paths:
         return {}
     ancestor = trusted_ancestor(head, root)
-    inherited = set(git("ls-tree", "-r", "--name-only", ancestor, "--", WORKFLOWS).splitlines()) if ancestor else set()
+    inherited = (
+        set(git("ls-tree", "-r", "--name-only", ancestor, "--", WORKFLOWS).splitlines())
+        if ancestor
+        else cast(set[str], set())
+    )
     graded = {
         path: grade(
             git("show", f"{head}:{path}"),
@@ -328,19 +346,21 @@ def fires_on_head(head: str, path: str) -> bool:
         return True
     if not isinstance(workflow, dict):
         return True
-    for on in events(workflow):
-        names = on if isinstance(on, (list, dict)) else [on]
+    for on in events(cast(dict[Any, Any], workflow)):
+        names = cast("list[Any] | dict[Any, Any]", on) if isinstance(on, (list, dict)) else [on]
         if any(name in ("push", "pull_request", "pull_request_target") for name in names):
             return True
     return False
 
 
 def cancel(repo: str, head: str, paths: set[str], wait: float, step: float = 5.0) -> set[int]:
-    cancelled, seen = set(), set()
+    cancelled, seen = cast(set[int], set()), cast(set[str], set())
     deadline = time.monotonic() + wait
     while True:
-        live = []
-        for run in api(f"repos/{repo}/actions/runs?head_sha={head}&per_page=100").get("workflow_runs", []):
+        live: list[int] = []
+        for run in api(f"repos/{repo}/actions/runs?head_sha={head}&per_page=100").get(
+            "workflow_runs", cast(list[Any], [])
+        ):
             path = run["path"].split("@")[0]
             if path in paths:
                 seen.add(path)

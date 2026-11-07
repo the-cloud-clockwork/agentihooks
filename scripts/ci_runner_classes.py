@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.ci_runner_trust import ACTORS, _compact, selectors
 
@@ -21,7 +22,7 @@ PINNED_HOSTED = frozenset(
 )
 
 
-def _runner_problem(key: str, cls: str, runner: object, policy: dict) -> str | None:
+def _runner_problem(key: str, cls: str, runner: object, policy: dict[str, Any]) -> str | None:
     if runner == "ubuntu-latest":
         return None
     if cls in UNROUTED:
@@ -31,17 +32,17 @@ def _runner_problem(key: str, cls: str, runner: object, policy: dict) -> str | N
     return None
 
 
-def check(workflows: dict[str, dict], table: dict[str, str], policy: dict) -> list[str]:
+def check(workflows: dict[str, dict[str, Any]], table: dict[str, str], policy: dict[str, Any]) -> list[str]:
     problems = [
         f"{file}/{name}: runner classes cannot resolve local workflow {job['uses']}"
         for file, workflow in workflows.items()
-        for name, job in (workflow.get("jobs") or {}).items()
+        for name, job in cast(dict[str, dict[str, Any]], workflow.get("jobs") or {}).items()
         if str(job.get("uses")).startswith("./.github/workflows/") and Path(job["uses"]).name not in workflows
     ]
-    jobs = {
+    jobs: dict[str, dict[str, Any]] = {
         f"{file}/{name}": job
         for file, workflow in workflows.items()
-        for name, job in (workflow.get("jobs") or {}).items()
+        for name, job in cast(dict[str, dict[str, Any]], workflow.get("jobs") or {}).items()
         if not job.get("uses")
     }
     for key, job in jobs.items():
@@ -64,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     import yaml
 
-    workflows = {
+    workflows: dict[str, dict[str, Any]] = {
         path.name: yaml.safe_load(path.read_text()) or {}
         for path in sorted((args.root / ".github/workflows").iterdir())
         if path.suffix in (".yml", ".yaml")

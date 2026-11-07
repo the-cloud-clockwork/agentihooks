@@ -1,6 +1,7 @@
 import argparse
 import json
 from collections.abc import Callable
+from typing import Any
 
 from scripts.ci_queue_retry import _api
 
@@ -11,8 +12,10 @@ REBUILT = "queue group is no longer current"
 FAILED_RUNS = '.workflow_runs[] | select(.conclusion != "success") | .id'
 
 
-def classify(jobs: list[dict], notes: Callable[[int], list[str]]) -> str | None:
-    red = {job["name"]: job for job in jobs if job.get("conclusion") not in ("success", "skipped")}
+def classify(jobs: list[dict[str, Any]], notes: Callable[[int], list[str]]) -> str | None:
+    red: dict[str, dict[str, Any]] = {
+        job["name"]: job for job in jobs if job.get("conclusion") not in ("success", "skipped")
+    }
     if any(job["name"] == "Queue gate summary" for job in jobs):
         watcher = GATE
         if watcher not in red or set(red) - {GATE, "Queue gate summary"}:
@@ -24,8 +27,8 @@ def classify(jobs: list[dict], notes: Callable[[int], list[str]]) -> str | None:
     return "rebuild" if any(REBUILT in note for note in notes(red[watcher]["id"])) else "drop"
 
 
-def count(repo: str, day: str, api: Callable[..., str]) -> dict:
-    found = {"day": day, "drops": [], "rebuilds": []}
+def count(repo: str, day: str, api: Callable[..., str]) -> dict[str, Any]:
+    found: dict[str, Any] = {"day": day, "drops": [], "rebuilds": []}
 
     def notes(job_id: int) -> list[str]:
         return [note["message"] for note in json.loads(api(f"repos/{repo}/check-runs/{job_id}/annotations"))]

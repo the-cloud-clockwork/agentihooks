@@ -6,6 +6,7 @@ import sys
 import tempfile
 from collections import Counter
 from pathlib import Path
+from typing import Any, cast
 
 # The workflow runs the base branch copy of this script from outside the checkout, so the tree is the working directory.
 ROOT = Path.cwd()
@@ -14,13 +15,13 @@ FLOORS = RULES / "floors.json"
 TARGET = "hooks"
 
 
-def _semgrep(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+def _semgrep(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["semgrep", "scan", "--metrics", "off", *args], capture_output=True, text=True, cwd=cwd or ROOT
     )
 
 
-def _git(*args: str) -> subprocess.CompletedProcess:
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
 
 
@@ -28,20 +29,20 @@ def rules() -> list[Path]:
     return sorted(RULES.glob("*.yml"))
 
 
-def findings(rule_files: list[Path], target: str) -> list[dict]:
+def findings(rule_files: list[Path], target: str) -> list[dict[str, Any]]:
     configs = [arg for rule in rule_files for arg in ("--config", str(rule))]
     done = _semgrep("--json", "--strict", "--verbose", *configs, target)
     report = json.loads(done.stdout or "{}")
     if done.returncode or report.get("errors") or "results" not in report:
         raise SystemExit(f"semgrep could not scan {target} (exit {done.returncode}):\n{done.stderr}")
-    return report["results"]
+    return cast("list[dict[str, Any]]", report["results"])
 
 
-def _rule_id(finding: dict) -> str:
+def _rule_id(finding: dict[str, Any]) -> str:
     return finding["check_id"].rpartition(".")[2]
 
 
-def tally(rule_files: list[Path], found: list[dict]) -> dict[str, int]:
+def tally(rule_files: list[Path], found: list[dict[str, Any]]) -> dict[str, int]:
     by_rule = Counter(_rule_id(finding) for finding in found)
     return {rule.stem: by_rule[rule.stem] for rule in rule_files}
 
@@ -65,6 +66,7 @@ def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
                 shutil.copy(path, copy / path.name)
         done = _semgrep("--test", "--json", "--config", "rules", "rules", cwd=Path(folder))
     failed = f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}"
+    report: dict[str, Any]
     try:
         report = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -84,8 +86,8 @@ def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
 
 def fixture_errors(rule_files: list[Path]) -> list[str]:
     tested = [rule for rule in rule_files if all(path.is_file() for path in _fixtures(rule))]
-    reported, mismatched = fixture_test(tested) if tested else (set(), set())
-    errors = []
+    reported, mismatched = fixture_test(tested) if tested else (cast("set[str]", set()), cast("set[str]", set()))
+    errors: list[str] = []
     for rule in rule_files:
         red, clean = _fixtures(rule)
         if rule not in tested:
@@ -109,7 +111,7 @@ def at_base(base: str, path: Path) -> str | None:
 
 def base_floors(base: str) -> dict[str, int]:
     text = at_base(base, FLOORS)
-    return {} if text is None else json.loads(text)
+    return {} if text is None else cast("dict[str, int]", json.loads(text))
 
 
 def changed_rules(base: str, rule_files: list[Path]) -> set[str]:
@@ -121,7 +123,7 @@ def _marks(rule: Path, text: str | None) -> int:
 
 
 def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], dict[str, int]]:
-    errors, grown = [], {}
+    errors, grown = cast("list[str]", []), cast("dict[str, int]", {})
     for rule in rule_files:
         red = rule.with_suffix(".red.py")
         before = _marks(rule, at_base(base, red))
@@ -173,7 +175,7 @@ def check(base: str) -> int:
     if not rule_files:
         print(f"no rule files in {RULES.relative_to(ROOT)}")
         return 1
-    floors = json.loads(FLOORS.read_text()) if FLOORS.is_file() else {}
+    floors = cast("dict[str, int]", json.loads(FLOORS.read_text())) if FLOORS.is_file() else {}
     errors = fixture_errors(rule_files)
     shrunk, grown = marked_cases(base, rule_files)
     errors += shrunk

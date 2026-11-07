@@ -3,11 +3,14 @@ import os
 import time
 from collections.abc import Callable
 from copy import deepcopy
+from typing import Any, cast
 
+import scripts.ci_budget.jobs
 from scripts.ci_budget import rate_limit
-from scripts.ci_budget.jobs import read_jobs
 from scripts.ci_gate_shards import POLL_SECONDS, api
 from scripts.ci_queue_fail_fast import logged_loss
+
+read_jobs = cast("Callable[[str, int], list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
 
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
@@ -43,8 +46,8 @@ SKIPPED = {
 ANNOUNCED = {"install-smoke", "dep-manifest", "type-gate"}
 
 
-def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
-    groups = {}
+def inventory(jobs: list[dict[str, Any]], expected: set[str]) -> dict[str, dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
     for job in jobs:
         name = job["name"]
         base = name.split(" (", 1)[0]
@@ -63,7 +66,7 @@ def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
     return groups
 
 
-def checked(job: dict | None, conclusion: str) -> bool:
+def checked(job: dict[str, Any] | None, conclusion: str) -> bool:
     if job is None or job["status"] != "completed":
         return False
     if job.get("conclusion") != conclusion:
@@ -71,8 +74,10 @@ def checked(job: dict | None, conclusion: str) -> bool:
     return True
 
 
-def originals(groups: dict[str, dict], expected: set[str], lost: Callable[[dict], bool]) -> tuple[set[str], bool]:
-    recovered = set()
+def originals(
+    groups: dict[str, dict[str, Any]], expected: set[str], lost: Callable[[dict[str, Any]], bool]
+) -> tuple[set[str], bool]:
+    recovered: set[str] = set()
     finished = True
     for name in expected:
         job = groups.get(name)
@@ -85,7 +90,7 @@ def originals(groups: dict[str, dict], expected: set[str], lost: Callable[[dict]
     return recovered, finished
 
 
-def recovery(groups: dict[str, dict], recovered: set[str]) -> bool:
+def recovery(groups: dict[str, dict[str, Any]], recovered: set[str]) -> bool:
     reruns = {name for name in groups if name.startswith("unit rerun (")}
     if reruns - recovered:
         raise ValueError("A recovery shard did not replace a lost original")
@@ -101,7 +106,11 @@ def recovery(groups: dict[str, dict], recovered: set[str]) -> bool:
     return classified and recovered == reruns and all(passed)
 
 
-def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = lambda job: False) -> bool:
+def verify(
+    jobs: list[dict[str, Any]],
+    shards: list[int],
+    lost: Callable[[dict[str, Any]], bool] = lambda job: False,
+) -> bool:
     if not shards or any(type(shard) is not int or shard < 1 for shard in shards) or len(shards) != len(set(shards)):
         raise ValueError("The queue needs a nonempty unique positive shard plan")
     expected = {f"unit (3.12, {shard})" for shard in shards}
@@ -112,7 +121,7 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
     return all(finished) and originals_finished and recovery_finished
 
 
-def watcher(runner: str, *, deferred: bool = False) -> dict:
+def watcher(runner: str, *, deferred: bool = False) -> dict[str, Any]:
     return {
         "name": GATE_NAME,
         "outputs": {"failed": "${{ steps.watch.outputs.failed }}"},
@@ -163,10 +172,10 @@ def watcher(runner: str, *, deferred: bool = False) -> dict:
     }
 
 
-def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
+def normalize(workflows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     normalized = deepcopy(workflows)
     for workflow in normalized.values():
-        jobs = workflow.get("jobs") or {}
+        jobs = cast("dict[str, dict[str, Any]]", workflow.get("jobs") or {})
         dynamic = [
             job
             for job in jobs.values()
@@ -178,7 +187,11 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         if (
             len(dynamic) != 2
             or summary.get("name") != SUMMARY_NAME
-            or early not in (watcher(summary.get("runs-on")), watcher(summary.get("runs-on"), deferred=True))
+            or early
+            not in (
+                watcher(cast(str, summary.get("runs-on"))),
+                watcher(cast(str, summary.get("runs-on")), deferred=True),
+            )
         ):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
         if (
@@ -195,7 +208,7 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
 
 
 def current(repository: str, ref: str, head: str) -> None:
-    pages = api(f"repos/{repository}/git/matching-refs/{ref.removeprefix('refs/')}")
+    pages = cast("list[list[dict[str, Any]]]", api(f"repos/{repository}/git/matching-refs/{ref.removeprefix('refs/')}"))
     heads = [row["object"]["sha"] for page in pages for row in page if row["ref"] == ref]
     if heads != [head]:
         print("::error::queue group is no longer current")
@@ -204,7 +217,7 @@ def current(repository: str, ref: str, head: str) -> None:
 
 def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, head: str) -> None:
     verify([], shards)
-    seen = {}
+    seen: dict[str, bool] = {}
     deadline = rate_limit.deadline = time.monotonic() + DEADLINE_SECONDS
     while time.monotonic() < deadline:
         current(repository, ref, head)

@@ -7,6 +7,8 @@ import sys
 import termios
 import time
 import tty
+from types import FrameType
+from typing import cast
 
 # Remove this guard after herdr ships https://github.com/herdrdev/herdr/issues/5251.
 ESCAPE_WAIT_S = 1.0
@@ -25,7 +27,11 @@ class InputFramer:
         return b"".join(self._consume(value) for value in data)
 
     def expire_escape(self) -> bytes:
-        if not self.paste and self.pending == b"\x1b" and time.monotonic() - self.escape_at >= ESCAPE_WAIT_S:
+        if (
+            not self.paste
+            and cast(bytes, self.pending) == b"\x1b"
+            and time.monotonic() - self.escape_at >= ESCAPE_WAIT_S
+        ):
             self.pending.clear()
             return self.escape_key
         return b""
@@ -37,7 +43,7 @@ class InputFramer:
             self.pending.clear()
             return b"\x03"
         if value == 27:
-            previous = self.escape_key if self.pending == b"\x1b" else b""
+            previous = self.escape_key if cast(bytes, self.pending) == b"\x1b" else b""
             self.pending = bytearray(b"\x1b")
             self.escape_key = b"\x1b"
             self.escape_at = time.monotonic()
@@ -74,7 +80,7 @@ class InputFramer:
             if PASTE_END.startswith(self.pending):
                 break
             output.append(self.pending.pop(0))
-        if self.pending == PASTE_END:
+        if cast(bytes, self.pending) == PASTE_END:
             output.extend(self._take())
             self.paste = False
         return bytes(output)
@@ -120,7 +126,7 @@ def run(argv: list[str]) -> int:
     saved = termios.tcgetattr(0)
     size = termios.tcgetwinsize(0)
 
-    def forward(number, frame):
+    def forward(number: int, frame: FrameType | None) -> None:
         os.killpg(pid, number)
 
     signal.pthread_sigmask(signal.SIG_BLOCK, FORWARDED)
@@ -134,7 +140,7 @@ def run(argv: list[str]) -> int:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, FORWARDED)
         os.execvp(argv[0], argv)
 
-    def resize(number, frame):
+    def resize(number: int, frame: FrameType | None) -> None:
         termios.tcsetwinsize(master, termios.tcgetwinsize(0))
 
     previous[signal.SIGWINCH] = signal.signal(signal.SIGWINCH, resize)
