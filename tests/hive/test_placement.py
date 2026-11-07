@@ -225,7 +225,9 @@ def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
 
 
 @pytest.mark.parametrize(("used_percent", "expected"), [(79, "worker-one"), (81, "oracle")])
-def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(used_percent, expected):
+def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(
+    used_percent: int, expected: str
+) -> None:
     from scripts.hive import admission, placement
 
     total = 92_000

@@ -533,7 +533,7 @@ def test_a_first_ranked_hive_refuses_at_eighty_percent_host_memory():
     )
 
 
-def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory():
+def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory() -> None:
     measured = reading(pod_available_mb=3900, pod_total_mb=19600, pod_cpus=4, pod_load=1.0)
     found = admission.room(measured, first=True)
     assert admission.refusal(found) == (
@@ -541,7 +541,7 @@ def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory():
     )
 
 
-def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory():
+def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory() -> None:
     measured = reading(pod_available_mb=5000, pod_total_mb=19600, pod_cpus=4, pod_load=1.0)
     found = admission.room(measured, pending=7, first=True)
     assert found == admission.Room(
@@ -562,7 +562,7 @@ def test_a_first_ranked_hive_still_refuses_below_the_disk_floor_and_without_a_re
     assert admission.room(None, first=True).reason == admission.MISSING
 
 
-def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial():
+def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial() -> None:
     measured = {"cpus": 16, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
     found = admission.room(measured, first=True)
     assert found == admission.Room(
