@@ -21,6 +21,7 @@ __all__ = [
     "LIMITS",
     "PARALLEL",
     "RESERVES",
+    "RESERVE_SHARES",
     "SEQUENTIAL",
     "SLOW_LANE",
     "SLOW_S",
@@ -30,6 +31,7 @@ __all__ = [
     "active",
     "fan_out",
     "limit",
+    "reserved",
     "running",
 ]
 
@@ -43,7 +45,8 @@ CLOSING_LANE = "closing"
 CLOSING_S = 30.0
 LATER_GRACE_S = 1.0
 LIMITS = {"herdr": 6, "github": 4}
-SPAWN_RESERVE_S = 20.0
+RESERVE_SHARES: Mapping[str, float] = MappingProxyType({"spawn": 1 / 3})
+SPAWN_RESERVE_S = CRITICAL_S * RESERVE_SHARES["spawn"]
 RESERVES: Mapping[str, float] = MappingProxyType({"spawn": SPAWN_RESERVE_S})
 
 _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
@@ -136,6 +139,11 @@ class Pass:
         return self.slow if name == SLOW_LANE else self.critical
 
 
+def reserved(critical_s: float) -> Mapping[str, float]:
+    """Return the seconds each reserved step holds back at the end of a ``critical_s`` lane: its share of the lane."""
+    return MappingProxyType({name: share * critical_s for name, share in RESERVE_SHARES.items()})
+
+
 _ACTIVE: ContextVar[Pass | None] = ContextVar("tick_pass", default=None)
 
 
@@ -176,10 +184,10 @@ def running(
     slow_s: float = SLOW_S,
     heartbeat: Callable[[], object] | None = None,
     closing_s: float = CLOSING_S,
-    reserves: Mapping[str, float] = RESERVES,
+    reserves: Mapping[str, float] | None = None,
 ) -> Generator[Pass, None, None]:
     """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work and
-    holds ``reserves`` back from the steps each reserved step needs."""
+    holds ``reserves`` back from the steps each reserved step needs, by default each step's share of ``critical_s``."""
     if mode not in (PARALLEL, SEQUENTIAL):
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
@@ -193,7 +201,7 @@ def running(
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-step"),
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
         closing_s,
-        reserves,
+        reserved(critical_s) if reserves is None else reserves,
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None

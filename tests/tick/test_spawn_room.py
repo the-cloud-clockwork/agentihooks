@@ -164,3 +164,10 @@ def test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn
     with pool.running() as found:
         assert dict(found.reserves) == {"spawn": budgets.CRITICAL_S - budgets.SPAWN_START_S}
     assert budgets.SPAWN_START_S == 40.0
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_a_shorter_critical_lane_reserves_the_same_share_for_spawn() -> None:
+    with pool.running(critical_s=3.0) as found:
+        assert dict(found.reserves) == {"spawn": 1.0}
+    assert dict(pool.reserved(0.6)) == {"spawn": pytest.approx(0.2)}
