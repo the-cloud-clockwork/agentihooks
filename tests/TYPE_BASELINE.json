@@ -370,7 +370,7 @@
   "scripts/gates/quiet.py": 187,
   "scripts/gates/reruns.py": 104,
   "scripts/gates/sign_ins.py": 46,
-  "scripts/gates/subagents.py": 55,
+  "scripts/gates/subagents.py": 33,
   "scripts/gates/talk.py": 147,
   "scripts/gates/terminations.py": 31,
   "scripts/gates/verdicts.py": 40,
