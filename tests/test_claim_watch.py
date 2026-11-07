@@ -271,6 +271,7 @@ def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypat
     assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
 
 
+@pytest.mark.wall_clock
 def test_a_ledger_answering_after_five_seconds_does_not_slow_a_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import context_recycle, swarm_gates
 
