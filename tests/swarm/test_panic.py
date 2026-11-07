@@ -383,6 +383,29 @@ def test_cancel_runs_spares_release_tag_runs() -> None:
     assert runs.cancelled() == ["o/a:3", "o/a:4"]
 
 
+@pytest.mark.feature("panic-merged-fix-dev-run")
+def test_cancel_runs_spares_the_dev_run_of_a_merged_fix(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    merged = "m" * 40
+
+    def change(url: str, refused: str) -> ChangeState:
+        return ChangeState(ChangeRef("o/r", 1), "closed", "a" * 40, "dev", True, url, "fix-branch", merge_commit=merged)
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs(
+        {
+            "o/a": [
+                RepositoryRun(1, "dev", "push", "in_progress", head_sha=merged),
+                RepositoryRun(2, "dev", "push", "in_progress", head_sha="b" * 40),
+                RepositoryRun(3, "feature", "pull_request", "queued", head_sha=""),
+            ],
+        },
+    )
+    assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 2 on dev", "o/a run 3 on feature"]
+
+
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     assert panic.REPOS == (
         "the-cloud-clockwork/agentihooks",
@@ -636,6 +659,21 @@ def test_the_hook_payload_cwd_decides_the_fix_branch_push(
     assert blocker_window.checked({**payload, "cwd": fix}) is None
     assert blocker_window.checked({**payload, "cwd": other}) is not None
     assert blocker_window.checked(payload) is not None
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_push_after_cd_into_the_fix_worktree_is_spared(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX], 0)
+    primary = _checkout(tmp_path / "primary", "dev")
+    fix = _checkout(tmp_path / "fix", "fix-branch")
+    other = _checkout(tmp_path / "other", "other-branch")
+    spared = blocker_window.pretool("Bash", {"command": f"cd {fix} && git push -u origin HEAD"}, "s", primary)
+    refused = blocker_window.pretool("Bash", {"command": f"cd {other} && git push"}, "s", fix)
+    assert spared == (None, None)
+    assert refused[1] is not None
 
 
 @pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
