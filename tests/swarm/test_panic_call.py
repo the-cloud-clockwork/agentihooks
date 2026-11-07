@@ -335,7 +335,7 @@ def test_an_urgent_claim_quiet_past_the_stale_window_is_a_signal_from_its_last_p
     assert [(signal.name, signal.since, signal.after) for signal in found] == [
         ("Urgent task fix the outage claim quiet", START - 30 * MINUTE, 30 * MINUTE)
     ]
-    assert found[0].evidence == f"claimed by {ENGINEER} with no ledger change for 30 minutes"
+    assert found[0].evidence == f"claimed by {ENGINEER} with no progress for 30 minutes"
 
 
 def test_an_urgent_claim_inside_the_stale_window_or_with_a_declared_wait_is_no_signal(store):
@@ -390,5 +390,5 @@ def test_a_planted_quiet_urgent_claim_sends_the_master_one_panic_question_in_one
     asked = [item for item in items(store) if item.text.startswith("Is this a panic mode call?")]
     assert len(asked) == 1
     assert f"Urgent task fix the outage claim quiet on swarm {SLUG} for 45 minutes" in asked[0].text
-    assert f"claimed by {ENGINEER} with no ledger change for 45 minutes" in asked[0].text
+    assert f"claimed by {ENGINEER} with no progress for 45 minutes" in asked[0].text
     assert asked[0].ref == f"panic-call:{SLUG}:Urgent task fix the outage claim quiet|{START - 45 * MINUTE}:1"

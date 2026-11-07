@@ -35,7 +35,7 @@ MASTER = "master"
 SPOKEN = "%d %B %H:%M UTC"
 LAUNCH = "a lane has a free seat, quota and claimable work and no agent launched"
 UNCLAIMED = "it is claimable but remains unclaimed"
-QUIET = "claimed by {name} with no ledger change for {minutes} minutes"
+QUIET = "claimed by {name} with no progress for {minutes} minutes"
 QUESTION = (
     "Is this a panic mode call? {name} on swarm {slug} for {minutes} minutes, since {start}. Evidence: {evidence}. "
     "Yes: fix it yourself now; agentihooks swarm {slug} panic on --fix <pr url> raises panic and opens the master "
