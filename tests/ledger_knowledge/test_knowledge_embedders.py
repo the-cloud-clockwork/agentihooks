@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -57,9 +58,13 @@ class ConceptServer(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def server(no_proxy: None) -> Iterator[str]:
     ConceptServer.batches = []
     ConceptServer.authorizations = []
     httpd = HTTPServer(("127.0.0.1", 0), ConceptServer)
@@ -115,7 +120,7 @@ def test_semantic_choice_wraps_the_memory_provider_in_bounded_batches(server: st
 
 
 def test_semantic_vectors_are_unit_length_so_ranking_is_cosine(server: str) -> None:
-    (long, short, empty) = embedders.choose(semantic_environ(server)).embedder.embed(
+    long, short, empty = embedders.choose(semantic_environ(server)).embedder.embed(
         ["reboot restart reboot stuck", "daemon", "none"]
     )
     assert long == pytest.approx([3 / 10**0.5, 1 / 10**0.5, 0.0, 0.0])
@@ -123,8 +128,13 @@ def test_semantic_vectors_are_unit_length_so_ranking_is_cosine(server: str) -> N
     assert empty == [0.0, 0.0, 0.0, 0.0]
 
 
-def test_cli_reports_a_provider_outage_without_a_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    environ = semantic_environ("http://127.0.0.1:9/v1/embeddings", AGENTIHOOKS_HOME=str(tmp_path))
+def test_cli_reports_a_provider_outage_without_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], no_proxy: None
+) -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    environ = semantic_environ(f"http://127.0.0.1:{port}/v1/embeddings", AGENTIHOOKS_HOME=str(tmp_path))
     assert cli.main(["refresh", "--ledger", "rig"], environ, lambda slug: {"title": "t"}, lambda: 1.0) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == ("", "knowledge: embedding provider unavailable\n")

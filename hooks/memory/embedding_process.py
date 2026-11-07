@@ -95,7 +95,7 @@ class Settings:
 
 
 def checked_url(url: str) -> str:
-    """The embeddings URL, refused when it carries credentials, a query or a fragment, or is neither HTTPS nor loopback HTTP."""
+    """The embeddings URL, refused with credentials, a query or a fragment, or unless HTTPS or loopback HTTP."""
     parsed = urllib.parse.urlsplit(url)
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("embedding URL must not carry credentials, query parameters or a fragment")
