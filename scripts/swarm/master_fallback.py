@@ -17,6 +17,7 @@ SWARMS = "AGENTIHOOKS_MASTER_FALLBACK_SWARMS"
 DEFAULT_MINUTES = 20.0
 INTERVAL_S = 60
 PASS_TIMEOUT_S = 50
+SYSTEMCTL_TIMEOUT_S = 60
 MODULE = "scripts.swarm.master_fallback"
 UNIT = "agentihooks-master-fallback"
 STATE = Path.home() / ".agentihooks" / "master-fallback.json"
@@ -132,13 +133,15 @@ def install(environ: Mapping[str, str]) -> Path:
     repo = str(Path(__file__).resolve().parents[2])
     folder = Path.home() / ".config" / "systemd" / "user"
     folder.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"], check=False)
+    subprocess.run(
+        ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"], check=False, timeout=SYSTEMCTL_TIMEOUT_S
+    )
     (folder / f"{UNIT}.timer").unlink(missing_ok=True)
     path = folder / f"{UNIT}.service"
     path.write_text(unit_text(sys.executable, repo, environ))
-    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", f"{UNIT}.service"], check=True)
-    subprocess.run(["systemctl", "--user", "restart", f"{UNIT}.service"], check=True)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, timeout=SYSTEMCTL_TIMEOUT_S)
+    subprocess.run(["systemctl", "--user", "enable", f"{UNIT}.service"], check=True, timeout=SYSTEMCTL_TIMEOUT_S)
+    subprocess.run(["systemctl", "--user", "restart", f"{UNIT}.service"], check=True, timeout=SYSTEMCTL_TIMEOUT_S)
     return path
 
 
