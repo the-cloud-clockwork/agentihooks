@@ -110,13 +110,14 @@ def state(store: RedisStore) -> Panic | None:
 
 
 def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now_ms: int) -> Panic:
-    """Turns panic on, or adds fixes to the panic already on and makes it manual when a person engaged it."""
+    """Turns panic on, or adds fixes to the panic already on; a person pressing on with no fix makes it manual."""
     current = state(store)
+    added = tuple(fixes)
     found = Panic(
         current.since if current else now_ms,
         current.reason if current else reason,
-        auto and (current.auto if current else True),
-        tuple(sorted({*(current.fixes if current else ()), *fixes})),
+        (current.auto and (auto or bool(added))) if current else auto,
+        tuple(sorted({*(current.fixes if current else ()), *added})),
     )
     _client(store).set(_key("panic"), json.dumps(found.__dict__))
     return found
