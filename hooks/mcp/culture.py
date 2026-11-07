@@ -72,9 +72,10 @@ def _caller_seat(store: Any, slug: str) -> str:
 def resolve(store: Any, engine: str, swarm: str, seat: str) -> tuple[str, str, str]:
     """Engine, swarm and seat for the prompt; under stdio an empty one falls back to this session, else it is required."""
     from hooks.mcp._session import env_fallback_allowed
+    from hooks.targets import current_target
 
     if env_fallback_allowed():
-        engine = engine or os.getenv("AGENTIHOOKS_TARGET", "") or "claude"
+        engine = engine or current_target()
         swarm = swarm or os.getenv("AGENTIHOOKS_SWARM", "")
         seat = seat or (_caller_seat(store, swarm) if swarm else "")
     missing = [name for name, value in (("engine", engine), ("swarm", swarm), ("seat", seat)) if not value]

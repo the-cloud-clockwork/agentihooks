@@ -152,6 +152,7 @@ def test_the_server_serves_the_templates_and_the_prompt(monkeypatch: pytest.Monk
     from hooks.mcp import build_server
 
     monkeypatch.setattr(culture, "_store", _store)
+    _correct(f"culture:{SLUG}#2", f"- {BAD}", {"swarm": SLUG, "line": 2})
     server = build_server(["culture"])
 
     async def served() -> tuple[list, list, str, str, str]:
@@ -166,6 +167,7 @@ def test_the_server_serves_the_templates_and_the_prompt(monkeypatch: pytest.Monk
 
     assert sorted(templates) == ["swarm://{slug}/culture", "swarm://{slug}/seats/{seat}"]
     assert prompts == [("swarm_culture", ["engine", "swarm", "seat"])]
-    assert culture_body == CULTURE
+    assert BAD not in culture_body
+    assert culture_body == culture.culture_text(_store(), SLUG)
     assert seat_body.startswith(f"Seat {SEAT}.")
     assert message == culture.priming(_store(), "claude", SLUG, "eng-2")
