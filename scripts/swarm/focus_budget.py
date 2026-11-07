@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from scripts.swarm import freeze, profile_first
+from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
 
@@ -23,9 +24,14 @@ def ranks(doc: dict[str, Any]) -> dict[str, int]:
     return {str(task["id"]): _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in tasks}
 
 
-def ordered(queue: list[tuple[str, dict[str, Any]]], focus: dict[str, int]) -> list[tuple[str, dict[str, Any]]]:
-    """The lane and task queue sorted by each task's focus rank, ties kept in queue order."""
-    return sorted(queue, key=lambda entry: focus[entry[1]["id"]])
+def ordered(
+    queue: list[tuple[str, dict[str, Any]]],
+    focus: dict[str, int],
+    band: Callable[[dict[str, Any]], Any] = lambda task: 0,
+    unfocused: int | None = None,
+) -> list[tuple[str, dict[str, Any]]]:
+    """The queue with focused tasks first, then by rank band, then by focus rank, ties kept in queue order."""
+    return sorted(queue, key=lambda entry: (focus[entry[1]["id"]] == unfocused, band(entry[1]), focus[entry[1]["id"]]))
 
 
 def _rank(
@@ -54,7 +60,10 @@ def place(doc: dict, ready: list, lane: str, capacity: int, running: list, locat
     room = max(0, capacity - sum(task.get("lane") == lane for task in running))
     normal, notes = locate([task for task in ready if order[task["id"]] == unfocused], room)
     plain = [task for task in normal if profile_first.UNRESOLVED not in task]
-    hot = sorted((task for task in ready if order[task["id"]] < unfocused), key=lambda task: order[task["id"]])
+    hot = sorted(
+        (task for task in ready if order[task["id"]] < unfocused),
+        key=lambda task: (ledger_rank.order(task), order[task["id"]]),
+    )
     focused, refused = locate(hot, room)
     placed = [task for task in focused if profile_first.UNRESOLVED not in task]
     pending = [task for task in normal + focused if profile_first.UNRESOLVED in task]

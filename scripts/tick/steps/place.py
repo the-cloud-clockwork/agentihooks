@@ -641,7 +641,11 @@ def _spawn_order(
         waits += refused
     ranked = timing.timed(tick._ranked, slug, store, queue, dispatched)
     focus = timing.timed(focus_budget.ranks, doc)
-    return timing.timed(focus_budget.ordered, ranked, focus), waits
+    outside = sum(row["verb"] == "focus" for row in doc.get("freezes", []))
+    band: Callable[[dict[str, Any]], Any] = (
+        (lambda task: dispatched(task)[0]) if dispatched else ledger_rank.order  # pyright: ignore[reportUnknownLambdaType]
+    )
+    return timing.timed(focus_budget.ordered, ranked, focus, band, outside), waits
 
 
 def _ranked(
