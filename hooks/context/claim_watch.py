@@ -19,6 +19,7 @@ STOP = (
 )
 NOTE = "{at} {name} ended at its next tool call: the task claim names {owner}\n"
 CACHE_S = 30
+READ_S = 0.05
 CACHE = "claim-watch.json"
 
 
@@ -28,9 +29,12 @@ def key(slug: str, task: str) -> str:
 
 
 def _client(environ: Mapping[str, str]) -> Any:
-    from scripts.swarm import redis_budget, store
+    import redis
 
-    return redis_budget.capped(store.redis_client(dict(environ)))
+    from scripts.swarm import store
+
+    url = store.redis_url(environ)
+    return redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=READ_S, socket_timeout=READ_S)
 
 
 def _cached(path: Path, name: str, now: float) -> tuple[bool, str | None]:
@@ -38,7 +42,8 @@ def _cached(path: Path, name: str, now: float) -> tuple[bool, str | None]:
         saved = json.loads(path.read_text())
     except (OSError, ValueError):
         return False, None
-    if saved.get("name") != name or not 0 <= now - saved.get("at", -CACHE_S) < CACHE_S:
+    at = saved.get("at") if isinstance(saved, dict) else None
+    if not isinstance(at, int | float) or saved.get("name") != name or not 0 <= now - at < CACHE_S:
         return False, None
     return True, saved.get("holder")
 

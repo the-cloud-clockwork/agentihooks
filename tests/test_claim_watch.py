@@ -202,6 +202,57 @@ def test_no_redis_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
     assert claim_watch.check(ENV, None, 1000.0, Spawn()) is None
 
 
+def test_the_client_reads_the_swarm_redis_with_a_fifty_millisecond_bound_and_no_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import redis
+
+    built = []
+
+    def from_url(url: str, **options: object) -> str:
+        built.append((url, options))
+        return "client"
+
+    monkeypatch.setattr(redis.Redis, "from_url", from_url)
+
+    assert claim_watch.READ_S <= 0.05
+    assert claim_watch._client({**ENV, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://swarm.test:6379/0"}) == "client"
+    assert built == [
+        (
+            "redis://swarm.test:6379/0",
+            {
+                "decode_responses": True,
+                "socket_connect_timeout": claim_watch.READ_S,
+                "socket_timeout": claim_watch.READ_S,
+            },
+        )
+    ]
+
+
+def test_a_released_claim_keeps_the_session_until_the_next_claimant_takes_the_key() -> None:
+    redis, spawn = Pushed(NAME), Spawn()
+
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
+    redis.holder = None
+    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) is None
+    redis.holder = OTHER
+    assert claim_watch.check(ENV, redis, 1000.0 + 2 * claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
+        task="t1", slug="sw", owner=OTHER
+    )
+    assert len(spawn.calls) == 1
+
+
+@pytest.mark.parametrize("saved", ["[]", "null", '"x"', '{"name": "' + NAME + '", "at": "soon", "holder": null}'])
+def test_a_cache_file_of_another_shape_is_a_miss(saved: str) -> None:
+    folder = ledger_workspace.folder("sw", "t1")
+    folder.mkdir(parents=True)
+    (folder / claim_watch.CACHE).write_text(saved)
+    redis = Pushed(OTHER)
+
+    assert claim_watch.check(ENV, redis, 1000.0, Spawn()) is not None
+    assert redis.reads == [KEY]
+
+
 def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks import hook_manager
 
