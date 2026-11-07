@@ -192,7 +192,10 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store: Redis
 def test_drop_commits_while_other_agents_registry_writes_interleave(store: RedisStore) -> None:
     from scripts.swarm import lease
 
-    agent, other = started(store), started(store)
+    agent = started(store)
+    other = store.start_execution(
+        "fixture", AgentRecord(store.next_name("fixture", "eng"), "eng", "task", seat="eng-2@fixture")
+    )
     fenced = lease.fenced
     writing: list[bool] = []
     writes: list[bool] = []
