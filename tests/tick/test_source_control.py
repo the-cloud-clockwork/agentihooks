@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -461,6 +462,110 @@ def test_github_open_changes_stops_after_two_hundred_pull_requests_in_pages_of_t
     assert provider.open_changes(deadline=_deadline()) == tuple(port.OpenChange(f"u{n}", ()) for n in range(8))
     assert len(recorder.calls) == 8
     assert "pullRequests(states: OPEN, first: 25, after: $after)" in github._OPEN
+
+
+def _refused(errors: object) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return a rest stand in that raises a CalledProcessError carrying a partial open listing body and the errors."""
+    tests = {"__typename": "CheckRun", "name": "Tests", "conclusion": "FAILURE", "startedAt": "s", "completedAt": "c"}
+    rollup = {"contexts": {"nodes": [tests]}}
+    shown = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}
+    hidden = {"url": "u1", "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
+    info = {"hasNextPage": False, "endCursor": None}
+    data = {"repository": {"pullRequests": {"pageInfo": info, "nodes": [shown, hidden]}}}
+    body = json.dumps({"data": data, "errors": errors})
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, ["gh", *args], body, "gh: Resource not accessible by integration")
+
+    return rest
+
+
+ROLLUP_PATH = ["repository", "pullRequests", "nodes", 1, "commits", "nodes", 0, "commit", "statusCheckRollup"]
+
+
+def test_github_open_changes_reads_a_pull_request_whose_rollup_the_app_cannot_read_as_unchecked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    forbidden = [{"type": "FORBIDDEN", "path": ROLLUP_PATH, "message": "Resource not accessible by integration"}]
+    monkeypatch.setattr(github.github_reads, "rest", _refused(forbidden))
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    shown = port.OpenChange("u0", (port.RollupCheck("Tests", "FAILURE", "c"),))
+    assert provider.open_changes(deadline=_deadline()) == (shown, port.OpenChange("u1", ()))
+
+
+def test_github_open_changes_pages_on_after_a_page_with_hidden_rollups(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hidden = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
+    info = {"hasNextPage": True, "endCursor": "next"}
+    first = {
+        "data": {"repository": {"pullRequests": {"pageInfo": info, "nodes": [hidden]}}},
+        "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}],
+    }
+    calls: list[list[str]] = []
+
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(1, ["gh", *args], json.dumps(first), "gh: Resource not accessible")
+        return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(_open_page(["u1"], [], None)), "")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
+    assert calls[1][-2:] == ["-f", "after=next"]
+
+
+@pytest.mark.parametrize(
+    "errors",
+    [
+        [{"type": "NOT_FOUND", "path": ROLLUP_PATH, "message": "gone"}],
+        [{"type": "FORBIDDEN", "path": ["repository", "pullRequests"], "message": "no"}],
+        [{"type": "FORBIDDEN", "message": "no path"}],
+        [{"type": "FORBIDDEN", "path": ["viewer", "statusCheckRollup"], "message": "elsewhere"}],
+        [
+            {"type": "FORBIDDEN", "path": ROLLUP_PATH, "message": "hidden"},
+            {"type": "NOT_FOUND", "path": ROLLUP_PATH, "message": "gone"},
+        ],
+        {"type": "FORBIDDEN", "path": ROLLUP_PATH},
+        ["FORBIDDEN"],
+        [],
+    ],
+)
+def test_github_open_changes_raises_any_other_listing_refusal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, errors: object
+) -> None:
+    monkeypatch.setattr(github.github_reads, "rest", _refused(errors))
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        provider.open_changes(deadline=_deadline())
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "",
+        None,
+        "not json",
+        json.dumps(["FORBIDDEN"]),
+        json.dumps({"data": {"repository": None}, "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]}),
+        json.dumps({"data": None, "errors": [{"type": "FORBIDDEN", "path": ROLLUP_PATH}]}),
+    ],
+)
+def test_github_open_changes_raises_a_refusal_with_no_listing_body(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stdout: str | None
+) -> None:
+    def rest(caller: str, args: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, ["gh", *args], stdout, "gh: HTTP 502")
+
+    monkeypatch.setattr(github.github_reads, "rest", rest)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        provider.open_changes(deadline=_deadline())
 
 
 @pytest.mark.parametrize("enabled", [True, False])

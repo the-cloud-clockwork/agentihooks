@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from scripts.swarm import github_reads
 from scripts.tick.deadline import Deadline
@@ -99,6 +99,53 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
     rollup = node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]
     contexts: list[dict[str, Any]] = rollup["contexts"]["nodes"] if rollup else []
     return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
+
+
+def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
+    """Return the data of a refused open listing whose only errors hide check rollups from the App, else re-raise."""
+    try:
+        body: Any = json.loads(refused.stdout)
+    except (TypeError, ValueError):
+        raise refused from None
+    reply = _object(body)
+    found = _items(reply.get("errors"))
+    hidden = bool(found) and all(_rollup_refusal(error) for error in found)
+    listing = _object(reply.get("data") if hidden else None)
+    repository = _object(listing.get("repository"))
+    if not isinstance(repository.get("pullRequests"), dict):
+        raise refused
+    return listing
+
+
+def _rollup_refusal(error: Any) -> bool:
+    """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
+    entry = _object(error)
+    steps = _items(entry.get("path"))
+    return (
+        entry.get("type") == "FORBIDDEN"
+        and steps[:2] == ["repository", "pullRequests"]
+        and steps[-1:] == ["statusCheckRollup"]
+    )
+
+
+def _object(value: Any) -> dict[str, Any]:
+    """Return a decoded JSON value when it is an object, else an empty one."""
+    return value if _is_object(value) else {}
+
+
+def _items(value: Any) -> list[Any]:
+    """Return a decoded JSON value when it is an array, else an empty one."""
+    return value if _is_items(value) else []
+
+
+def _is_object(value: Any) -> TypeGuard[dict[str, Any]]:
+    """Say whether a decoded JSON value is an object."""
+    return isinstance(value, dict)
+
+
+def _is_items(value: Any) -> TypeGuard[list[Any]]:
+    """Say whether a decoded JSON value is an array."""
+    return isinstance(value, list)
 
 
 def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
@@ -294,13 +341,20 @@ class GitHubSourceControl:
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
-        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five."""
+        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five.
+
+        A pull request whose check rollup the App may not read is listed with no checks.
+        """
         deadline.live()
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
         changes: list[OpenChange] = []
         for _ in range(_OPEN_PAGES):
-            pulls = self._graphql(_OPEN, variables, deadline)["repository"]["pullRequests"]
+            try:
+                data = self._graphql(_OPEN, variables, deadline)
+            except subprocess.CalledProcessError as refused:
+                data = _hidden_rollups(refused)
+            pulls = data["repository"]["pullRequests"]
             changes.extend(_open_change(node) for node in pulls["nodes"])
             if not pulls["pageInfo"]["hasNextPage"]:
                 break
