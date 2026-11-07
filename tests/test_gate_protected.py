@@ -1575,6 +1575,59 @@ def test_the_retried_summary_waits_and_downloads_each_report_once_more():
         }
 
 
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_required_gate_ending_with_the_job_peak_memory_step_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.peak_memory(ci_reuse.gate_steps(**form, summary=summary))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("field", ["name", "if", "shell", "run"])
+def test_a_required_gate_ending_with_an_altered_peak_memory_step_is_red(field):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.peak_memory(ci_reuse.gate_steps())
+    steps[-1] = {**steps[-1], field: steps[-1][field] + " x"}
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        f"The head's {gate_protected.GATE} changes its steps; the protected branch grades with its own."
+    ]
+
+
+@pytest.mark.parametrize("retried", [False, True])
+@pytest.mark.parametrize("altered", [False, True])
+def test_the_separate_summary_may_end_with_the_job_peak_memory_step(retried, altered):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.summary_steps()
+    if retried:
+        steps = ci_reuse.pipefail_summary(ci_reuse.retried_summary(steps))
+    steps = ci_reuse.peak_memory(steps)
+    if altered:
+        steps[-1] = {**steps[-1], "if": "success()"}
+    config = _separate_summary(head, steps)
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY)
+    assert problems == (["The test summary must use the reviewed reporting job."] if altered else [])
+
+
+def test_only_a_trailing_exact_peak_memory_step_is_removed():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps()
+    assert ci_reuse.peak_memory(steps) == [*steps, ci_reuse.PEAK_MEMORY]
+    assert ci_reuse.without_peak_memory(ci_reuse.peak_memory(steps)) == steps
+    assert ci_reuse.without_peak_memory([ci_reuse.PEAK_MEMORY, *steps]) == [ci_reuse.PEAK_MEMORY, *steps]
+    assert ci_reuse.without_peak_memory([]) == []
+    assert "Job peak memory of $GITHUB_JOB" in ci_reuse.PEAK_MEMORY["run"]
+    assert ci_reuse.PEAK_MEMORY["run"].endswith('tee -a "$GITHUB_STEP_SUMMARY"\n')
+
+
 @pytest.mark.parametrize("change", ["second continues", "no wait", "first fails the job"])
 def test_a_separate_summary_cannot_weaken_its_download_retry(change):
     from scripts import ci_reuse
