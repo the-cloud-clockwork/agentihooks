@@ -1864,6 +1864,51 @@
         "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
+    },
+    {
+      "id": "master-safety-nudge",
+      "origin": "operator",
+      "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2399",
+      "behaviour": "Live swarm masters record their herdr pane in a host registry file on orchestrator join and on later tool calls, and an hourly operating system cron round types the safety nudge into each live master pane idle at its prompt, Claude or Codex, without Redis, the tick or the controller.",
+      "seam": "agentihooks safety-nudge round|install|check",
+      "tests": [
+        "tests/swarm/test_safety_nudge.py::test_a_master_in_a_herdr_pane_is_recorded_and_dead_masters_are_dropped",
+        "tests/swarm/test_safety_nudge.py::test_a_session_that_is_not_a_master_in_a_pane_is_never_recorded",
+        "tests/swarm/test_safety_nudge.py::test_an_unreadable_registry_reads_as_empty",
+        "tests/swarm/test_safety_nudge.py::test_a_round_nudges_idle_claude_and_codex_masters_and_skips_busy_or_typed_panes",
+        "tests/swarm/test_safety_nudge.py::test_safety_nudge_text_is_the_operator_words",
+        "tests/swarm/test_safety_nudge.py::test_a_herdr_failure_is_logged_as_failed_and_the_round_goes_on",
+        "tests/swarm/test_safety_nudge.py::test_install_registers_one_hourly_round_and_keeps_other_entries",
+        "tests/swarm/test_safety_nudge.py::test_install_works_for_a_user_with_no_table",
+        "tests/swarm/test_safety_nudge.py::test_check_reports_the_job_and_the_pane_of_this_master",
+        "tests/swarm/test_safety_nudge.py::test_agentihooks_safety_nudge_is_a_delegated_command",
+        "tests/swarm/test_safety_nudge.py::test_home_defaults_to_the_agentihooks_folder_under_the_user_home",
+        "tests/swarm/test_safety_nudge.py::test_only_positive_process_ids_with_a_proc_entry_are_alive",
+        "tests/swarm/test_safety_nudge.py::test_an_entry_without_a_process_id_is_dropped",
+        "tests/swarm/test_safety_nudge.py::test_load_keeps_only_object_entries_of_an_object_file",
+        "tests/swarm/test_safety_nudge.py::test_record_takes_the_agent_process_when_no_pid_is_given",
+        "tests/swarm/test_safety_nudge.py::test_a_round_with_no_live_master_logs_no_masters_and_rounds_append",
+        "tests/swarm/test_safety_nudge.py::test_the_cron_line_reaches_agentihooks_herdr_and_the_herdr_socket",
+        "tests/swarm/test_safety_nudge.py::test_the_cron_line_falls_back_to_the_bare_command_when_nothing_is_found",
+        "tests/swarm/test_safety_nudge.py::test_cron_reads_and_writes_capture_text_output",
+        "tests/swarm/test_safety_nudge.py::test_install_raises_with_the_cron_error_when_the_write_is_refused",
+        "tests/swarm/test_safety_nudge.py::test_check_lists_every_live_master_for_a_caller_that_is_not_registered",
+        "tests/swarm/test_safety_nudge.py::test_main_runs_each_action_and_prints_its_json",
+        "tests/swarm/test_safety_nudge.py::test_main_install_prints_the_installed_line",
+        "tests/swarm/test_safety_nudge.py::test_main_usage_names_the_agentihooks_command",
+        "tests/swarm/test_safety_nudge.py::test_main_refuses_an_unknown_action",
+        "tests/swarm/test_safety_nudge.py::test_the_ledger_adapter_records_the_master",
+        "tests/swarm/test_safety_nudge.py::test_only_an_orchestrator_join_records_the_master"
+      ],
+      "semgrep_rule": "feature-master-safety-nudge",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.swarm.safety_nudge",
+        "check"
+      ]
     }
   ],
   "unmapped_rules": [
