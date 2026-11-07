@@ -46,8 +46,8 @@ def test_list_walks_every_page_with_the_given_headers(monkeypatch):
     pages = {None: (["a", "b"], "p2"), "p2": (["c"], "p3"), "p3": ([], None)}
 
     @asynccontextmanager
-    async def client(url, headers=None, timeout=None):
-        seen["client"] = (url, headers, timeout)
+    async def client(url, *, http_client=None):
+        seen["client"] = (url, http_client.headers["H"], http_client.timeout.connect, http_client.timeout.read)
         yield "r", "w", None
 
     class Session:
@@ -64,18 +64,19 @@ def test_list_walks_every_page_with_the_given_headers(monkeypatch):
         async def initialize(self):
             seen["initialized"] = True
 
-        async def list_tools(self, cursor=None):
+        async def list_tools(self, *, params):
+            cursor = params.cursor
             seen["cursors"].append(cursor)
             assert len(seen["cursors"]) <= len(pages)
             names, nxt = pages[cursor]
             return SimpleNamespace(tools=[SimpleNamespace(name=n) for n in names], nextCursor=nxt)
 
-    monkeypatch.setattr(transport, "streamablehttp_client", client)
+    monkeypatch.setattr(transport, "streamable_http_client", client)
     monkeypatch.setattr(mcp, "ClientSession", Session)
 
     assert connectors.advertised("https://g.example/mcp", {"H": "v"}) == ["a", "b", "c"]
     assert seen == {
-        "client": ("https://g.example/mcp", {"H": "v"}, 30),
+        "client": ("https://g.example/mcp", "v", 30, 300),
         "streams": ("r", "w"),
         "cursors": [None, "p2", "p3"],
         "initialized": True,
