@@ -180,7 +180,7 @@ STEPS = (
         "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
     ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged")),
+    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged"), lane=SLOW),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),

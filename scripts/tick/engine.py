@@ -434,6 +434,12 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     return record
 
 
+def _kept(step: Step) -> bool:
+    """Return whether ``step`` is kept: it runs under its own budget even after its lane expired or a step it needs
+    was dropped."""
+    return bool(getattr(step, "kept", False))
+
+
 def _expire(
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
     dropped: set[str],
@@ -462,7 +468,8 @@ def _eager(
     """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
-    A step in ``rest`` starts no thread and ends at once for its dependents.
+    A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
+    expired or a step it needs was dropped, bounded by its own budget alone.
     """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
@@ -483,11 +490,15 @@ def _eager(
                 offsets[step.name] = _offset()
                 if step.name in rest | _shut(gate, step, records):
                     records[step.name] = _ended(found, _rested(step))
-                elif step.needs & dropped or lane.expired:
+                elif not _kept(step) and (step.needs & dropped or lane.expired):
                     dropped.add(step.name)
                     records[step.name] = _ended(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
+                elif _kept(step):
+                    future = found.steps.submit(copy_context().run, run_step, step, ctx)
+                    submitted.append(future)
+                    running[future] = (step, clock(), Deadline.after(step.budget_s + SETTLE_S, clock=clock))
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
