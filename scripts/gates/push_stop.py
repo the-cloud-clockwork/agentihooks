@@ -232,10 +232,11 @@ class PushStop:
             return Decision()
         store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
         frozen = self.frozen(store)
-        holding = [tree for tree in found if (tree.dirty or tree.unpushed) and own_pull(tree, task)]
+        holding = [tree for tree in found if tree.unpushed and own_pull(tree, task)]
         checks = self.checks(task) if holding else ""
         for tree in found:
             if checks and tree in holding:
+                owed = owed or tree.dirty
                 continue
             if tree.unpushed and frozen:
                 failed.append(PANIC_HELD.format(path=tree.path))

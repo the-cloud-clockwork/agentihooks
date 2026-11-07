@@ -1203,14 +1203,9 @@ def running_pull(**changes: object) -> object:
     return PullRequest(**{**fields, **changes})
 
 
-@pytest.mark.parametrize("dirty", [False, True])
-def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_checks(
-    rig: SimpleNamespace, dirty: bool
-) -> None:
+def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_checks(rig: SimpleNamespace) -> None:
     rig.ledger.task["pr_url"] = RUNNING_URL
     rig.commit()
-    if dirty:
-        (rig.tree / "new").write_text("new\n")
     seen: list[str] = []
     rig.gate._github = lambda url: seen.append(url) or running_pull()
     decision = rig.stop()
@@ -1222,6 +1217,15 @@ def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_check
     assert seen == [RUNNING_URL]
     assert rig.remote_head() == ""
     assert rig.inbox() == []
+
+
+def test_running_checks_still_demand_a_commit_of_uncommitted_work_without_a_push(rig: SimpleNamespace) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == ""
 
 
 @pytest.mark.parametrize(
