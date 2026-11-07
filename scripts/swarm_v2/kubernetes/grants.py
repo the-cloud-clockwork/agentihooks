@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Protocol
 
 from scripts.swarm.store import AgentRecord
@@ -130,7 +130,8 @@ class PodGrants:
         restore = self.restores(agent.execution_id)
         hosted = project is not None and project.startswith(GITHUB)
         checkout = {"project": project, "agent": agent.name} if hosted else None
-        record = self.supervision.record(registration, agent.profile, restore, checkout, opening)
+        supervision = replace(self.supervision, harness=agent.harness or self.supervision.harness)
+        record = supervision.record(registration, agent.profile, restore, checkout, opening)
         containers = pod.get("spec", {}).get("containers", [])
         if containers and "@" in containers[0].get("image", ""):
             material = json.loads(record)
