@@ -1536,6 +1536,17 @@ def test_codex_render_keeps_hooks_on_and_layer_servers_out(world):
     assert "layer-srv" not in doc["mcp_servers"]
 
 
+def test_codex_config_drops_the_layer_mcp_servers_table(tmp_path: Path) -> None:
+    from scripts.profiles import render
+
+    settings = {"features": {}, "mcp_servers": {"layer-srv": {"command": "x"}}, "model": "m"}
+
+    doc = render._codex_config({}, tmp_path / "operator", tmp_path / "out", settings)
+
+    assert "mcp_servers" not in doc
+    assert doc["model"] == "m"
+
+
 def test_codex_render_status_line_keeps_context_apart_from_cumulative_tokens(world):
     from scripts.profiles import render
 
