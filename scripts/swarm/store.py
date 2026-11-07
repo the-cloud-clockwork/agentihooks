@@ -25,6 +25,13 @@ MASTER = "master"
 PROJECTION_ATTEMPTS = 5
 PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
 LEGACY_PROJECTION_CONTENTION = "agent registry kept changing; update was not committed"
+RETIRED_PARTS = ("agents", "hosts", "desired-routes", "state-since", "retire-failures", "retired-process")
+RETIRE_ROW = """
+if (redis.call('HGET', KEYS[1], ARGV[1]) or '') ~= ARGV[2] then return 0 end
+if ARGV[3] ~= '' then redis.call('RPUSH', KEYS[#KEYS], ARGV[3]) end
+for index = 1, #KEYS - 1 do redis.call('HDEL', KEYS[index], ARGV[1]) end
+return 1
+"""
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -576,12 +583,67 @@ class RedisStore:
     def agents(self, slug):
         return self.execution_registry.agents(slug)
 
-    def drop_agent(self, slug, name, at=None, expected=None, before=None):
+    def drop_agent(
+        self,
+        slug: str,
+        name: str,
+        at: int | None = None,
+        expected: "AgentRecord | None" = None,
+        before: Callable[[Any], Any] | None = None,
+    ) -> bool:
+        """Retires the agent: ends its executions and removes its projection with one history row.
+
+        A watched transaction runs first; when other registry writes keep aborting it, a compare and delete on the
+        agent's own row commits instead, so only changes to this agent's row refuse the retirement."""
         from redis.exceptions import WatchError
 
-        from scripts.swarm import fencing, lease
+        from scripts.swarm import fencing
 
         ended = int(time.time() * 1000) if at is None else at
+        for _ in range(PROJECTION_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.key(slug, "agents"))
+                    previous = pipe.hget(self.key(slug, "agents"), name)
+                    lives = self._end_named(slug, name, expected, previous)
+                    if lives is None:
+                        return False
+                    fencing.watch(self, pipe)
+                    if not self._occupants_kept(slug, name, lives[0]):
+                        return False
+                    pipe.multi()
+                    if before is not None:
+                        before(pipe)
+                    if previous:
+                        pipe.rpush(self.key(slug, "history"), self._history_row(slug, name, previous, lives[1], ended))
+                    for part in RETIRED_PARTS:
+                        pipe.hdel(self.key(slug, part), name)
+                    pipe.execute()
+                    self.names.retire(name, ended)
+                    return True
+                except WatchError:
+                    continue
+        for _ in range(PROJECTION_ATTEMPTS):
+            previous = self.redis.hget(self.key(slug, "agents"), name)
+            lives = self._end_named(slug, name, expected, previous)
+            if lives is None or not self._occupants_kept(slug, name, lives[0]):
+                return False
+            row = self._history_row(slug, name, previous, lives[1], ended) if previous else ""
+            keys = [self.key(slug, part) for part in (*RETIRED_PARTS, "history")]
+            if self.redis.eval(RETIRE_ROW, len(keys), *keys, name, previous or "", row):
+                self.names.retire(name, ended)
+                return True
+        raise SwarmError("agent registry kept changing; retirement was not committed")
+
+    def _end_named(
+        self, slug: str, name: str, expected: Any, previous: str | None
+    ) -> tuple[set[str], list[AgentRecord]] | None:
+        """Ends the named agent's current executions under the lease; None when the lease or an occupant refuses."""
+        from scripts.swarm import fencing, lease
+
+        doc = fencing.read(self, slug)
+        live = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
+        lives = records_of(doc) if previous else []
 
         def end(doc: dict[str, Any]) -> Any:
             current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
@@ -592,52 +654,26 @@ class RedisStore:
                     doc["executions"][execution_id] = {**doc["executions"][execution_id], "state": "ended"}
             return True
 
-        for _ in range(5):
-            with self.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(self.key(slug, "agents"))
-                    previous = pipe.hget(self.key(slug, "agents"), name)
-                    doc = fencing.read(self, slug)
-                    executions = [a for a in occupants_of(doc).values() if a.name == name]
-                    lives = records_of(doc) if previous else []
-                    live = {agent.execution_id for agent in executions}
-                    if not lease.fenced(self, slug, lease.EPOCH.get(), end):
-                        return False
-                    fencing.watch(self, pipe)
-                    observed = occupants_of(fencing.read(self, slug)).values()
-                    if {a.execution_id for a in observed if a.name == name} != live:
-                        return False
-                    pipe.multi()
-                    if before is not None:
-                        before(pipe)
-                    if previous:
-                        row = json.loads(previous)
-                        reason = "finished" if row["state"] == "finished" else "retired"
-                        if self.handoff(slug, row["task"]):
-                            reason = "handed off"
-                        placement = {
-                            field: getattr(agent, field)
-                            for agent in lives
-                            if (agent.name, agent.started_at) == (name, row.get("started_at"))
-                            for field in ("execution_id", "hive", "runtime_backend")
-                        }
-                        pipe.rpush(
-                            self.key(slug, "history"),
-                            json.dumps({**row, **placement, "ended_at": ended, "reason": reason}),
-                        )
-                    pipe.hdel(self.key(slug, "agents"), name)
-                    pipe.hdel(self.key(slug, "hosts"), name)
-                    pipe.hdel(self.key(slug, "desired-routes"), name)
-                    pipe.hdel(self.key(slug, "state-since"), name)
-                    pipe.hdel(self.key(slug, "retire-failures"), name)
-                    pipe.execute()
-                    self.names.retire(name, ended)
-                    break
-                except WatchError:
-                    continue
-        else:
-            raise SwarmError("agent registry kept changing; retirement was not committed")
-        return True
+        return (live, lives) if lease.fenced(self, slug, lease.EPOCH.get(), end) else None
+
+    def _occupants_kept(self, slug: str, name: str, live: set[str]) -> bool:
+        from scripts.swarm import fencing
+
+        observed = occupants_of(fencing.read(self, slug)).values()
+        return {a.execution_id for a in observed if a.name == name} == live
+
+    def _history_row(self, slug: str, name: str, previous: str, lives: list[AgentRecord], ended: int) -> str:
+        row = json.loads(previous)
+        reason = "finished" if row["state"] == "finished" else "retired"
+        if self.handoff(slug, row["task"]):
+            reason = "handed off"
+        placement = {
+            field: getattr(agent, field)
+            for agent in lives
+            if (agent.name, agent.started_at) == (name, row.get("started_at"))
+            for field in ("execution_id", "hive", "runtime_backend")
+        }
+        return json.dumps({**row, **placement, "ended_at": ended, "reason": reason})
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)

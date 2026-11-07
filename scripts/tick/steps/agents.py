@@ -143,12 +143,16 @@ def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
 
 def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     tick.master_retire.forget(store, slug, agent.name)
-    removed = tick.reports.Reports(store.redis).removed(agent, now_ms) or tick.retire_watch.reported_gone(
-        store, agent, now_ms
+    retired = store.key(slug, "retired-process")
+    removed = (
+        tick.reports.Reports(store.redis).removed(agent, now_ms)
+        or tick.retire_watch.reported_gone(store, agent, now_ms)
+        or store.redis.hexists(retired, agent.name)
     )
     if not removed and not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
         tick.retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
+    store.redis.hset(retired, agent.name, now_ms)
     tick._refund_parked(slug, store, rows, agent)
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
