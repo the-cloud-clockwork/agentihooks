@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/cli.py:scripts.ledger_knowledge.cli.x__parser:eefecc0800f5f61c14c71e4b4b82f151be1c9732c5e627baca71a00d3dd2f978": {
+    "reader": "Standards",
+    "reason": "args.ledger is only used in args.ledger or environ.get, and None and the empty string are both falsy, so the resolved slug is identical."
+  }
+}

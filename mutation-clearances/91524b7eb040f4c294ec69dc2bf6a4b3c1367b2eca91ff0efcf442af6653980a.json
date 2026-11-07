@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/cli.py:scripts.ledger_knowledge.cli.x_main:9d79cff2f48e13656a5371da5a3538d4b6297e15a6e06c1fb3671ae5e1d5bb56": {
+    "reader": "Standards",
+    "reason": "When AGENTIHOOKS_SWARM is unset, None and the empty string both fail if not slug, so the same return 2 and message result."
+  }
+}
