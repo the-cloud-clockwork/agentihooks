@@ -465,7 +465,7 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
-def _preferred() -> dict[str, int]:
+def preferred() -> dict[str, int]:
     ranks: dict[str, int] = {}
     for name in os.environ.get(ORDER_ENV, "").split(","):
         try:
@@ -488,10 +488,10 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     if not offered:
         raise LoginRefused(NO_LOGIN)
     named = {number: login_account(number, copy) for number, copy in offered.items()}
-    now, held = time.time(), []
+    now, held = time.time(), list[str]()
     order = list(offered)
     if len(offered) > 1:
-        ranks = _preferred()
+        ranks = preferred()
         order.sort(
             key=lambda number: (
                 master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
@@ -502,6 +502,11 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
             )
         )
     for number in order:
+        found = named[number]
+        week_left = master_logins.week_left(found, now)
+        if reservation.primary_reserved(found, week_left, os.environ):
+            held.append(f"{found or number} reserved at {week_left:.0f}% of the week left")
+            continue
         with _locked(root(number)) as folder:
             try:
                 epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]

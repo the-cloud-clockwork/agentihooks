@@ -141,9 +141,9 @@ def test_front_doors_excludes_a_working_master_whose_session_is_gone(monkeypatch
     assert check.main(current) == 0
 
 
-def test_login_order_uses_preference_then_room_then_slot(monkeypatch):
+def test_login_order_uses_preference_then_room_then_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(login, "logins", lambda: {1: "z", 2: "a", 3: "first", 4: "more"})
-    monkeypatch.setattr(login, "_preferred", lambda: {"first": 0})
+    monkeypatch.setattr(login, "preferred", lambda: {"first": 0})
     _room(monkeypatch, z=30, a=30, first=10, more=60)
     assert check.ordered(1) == [("first", 10), ("more", 60), ("z", 30), ("a", 30)]
 

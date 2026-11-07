@@ -18,25 +18,28 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
+JUDGING = "judging"
 
 
-def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Run ``call`` with the swarm command module, skipping once a step held an exception and holding the one it raises."""
+def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
+    """Run ``call`` with the swarm command module, skipping once a step held an exception in the pass value ``box``
+    and holding the one it raises there."""
 
     def run(tick: Any, get: Get) -> Any:
-        box = get("box")
-        if "raised" in box:
+        found = get(box)
+        if "raised" in found:
             return []
         try:
             return call(import_module("scripts.swarm.cli"), get)
         except Left:
             return []
         except (Exception, SystemExit) as exc:
-            box["raised"] = exc
+            found["raised"] = exc
             return []
 
     return run
@@ -124,8 +127,9 @@ def _planning_after_phase(cli: Any, get: Get) -> Any:
 
 
 def _intent_check(cli: Any, get: Get) -> None:
-    get("box")["judged"] = cli._intent_pass(
-        get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"), get("config")
+    judging = get(JUDGING)
+    judging["judged"] = cli._intent_pass(
+        get("inbox"), get("store"), get("slug"), judging["doc"], get("ledger"), judging["config"]
     )
 
 
@@ -152,12 +156,12 @@ STEPS = (
     CallStep("inbox relay", "wrapper probes", held(_inbox_relay)),
     CallStep("launch slots", "wrapper probes", held(_launch_slots)),
     CallStep("outage probes", "wrapper probes", held(_outage_probes)),
-    CallStep("hive ledger", "wrapper probes", held(_hive_ledger)),
+    CallStep("hive ledger", "wrapper probes", held(_hive_ledger), lane=SLOW),
     CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
-    CallStep("host pressure", "wrapper health", held(_host_pressure)),
-    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog)),
-    CallStep("ledger probe", "wrapper health", held(_ledger_probe)),
-    CallStep("prompt backlog", "wrapper health", held(_prompt_backlog)),
+    CallStep("host pressure", "wrapper health", held(_host_pressure), lane=SLOW),
+    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog), lane=SLOW),
+    CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
+    CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
     CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
     CallStep(
@@ -176,7 +180,7 @@ STEPS = (
         "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
     ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", held(_intent_check), writes=pass_domains("judged")),
+    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged")),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),

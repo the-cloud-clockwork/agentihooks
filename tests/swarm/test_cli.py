@@ -890,7 +890,7 @@ def test_tick_reports_spawn_intent_and_store_stages(env, capsys):
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
     finished = {row["step"] for row in rows if row["phase"] == "finished"}
     assert {
-        "scripts.swarm.tick._spawn",
+        "scripts.tick.steps.place._spawn",
         "scripts.gates.intent.Check.run",
         "scripts.swarm.store.RedisStore.agents",
     } <= finished
@@ -961,11 +961,10 @@ def test_a_stopped_scheduled_tick_has_started_the_refresh_job(env: tuple, monkey
     started = []
     monkeypatch.setattr(refresh_job, "spawn", started.append)
 
-    def overrun(slug: str, *args: object) -> list[str]:
-        assert slug == "sw"
+    def overrun(sites: object) -> bool:
         raise cli.tick_stop.Stopped
 
-    monkeypatch.setattr(cli, "tick", overrun)
+    monkeypatch.setattr(cli.TickSites, "_start", overrun)
     with pytest.raises(cli.tick_stop.Stopped):
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
     assert started == ["sw"]

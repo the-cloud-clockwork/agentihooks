@@ -279,8 +279,11 @@ def compare(agent: AgentRecord, facts: dict) -> dict:
 
 
 def _same(field: str, expected: object, actual: object) -> bool:
+    """Whether an observed value matches its assignment, reading account names with - as _."""
     if field == "model":
         return session_model.same(str(expected), str(actual))
+    if field == "account":
+        return str(expected).replace("-", "_") == str(actual).replace("-", "_")
     return actual == expected
 
 

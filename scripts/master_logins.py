@@ -44,3 +44,9 @@ def usage(account: str, now: float) -> tuple[float, float, float]:
 def left(account: str, now: float) -> float:
     five, week, _ = usage(account, now)
     return 100.0 - max(five, week)
+
+
+def week_left(account: str, now: float) -> float:
+    """Week-only room, ignoring the five hour window: Claude Max logins carry no five hour limit."""
+    _, week, _ = usage(account, now)
+    return 100.0 - week

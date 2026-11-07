@@ -497,6 +497,30 @@ def test_a_failed_receipt_other_than_expiry_sends_no_reap(setup):
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
+def test_a_stale_launch_finishing_after_its_name_was_reaped_is_reaped_by_its_execution(setup: SimpleNamespace) -> None:
+    from unittest.mock import call
+
+    from scripts.hive.orders import Ack, Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", first, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(first).ok
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    consumer = Consumer(setup.store.redis, "remote", hive)
+    assert consumer.poll_commands() == 1
+    stale = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    assert stale.execution_id != first.execution_id
+    setup.launcher.orders.finish("remote", "0-1", stale, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(stale).ok
+    assert consumer.poll_commands() == 1
+    assert hive.herdr.reap_name.call_args_list == [call(request.name), call(request.name)]
+    sent = [f"reap:{request.name}:{order.execution_id}" for order in (first, stale)]
+    receipts = [setup.launcher.orders.command_receipt("remote", order_id) for order_id in sent]
+    assert [setup.store.redis.hexists(receipt, "ack") for receipt in receipts] == [True, True]
+
+
 def test_expired_unknown_order_remains_ambiguous(setup):
     from scripts.swarm_v2.runtime.base import Status
 
@@ -604,7 +628,7 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
     assert [json.loads(fields["order"]) for _, fields in commands] == [
         {
-            "id": f"reap:{request.name}",
+            "id": f"reap:{request.name}:{order.execution_id}",
             "action": "reap",
             "slug": "",
             "name": request.name,
@@ -617,6 +641,30 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     assert replacement.execution_id != order.execution_id
     launched = setup.store.execution_registry.get("fixture", replacement.execution_id)
     assert (launched.name, launched.seat) == (other.name, request.task["seat"])
+
+
+def test_a_later_expired_launch_of_the_same_name_is_reaped_by_its_own_execution(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(first.__dict__))
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    later = replace(setup.launcher.orders_for("task"), expires_at=0)
+    assert later.execution_id != first.execution_id
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(later.__dict__))
+    assert setup.launcher.spawn(request) == "pending"
+    assert setup.store.execution_registry.get("fixture", later.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [
+        f"reap:{request.name}:{first.execution_id}",
+        f"reap:{request.name}:{later.execution_id}",
+    ]
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    assert Consumer(setup.store.redis, "remote", hive).poll_commands() == 2
+    assert [args for args, _ in hive.herdr.reap_name.call_args_list] == [(request.name,), (request.name,)]
 
 
 def test_unexpired_unacknowledged_order_is_never_retired(setup):
@@ -731,6 +779,48 @@ def test_failed_order_can_retry_with_a_new_generation(setup):
     setup.launcher.wait = Mock(return_value="pending")
     assert setup.launcher.spawn(next_request) == "pending"
     assert setup.launcher.orders_for("task").generation == order.generation + 1
+
+
+@pytest.mark.parametrize(
+    ("behind", "ack"),
+    [(1, ("failed", "stale_epoch")), (0, ("failed", "stale_epoch")), (1, None), (1, ("live", ""))],
+    ids=["refused-older", "refused-current", "unacknowledged-older", "live-older"],
+)
+def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_the_same_pass(
+    setup: SimpleNamespace, behind: int, ack: tuple[str, str] | None
+) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+    from scripts.swarm.tick import ACK_LATER
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    stale = replace(
+        order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task)),
+        epoch=setup.held.epoch - behind,
+        expires_at=lease.now_ms(setup.store) + 60000,
+    )
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(stale.__dict__))
+    if ack is not None:
+        setup.launcher.orders.finish("remote", "0-0", stale, Ack(ack[0], {"host_id": "remote"}, ack[1]))
+    assert setup.launcher.spawn(request).status == Status.PENDING
+    reissued = setup.launcher.orders_for("task")
+    assert reissued.epoch == setup.held.epoch
+    assert reissued.generation == stale.generation + 1
+    assert reissued.execution_id != stale.execution_id
+    assert setup.store.execution_registry.get("fixture", stale.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), stale.execution_id)) == {
+        "reason": "hive launch failed: stale_epoch",
+        "generation": stale.generation,
+    }
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    reaped = (
+        f"reap:fixture:{stale.execution_id}:{stale.generation}"
+        if ack is not None and ack[0] == "live"
+        else f"reap:{request.name}:{stale.execution_id}"
+    )
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [reaped]
 
 
 def test_an_ended_launch_releases_its_admission_reservation(setup):

@@ -1028,7 +1028,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
 | `agentihooks swarm <id> verdict FINDING VERDICT [--note TEXT]` | The master or the operator judges a health finding: `false-positive`, `early-real`, `established`, `insufficient-evidence` or `resolved`. The finding hides for `AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES` (60); after that it shows again, with its earlier verdict attached, only when its measure is above the measure recorded at the verdict. A standing `bottleneck-stage/<stage>` finding measures the stage's latest value in the unit of the writer that owns it, not how many times it fired: task hours for the stage detector, task hours in the window for Grafana alerts, minutes from push to `Gate Required` for the ci budget pass, which counts pull request Tests runs over fifteen minutes, and for a `bottleneck-stage/langfuse_account_<account>` finding the highest value to threshold ratio across that account's error rate breaches. A stage that keeps firing while its value holds or falls stays hidden after its verdict and returns once the value rises past the one judged. For example, `bottleneck-stage/merge_queue` judged `established` at 1.5 task hours stays hidden when it fires again at 1.2 and returns when it fires at 2.0. The `Fired N times` evidence line on the finding counts firings and never brings it back. Over monitoring fires past `AGENTIHOOKS_HEALTH_WATCH_MIN` (20) watch calls since the agent's last action and over `AGENTIHOOKS_HEALTH_WATCH_RATIO` (5) per action; the master, whose job is mostly watching, gets `AGENTIHOOKS_HEALTH_MASTER_WATCH_MIN` (60) and `AGENTIHOOKS_HEALTH_MASTER_WATCH_RATIO` (15). Working on drain fires when a working agent that is not idle stays on an account the quota capacity decision marks closed, or one at or under `AGENTIHOOKS_HEALTH_DRAIN_LEFT` (10) percent routing left, the quota balancer's drain line where the tick may still place work, over `AGENTIHOOKS_HEALTH_DRAIN_MINUTES` (10) after its early quota handoff warning. The `watch` gate (`python -m scripts.gates watch`) refuses the watch call that would cross the same limits, so this finding means the gate leaked; a ledger watch re-arm with no live watcher always passes. |
 | `agentihooks swarm <id> blockers [list]`, `agentihooks swarm <id> blockers clear CATEGORY` | Lists this swarm's active blocker categories (error or stall kind, first and last seen, count, detail), or clears one. Fed from the tick-pass failure callback and the stale-tick watcher with no new polling; a category stuck an hour or more, still recurring in the last fifteen minutes, is sustained and opens the master's hotfix window automatically until each sustained category is cleared. |
-| `agentihooks swarm <id> panic [status]`, `agentihooks swarm <id> panic on --fix PR_URL`, `agentihooks swarm <id> panic off` | Fleet panic mode. Every failed tick step and stale tick adds one to the OpenTelemetry counter `agentihooks.swarm.errors` (attributes `swarm`, `category`) and to a fleet one hour window; 60 errors in the last hour, three times the busiest measured hour, engage panic automatically, and `on` engages it by hand. While it holds, every swarm opens its master's hotfix window and spawns no agent, the tick cancels queued and running Actions runs in agentihooks, agentihooks-bundle and antoncore once a minute except merge queue runs and the `--fix` pull requests, and every other session's `git push`, `gh run rerun`, `gh workflow run`, `kubectl apply|rollout`, `helm upgrade|install` and `argocd app sync` are denied. It clears only at business as usual: at least 90 percent of tick passes in the last fifteen minutes without a failed step and fewer than 15 errors in that window; an automatic panic clears itself, `off` clears either. `status` prints the counter by category, the threshold and the level. |
+| `agentihooks swarm <id> panic [status]`, `agentihooks swarm <id> panic on --fix PR_URL`, `agentihooks swarm <id> panic off` | Fleet panic mode. Every failed tick step and stale tick adds one to the OpenTelemetry counter `agentihooks.swarm.errors` (attributes `swarm`, `category`) and to a fleet one hour window; 60 errors in the last hour, three times the busiest measured hour, engage panic automatically, and `on` engages it by hand. While it holds, every swarm opens its master's hotfix window and spawns no agent; the master keeps every tool during panic and sustained blockers, and only other sessions are frozen; the tick cancels queued and running Actions runs in agentihooks, agentihooks-bundle and antoncore once a minute except merge queue runs and the `--fix` pull requests, and every other session's `git push`, `gh run rerun`, `gh workflow run`, `kubectl apply|rollout`, `helm upgrade|install` and `argocd app sync` are denied. It clears only at business as usual: at least 90 percent of tick passes in the last fifteen minutes without a failed step and fewer than 15 errors in that window; an automatic panic clears itself, `off` clears either. `status` prints the counter by category, the threshold and the level. |
 | `swarm tick` Grafana alerts | See [Grafana bottleneck alerts](../reference/grafana-bottleneck-alerts.md) for setup, an example and troubleshooting. Each scheduled tick reads the swarm bottleneck alert state history from Grafana through the gateway Grafana tools, with the gateway key in `MCP_KEY_GATEWAY` at the gateway endpoint in `LANGFUSE_MCP_URL`, the same encrypted path the [Langfuse summary pass](../reference/observability-langfuse.md#the-swarm-langfuse-summary-pass) uses; with either unset it reads nothing. It asks `grafana-get_annotations` for the alert state annotations of the last day, at most 1000, bounded at ten seconds; a failed read changes nothing. Nothing listens for Grafana pushes: the swarm timer install disables and deletes the old `agentihooks-alert-intake` user service. For each known `stage` on a `swarm=bottleneck` alert whose `ledger` label names this ledger, the latest transition decides: `Alerting` with a `threshold_hours` label and an `hours` value keeps one standing `bottleneck-stage/<stage>` health finding, its hours from that transition and each new firing, keyed by its time, counted once; `Normal` clears the finding its alert raised, never one in another unit; any other state changes nothing. Only the labels inside the braces and the `hours` value are read, never the alert text. The ci budget pass alone owns the `ci_overrun` finding, which the alert read ignores: it updates that finding for each Tests run over fifteen minutes instead of adding a follow up per run. A standing finding not updated for six hours stops showing. The rules live in antoncore's Grafana provisioning. Build, ci run and launch are productive work: the alert read ignores their alerts and the stage detector never raises a finding for them, though status still ranks them. The detector opens a finding only when a stage's task hours in its window pass that stage's threshold in `stage_detector.THRESHOLD_HOURS` (seat wait and review 4, quota and host hold 2, merge queue, intent fix and ci queue 1, ci overrun and launch failure 0.25). A task's claim wait starts at the latest event that made it claimable: its add, reopen or return to scope, the unfreeze or focus that admits it, its phase opening, or a dependency done. It is split into `seat_wait`, ready while every seat of its lane was busy, counting at most as many waiting tasks as the lane has seats in ready order, and `queue_wait`, every other ready instant, which raises no finding. The detector clears a finding it opened once the stage falls back under it; an alert's finding is left to its alert. Each tick, every standing stage finding over a nonzero threshold runs its remedy once per four hour window. `seat_wait` has no mechanical remedy, because the dispatcher never moves seats between lanes. At `delegate` or `full`, `launch_failure` moves the first eng or ci lane pinned to the one harness the detector saw fail to the other harness and `quota_hold` does the same for the one harness its finding names as held, which each host sample records as `held_harness` when every quota held lane is pinned to that harness; a stage whose remedy is refused or has none raises its open task titled `Bottleneck fix for the <stage> stage` to `urgent`, which the dispatcher queue orders first, and an urgent one needs nothing more. Otherwise, and for every stage below `delegate`, the master gets one proposed task carrying the hours: to add that task, or to raise the open one. Each action goes to the gate log as rule `bottleneck-remedy` with the hours it targeted and is kept as the stage's last action. |
 | `agentihooks swarm <id> classify EXECUTION RULING --reason TEXT` | The master or the operator rules `lost` or `working` on an execution attempt the observer flagged for the operator under `AGENTIHOOKS_OBSERVATION_MODE=conservative`. The reason, author and time are kept on its observation. `lost` holds the attempt lost and writes the audit record; `working` holds it working until a newer loss reading (pod gone or ended, supervisor exited) flags it again, or it recovers on its own. Only a registered master record or the operator acts: any other name, an empty reason or an attempt that is not flagged is refused. `verdict` follows the same authority rule. |
 | `agentihooks swarm <id> terminal EXECUTION` | For a local managed Codex execution, reopen a native viewer on its recorded thread; see [Managed Codex terminals](../reference/codex-managed-terminal.md). For Kubernetes, the operator opens the worker terminal in herdr. The command takes only the swarm and the execution: the host, the generation and the host key come from the record the controller wrote when it launched the Pod. It signs a short lived certificate with the user CA key named by `AGENTIHOOKS_TERMINAL_CA_KEY`, reads the worker namespace from the Pod policy in `AGENTIHOOKS_POD_POLICY_FILE`, writes the SSH material under the operator's own home and saves the machine in herdr. The Kubernetes path refuses a master or any agent session, and an execution with no recorded host key. |
@@ -4363,8 +4363,16 @@ decisions until recovery (see [Outage holds and recovery](#outage-holds-and-reco
 | Step record | Every step run ends as `ok`, `late` (it ran past its budget, or was left running), `failed` (it raised) or `held` (its previous run is still alive, so no new thread starts). A late or failed step never stops the next one. |
 
 A value a held or late writer never stored raises `Left` when a later step reads it from the pass box, and the tick
-raises the held error at the group's site, so a pass never continues on a value no step produced. Adding a step,
-the pass state and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+raises the held error at the group's site, so a pass never continues on a value no step produced. The pass state
+and the exceptions are covered in [Tick engine steps](../reference/tick-engine-steps.md).
+
+Every step follows one pattern, and `python -m scripts.tick.new_step` writes a new step with its budget row, feature
+test, scenario index row and feature map entry in one command (see
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step)). The
+[tick pattern gate](../reference/tick-pattern-gate.md) refuses a pull request that adds a step outside the pattern,
+and the [tick step catalogue](../reference/tick-step-catalogue.md), rendered from the registry by
+`python -m scripts.tick.catalogue render`, lists every step with its group, lane, budget, interval, needs, effects and
+feature.
 
 ### Two lanes and fan out
 
@@ -4420,14 +4428,21 @@ fanned out action runs inline. Calls to herdr and GitHub hold one of a fixed num
 
 ### Budgets and intervals
 
-Each step's budget is its measured p95 from a tick report over 60 passes with fifty percent headroom, rounded up to
-a whole second, and at least one second. Its declared interval is 60 seconds for a step that belongs in every pass,
-120 seconds for a wide sweep and 600 seconds for a slow job. Both live in the checked in timing table
-`scripts.tick.steps.budgets.MEASURED`; a step the table does not name is refused when the step is built.
-Intervals are declared and validated; no step is skipped because its interval has not elapsed, and the engine runs
-every registered step on every pass. Timing changes, overlap limits and the
+Each step's budget is the p95 of its last 60 recorded walls with fifty percent headroom, rounded up to a whole
+second, and never under the step's declared floor; with fewer than 60 walls it is the floor. Its declared interval is
+60 seconds for a step that belongs in every pass, 120 seconds for a wide sweep and 600 seconds for a slow job. Floors
+and intervals live in the checked in timing table `scripts.tick.steps.budgets.FLOORS`; a step the table does not name
+is refused when the step is built.
+A step whose interval is above one minute rests on a pass that starts within its interval less one minute of the end of
+its last `ok` or `failed` run: a 120 second step runs every other pass and a 600 second step about one pass in ten. A
+resting step starts no thread, ends at once for the steps that need it, and leaves a `skipped` record with `rested`
+true. The end of each run is kept in the swarm's `tick:step-ran` hash; a late or held run stores no end, so the step
+stays due on the next pass, and a step with no stored end or an unreadable hash is due. A step that writes the pass
+state must be declared at 60 seconds, and the registry refuses one above that. The
+[tick step catalogue](../reference/tick-step-catalogue.md) shows each step's floor and interval. Timing changes, overlap limits and the
 forty second spawn bound are covered in
-[Tick engine steps](../reference/tick-engine-steps.md#measured-budgets-and-declared-intervals).
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals), and the rest rule in
+[Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement).
 
 ### Records
 
@@ -4454,7 +4469,8 @@ under `scripts/tick` outside the adapters that imports an adapted implementation
 [The import check](../reference/tick-adapters.md#the-import-check)). Most registered steps still run a call of the tick module, which reaches those systems
 itself; every pass already scans processes through the processes adapter and holds one lease heartbeat. Each pass
 builds the real adapters once. A step that reads `ctx.tools` gets write access only to the ports its declared effects
-name, and a write through another port fails it; call steps only record their effects until they move into step
+name, and a write through another port fails it; the [tick step catalogue](../reference/tick-step-catalogue.md)
+lists each step's effects. Call steps only record their effects until they move into step
 classes (see
 [Effects in a tick pass](../reference/tick-adapters.md#effects-in-a-tick-pass)). See
 [Tick adapters](../reference/tick-adapters.md) and [Fencing records](../reference/fencing-records.md).
@@ -4467,16 +4483,21 @@ registers it and starts the scheduler runner; each tick pass re-registers it if 
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks once per
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Each pass considers every step the
+[tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
+([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
+[Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
 `AGENTIHOOKS_TICK_CADENCE` sets the slow lane cadence in whole minutes, one to five, one when unset; the cron stays
 every minute. `scripts.tick.engine.interval_s` gives a slow lane step the larger of its declared interval and the
 cadence, and leaves critical lane steps at their own interval. Every guard must outlast one missed slow pass, so
 `scripts.tick.engine.cadence_s` refuses a cadence when twice it exceeds the 690 second delivery guard or the ten minute
-heartbeat limit, when the lease TTL is below two cron minutes, or when the stale watcher's pass and slug window no
+heartbeat limit, when the lease TTL is below two controller ticks, or when the stale watcher's pass and slug window no
 longer fit inside the heartbeat limit less the cadence. Six minutes breaks the delivery guard and the heartbeat
-limit. No step is skipped on its interval yet, so the setting is validated but does not change a pass today.
+limit. At a cadence of three minutes a slow lane step declared at 60 seconds runs one pass in three and rests on the
+other two; at the default of one it runs every pass, and a slow step declared at 600 seconds keeps its own interval
+at every cadence the setting accepts.
 
 Check a cadence before setting it, from the repository root with the workspace Python:
 

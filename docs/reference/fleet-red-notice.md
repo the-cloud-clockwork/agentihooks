@@ -122,7 +122,7 @@ writes. The listing save is one of those writes. With no measured timing the
 live listing took about 16.6 seconds, so the step was abandoned on every pass
 that listed, the save never landed and every pass listed again.
 
-`budgets.MEASURED["fleet red notice"]` now carries the step's measured p95 of
+`budgets.FLOORS["fleet red notice"]` carries a 30 second floor from the step's measured p95 of
 19.981 seconds, from `tick-report --passes 10` on 3 November 2026 at 18:30
 UTC. Its budget is `ceil(19.981 * 1.5)`, 30 seconds, above the live listing,
 so the pass that lists keeps its save and the passes of the next ten minutes
@@ -269,8 +269,8 @@ The constants are code: change them through a pull request.
 | No notice although most pull requests share a red check | `GET` the cache key. `null` means the last listing failed: delete the key to list again, or wait out the ten minutes. Otherwise confirm at least three other pull requests have a check that finished in the last six hours |
 | A task stays held after the shared checks went green | The cached listing is up to ten minutes old; delete the key to read GitHub now |
 | A task is claimed although the notice pass holds it | `GET` the cache key: `null` makes the claim filter admit every task. With no key the claim filter lists live and admits every task when that listing fails; read the tick log for `fleet red hold skipped` |
-| The cache key never appears and the notice step runs over its 30 second budget | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise the measured p95 in `budgets.MEASURED` through a pull request |
-| Preempt and spawn are late in a pass with no critical lane overrun | The notice step ran past its 30 second budget on the slow lane and both were dropped behind it. Its `swarm_tick_step_abandoned` line in the same pass confirms it. Compare the step's wall time in `tick-report --passes 10` with its 30 second budget and raise the measured p95 in `budgets.MEASURED` through a pull request |
+| The cache key never appears and the notice step runs over its 30 second budget | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise its floor in `budgets.FLOORS` through a pull request, or let its live budget follow its walls |
+| Preempt and spawn are late in a pass with no critical lane overrun | The notice step ran past its 30 second budget on the slow lane and both were dropped behind it. Its `swarm_tick_step_abandoned` line in the same pass confirms it. Compare the step's wall time in `tick-report --passes 10` with its 30 second budget and raise its floor in `budgets.FLOORS` through a pull request, or let its live budget follow its walls |
 | The quota notice step costs tens of seconds | Its capacity read builds the claim view; with no cache key every read lists GitHub. Check the cache key's `TTL` and the notice step as above |
 
 ## Tests

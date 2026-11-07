@@ -5,6 +5,7 @@ from functools import partial
 from importlib import import_module
 from typing import Any, TypedDict, Unpack, cast
 
+from scripts.tick import registry
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import budgets
@@ -13,6 +14,7 @@ PASS = Domain("pass")
 AGENTS = Domain("agents")
 TASKS = Domain("tasks")
 SWARM = Domain("swarm")
+DEADLINE = "deadline"
 
 
 class Declared(TypedDict, total=False):
@@ -47,14 +49,25 @@ class CallStep:
         self.needs = needs
         self.group = group
         self.call = call
-        self.budget_s, self.interval_s = budgets.timing_of(name)
+        self.interval_s = budgets.timing_of(name)[1]
+        self.floor_s = budgets.floor_of(name)
         self.reads = reads
         self.writes = writes | {actions_of(name)}
 
+    @property
+    def budget_s(self) -> float:
+        """Return the step's budget this pass: its live budget, never under its floor."""
+        return budgets.floored(self.name, self.floor_s)
+
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""
-        found = self.call(import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS))
+        found = self.call(import_module("scripts.swarm.tick"), partial(_pass_or_deadline, ctx))
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
+
+
+def _pass_or_deadline(ctx: Context, key: str) -> Any:
+    """Return the context deadline under ``deadline``, else the pass value under ``key``."""
+    return ctx.deadline if key == DEADLINE else ctx.view.read(PASS, key)
 
 
 def actions_of(name: str) -> Domain:
@@ -122,3 +135,19 @@ def note_left(box: object, records: Iterable[StepRecord]) -> None:
     """Add to a pass ``box`` the name of each recorded step left running past its budget, dropped or held."""
     if isinstance(box, PassBox):
         box.left.extend(record.name for record in records if record.abandoned or record.held)
+
+
+MODULES = (
+    "scripts.tick.steps.agents",
+    "scripts.tick.steps.common",
+    "scripts.tick.steps.host",
+    "scripts.tick.steps.masters",
+    "scripts.tick.steps.observe",
+    "scripts.tick.steps.place",
+    "scripts.tick.steps.report",
+    "scripts.tick.steps.tasks",
+    "scripts.tick.steps.territory",
+)
+
+for _module in MODULES:
+    registry.require(_module)

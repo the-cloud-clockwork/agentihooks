@@ -1,0 +1,3 @@
+### Added
+
+- Every live swarm master on a host gets an hourly safety nudge from the operating system, independent of Redis, the swarm tick and the Anton controller. A master records itself in `master-registry.json` under the agentihooks home when it joins its ledger as orchestrator and on each later tool call; `agentihooks safety-nudge round` types "Safety Nudge: In case the main tick or controller is down" into each live master's herdr pane that sits idle at its prompt, Claude or Codex, and logs every outcome; `agentihooks safety-nudge install` registers the hourly cron entry and `agentihooks safety-nudge check` reports whether it exists and lists the master's pane.

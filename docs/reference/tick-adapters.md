@@ -966,31 +966,37 @@ look at the placement reads in the table above.
 ### Timed rows inside spawn order
 
 `_spawn_order` in `scripts.swarm.tick` builds the queue the spawn step launches from, and records its own row,
-`scripts.swarm.tick._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
-while `_spawn_order` runs. Once per spawn order it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`,
-`scripts.swarm.dispatcher.claim_key`, `scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for
-each lane in the caps, it times three parts in this order:
+`scripts.tick.steps.place._spawn_order`. Its parts are timed through `timing.timed`, so each has a row of its own recorded
+while `_spawn_order` runs. Once per spawn order it first times the runtime's `begin_placement_pass` when the runtime
+has one, recorded under that method's name, such as `scripts.swarm.controller.FencedRuntime.begin_placement_pass`.
+Then it times `scripts.swarm.capacity.read`, `scripts.swarm.capacity.caps`, `scripts.swarm.dispatcher.claim_key`,
+`scripts.swarm.preempt.yielding` and `scripts.swarm.tick.claim_view`. Then, for each lane in the caps, it times four
+parts in this order:
 
 | Step row | Runs | Times |
 |---|---|---|
 | `scripts.swarm.tick._running` | Once per lane | The running agent filter: the task rows of the lane's agents that have not ended and still own their task. Its length is the lane's busy count, which offsets the rank of every task queued for the lane |
 | `scripts.swarm.tick.ready_in_order` | Once per lane | The lane's ready tasks in ledger or dispatched order |
+| `scripts.swarm.readiness.launchable` | Once per lane | The ready tasks the tick launches under the swarm engine, narrowed to the capacity decision's tasks when it names any |
 | `scripts.swarm.focus_budget.place` | Once per lane | Focus budget placement: which ready tasks fit the lane cap after the running ones, and which wait. It includes its two `profile_first.placeable` rows |
 
 `focus_budget.place` locates tasks through `scripts.swarm.profile_first.placeable` twice per lane: once for the ready
 tasks outside the focus queue, once for the focused ones. Each `placeable` row in turn holds one
 `scripts.swarm.profile_first.decided` row and one `scripts.swarm.seat_spawn.placed_elsewhere` row for every task it
-checks, until the lane's free room is filled. After the lanes, `scripts.swarm.tick._ranked` sorts the whole queue once.
+checks, until the lane's free room is filled. After the lanes, `scripts.tick.steps.place._ranked` sorts the whole queue
+once, `scripts.swarm.focus_budget.ranks` reads each task's focus rank and `scripts.swarm.focus_budget.ordered` sorts
+the queue by that rank. Every call in spawn order that reads the store, the runtime or the ledger document has a row;
+only the local queue and wait list bookkeeping between them is untimed.
 
-The code fixes the counts: `_running`, `ready_in_order` and `focus_budget.place` each run once per lane per spawn
-order, and `placeable` twice, so over a window recorded entirely after pull request 9673 merged the first three have
-equal counts and `placeable` has twice that.
+The code fixes the counts: `_running`, `ready_in_order`, `scripts.swarm.readiness.launchable` and
+`focus_budget.place` each run once per lane per spawn order, and `placeable` twice, so over a window recorded entirely
+after this change merged the first four have equal counts and `placeable` has twice that.
 
 Read the rows with:
 
 ```bash
 agentihooks swarm <swarm slug> tick-report --passes 60 \
-  | grep -E 'capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|focus_budget|profile_first|placed_elsewhere|_ranked'
+  | grep -E 'placement_pass|capacity|claim_key|yielding|claim_view|_spawn_order|_running|ready_in_order|launchable|focus_budget|profile_first|placed_elsewhere|_ranked'
 ```
 
 A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm`, read at 15:04 UTC on 4 November
@@ -999,9 +1005,9 @@ A snapshot of the spawn order rows from the workstation tick of `rig-grade-swarm
 ```text
 scripts.swarm.focus_budget.place  138  0.054s  1.585s  0.18%
 scripts.swarm.profile_first.placeable  426  0.000s  0.311s  0.29%
-scripts.swarm.tick._ranked  71  0.002s  0.009s  0.00%
+scripts.tick.steps.place._ranked  71  0.002s  0.009s  0.00%
 scripts.swarm.tick._running  138  0.000s  0.001s  0.00%
-scripts.swarm.tick._spawn_order  71  3.336s  17.861s  2.26%
+scripts.tick.steps.place._spawn_order  71  3.336s  17.861s  2.26%
 scripts.swarm.tick.claim_view  71  0.050s  0.196s  0.02%
 scripts.swarm.tick.ready_in_order  213  0.111s  2.357s  0.80%
 ```
@@ -1016,14 +1022,15 @@ percentiles do not add, and the estimate runs low for a row with a long tail, so
 
 | What the report shows | Where the time goes |
 |---|---|
-| The `_spawn_order` estimate well above the summed estimates of its directly timed parts | Time in untimed code: the runtime's `begin_placement_pass`, the `readiness.tick_launches` and capacity decision task filters on each ready list, `focus_budget.ranks` and the final focus sort |
+| The `begin_placement_pass`, `launchable`, `ranks` or `ordered` estimate close to the `_spawn_order` estimate | That part is the slow one: the runtime's per pass hive and herdr reads, the engine and capacity decision filters, the focus record selection over the ledger hierarchy, or the final focus sort |
 | The `focus_budget.place` estimate close to the `_spawn_order` estimate | Placement is the slow part; compare it with the `placeable` estimate. When `placeable` is small, the time is in focus placement itself |
 | `_running` above a few milliseconds | The lane holds many agent records or task rows; the filter makes no store or network call, so it grows only with those |
 | The `ready_in_order` or `claim_view` estimate close to the `_spawn_order` estimate | Their swarm store reads, such as claims, launch failures and agent records, or their readiness checks are the slow part |
 
 `tests/swarm/test_spawn_timing.py` holds the contract. A spawn pass records a row for each part before the spawn step
 row ends. Spawn order records one `_running` and one `focus_budget.place` row per lane, each starting and ending
-inside the `_spawn_order` row. The running filter keeps only the lane's agents that have not ended and still own their
+inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `begin_placement_pass`, `ranks`
+and `ordered` row per spawn order. The running filter keeps only the lane's agents that have not ended and still own their
 task, with a placeholder row for an agent whose task row is missing.
 
 ## One lease heartbeat per tick pass
@@ -1364,7 +1371,7 @@ and call the port from the step.
 | `UndeclaredEffect: <port> is not a declared effect` | A step called a write operation on a port missing from its effects. | Declare the port in the step's effects. |
 | A step fails with `UndeclaredEffect` although its effects name the port | The name in `effects` is misspelt, such as `"source-control"` for `source_control`, so no port opened. | Use the port names from the table under [Declared effects](#declared-effects). |
 | `AttributeError: 'NoneType' object has no attribute '<port>'` inside a step | `ctx.tools` is `None`: the `Context` was built outside a tick pass, for example by calling `scripts.swarm.tick.tick` or `run_group` directly instead of through `run_tick`. | Run the pass through `scripts.swarm.cli.run_tick`, or in a test pass `tools` to `Context` or set `PASS_TOOLS`. |
-| `test_every_registered_step_declares_no_effects_yet` fails naming a step | A registered step now declares effects. | Update that test in the same pull request that moves the step onto ports. |
+| `test_only_the_reap_and_spawn_steps_declare_their_effects_yet` fails naming a step | A registered step other than reap and spawn now declares effects, or reap or spawn changed its ports. | Update that test in the same pull request that moves the step onto ports. |
 | `TypeError: tools require a Deadline keyword argument` | A restricted port was called without `deadline=`. | Pass the step's `Deadline` by keyword. |
 | `KeyError: 'unknown metrics table: <name>'` | `emit` named a table the adapter was not built with. | Add the `Table` to the `tables` mapping. |
 | `BackendFailure: <model>: timeout` from `classify` | The decisions API did not answer within `deadline.remaining`. | Raise the deadline, or build `ApiLlm` with a model that answers faster. |

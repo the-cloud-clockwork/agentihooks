@@ -223,21 +223,50 @@ def test_reap_agent_forwards_every_argument_to_watch_remote(store: RedisStore, m
 def test_tick_hands_the_close_group_its_freshly_spawned_rows(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from scripts.tick import registry
     from scripts.tick.steps import tasks as task_steps_module
     from tests.swarm.test_tick import FakeRuntime, tasks
+    from tests.swarm.test_tick_groups import _Marker
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     seen: dict[str, str] = {}
-    original_run_group = tick_module.run_group
 
-    def spying_run_group(name: str, **state: Any) -> list[str]:
-        if name == task_steps_module.CLOSE:
-            seen["claimed_by"] = state["rows"]["t1"]["claimed_by"]
-        return original_run_group(name, **state)
+    def close(get: Any) -> list[str]:
+        seen["claimed_by"] = get("rows")["t1"]["claimed_by"]
+        return []
 
-    monkeypatch.setattr(tick_module, "run_group", spying_run_group)
+    fresh = registry.Registry()
+    for step in (*registry.steps(), _Marker("close marker", task_steps_module.CLOSE, close)):
+        fresh.register(step)
+    monkeypatch.setattr(registry, "registry", fresh)
 
     tick_module.tick("sw", store, ledger, runtime, 1)
 
     spawned = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
     assert seen["claimed_by"] == spawned
+
+
+class _AnsweringRuntime:
+    def observe(self, agent: AgentRecord) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(state="working")
+
+
+def test_watch_remote_forwards_every_argument_to_watch_agent(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[object, ...]] = []
+
+    def spying_watch_agent(
+        slug: str, store: object, ledger: object, runtime: object, rows: object, agent: object, now_ms: int
+    ) -> list[str]:
+        seen.append((slug, store, ledger, runtime, rows, agent, now_ms))
+        return ["watched"]
+
+    monkeypatch.setattr(tick_module, "_watch_agent", spying_watch_agent)
+    ledger, rows, runtime = object(), {}, _AnsweringRuntime()
+    agent = AgentRecord(name="agent-a", lane="eng", task="t1", state="working", runtime_backend="remote")
+
+    assert tick_module._watch_remote("sw", store, ledger, runtime, rows, agent, 13) == ["watched"]
+    assert seen == [("sw", store, ledger, runtime, rows, agent, 13)]

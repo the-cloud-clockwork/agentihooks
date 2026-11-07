@@ -2,18 +2,20 @@ import os
 import subprocess
 import sys
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
 from scripts.swarm import cli, timer
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 real_roots = timer._roots
 real_reconcile = timer.reconcile
 real_schedule = timer.schedule
 real_undelivered = timer.undelivered
 real_guard = timer.guard
+real_hosts_work = timer.hosts_work
 
 
 @pytest.fixture
@@ -764,6 +766,12 @@ def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
     )
 
 
+def test_undelivered_proves_nothing_while_no_swarm_needs_this_workstation(monkeypatch):
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    monkeypatch.setattr(timer, "_roots", lambda: pytest.fail("the delivery record was read"))
+    assert real_undelivered() == ""
+
+
 def test_guard_restarts_a_dead_supervisor_on_every_pass(tmp_path, monkeypatch):
     started = []
     monkeypatch.setattr(timer, "supervise", lambda: started.append(True) or True)
@@ -1061,3 +1069,170 @@ def test_ensure_writes_and_enables_the_scheduler_unit(tmp_path, monkeypatch):
         "agentihooks-scheduler.service"
     ]
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-scheduler.service"] in calls
+
+
+ANTON = "http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780"
+SWARM_WORK = (
+    "agentihooks-swarm-waits.service",
+    "agentihooks-swarm-waits.timer",
+    "agentihooks-tick-watch.service",
+    "agentihooks-inbox-waker.service",
+)
+
+
+def _swarm_store(*rows: tuple[str, str, str]) -> RedisStore:
+    """A fake swarm store holding one swarm per row of slug, state and stored ledger address."""
+    import fakeredis
+
+    from scripts.swarm.store import SwarmConfig
+
+    found = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    for slug, state, api_url in rows:
+        found.create(SwarmConfig(slug, "/repo", 2, 1, state=state))
+        found.redis.hset(found.key(slug, "config"), "api_url", api_url)
+    return found
+
+
+def test_a_swarm_with_a_stored_controller_address_is_served_in_anton():
+    from scripts.swarm import scheduled_tick
+
+    found = _swarm_store(("live", "running", ANTON), ("proof", "running", ""))
+    assert scheduled_tick.served(found.config("live")) is True
+    assert scheduled_tick.served(found.config("proof")) is False
+
+
+@pytest.mark.parametrize(
+    ("rows", "hosts"),
+    [
+        ((("live", "running", ANTON), ("doctor", "stopped", "")), False),
+        ((("live", "running", ANTON), ("proof", "running", "")), True),
+        ((("live", "running", ANTON), ("proof", "paused", "")), True),
+        ((("live", "running", ANTON), ("proof", "stopping", "")), True),
+        ((("live", "stopped", ANTON),), False),
+        ((), False),
+    ],
+    ids=["served-and-stopped", "local-running", "local-paused", "local-stopping", "served-stopped", "empty"],
+)
+def test_the_workstation_hosts_swarm_work_only_for_a_live_swarm_not_served_in_anton(rows, hosts):
+    from scripts.swarm import scheduled_tick
+
+    assert scheduled_tick.hosts(_swarm_store(*rows)) is hosts
+
+
+def test_hosts_work_reads_the_swarm_store_and_keeps_the_units_when_it_cannot(monkeypatch):
+    from scripts.swarm import store as swarm_store
+
+    served = _swarm_store(("live", "running", ANTON))
+    monkeypatch.setattr(swarm_store, "connect", lambda: served)
+    assert real_hosts_work() is False
+    local = _swarm_store(("proof", "running", ""))
+    monkeypatch.setattr(swarm_store, "connect", lambda: local)
+    assert real_hosts_work() is True
+    local.redis.sadd(f"{swarm_store.PREFIX}:index", "gone")
+    assert real_hosts_work() is True
+
+    def down():
+        raise swarm_store.Unreachable("Redis is unreachable")
+
+    monkeypatch.setattr(swarm_store, "connect", down)
+    assert real_hosts_work() is True
+
+
+def test_ensure_retires_the_swarm_work_units_while_every_swarm_is_served_in_anton(tmp_path, monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(timer, "unschedule", lambda: cancelled.append(True))
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
+    calls = []
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    for name, text in {**timer.units("/installed/bin/agentihooks"), **timer.tick_units()}.items():
+        (unit_dir / name).write_text(text)
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    assert timer.ensure("/installed/bin/agentihooks", unit_dir, run=_systemctl(calls)) is True
+    assert cancelled == [True]
+    assert [argv for argv, _ in calls if argv[2] in ("disable", "enable", "daemon-reload")] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm-waits.timer"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-tick-watch.service"],
+        ["systemctl", "--user", "disable", "--now", "agentihooks-inbox-waker.service"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    assert sorted(path.name for path in unit_dir.iterdir()) == [
+        "agentihooks-quota-prober.service",
+        "agentihooks-scheduler.service",
+    ]
+    calls.clear()
+    assert timer.ensure("/installed/bin/agentihooks", unit_dir, run=_systemctl(calls)) is True
+    assert [argv for argv, _ in calls] == []
+    assert cancelled == [True, True]
+
+
+def test_reconcile_retires_current_units_once_no_swarm_needs_the_workstation(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "schedule", lambda caller: pytest.fail("the tick was scheduled"))
+    monkeypatch.setattr(timer, "hosts_work", lambda: False)
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    assert not any((tmp_path / name).exists() for name in SWARM_WORK)
+    monkeypatch.setattr(timer, "hosts_work", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
+    calls = []
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
+    assert all((tmp_path / name).exists() for name in SWARM_WORK)
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in [argv for argv, _ in calls]
+
+
+def test_a_swarm_tick_on_a_workstation_refuses_a_swarm_served_in_anton_and_ticks_a_local_one(monkeypatch, capsys):
+    found = _swarm_store(("live", "running", ANTON), ("proof", "running", ""))
+    ticked = []
+    monkeypatch.setattr(cli, "connect", lambda: found)
+    monkeypatch.setattr(cli, "refusal", lambda name, who: "")
+    monkeypatch.setattr(cli.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: ticked.append((store, slug)) or ["spawned engineer"])
+    assert cli.dispatch(["live", "tick"]) == 1
+    assert capsys.readouterr().err == "swarm: the swarm live is served in Anton, so only its controller ticks it\n"
+    assert ticked == []
+    assert cli.dispatch(["proof", "tick"]) == 0
+    assert capsys.readouterr().out == "spawned engineer\n"
+    assert ticked == [(found, "proof")]
+
+
+def test_anton_only_disables_and_reloads_the_swarm_work_units_without_checking_systemctl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    (unit_dir / "agentihooks-tick-watch.service").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is True
+    assert calls == [
+        (["systemctl", "--user", "disable", "--now", "agentihooks-tick-watch.service"], timer.UNCHECKED),
+        (["systemctl", "--user", "daemon-reload"], timer.UNCHECKED),
+    ]
+    assert list(unit_dir.iterdir()) == []
+
+
+def test_anton_only_reloads_after_retiring_the_tick_units_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "_retire", lambda unit_dir, run: True)
+    (unit_dir / "agentihooks-swarm.timer").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is True
+    assert calls == [(["systemctl", "--user", "daemon-reload"], timer.UNCHECKED)]
+
+
+def test_anton_only_skips_the_reload_while_the_tick_units_stay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    monkeypatch.setattr(timer, "unschedule", lambda: None)
+    monkeypatch.setattr(timer, "_retire", lambda unit_dir, run: False)
+    (unit_dir / "agentihooks-swarm.timer").write_text("")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    assert timer._anton_only(unit_dir, _systemctl(calls)) is False
+    assert calls == []
