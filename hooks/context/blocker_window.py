@@ -1,7 +1,8 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
 window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
 troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
-session's pushes, reruns, dispatches and deploys, except from a session on the head branch of a registered fix.
+session's pushes, reruns, dispatches and deploys; a session on the head branch of a registered fix keeps its pushes,
+reruns and dispatches.
 Fails open on a store error."""
 
 from pathlib import Path
@@ -35,6 +36,7 @@ _FROZEN_COMMANDS = (
     ("helm", "install"),
     ("argocd", "app", "sync"),
 )
+_FIX_COMMANDS = _FROZEN_COMMANDS[:3]
 
 
 def _slug(session_id: str) -> str:
@@ -133,23 +135,27 @@ def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str = "") -> str | 
         return None
     from hooks.context.shell_commands import commands
 
-    if not any(_freezes(tokens) for tokens in commands(str(tool_input.get("command")))):
+    found = [tokens for tokens in commands(str(tool_input.get("command"))) if _freezes(tokens)]
+    if not found:
         return None
     store = _store()
     current = None if store is None else _panic_state(store)
-    if current is None or _on_fix_branch(cwd, current.fixes):
+    if current is None or (all(_spares(tokens) for tokens in found) and _on_fix_branch(cwd, current.fixes)):
         return None
     return FROZEN.format(reason=current.reason)
 
 
-def _session_branch(cwd: str) -> str:
-    """Return the branch checked out in the session's directory, or an empty string outside a checkout."""
+def _spares(tokens: list[str]) -> bool:
+    words = [Path(tokens[0]).name, *tokens[1:]]
+    return any(words[: len(prefix)] == list(prefix) for prefix in _FIX_COMMANDS)
+
+
+def _git(cwd: str, *args: str) -> str:
+    """Return one git read's output in the session's directory, or an empty string when it fails."""
     import subprocess
 
     try:
-        found = subprocess.run(
-            ["git", "branch", "--show-current"], cwd=cwd or None, capture_output=True, text=True, timeout=5
-        )
+        found = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return ""
     return found.stdout.strip() if found.returncode == 0 else ""
@@ -167,9 +173,15 @@ def _fix_branch(url: str) -> str:
 
 
 def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
-    """Return whether the session works on the head branch of a registered fix pull request."""
-    branch = _session_branch(cwd) if fixes else ""
-    return bool(branch) and any(_fix_branch(url) == branch for url in fixes)
+    """Return whether the session works in the repository and on the head branch of a registered fix pull request."""
+    from scripts.swarm.stack import repo_key
+
+    branch = _git(cwd, "branch", "--show-current") if cwd and fixes else ""
+    origin = _git(cwd, "remote", "get-url", "origin") if branch else ""
+    if not origin:
+        return False
+    changes = f"{repo_key(origin)}/pull/"
+    return any(repo_key(url).startswith(changes) and _fix_branch(url) == branch for url in fixes)
 
 
 def checked(payload: Any) -> str | None:

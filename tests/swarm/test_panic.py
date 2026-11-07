@@ -595,8 +595,9 @@ def test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions(s
     assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
 
 
-def _checkout(root: Path, branch: str) -> str:
+def _checkout(root: Path, branch: str, origin: str = "git@github.com:The-Cloud-Clockwork/agentihooks.git") -> str:
     subprocess.run(["git", "init", "-q", "-b", branch, str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", origin], check=True)
     return str(root)
 
 
@@ -617,6 +618,34 @@ def test_panic_still_refuses_a_push_from_any_other_branch(store, monkeypatch, tm
     cwd = _checkout(tmp_path / "other", "other-branch")
     block = blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", cwd)[1]
     assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_the_hook_payload_cwd_decides_the_fix_branch_push(store, monkeypatch, tmp_path):
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
+    payload = {"tool_name": "Bash", "tool_input": {"command": "git push"}, "session_id": "engineer-session"}
+    fix = _checkout(tmp_path / "fix", "fix-branch")
+    other = _checkout(tmp_path / "other", "other-branch")
+    assert blocker_window.checked({**payload, "cwd": fix}) is None
+    assert blocker_window.checked({**payload, "cwd": other}) is not None
+    assert blocker_window.checked(payload) is not None
+
+
+@pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
+def test_a_fix_branch_session_still_waits_to_deploy(store, monkeypatch, tmp_path, command):
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1] is not None
+
+
+def test_a_same_named_branch_in_another_repository_stays_frozen(store, monkeypatch, tmp_path):
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch", "https://github.com/the-cloud-clockwork/antoncore.git")
+    assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", cwd)[1] is not None
+    assert asked == []
 
 
 def test_panic_refuses_a_push_when_the_fix_cannot_be_read(store, monkeypatch, tmp_path):

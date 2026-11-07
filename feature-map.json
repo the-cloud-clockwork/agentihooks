@@ -1826,7 +1826,8 @@
       "seam": "The PreToolUse panic freeze in the blocker window hook",
       "tests": [
         "tests/swarm/test_panic.py::test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix",
-        "tests/swarm/test_panic.py::test_panic_still_refuses_a_push_from_any_other_branch"
+        "tests/swarm/test_panic.py::test_panic_still_refuses_a_push_from_any_other_branch",
+        "tests/swarm/test_panic.py::test_the_hook_payload_cwd_decides_the_fix_branch_push"
       ]
     },
     {
