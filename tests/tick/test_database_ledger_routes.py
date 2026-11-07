@@ -236,3 +236,20 @@ def test_a_tick_routed_call_keeps_its_own_ledger_route(monkeypatch: pytest.Monke
         return ledger_route.url(slug)
 
     assert probe(object(), "sw") == "http://hive-ledger"
+
+
+@pytest.mark.feature("swarm-tick-database-ledger")
+def test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm import ledger_client
+    from scripts.tick.adapters.ledger import resource_client
+
+    fake = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", REQUEST_TIMEOUT=10)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
+    build = resource_client("sw", service=True)
+    with database_ledger.scoped({database_ledger.postgres.URL: "postgresql://ledger@shared/ledger"}):
+        short, long = build(2.5), build(30.0)
+    assert (short.base, short.credentials, short.timeout) == ("http://ledger/sw", {}, 2.5)
+    assert (long.base, long.timeout) == ("http://ledger/sw", 10)
+    assert short.transport is database_ledger.request
