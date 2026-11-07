@@ -168,3 +168,34 @@ def test_a_single_pass_reports_a_tolerated_redis_error_as_failed(monkeypatch):
     passes(monkeypatch, [redis.ConnectionError("refused")])
 
     assert controller._passes(None, None, None, True, redis_grace.Outage(30, Clock())) == 1
+
+
+def test_startup_retries_a_refused_connect_inside_the_window(monkeypatch):
+    attempts = []
+
+    def connect():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise Unreachable("Redis is unreachable (connection refused)")
+        return "store"
+
+    monkeypatch.setattr(controller, "connect", connect)
+    monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: None)
+    outage = redis_grace.Outage(30, Clock())
+
+    assert controller._reached(outage) == "store"
+    assert len(attempts) == 3
+    assert outage.since is None
+
+
+def test_startup_gives_up_once_the_refusal_outlasts_the_window(monkeypatch):
+    clock = Clock()
+
+    def connect():
+        raise Unreachable("Redis is unreachable (connection refused)")
+
+    monkeypatch.setattr(controller, "connect", connect)
+    monkeypatch.setattr(controller, "scheduled_wait", lambda seconds: setattr(clock, "now", clock.now + 31))
+
+    with pytest.raises(Unreachable):
+        controller._reached(redis_grace.Outage(30, clock))
