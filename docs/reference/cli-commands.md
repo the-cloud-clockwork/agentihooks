@@ -369,7 +369,7 @@ agentihooks recall eval golden.json                                           # 
 
 ## `agentihooks knowledge`
 
-Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
+Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, question, follow up, note, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. The default embedder counts hashed words, so matching is lexical. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
 
 ```bash
 agentihooks knowledge ask "merge queue priority" --limit 5   # summary, recent changes, hits with their parent chain
