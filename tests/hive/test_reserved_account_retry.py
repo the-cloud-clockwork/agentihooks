@@ -2,6 +2,7 @@
 
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -25,6 +26,7 @@ def setup() -> SimpleNamespace:
     config = SwarmConfig("fixture", "agentihooks", 1, 1)
     store.create(config)
     held = lease.acquire(store, config.slug, "controller")
+    assert held is not None
     hive = registry._default("remote")
     hive.update(
         slots=[
@@ -60,7 +62,7 @@ def setup() -> SimpleNamespace:
     return SimpleNamespace(store=store, config=config, held=held, launcher=launcher)
 
 
-def request_for(setup: SimpleNamespace) -> object:
+def request_for(setup: SimpleNamespace, config: Any = None) -> Any:
     from scripts.swarm.store import AgentRecord
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
@@ -69,7 +71,23 @@ def request_for(setup: SimpleNamespace) -> object:
     setup.store.put_agent("fixture", record)
     setup.store.seats.occupy(record.seat, name, 0)
     task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch, "route_kind": "subscription"}
-    return SpawnRequest(setup.config, "eng", name, task)
+    return SpawnRequest(config or setup.config, "eng", name, task)
+
+
+def add_hive(setup: SimpleNamespace, hive_id: str, slots: list[tuple[str, str]]) -> None:
+    from scripts.hive import headroom, registry
+    from scripts.swarm import lease
+
+    hive = registry._default(hive_id)
+    hive.update(
+        slots=[{"harness": harness, "account": account, "kind": "subscription"} for harness, account in slots],
+        repos=[setup.config.repo],
+        heartbeat_at=lease.now_ms(setup.store),
+        max_agents=3,
+    )
+    setup.store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in hive.items()})
+    setup.store.redis.sadd(registry.INDEX, hive_id)
+    setup.store.redis.set(headroom.key(hive_id), setup.store.redis.get(headroom.key("remote")))
 
 
 def test_a_full_reservation_launches_on_the_next_account_with_room(setup: SimpleNamespace) -> None:
@@ -141,6 +159,51 @@ def test_a_retry_on_another_hive_spends_that_hive_room(setup: SimpleNamespace) -
     assert after == {"remote": before["remote"] - 1, "other": before["other"] - 1}
     assert setup.store.redis.zrange(admission.key("remote"), 0, -1) == []
     assert setup.store.redis.zrange(admission.key("other"), 0, -1) == [f"fixture/{request.name}"]
+
+
+def test_a_hive_refusal_during_a_retry_keeps_the_refused_account_skipped(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import registry
+
+    setup.store.redis.srem(registry.INDEX, "remote")
+    add_hive(setup, "alpha", [("claude", "second")])
+    add_hive(setup, "beta", [("claude", "first"), ("claude", "second")])
+    assert setup.launcher.slots.reserve("claude:first", "master", 1, 300000)
+    original = setup.launcher.reserve_room
+    refused: list[tuple[str, str]] = []
+
+    def reserve_room(request: Any, selected: Any) -> str:
+        if selected.hive == "alpha" and not refused:
+            refused.append((selected.hive, selected.account.name))
+            return "no hive for eng has room: alpha is full"
+        return original(request, selected)
+
+    monkeypatch.setattr(setup.launcher, "reserve_room", reserve_room)
+    assert setup.launcher.spawn(request_for(setup)) == "pending"
+    order = setup.launcher.orders_for("task")
+    assert (order.hive, order.slot) == ("beta", "second")
+    assert refused == [("alpha", "second")]
+
+
+def test_a_retry_keeps_the_harness_its_lane_names(setup: SimpleNamespace) -> None:
+    from dataclasses import replace
+
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    setup.store.redis.srem(registry.INDEX, "remote")
+    add_hive(setup, "codex-hive", [("codex", "first"), ("codex", "second")])
+    setup.herdr._quota_tasks = {}
+    setup.herdr._quota_accounts = [
+        Account("codex", "first", "room", 0, 80, 80, 1),
+        Account("codex", "second", "room", 1, 80, 80, 6),
+    ]
+    assert setup.launcher.slots.reserve("codex:first", "master", 1, 300000)
+    config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
+    assert setup.launcher.spawn(request_for(setup, config)) == "pending"
+    order = setup.launcher.orders_for("task")
+    assert (order.harness, order.slot) == ("codex", "second")
 
 
 def test_only_an_unavailable_full_reservation_counts_as_a_full_account() -> None:

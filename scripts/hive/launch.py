@@ -300,7 +300,7 @@ class HiveLaunch:
         self,
         config: SwarmConfig,
         lane: str,
-        task: dict,
+        task: dict[str, Any],
         excluded: set[str] | None = None,
         accounts: frozenset[str] = frozenset(),
     ) -> Selection | placement.Wait:
@@ -536,25 +536,27 @@ class HiveLaunch:
     def _placed(self, request: SpawnRequest) -> Outcome:
         """Orders the launch on the selected account, moving to the next account while reservations are full."""
         accounts: frozenset[str] = frozenset()
-        refused_outcome: Outcome | None = None
+        selected = self._admitted_selection(request)
+        if isinstance(selected, placement.Wait):
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
         while True:
-            selected = self._admitted_selection(request, accounts)
-            if isinstance(selected, placement.Wait):
-                return refused_outcome or Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
             if refused := self.user_bundle_refusal(selected):
                 return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
             outcome = self._ordered(request, selected)
             if not _account_full(outcome):
                 return outcome
             self._release_room(request, selected)
-            refused_outcome = outcome
             accounts = accounts | {f"{selected.account.harness}:{selected.account.name}"}
+            selected = self._admitted_selection(request, accounts)
+            if isinstance(selected, placement.Wait):
+                return outcome
 
     def _reselect(self, request: SpawnRequest, accounts: frozenset[str]) -> Selection | placement.Wait:
         """Selects again without the accounts whose reservation refused this launch, charging a newly chosen hive."""
-        selected = self._select(request.config, request.lane, request.task, accounts=accounts)
+        task: dict[str, Any] = request.task
+        selected = self._select(request.config, request.lane, task, accounts=accounts)
         if self.placement_cache is not None:
-            key = (request.lane, request.task["id"])
+            key = (request.lane, task["id"])
             charged = self.placement_cache.get(key)
             if not (
                 isinstance(charged, Selection) and isinstance(selected, Selection) and charged.hive == selected.hive
