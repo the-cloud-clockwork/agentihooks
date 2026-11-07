@@ -1,7 +1,8 @@
 """PreToolUse enforcement for sustained swarm blockers: a category stuck for an hour or more opens the master coding
 window automatically and injects a once-a-minute notice naming each sustained category, putting the master in
 troubleshooting mode with every tool it needs. Fleet panic mode opens the same window and denies every other
-session's pushes, reruns, dispatches and deploys. Fails open on a store error."""
+session's pushes, reruns, dispatches and deploys, except from a session on the head branch of a registered fix.
+Fails open on a store error."""
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -80,7 +81,7 @@ def pretool(
     if not session_id:
         return None, None
     if not master_coding.is_master(session_id):
-        return None, _frozen(tool_name, tool_input)
+        return None, _frozen(tool_name, tool_input, cwd)
     slug = _slug(session_id)
     if not slug:
         return None, None
@@ -127,7 +128,7 @@ def _freezes(tokens: list[str]) -> bool:
     return any(words[: len(prefix)] == list(prefix) for prefix in _FROZEN_COMMANDS)
 
 
-def _frozen(tool_name: str, tool_input: dict[str, Any]) -> str | None:
+def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str = "") -> str | None:
     if tool_name != "Bash":
         return None
     from hooks.context.shell_commands import commands
@@ -136,7 +137,39 @@ def _frozen(tool_name: str, tool_input: dict[str, Any]) -> str | None:
         return None
     store = _store()
     current = None if store is None else _panic_state(store)
-    return None if current is None else FROZEN.format(reason=current.reason)
+    if current is None or _on_fix_branch(cwd, current.fixes):
+        return None
+    return FROZEN.format(reason=current.reason)
+
+
+def _session_branch(cwd: str) -> str:
+    """Return the branch checked out in the session's directory, or an empty string outside a checkout."""
+    import subprocess
+
+    try:
+        found = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=cwd or None, capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return found.stdout.strip() if found.returncode == 0 else ""
+
+
+def _fix_branch(url: str) -> str:
+    """Return the head branch of one registered fix pull request, or an empty string when it cannot be read."""
+    from scripts.swarm import panic
+    from scripts.swarm.store import SwarmError
+
+    try:
+        return panic.fix_branch(url)
+    except SwarmError:
+        return ""
+
+
+def _on_fix_branch(cwd: str, fixes: tuple[str, ...]) -> bool:
+    """Return whether the session works on the head branch of a registered fix pull request."""
+    branch = _session_branch(cwd) if fixes else ""
+    return bool(branch) and any(_fix_branch(url) == branch for url in fixes)
 
 
 def checked(payload: Any) -> str | None:
