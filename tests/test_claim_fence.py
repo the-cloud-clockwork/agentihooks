@@ -1,10 +1,14 @@
 import json
+import os
+import threading
+import time
+from collections.abc import Callable
 from unittest.mock import Mock, patch
 
 import pytest
 
 from scripts.events.config import BusConfig
-from scripts.events.memory import open_bus
+from scripts.events.memory import MemoryBus, open_bus
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -78,7 +82,7 @@ def test_revoked_or_missing_claim_ends_the_old_agent(monkeypatch, state):
     kill.assert_called_once_with(4321)
 
 
-def test_unreachable_authority_blocks_actions_without_killing_the_agent(monkeypatch):
+def test_unreachable_authority_lets_actions_pass_without_killing_the_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": 1}))
@@ -87,10 +91,10 @@ def test_unreachable_authority_blocks_actions_without_killing_the_agent(monkeypa
         patch.object(claim_fence, "sleep") as pause,
         patch.object(claim_fence, "terminate") as kill,
     ):
-        assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.CHECK_FAILED
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
     assert claim_fence.ATTEMPTS == 3
     assert connect.call_count == 3
-    assert pause.call_args_list == [((0.5,), {}), ((0.5,), {})]
+    assert pause.call_args_list == [((claim_fence.DELAY,), {}), ((claim_fence.DELAY,), {})]
     kill.assert_not_called()
 
 
@@ -107,7 +111,7 @@ def test_a_launch_prompt_passes_when_one_bus_read_fails_before_an_owned_claim(mo
     ):
         assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) is None
     assert connect.call_count == 2
-    pause.assert_called_once_with(0.5)
+    pause.assert_called_once_with(claim_fence.DELAY)
     kill.assert_not_called()
 
 
@@ -125,12 +129,12 @@ def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monk
     ):
         assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) == claim_fence.REVOKED
     assert connect.call_count == 2
-    pause.assert_called_once_with(0.5)
+    pause.assert_called_once_with(claim_fence.DELAY)
     kill.assert_called_once_with(4321)
 
 
 @pytest.mark.parametrize("recovers", [True, False])
-def test_a_failed_claim_state_read_is_retried_before_blocking(monkeypatch, recovers):
+def test_a_failed_claim_state_read_is_retried_before_passing(monkeypatch: pytest.MonkeyPatch, recovers: bool) -> None:
     from hooks.context import claim_fence
 
     bus = Mock()
@@ -145,11 +149,11 @@ def test_a_failed_claim_state_read_is_retried_before_blocking(monkeypatch, recov
     ):
         message = claim_fence.check({"hook_event_name": "UserPromptSubmit"})
     attempts = 2 if recovers else 3
-    assert message == (None if recovers else claim_fence.CHECK_FAILED)
+    assert message is None
     assert bus.state.call_args_list == [(("spoke-work",), {})] * attempts
     assert bus.state.return_value.get.call_args_list == [(("claim-a",), {})] * attempts
     assert bus.close.call_count == attempts
-    assert pause.call_args_list == [((0.5,), {})] * (attempts - 1)
+    assert pause.call_args_list == [((claim_fence.DELAY,), {})] * (attempts - 1)
     kill.assert_not_called()
 
 
@@ -239,3 +243,81 @@ def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
     assert exited.value.code == 0
     check.assert_called_once_with(payload)
     handler.assert_called_once_with(payload)
+
+
+def _held_claim(monkeypatch: pytest.MonkeyPatch) -> MemoryBus:
+    bus = open_bus(BusConfig())
+    revision = bus.state("spoke-work").create("claim-a", b'{"state":"started"}')
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": revision}))
+    monkeypatch.setattr(bus, "close", lambda: None)
+    return bus
+
+
+def _stalled_bus(release: threading.Event) -> Callable[[BusConfig], None]:
+    def stall(_config: BusConfig) -> None:
+        release.wait(10)
+        raise RuntimeError("stalled")
+
+    return stall
+
+
+@pytest.mark.wall_clock
+def test_slow_nats_costs_at_most_the_bound_and_lets_the_action_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import claim_fence
+
+    _held_claim(monkeypatch)
+    release = threading.Event()
+    try:
+        with (
+            patch.object(claim_fence, "open_bus", side_effect=_stalled_bus(release)),
+            patch.object(claim_fence, "terminate") as kill,
+        ):
+            started = time.monotonic()
+            message = claim_fence.check({"hook_event_name": "PreToolUse"})
+            elapsed = time.monotonic() - started
+    finally:
+        release.set()
+    assert claim_fence.BOUND == 1.0
+    assert elapsed < claim_fence.BOUND + 0.5
+    assert message is None
+    kill.assert_not_called()
+
+
+def test_a_moved_claim_still_blocks_once_the_cached_answer_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    with (
+        patch.object(claim_fence, "open_bus", return_value=bus),
+        patch.object(claim_fence, "agent_pid", return_value=4321),
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+        current = bus.state("spoke-work").get("claim-a")
+        assert current is not None
+        bus.state("spoke-work").update("claim-a", b'{"state":"claimed"}', current.revision)
+        with patch.object(claim_fence, "CACHE_SECONDS", 0):
+            assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
+    kill.assert_called_once_with(4321)
+
+
+def test_a_fresh_held_answer_skips_the_read_for_its_own_claim_generation_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    with patch.object(claim_fence, "open_bus", return_value=bus):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    with patch.object(claim_fence, "open_bus", side_effect=AssertionError("cached")):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    current = json.loads(os.environ["AGENTIHOOKS_CLAIM_FENCE"])
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({**current, "revision": current["revision"] + 1}))
+    with (
+        patch.object(claim_fence, "open_bus", return_value=bus) as connect,
+        patch.object(claim_fence, "agent_pid", return_value=4321),
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
+    connect.assert_called_once()
+    kill.assert_called_once_with(4321)
