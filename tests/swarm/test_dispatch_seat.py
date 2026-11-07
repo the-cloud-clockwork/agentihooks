@@ -996,7 +996,7 @@ def test_done_from_a_hive_dispatcher_seat_writes_only_keys_the_hive_member_may_w
 
 
 class OneFreeSlot(FakeRuntime):
-    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> object:
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> tick_module.Placed:
         if lane != tick_module.MASTER and self.spawned:
             raise tick_module.SpawnError(
                 "no hive has room, and the local machine runs 4 of its 4 agents", "unavailable"
