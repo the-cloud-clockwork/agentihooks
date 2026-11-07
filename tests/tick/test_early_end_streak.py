@@ -159,17 +159,25 @@ def test_a_pass_whose_lane_dropped_the_page_relay_still_lists_its_agents_and_end
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from scripts.swarm.store import AgentRecord
+
     swarm, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
+    swarm.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", state="finished"))
     real = cli._Wrapper.shut
-    boxes: list[Any] = []
+    wrappers: list[Any] = []
 
     def shut(wrapper: Any, step: Any) -> bool:
-        boxes.append(wrapper.box)
+        wrappers.append(wrapper)
         return step.name == "page relay" or real(wrapper, step)
 
     monkeypatch.setattr(cli._Wrapper, "shut", shut)
     [actions] = _passes(swarm, ledger, runtime, 1)
     assert not any(action.startswith("pass ended early") for action in actions)
-    assert boxes[-1]["agents"] == []
+    wrapper = wrappers[-1]
+    assert not wrapper.seen["spawn"].abandoned
+    assert wrapper.seen["page relay"].rested
+    unfinished = [agent.name for agent in swarm.agents("sw") if agent.state != "finished"]
+    assert [agent.name for agent in wrapper.box["agents"]] == unfinished
+    assert "engineer@a1b2c3-0009" not in unfinished
     assert swarm.redis.get(swarm.key("sw", "early-end-streak")) is None
