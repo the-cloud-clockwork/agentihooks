@@ -2707,7 +2707,7 @@ def test_a_probe_refreshes_claude_and_codex_at_the_given_time(monkeypatch):
     assert calls == [("claude", env, 7.0, True), ("codex", env, 7.0, True)]
 
 
-def test_live_inputs_leave_out_ready_work_with_a_fresh_placement_refusal(monkeypatch):
+def test_live_inputs_leave_out_ready_work_with_a_fresh_placement_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import placement_waits
 
     store = _store()
@@ -2721,7 +2721,7 @@ def test_live_inputs_leave_out_ready_work_with_a_fresh_placement_refusal(monkeyp
     assert expired.demand == {"eng": 2, "ci": 0, "plan": 0}
 
 
-def test_the_tick_host_is_the_room_the_tick_last_granted():
+def test_the_tick_host_is_the_room_the_tick_last_granted() -> None:
     granted = {"room": 6, "reason": "quota pods", "limit": "quota pods", "held": False, "granted_at": 4_000}
     inputs = replace(capacity.fixture_inputs(_readings()), previous={"host": granted})
     assert capacity.tick_host(inputs) == granted

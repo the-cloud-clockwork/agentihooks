@@ -271,7 +271,7 @@ def test_a_pending_raise_older_code_stored_keeps_its_counted_passes():
 
 
 @pytest.mark.feature("swarm-autoscale")
-def test_a_target_that_drifts_down_and_up_keeps_counting_and_raises_on_the_third_tick():
+def test_a_target_that_drifts_down_and_up_keeps_counting_and_raises_on_the_third_tick() -> None:
     live = {"plan": 0, "ci": 0, "eng": 12}
     previous: Decision = {
         "ceilings": {"plan": 0, "ci": 0, "eng": 14},

@@ -183,8 +183,10 @@ def test_the_autoscale_command_on_a_deployed_controller_names_the_off_reason(no_
     assert f"host room None: {WORKERS_OFF}" in capsys.readouterr().out.splitlines()
 
 
-def test_the_autoscale_preview_reads_the_host_room_the_tick_granted(monkeypatch, capsys):
-    def local_host(*args, **kwargs):
+def test_the_autoscale_preview_reads_the_host_room_the_tick_granted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def local_host(*args: object, **kwargs: object) -> None:
         raise AssertionError("the preview read the local host")
 
     store = _store()
