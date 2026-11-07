@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.696 · 2026-11-07
+
+### 2026-11-07 · 99108c3d7454 · #9960 · @agenticore-app
+
+**Exchange the local operator credential in the auth service outside edge mode**
+
+This change lets the auth service's token exchange, when running outside Cloudflare Access edge mode, verify the ledger's own stored page credential instead of requiring an edge assertion. That means the workstation and the Docker Compose developer build can now obtain a signed operator token directly from the auth service without going through Cloudflare Access. Inside edge mode nothing changes, since the page credential is never read there. Tests confirm correct exchanges succeed, wrong or missing credentials are refused, and edge mode behavior is untouched, closing a gap that previously blocked local/developer operator authentication.
+
 ## v2.17.695 · 2026-11-07
 
 ### 2026-11-07 · 16a03370e50c · #9957 · @agenticore-app
