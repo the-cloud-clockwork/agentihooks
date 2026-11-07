@@ -58,7 +58,9 @@ def test_a_retired_lead_whose_record_drop_was_refused_does_not_hold_its_successo
     assert len(runtime.masters) == 2
     successor = runtime.masters[1][0]
     assert f"spawned master {successor}" in actions
-    assert [a.name for a in masters(store) if a.seat == "master@sw"] == [successor]
+    assert [a.name for a in masters(store)] == [lead.name, successor]
+    _retire_ended("sw", store, ledger, runtime, ledger.rows, lead, 3 + STARTUP_GRACE_MS)
+    assert [a.name for a in masters(store)] == [successor]
 
 
 def test_a_seat_two_master_that_crashed_without_finishing_is_dropped_and_refilled(store):
