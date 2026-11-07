@@ -15,10 +15,10 @@ Idempotent: --ensure on a running server only prints the URL.
 """
 
 import argparse
+import email.message
 import errno
 import functools
 import html
-import email.message
 import http.cookies
 import http.server
 import importlib
