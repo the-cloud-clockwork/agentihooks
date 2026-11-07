@@ -490,7 +490,7 @@ def test_a_grant_that_takes_no_launch_material_opens_no_terminal():
     assert terminals.opened == []
 
 
-def test_a_codex_agent_is_handed_a_codex_launch_record():
+def test_a_codex_agent_is_handed_a_codex_launch_record() -> None:
     api = Api(pod())
     codex = AgentRecord(
         "engineer-1", "eng", "t1", execution_id=EXECUTION, generation=3, profile="engineer", harness="codex"

@@ -551,7 +551,9 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     assert decision["placeable"] == {"claude": 3, "codex": 0}
 
 
-def _harness_routes(claude_keys, codex_keys, held=None):
+def _harness_routes(
+    claude_keys: set[str], codex_keys: set[str], held: dict[str, int] | None = None
+) -> approved.HarnessRoutes:
     _, observations = _quota()
     return approved.HarnessRoutes(
         {
@@ -563,7 +565,7 @@ def _harness_routes(claude_keys, codex_keys, held=None):
     )
 
 
-def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_seats():
+def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_seats() -> None:
     routes = _harness_routes({"akey"}, {"alpha-personal", "beta-business"}, {"beta-business": 1})
     rows = approved.FleetAccounts(routes, 6)({}, NOW_MS / 1000, refresh=False)
     assert rows == [
@@ -574,7 +576,7 @@ def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_
     assert [capacity.free_seats(row) for row in rows] == [6, 6, 5]
 
 
-def test_a_launch_account_comes_from_the_route_of_its_harness():
+def test_a_launch_account_comes_from_the_route_of_its_harness() -> None:
     routes = _harness_routes({"akey"}, {"alpha-personal"})
     assert routes.choose(2, None, None, "codex") == "alpha-personal"
     assert routes.choose(2, None, None, "claude") == "akey"

@@ -1258,8 +1258,8 @@ def test_registration_reports_a_missing_global_reservation(world, monkeypatch):
         world.launcher.registered(world.session(launch), launch.grant)
 
 
-def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a_codex_agent(world):
-    asked = []
+def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a_codex_agent(world: World) -> None:
+    asked: list[tuple[str | None, str]] = []
     world.launcher.accounts = lambda cap, planned, left, harness: asked.append((planned, harness)) or "codex-key"
     world.launcher.planned = lambda task, harness: f"{task}-{harness}"
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
