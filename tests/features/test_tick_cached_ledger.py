@@ -93,6 +93,7 @@ class Proxy:
                     pass
 
 
+@pytest.mark.wall_clock
 @pytest.mark.feature("swarm-tick-cached-ledger")
 @pytest.mark.parametrize("fault", ["slow", "stopped"])
 def test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped(
