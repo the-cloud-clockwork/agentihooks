@@ -527,7 +527,7 @@
       "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
       "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
       "tests": [
-        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
         "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
       ]
@@ -545,7 +545,8 @@
         "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
         "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
         "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
-        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value",
+        "tests/tick/test_early_end_streak.py::test_a_pass_whose_lane_dropped_the_page_relay_still_lists_its_agents_and_ends_full"
       ]
     },
     {
@@ -1863,6 +1864,17 @@
       "tests": [
         "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
+    },
+    {
+      "id": "controller-survives-ledger-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-timeout",
+      "behaviour": "When a controller pass raises LedgerUnreachable, such as a ledger read timeout, the run loop logs it, ends that pass, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1. The startup proof swarm run and control service host before the loop are outside this seam.",
+      "seam": "scripts.swarm.controller.main run loop",
+      "tests": [
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass",
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_once_reports_a_ledger_timeout_as_a_failed_pass"
       ]
     },
     {
