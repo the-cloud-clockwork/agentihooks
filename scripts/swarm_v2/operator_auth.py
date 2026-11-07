@@ -27,7 +27,7 @@ def credential(slug: str, page_credential: Callable[[str], str | None], who: Who
 def agent_credential(slug: str, page_credential: Callable[[str], str | None], name: str) -> str:
     """The credential a host holding the page credential derives for one named agent, or '' without either."""
     expected = page_credential(slug)
-    if not isinstance(expected, str) or not expected or not name:
+    if not expected or not name:
         return ""
     return agent_token(expected, slug, name)
 
@@ -35,8 +35,6 @@ def agent_credential(slug: str, page_credential: Callable[[str], str | None], na
 def agent_authenticator(page_credential: Callable[[str], str | None]) -> Callable[[str, str, str], bool]:
     def bound(slug: str, credential: str, name: str) -> bool:
         expected = agent_credential(slug, page_credential, name)
-        if not expected or not isinstance(credential, str) or not credential:
-            return False
-        return hmac.compare_digest(credential.encode(), expected.encode())
+        return bool(expected) and hmac.compare_digest(credential.encode(), expected.encode())
 
     return bound

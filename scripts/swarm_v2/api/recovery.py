@@ -80,14 +80,16 @@ class RecoveryAPI:
             raise SwarmError("checkpoint is not verified for this execution")
         return 200, recovery.checkpoints.fetch(execution_id, identifier)
 
+    def _bound(self, token: str, name: str) -> bool:
+        if self.agent is not None and self.agent(self.slug, token, name):
+            return True
+        return auth.agent_member(self.store.redis, token, self.slug, name) is not None
+
     def _authorize(self, token: str, name: object) -> None:
         caller = self.operator(self.slug, token) if self.operator is not None else None
         if caller is not None and caller.role == Role.OPERATOR:
             return
-        if not isinstance(name, str) or not name:
-            raise GrantRefused("unauthenticated", "the credential is not bound to this swarm and caller")
-        derived = self.agent is not None and self.agent(self.slug, token, name)
-        if not derived and not auth.agent_member(self.store.redis, token, self.slug, name):
+        if not isinstance(name, str) or not name or not self._bound(token, name):
             raise GrantRefused("unauthenticated", "the credential is not bound to this swarm and caller")
         if not any(
             agent.name == name and agent.lane == MASTER and agent.state != "finished"
