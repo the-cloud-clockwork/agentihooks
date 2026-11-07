@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.687 · 2026-11-07
+
+### 2026-11-07 · 859e0ed7c833 · #9930 · @agenticore-app
+
+**Keep an automatic panic automatic when a fix is added**
+
+This change ensures that when a fix is applied to a panic that was triggered automatically, the panic remains automatic rather than being converted to manual, so the alarm can still release it once the fleet stabilizes; only when a person manually presses panic without supplying a fix does it become manual. It also tightens the engage logic to materialize fixes exactly once, with a seam test using a one-shot generator to catch regressions where fixes read twice would be silently dropped, which previously caused both seam tests to fail before this fix.
+
 ## v2.17.686 · 2026-11-07
 
 ### 2026-11-07 · c507833b3986 · #9943 · @agenticore-app
