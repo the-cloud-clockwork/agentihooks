@@ -116,6 +116,33 @@ def test_a_retry_within_one_pass_skips_the_refused_account(setup: SimpleNamespac
     assert setup.launcher.hives()[0]["room"] == room - 1
 
 
+def test_a_retry_on_another_hive_spends_that_hive_room(setup: SimpleNamespace) -> None:
+    from scripts.hive import admission, headroom, registry
+    from scripts.swarm import lease
+
+    for hive_id, account in (("remote", "first"), ("other", "second")):
+        hive = registry._default(hive_id)
+        hive.update(
+            slots=[{"harness": "claude", "account": account, "kind": "subscription"}],
+            repos=[setup.config.repo],
+            heartbeat_at=lease.now_ms(setup.store),
+            max_agents=3,
+        )
+        setup.store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in hive.items()})
+        setup.store.redis.sadd(registry.INDEX, hive_id)
+        setup.store.redis.set(headroom.key(hive_id), setup.store.redis.get(headroom.key("remote")))
+    assert setup.launcher.slots.reserve("claude:first", "master", 1, 300000)
+    setup.launcher.placement_cache = {}
+    before = {hive["id"]: hive["room"] for hive in setup.launcher.hives()}
+    request = request_for(setup)
+    assert setup.launcher.spawn(request) == "pending"
+    assert setup.launcher.orders_for("task").hive == "other"
+    after = {hive["id"]: hive["room"] for hive in setup.launcher.hives()}
+    assert after == {"remote": before["remote"] - 1, "other": before["other"] - 1}
+    assert setup.store.redis.zrange(admission.key("remote"), 0, -1) == []
+    assert setup.store.redis.zrange(admission.key("other"), 0, -1) == [f"fixture/{request.name}"]
+
+
 def test_only_an_unavailable_full_reservation_counts_as_a_full_account() -> None:
     from scripts.hive import launch
     from scripts.swarm_v2.runtime.base import Outcome, Status

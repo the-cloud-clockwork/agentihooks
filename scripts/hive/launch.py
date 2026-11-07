@@ -551,10 +551,16 @@ class HiveLaunch:
             accounts = accounts | {f"{selected.account.harness}:{selected.account.name}"}
 
     def _reselect(self, request: SpawnRequest, accounts: frozenset[str]) -> Selection | placement.Wait:
-        """Selects again without the accounts whose reservation refused this launch, keeping the pass cache current."""
+        """Selects again without the accounts whose reservation refused this launch, charging a newly chosen hive."""
         selected = self._select(request.config, request.lane, request.task, accounts=accounts)
         if self.placement_cache is not None:
-            self.placement_cache[(request.lane, request.task["id"])] = selected
+            key = (request.lane, request.task["id"])
+            charged = self.placement_cache.get(key)
+            if not (
+                isinstance(charged, Selection) and isinstance(selected, Selection) and charged.hive == selected.hive
+            ):
+                self._spend(selected)
+            self.placement_cache[key] = selected
         return selected
 
     def _release_room(self, request: SpawnRequest, selected: Selection) -> None:
