@@ -7,6 +7,7 @@ ENABLED = ["--set", "hub.enabled=true", "--set", "hub.bus.url=nats://nats.swarm:
 RECEIVER = ["--set", "githubWebhook.enabled=true", "--set", "githubWebhook.secretName=github-webhook"]
 RELEASE = ["--set", "image.tag=1.2.3"]
 RELEASE_IMAGE = "ghcr.io/the-cloud-clockwork/agentihooks-swarm:1.2.3"
+RELOAD = "secret.reloader.stakater.com/reload"
 
 
 def render(chart: str, *extra: str) -> subprocess.CompletedProcess:
@@ -35,6 +36,8 @@ def hub_problems(deployment: dict) -> list[str]:
         found.append("the hub pods are not labelled with the hub component")
     if spec.get("securityContext", {}).get("runAsNonRoot") is not True:
         found.append("the hub pods may run as root")
+    if RELOAD in deployment["metadata"].get("annotations", {}):
+        found.append("a hub without hub.secretEnv still carries a secret reload annotation")
     return found
 
 
@@ -82,6 +85,9 @@ def receiver_problems(documents: list[dict]) -> list[str]:
         found.append(f"the receiver container runs {container.get('command')}, expected {command}")
     if container.get("envFrom") != [{"secretRef": {"name": "github-webhook"}}]:
         found.append(f"the receiver reads {container.get('envFrom')}, expected its webhook secret by reference")
+    reload = deployment["metadata"].get("annotations", {}).get(RELOAD)
+    if reload != "github-webhook":
+        found.append(f"the receiver reloads on {reload}, expected its bus credential secret github-webhook")
     env = {row["name"]: row.get("value") for row in container.get("env", [])}
     if env.get("AGENTIHOOKS_BUS") != "nats":
         found.append(f"the receiver bus is {env.get('AGENTIHOOKS_BUS')}, expected nats")
@@ -124,14 +130,29 @@ def problems(chart: str) -> list[str]:
 def secret_env_problems(chart: str) -> list[str]:
     secret = ["--set", "hub.secretEnv[0].name=AGENTIHOOKS_BUS_CREDENTIALS"]
     secret += ["--set", "hub.secretEnv[0].secretName=hub-bus", "--set", "hub.secretEnv[0].key=credentials"]
+    secret += ["--set", "hub.secretEnv[1].name=AGENTIHOOKS_BUS_USER", "--set", "hub.secretEnv[1].secretName=hub-bus"]
+    secret += ["--set", "hub.secretEnv[1].key=user"]
     rendered = render(chart, *ENABLED, *secret)
     if rendered.returncode:
         return [f"a hub with hub.secretEnv fails to render: {rendered.stderr.strip()}"]
-    env = hubs(rendered.stdout)[0]["spec"]["template"]["spec"]["containers"][0]["env"]
+    deployment = hubs(rendered.stdout)[0]
+    env = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
     rows = [row for row in env if row["name"] == "AGENTIHOOKS_BUS_CREDENTIALS"]
     expected = {"secretKeyRef": {"name": "hub-bus", "key": "credentials"}}
     if rows != [{"name": "AGENTIHOOKS_BUS_CREDENTIALS", "valueFrom": expected}]:
         return [f"a hub with hub.secretEnv reads its credential from {rows}, expected {expected}"]
+    reload = deployment["metadata"].get("annotations", {}).get(RELOAD)
+    if reload != "hub-bus":
+        return [f"a hub with hub.secretEnv reloads on {reload}, expected its credential secret hub-bus once"]
+    shared = ["--set", "secretEnv[0].name=AGENTIHOOKS_SHARED_TOKEN", "--set", "secretEnv[0].secretName=swarm-bus"]
+    shared += ["--set", "secretEnv[0].key=token", "--set", "envFromSecrets[0]=swarm-env"]
+    rendered = render(chart, *ENABLED, *secret, *shared)
+    if rendered.returncode:
+        return [f"a hub with shared secret env fails to render: {rendered.stderr.strip()}"]
+    reload = hubs(rendered.stdout)[0]["metadata"].get("annotations", {}).get(RELOAD, "")
+    expected_secrets = ["hub-bus", "swarm-bus", "swarm-env"]
+    if sorted(reload.split(",")) != expected_secrets:
+        return [f"a hub with shared secret env reloads on {reload}, expected each of {expected_secrets} once"]
     return []
 
 

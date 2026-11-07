@@ -218,7 +218,7 @@ def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_
     ]
 
 
-def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_windows():
+def test_an_observed_key_offers_its_quota_band_past_the_launch_cap_with_its_windows():
     store, route = _route({"akey"})
     _observe(store, "akey", five_used=93.0, week_used=40.0)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
@@ -226,7 +226,7 @@ def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_win
         "claude", "akey", "OPEN", 0, 7.0, 60.0, 2, NOW_MS // 1000 + 48 * HOUR, five_resets_at=NOW_MS // 1000 + HOUR
     )
     _observe(store, "akey", five_used=10.0)
-    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == 4
+    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == session_bands.TOP_BAND
 
 
 def test_an_exhausted_key_is_a_closed_row():
@@ -304,7 +304,7 @@ def test_a_hive_reading_with_no_five_hour_window_opens_the_key_by_its_week() -> 
     store, route = _route({"nestor-coltatgmail-com"})
     _hive_reading(store, "nestor_coltatgmail_com", five_used=None)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, 4)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, session_bands.TOP_BAND)
 
 
 def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:
@@ -412,11 +412,25 @@ def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
     assert route.choose(1, planned=CLOSED_KEY) == OPEN_KEY
 
 
-def test_a_hive_reading_with_room_in_its_week_keeps_the_launch_cap() -> None:
+def test_a_hive_reading_with_room_in_its_week_takes_the_week_band() -> None:
     store, route = _route({CLOSED_KEY})
     _spent_week(store, 89.0)
     [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap, row.five_left, row.week_left) == ("OPEN", 2, None, 11.0)
+    assert (row.state, row.cap, row.five_left, row.week_left) == ("OPEN", session_bands.TOP_BAND, None, 11.0)
+
+
+def test_a_claude_account_with_no_five_hour_reading_is_not_held_to_one_session() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    [row] = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 51.0, session_bands.TOP_BAND)
+    assert capacity.free_seats(row) == session_bands.TOP_BAND - 1
+
+
+def test_the_launch_cap_still_bounds_the_kubernetes_worker_route() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    assert route.choose(1) is None
 
 
 DRAINING = {
@@ -549,3 +563,52 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     assert asked == [(NOW_MS / 1000, False)]
     assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
+
+
+def _harness_routes(
+    claude_keys: set[str], codex_keys: set[str], held: dict[str, int] | None = None
+) -> approved.HarnessRoutes:
+    _, observations = _quota()
+    return approved.HarnessRoutes(
+        {
+            harness: approved.AccountRoute(
+                lambda keys=keys: frozenset(keys), observations, lambda: dict(held or {}), harness
+            )
+            for harness, keys in (("claude", claude_keys), ("codex", codex_keys))
+        }
+    )
+
+
+def test_the_fleet_rows_carry_every_approved_claude_and_codex_account_with_free_seats() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal", "beta-business"}, {"beta-business": 1})
+    rows = approved.FleetAccounts(routes, 6)({}, NOW_MS / 1000, refresh=False)
+    assert rows == [
+        capacity.Account("claude", "akey", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "alpha-personal", "OPEN", 0, None, None, 6),
+        capacity.Account("codex", "beta-business", "OPEN", 1, None, None, 6),
+    ]
+    assert [capacity.free_seats(row) for row in rows] == [6, 6, 5]
+
+
+def test_a_launch_account_comes_from_the_route_of_its_harness() -> None:
+    routes = _harness_routes({"akey"}, {"alpha-personal"})
+    assert routes.choose(2, None, None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "akey", None, "codex") == "alpha-personal"
+    assert routes.choose(2, None, None, "other") is None
+
+
+def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predecessor_to_their_route() -> None:
+    store, observations = _quota()
+    claude = approved.AccountRoute(lambda: frozenset({"akey", "bkey"}), observations, lambda: {"bkey": 1}, "claude")
+    routes = approved.HarnessRoutes({"claude": claude})
+    _observe(store, "akey")
+
+    assert routes.rows(4, NOW_MS / 1000) == claude.rows(4, NOW_MS / 1000)
+    assert routes.rows(4, NOW_MS / 1000)[0].week_resets_at == NOW_MS // 1000 + 48 * HOUR
+    assert routes.banded_rows(4, NOW_MS / 1000) == claude.banded_rows(4, NOW_MS / 1000)
+    assert [row.name for row in routes.banded_rows(4, NOW_MS / 1000)] == ["akey", "bkey"]
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "bkey", None, "claude") == "bkey"
+    assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))
+    assert routes.choose(2, None, ("claude", "akey"), "claude") != "akey"

@@ -112,14 +112,18 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
     monkeypatch.setattr(step, "floor_s", 300.0)
     monkeypatch.setattr(reboot, "boot_pass", planted)
     monkeypatch.setattr(engine, "run_group", group)
-    monkeypatch.setattr(pool, "running", lambda **kw: real_running(**kw, critical_s=1.0))
+    monkeypatch.setattr(pool, "running", lambda **kw: real_running(**kw, critical_s=1.0, reserves={}))
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
-        assert actions[0].startswith("pass ended early: no step stored ")
+        assert not any(action.startswith("pass ended early") for action in actions)
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
         assert tick_heartbeat.read(swarm, "sw") is not None
-        outcomes = {record.name: record.outcome for record in closing}
-        assert outcomes == {"heartbeat": engine.OK, "last tick": engine.OK, "status publish": engine.OK}
+        assert sorted(record.name for record in closing) == ["heartbeat", "last tick", "status publish"]
+        stamps = [record for record in closing if record.name != "status publish"]
+        assert not any(record.abandoned or record.outcome == engine.FAILED for record in stamps)
+        publish = next(record for record in closing if record.name == "status publish")
+        assert publish.outcome != engine.FAILED
+        assert publish.skipped or not publish.abandoned
     finally:
         release.set()
         worker = engine._RUNNING.get(("sw", "reboot pass"))

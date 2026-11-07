@@ -186,6 +186,18 @@ def test_a_failed_read_admits_every_task_and_says_why(error, capsys):
     assert capsys.readouterr().err == f"fleet red hold skipped, listing open pull requests failed: {error}\n"
 
 
+def test_a_failed_gh_listing_names_its_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    error = subprocess.CalledProcessError(1, ["gh", "api", "graphql"], "", "GraphQL: Resource not accessible\n")
+
+    def broken(repo: str) -> fleet_red.Pulls:
+        raise error
+
+    assert fleet_red.checker(broken)(task("red", pr_url=MINE))
+    assert capsys.readouterr().err == (
+        f"fleet red hold skipped, listing open pull requests failed: {error}: GraphQL: Resource not accessible\n"
+    )
+
+
 def test_read_lists_open_pull_requests_through_the_repository_port() -> None:
     answer = (OpenChange("u", ()),)
     provider, ports = FakeSourceControl({"open_changes": answer}), []

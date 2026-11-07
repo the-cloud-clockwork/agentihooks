@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from hooks.context import profile_chain
 from scripts.swarm import live_binding, profile_choice, prompt
@@ -31,8 +31,8 @@ ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
-AccountChooser = Callable[[int, str | None, tuple[str, str] | None], str | None]
-PlannedAccount = Callable[[str], str | None]
+AccountChooser = Callable[[int, str | None, tuple[str, str] | None, str], str | None]
+PlannedAccount = Callable[[str, str], str | None]
 Ending = Callable[[AgentRecord, str], AgentRecord]
 
 
@@ -141,6 +141,7 @@ class DistributedLaunch:
         self.launch_slots = LaunchSlots(controller.store.redis)
         self.accounts: AccountChooser | None = None
         self.planned: PlannedAccount | None = None
+        self.planned_harness: Callable[[str], str | None] | None = None
         self.opening: Callable[[SpawnRequest], str] = opening
 
     def spawn(
@@ -183,6 +184,7 @@ class DistributedLaunch:
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
             "account": terms.account,
+            "harness": admitted.harness or "claude",
             "profile": admitted.profile,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url, **hosted_ledger()},
         }
@@ -235,9 +237,12 @@ class DistributedLaunch:
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
+        task: dict[str, Any] = request.task
+        planned_harness = None if self.planned_harness is None else self.planned_harness(task["id"])
+        harness: str = task.get("harness") or planned_harness or "claude"
         if self.accounts is not None:
-            planned = None if self.planned is None else self.planned(request.task["id"])
-            account = self.accounts(terms.cap, planned, quota_predecessor(request.task))
+            planned = None if self.planned is None else self.planned(task["id"], harness)
+            account = self.accounts(terms.cap, planned, quota_predecessor(task), harness)
             if account is None:
                 return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
             terms = replace(terms, account=account)
@@ -249,7 +254,7 @@ class DistributedLaunch:
             runtime_backend=backend,
             runtime_target=target(request),
             profile=profile,
-            harness=request.task.get("harness", "claude"),
+            harness=harness,
         )
         store = self.controller.store
         occupant = store.execution_occupants(self.slug).get(agent.seat)

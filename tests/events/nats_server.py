@@ -33,6 +33,10 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+def closed_url() -> str:
+    return f"nats://127.0.0.1:{free_port()}"
+
+
 def wait_listening(port: int, process: subprocess.Popen, deadline_s: float = 10) -> None:
     stop = time.monotonic() + deadline_s
     while time.monotonic() < stop:
