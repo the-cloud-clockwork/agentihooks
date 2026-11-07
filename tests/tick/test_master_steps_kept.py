@@ -1,6 +1,7 @@
 """The master seat steps run in every pass, even when an earlier step overran its lane or the intent check overran."""
 
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Event
 from time import sleep
@@ -10,9 +11,11 @@ import pytest
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import masters
+from scripts.tick.steps import CallStep, masters
 
 pytestmark = pytest.mark.unit
+
+MARK: ContextVar[str] = ContextVar("kept step mark", default="clean")
 
 
 class View:
@@ -107,3 +110,28 @@ def test_an_overrunning_intent_check_still_lets_the_master_steps_run() -> None:
     assert records["tick master"].outcome == engine.OK
     assert records["intent check"].abandoned
     assert records["page relay"].skipped
+
+
+def _nothing(state: object, read: Callable[[str], object]) -> None:
+    return None
+
+
+def test_a_call_step_is_kept_only_when_it_declares_kept() -> None:
+    assert CallStep("master down", masters.SEATS, _nothing, kept=True).kept is True
+    assert CallStep("master down", masters.SEATS, _nothing).kept is False
+
+
+def test_a_kept_step_runs_in_the_scheduling_context() -> None:
+    seen: list[str] = []
+
+    def read(ctx: Context) -> Result:
+        seen.append(MARK.get())
+        return Result()
+
+    token = MARK.set("scheduled")
+    try:
+        with pool.running(critical_s=0.3, slow_s=1.0):
+            engine.run_graph((Step("master down", "b", read, kept=True),), Context(View(), Deadline.after(10.0)))
+    finally:
+        MARK.reset(token)
+    assert seen == ["scheduled"]

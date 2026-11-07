@@ -506,7 +506,7 @@ def _eager(
                     earlier = found.handed_of(step.needs - names)
                     future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found)
                     submitted.append(future)
-                    running[future] = (step, clock(), Deadline.after(2 * step.budget_s + SETTLE_S, clock=clock))
+                    running[future] = (step, clock(), ctx.deadline)
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
