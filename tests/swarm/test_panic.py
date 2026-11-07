@@ -700,6 +700,7 @@ def test_a_push_without_a_session_directory_stays_frozen(
     fix = _checkout(tmp_path / "fix", "fix-branch")
     refused = blocker_window.pretool("Bash", {"command": f"cd {fix} && git push"}, "s", "")
     assert refused[1] is not None
+    assert blocker_window._directory("", [str(fix)]) == ""
 
 
 @pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
