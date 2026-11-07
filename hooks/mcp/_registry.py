@@ -7,6 +7,7 @@ CATEGORY_MODULES = {
     "scheduler": "hooks.mcp.scheduler",
     "recall": "hooks.mcp.recall",
     "sessions": "hooks.mcp.sessions",
+    "culture": "hooks.mcp.culture",
 }
 
 ALL_CATEGORIES = list(CATEGORY_MODULES.keys())
