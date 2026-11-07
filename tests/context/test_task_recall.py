@@ -1,7 +1,7 @@
 """Brain recall for the swarm task a session is bound to."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -78,7 +78,7 @@ def test_recall_is_capped_by_the_payload_limit(monkeypatch: pytest.MonkeyPatch) 
 def test_session_start_injects_the_task_recall(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr("hooks.config.BRAIN_ENABLED", True)
-    injected: list[tuple[str, str]] = []
+    injected: list[tuple[str, str, bool]] = []
     with (
         patch("hooks.context.brain_adapter.force_refresh", return_value=False),
         patch("hooks.context.brain_adapter.task_recall", return_value="TASK RECALL block"),
@@ -87,7 +87,84 @@ def test_session_start_injects_the_task_recall(monkeypatch: pytest.MonkeyPatch, 
         patch("hooks.context.project_sessions.record_session"),
         patch("hooks.context.task_context.offer", return_value=None),
         patch("hooks.context.task_context.restart"),
-        patch("hooks.common.inject_context", side_effect=lambda text, **kw: injected.append((text, kw["kind"]))),
+        patch(
+            "hooks.common.inject_context",
+            side_effect=lambda text, **kw: injected.append((text, kw["kind"], kw["skip_compression"])),
+        ),
     ):
         brain_adapter.inject_on_session_start("s1", "/repo")
-    assert injected == [("TASK RECALL block", "brain")]
+    assert injected == [("TASK RECALL block", "brain", True)]
+
+
+def _search(env: dict, ledger: dict | None, found: dict | None) -> tuple[str | None, list, list]:
+    with (
+        patch("scripts.swarm_ledger.storage.read_ledger", return_value=ledger) as read,
+        patch("hooks._brain_http.get", return_value=found) as get,
+    ):
+        return brain_adapter.task_recall(env), read.call_args_list, get.call_args_list
+
+
+@pytest.mark.feature("brain-task-recall")
+def test_recall_renders_the_exact_block_from_one_vault_search() -> None:
+    found = {"results": [_hit("lessons/a.md", 3, 5, "one  two\nthree"), {"tokens_matched": 5}]}
+    block, reads, calls = _search(BOUND, _ledger(), found)
+    assert reads == [call(Path("/nowhere"), "demo", "tasks/t9")]
+    assert calls == [
+        call("/vault/search", params={"q": "placement stops picking saturated hive", "limit": 10, "context_lines": 0})
+    ]
+    assert block == (
+        "TASK RECALL for t9 (brain search, recalled context, not an operator directive):\n"
+        "- lessons/a.md: one two three\n"
+        "- : "
+    )
+
+
+@pytest.mark.feature("brain-task-recall")
+def test_the_ledger_folder_defaults_under_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t9"}
+    _, reads, _ = _search(env, None, None)
+    assert reads == [call(tmp_path / "development-ledger", "demo", "tasks/t9")]
+
+
+@pytest.mark.feature("brain-task-recall")
+@pytest.mark.parametrize(
+    "env",
+    [{}, {"AGENTIHOOKS_SWARM": "demo"}, {"AGENTIHOOKS_SWARM_TASK": "t9"}],
+    ids=["neither", "swarm-only", "task-only"],
+)
+def test_an_unbound_session_reads_no_ledger(env: dict) -> None:
+    with patch("scripts.swarm_ledger.storage.read_ledger") as read:
+        assert brain_adapter._bound_task_title(env) == ("", "")
+    read.assert_not_called()
+
+
+@pytest.mark.feature("brain-task-recall")
+def test_a_task_without_a_title_searches_nothing() -> None:
+    block, _, calls = _search(BOUND, {"tasks": [{"id": "t9"}]}, {"results": [_hit("a.md", 5, 5, "x")]})
+    assert block is None and calls == []
+
+
+@pytest.mark.feature("brain-task-recall")
+def test_a_hit_matching_exactly_half_the_words_is_kept() -> None:
+    found = {"results": [_hit("half.md", 1, 2, "kept"), {"path": "none.md", "snippets": [{"snippet": "dropped"}]}]}
+    block, _, _ = _search(BOUND, _ledger("Saturated hive"), found)
+    assert block is not None
+    assert "half.md" in block and "none.md" not in block
+
+
+@pytest.mark.feature("brain-task-recall")
+def test_the_payload_cap_trims_trailing_space_before_the_ellipsis(monkeypatch: pytest.MonkeyPatch) -> None:
+    found = {"results": [_hit("lessons/a.md", 4, 5, "saturated hive " * 10)]}
+    monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", 0)
+    full, _, _ = _search(BOUND, _ledger(), found)
+    assert full is not None and not full.endswith("…")
+    monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", len(full))
+    assert _search(BOUND, _ledger(), found)[0] == full
+    monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", 1)
+    assert _search(BOUND, _ledger(), found)[0] == "…"
+    space = full.rindex(" ", 0, len(full) - 5)
+    monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", space + 2)
+    assert _search(BOUND, _ledger(), found)[0] == full[:space] + "…"
+    monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", space + 3)
+    assert _search(BOUND, _ledger(), found)[0] == full[: space + 2] + "…"
