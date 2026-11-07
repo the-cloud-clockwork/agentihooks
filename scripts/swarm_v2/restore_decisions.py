@@ -17,7 +17,11 @@ def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: W
     if not address:
         raise SwarmError("the Anton controller API address is unavailable")
     if who.pinned:
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or ledger.launch_token(slug, who.name)
+        token = (
+            operator_auth.agent_credential(slug, page_credential, who.name)
+            or os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN")
+            or ledger.launch_token(slug, who.name)
+        )
     else:
         token = operator_auth.credential(slug, page_credential, who)
     if not token:
