@@ -85,7 +85,7 @@ def test_a_failed_launch_reports_its_failure_once_under_the_spawn_step(store, ca
         timing.ON_FAILURE.reset(token)
     assert [entry for entry in reported if entry[1] == "herdr down"] == [("scripts.swarm.tick._spawn", "herdr down")]
     (launch,) = [row for row in finished(capsys) if row["step"] == timing.named(FakeRuntime.spawn)]
-    assert (launch["outcome"], launch["error"]) == ("error", "scripts.swarm.tick.SpawnError")
+    assert (launch["outcome"], launch["error"]) == ("error", "scripts.tick.steps.claims.SpawnError")
 
 
 def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, monkeypatch):

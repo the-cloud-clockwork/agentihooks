@@ -9,9 +9,8 @@ further master seats its count holds.
 import json
 import os  # noqa: F401
 import time  # noqa: F401
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace  # noqa: F401
-from typing import Any, Protocol
+from typing import Any
 
 import scripts.tick.steps.agents  # noqa: F401
 from hooks.context import context_recycle  # noqa: F401
@@ -26,10 +25,10 @@ from scripts.inbox.seats import seat_address  # noqa: F401
 from scripts.inbox.store import CLOSED, InboxStore  # noqa: F401
 from scripts.swarm import (
     affinity,  # noqa: F401
-    apply_wait,
+    apply_wait,  # noqa: F401
     bottleneck_remedy,  # noqa: F401
     claim_hold,  # noqa: F401
-    claim_order,
+    claim_order,  # noqa: F401
     content_refusal,  # noqa: F401
     continuation,
     control_notifications,  # noqa: F401
@@ -39,8 +38,8 @@ from scripts.swarm import (
     dispatcher,  # noqa: F401
     elapsed,
     failed_panes,  # noqa: F401
-    fleet_red,
-    freeze,
+    fleet_red,  # noqa: F401
+    freeze,  # noqa: F401
     grouping,  # noqa: F401
     held_elsewhere,  # noqa: F401
     input_wait,  # noqa: F401
@@ -58,9 +57,9 @@ from scripts.swarm import (
     pane_evidence,  # noqa: F401
     panic,  # noqa: F401
     preempt,  # noqa: F401
-    readiness,
+    readiness,  # noqa: F401
     reaper,
-    release_wait,
+    release_wait,  # noqa: F401
     resume,  # noqa: F401
     retire_watch,  # noqa: F401
     revoked_seats,  # noqa: F401
@@ -75,7 +74,6 @@ from scripts.swarm import (
 from scripts.swarm import idle as idle_state  # noqa: F401
 from scripts.swarm.ledger_client import LedgerRefused, pass_state  # noqa: F401
 from scripts.swarm.naming import lane_of, parse, seat_label  # noqa: F401
-from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved  # noqa: F401
 from scripts.swarm.ready import awaiting as awaiting_merge  # noqa: F401
 from scripts.swarm.store import (  # noqa: F401
@@ -87,8 +85,8 @@ from scripts.swarm.store import (  # noqa: F401
     SwarmConfig,
     SwarmError,
 )
-from scripts.swarm_ledger import ledger_rank, ledger_workspace
-from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_ledger import ledger_rank, ledger_workspace  # noqa: F401
+from scripts.swarm_ledger.repository import hierarchy  # noqa: F401
 from scripts.swarm_v2 import masters as master_seats  # noqa: F401
 from scripts.tick import engine, pool, steps
 from scripts.tick.deadline import Deadline  # noqa: F401
@@ -135,6 +133,20 @@ from scripts.tick.steps.masters import (  # noqa: F401
 from scripts.tick.steps.masters import _run_group as run_group  # noqa: F401
 
 from scripts.tick import sites as tick_sites  # isort: skip
+from scripts.tick.steps.claims import (  # noqa: F401
+    Claims,
+    Ledger,
+    Placed,
+    Runtime,
+    SpawnError,
+    _claimable,
+    _demoted,
+    _launch_order,
+    _owned_tasks,
+    agent_status,
+    claim_view,
+    ready_in_order,
+)
 from scripts.tick.steps.common import (
     _collected,  # noqa: F401
     _current_owner,
@@ -264,83 +276,6 @@ NUDGE = (
 )
 
 
-class SpawnError(RuntimeError):
-    def __init__(self, message: str, status: str = "refused", pane_id: str = "", *, harness: str = ""):
-        super().__init__(message)
-        self.status = status
-        self.pane_id = pane_id
-        self.harness = harness
-
-    def step_fields(self) -> dict[str, str]:
-        """The message and status a failed tick step records for this launch."""
-        return {"detail": str(self), "status": str(self.status)}
-
-    def waiting(self) -> bool:
-        """Whether this launch only waits: its hive acknowledgement is pending or its account reservation is full."""
-        full = self.status == "unavailable" and str(self).startswith("account reservation is full")
-        return self.status == "pending" or full
-
-
-@dataclass(frozen=True)
-class Placed:
-    pane_id: str
-    harness: str
-    account: str = ""
-    model: str = ""
-    effort: str = ""
-    placement: str = ""
-    profile: str = ""
-    model_source: str = ""
-    model_confidence: float | None = None
-    profile_decision: dict = field(default_factory=dict)
-    choice: str = ""
-    launched_at: int = 0
-    overlays: list = field(default_factory=list)
-    launch_timings: dict = field(default_factory=dict)
-    route_kind: str = "subscription"
-    transport: str = ""
-    execution: AgentRecord | None = None
-    remote_control: dict = field(default_factory=dict)
-    desired_route_kind: str | None = None
-    conversation_id: str = ""
-    launch_job: dict = field(default_factory=dict)
-
-
-class Ledger(Protocol):
-    def state(self, slug: str) -> dict: ...
-    def update_task(
-        self, slug: str, task_id: str, fields: dict, by: str = ..., if_state: tuple = ..., if_match: dict | None = ...
-    ) -> dict: ...
-    def comment(self, slug: str, task_id: str, text: str, by: str) -> None: ...
-    def notice(self, slug: str, task_id: str, text: str) -> None: ...
-    def notify(self, slug: str, text: str) -> None: ...
-    def closed(self, slug: str) -> bool: ...
-    def bin_closed(self, slug: str, closed_at: int) -> bool: ...
-
-
-class Runtime(Protocol):
-    def has_capacity(self, config) -> bool: ...
-    def spawn(self, config, lane: str, name: str, task: dict) -> Placed: ...
-    def live_names(self) -> set[str]: ...
-    def reported(self, agent: AgentRecord) -> bool: ...
-    def bindings(self, agents: list[AgentRecord]) -> dict: ...
-    def recover(self, name: str) -> Placed: ...
-    def retire(self, agent: AgentRecord, homes: list = ...) -> bool: ...
-    def refusal(self, agent: AgentRecord) -> dict: ...
-    def reap_name(self, name: str) -> bool: ...
-    def status(self, agent: AgentRecord) -> str: ...
-    def observe(self, agent: AgentRecord) -> PaneObservation: ...
-    def nudge(self, agent: AgentRecord, text: str) -> str | None: ...
-    def dismiss(self, agent: AgentRecord) -> bool: ...
-    def name_pane(self, agent: AgentRecord) -> bool: ...
-    def conversations(self) -> dict[str, str] | None: ...
-    def resume(self, config, agent: AgentRecord, text: str) -> Placed: ...  # noqa: F811
-    def close_space(self, config: SwarmConfig) -> bool: ...
-    def pane_tail(self, pane_id: str, lines: int) -> str: ...
-    def launched_pane(self, pane_id: str, name: str) -> bool: ...
-    def close_pane(self, pane_id: str) -> None: ...
-
-
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
     box: dict[str, Any] = steps.PassBox()
@@ -350,90 +285,6 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
     records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
     observe_steps.raise_held(box)
     return [] if sites.left else steps.actions(records)
-
-
-def agent_status(agent):
-    if agent.state in {"finished", "awaiting-decision"}:
-        return agent.state
-    if agent.input_prompt:
-        return "waiting"
-    if agent.idle_ticks >= IDLE_NUDGE_TICKS:
-        return "stalled"
-    return "idle" if agent.idle_ticks else "working"
-
-
-def ready_in_order(slug, store, rows, doc, lane, dispatched=None, claims=None):
-    return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched, claims), dispatched)
-
-
-def _owned_tasks(slug, store):
-    return {agent.task for agent in store.agents(slug) if agent.state != "finished"}
-
-
-def _claimable(slug, store, rows, doc, lane, dispatched=None, claims=None):
-    claims = claims or claim_view(slug, store, rows, doc, dispatched)
-    held = list(claims.held)
-    clear, overlapping = [], []
-    for t in claims.ordered:
-        if readiness.claimable(t, lane, claims.view):
-            mine = t.get("territory") or []
-            if any(_overlaps(mine, other) for other in held):
-                overlapping.append(t)
-                continue
-            clear.append(t)
-            held.append(mine)
-    return clear + overlapping
-
-
-@dataclass(frozen=True)
-class Claims:
-    view: readiness.Snapshot
-    held: list
-    ordered: list
-
-
-def claim_view(
-    slug: str,
-    store: RedisStore,
-    rows: dict[str, dict[str, Any]],
-    doc: dict[str, Any],
-    dispatched: Callable[[dict[str, Any]], tuple[Any, ...]] | None = None,
-) -> Claims:
-    awaiting = _owned_tasks(slug, store)
-    claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
-    held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
-    config = store.config(slug)
-    graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released, applied = release_wait.checker(config), apply_wait.checker(config, rows)
-    unshared = fleet_red.checker(fleet_red.saved_reader(store, slug))
-    view = readiness.Snapshot(
-        slug,
-        rows,
-        doc,
-        graph,
-        fix,
-        lambda task_id: task_id in awaiting or task_id in claimed,
-        lambda task: released(task) and applied(task) and unshared(task),
-    )
-    return Claims(view, held, sorted(rows.values(), key=dispatched or claim_order.key(rows)))
-
-
-def _launch_order(slug, store, tasks, dispatched=None):
-    demoted = _demoted(slug, store, [task["id"] for task in tasks])
-    return sorted(
-        tasks,
-        key=lambda task: (
-            dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            task["id"] in demoted,
-            not claim_order.resumed(task),
-        ),
-    )
-
-
-def _demoted(slug, store, task_ids):
-    failed = store.launch_failures(slug)
-    held = [task_id for task_id in task_ids if failed.get(task_id)]
-    return set(held) - store.handoff_tasks(slug, held) if held else set()
 
 
 def _prepare(run, lane, task, taken, failing, peers):
