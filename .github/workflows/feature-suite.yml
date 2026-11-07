@@ -24,10 +24,39 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Start Redis and Postgres from retried pulls
+      - name: Restore the service images saved on dev
+        id: service-images
+        uses: actions/cache/restore@v4
+        timeout-minutes: 5
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
+        with:
+          path: ${{ runner.temp }}/feature-service-images
+          key: feature-service-images-redis-7-alpine-postgres-16-v1
+
+      - name: Pull the service images once on a cache miss
+        if: steps.service-images.outputs.cache-hit != 'true'
         run: |
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine
           bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/postgres:16
+          mkdir -p "$RUNNER_TEMP/feature-service-images"
+          docker save -o "$RUNNER_TEMP/feature-service-images/images.tar" public.ecr.aws/docker/library/redis:7-alpine public.ecr.aws/docker/library/postgres:16
+
+      - name: Save the service images for later runs
+        if: steps.service-images.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/feature-service-images
+          key: feature-service-images-redis-7-alpine-postgres-16-v1
+
+      - name: Start Redis and Postgres from the saved images
+        env:
+          SERVICE_IMAGES_HIT: ${{ steps.service-images.outputs.cache-hit }}
+        run: |
+          if [[ "$SERVICE_IMAGES_HIT" == true ]]; then
+            docker load -i "$RUNNER_TEMP/feature-service-images/images.tar"
+          fi
           docker run --pull never --rm -d --name "feature-redis-$GITHUB_RUN_ID" -p 127.0.0.1:6380:6379 public.ecr.aws/docker/library/redis:7-alpine
           docker run --pull never --rm -d --name "feature-postgres-$GITHUB_RUN_ID" -p 127.0.0.1:5434:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=ledger public.ecr.aws/docker/library/postgres:16
           timeout 30 bash -c "until docker exec feature-redis-$GITHUB_RUN_ID redis-cli ping; do sleep 1; done"
