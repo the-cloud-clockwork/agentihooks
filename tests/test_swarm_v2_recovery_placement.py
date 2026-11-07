@@ -46,8 +46,9 @@ def test_an_unschedulable_attempt_never_reopens_reassigned_or_finished_work(
     assert ledger.calls == []
 
 
+@pytest.mark.parametrize("change", ["unchanged", "scheduled", "deleted", "seat_moved"])
 def test_unschedulable_finalization_resumes_after_the_agent_was_ended(
-    world: Any, monkeypatch: pytest.MonkeyPatch
+    world: Any, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     from scripts.swarm_v2 import retention
     from scripts.swarm_v2.kubernetes.unschedulable import Unschedulable
@@ -69,8 +70,27 @@ def test_unschedulable_finalization_resumes_after_the_agent_was_ended(
         ending(pods)
     assert world.store.execution(cases.SLUG, world.old.execution_id).state == "ended"
     monkeypatch.setattr(retention, "finalize", finalize)
+    if change == "scheduled":
+        pods[0]["status"] = {"phase": "Running"}
+    elif change == "deleted":
+        pods = []
+    elif change == "seat_moved":
+        world.launch(world.live, world.fx["first"])
 
     assert ending(pods) == {world.old.execution_id: "ended"}
     final = retention.final(world.store, cases.SLUG, world.old.execution_id)
     assert final is not None
     assert final.state == "cancelled"
+    from types import SimpleNamespace
+
+    from scripts.swarm_v2 import deployed
+    from tests.test_swarm_v2_kubernetes_failures import _Cleaning, _Grants
+
+    recover = deployed.recovery_pass(
+        cast(Any, SimpleNamespace(controller=world.live, grants=_Grants())),
+        cast(Any, SimpleNamespace(image_tag="dev")),
+        cast(Any, _Cleaning(world)),
+    )
+    assert recover.completion is not None
+    recover.completion(list(world.api.objects.values()))
+    assert f"swarm-{world.old.execution_id}" not in world.api.objects

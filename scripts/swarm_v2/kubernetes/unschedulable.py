@@ -67,8 +67,9 @@ class Unschedulable:
         key, now = self.store.key(self.slug, SINCE), lease.now_ms(self.store)
         waiting: set[str] = set()
         ended: dict[str, str] = {}
-        for agent in self.store.execution_occupants(self.slug).values():
-            if not self._live(agent) or agent.execution_id not in stuck:
+        for agent in self.store.execution_registry.records(self.slug):
+            finishing = agent.state == ENDED and self.redis.hexists(key, agent.execution_id)
+            if not self._live(agent) or (agent.execution_id not in stuck and not finishing):
                 continue
             self.controller.require()
             self.redis.hsetnx(key, agent.execution_id, now)
@@ -85,13 +86,12 @@ class Unschedulable:
     def _live(self, agent: AgentRecord) -> bool:
         return (
             agent.runtime_backend == BACKEND
-            and agent.state != ENDED
             and not self.redis.hexists(self.store.key(self.slug, FENCES), agent.execution_id)
             and retention.final(self.store, self.slug, agent.execution_id) is None
         )
 
     def _end(self, agent: AgentRecord) -> bool:
-        if not reopen(self.store, self.slug, self.controller, self.ledger, agent):
+        if agent.state != ENDED and not reopen(self.store, self.slug, self.controller, self.ledger, agent):
             return False
         end = retention.archive_watermark(self.store, self.slug, agent.execution_id)
         outcome = f"{SINCE}/{agent.execution_id}"

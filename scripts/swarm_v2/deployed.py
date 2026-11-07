@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
@@ -397,7 +397,7 @@ def recovery_pass(
     cleanup = Cleanup(controller.store, slug, api, controller.require, attach, releases["grant"])
     recovering.completion = Completion(controller.store, slug, cleanup)
     if ledger is not None:
-        recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger, placed=True)
+        recovering.replacements = Replacements(recovery, cast(Any, service.runtime).relaunch, ledger, placed=True)
         recovering.ending = Unschedulable(controller.store, slug, controller, ledger)
     if environ is not None:
         recovering.choose = partial(proof_swarm.choose_fresh, environ, recovery)

@@ -44,7 +44,7 @@ Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
 
 class Replacements:
     def __init__(self, recovery: Recovery, relaunch: Relaunch, ledger: TaskLedger, placed: bool = False) -> None:
-        """`placed` sends a fresh replacement through hive placement instead of relaunching it where it failed."""
+        """Placed fresh and node loss replacements return to hive placement through the task queue."""
         self.recovery, self.relaunch, self.ledger, self.placed = recovery, relaunch, ledger, placed
         self.store, self.slug, self.controller = recovery.store, recovery.slug, recovery.controller
 
@@ -95,7 +95,7 @@ class Replacements:
         return outcome.status.value
 
     def _place(self, decision: Decision, successor: AgentRecord) -> str:
-        """A fresh replacement resumes nothing, so its task reopens and the next lane spawn places it on a hive."""
+        """Reopen the replacement task for the next lane spawn to place on a hive."""
         if not reopen(self.store, self.slug, self.controller, self.ledger, successor):
             return DEFERRED
         self._launched(decision)
