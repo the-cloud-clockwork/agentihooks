@@ -10,6 +10,7 @@ from typing import Any
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
+from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -111,6 +112,11 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             hive[placement.FIRST_ROOM] = ranked.room
             hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
+
+
+def hosted_profiles(redis: Any, hives: list[dict]) -> frozenset[str]:
+    """The profiles the given hives advertise in their configuration snapshots, bundle profiles included."""
+    return frozenset(name for hive in hives for name in (hive_config.read(redis, hive["id"]) or {}).get("profiles", []))
 
 
 def _master_logins(hives: list[dict], front: bool) -> list[dict]:
@@ -306,9 +312,10 @@ class HiveLaunch:
     ) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
-        decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] not in (excluded or ())]
+        hosted = hosted_profiles(self.store.redis, hives)
+        decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ), hosted)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:

@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -595,11 +595,28 @@ class HerdrRuntime:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         return agent, reason
 
-    def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
+    def _profile_decision(
+        self,
+        config: SwarmConfig,
+        lane: str,
+        chosen: dict,
+        task: dict,
+        saved: dict,
+        relaunch: dict,
+        environ: dict,
+        hosted: Collection[str] = (),
+    ) -> profile_choice.ProfileDecision:
         decision = profile_choice.kept(task, saved, relaunch)
         if decision is None:
             decision = timing.call(
-                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
+                profile_choice.choose,
+                config.slug,
+                lane,
+                chosen,
+                task,
+                environ,
+                getattr(config, "overlays", {}),
+                hosted=hosted,
             )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""

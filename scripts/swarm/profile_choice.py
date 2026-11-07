@@ -1,5 +1,6 @@
 """The typed profile decision made before every swarm launch: explicit task profile, fixed lane, else the classifier."""
 
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, replace
 
 from hooks.classifier import ClassifierUnavailable, decide, definitions, runner
@@ -45,10 +46,17 @@ def preferred(profile: str) -> tuple[str, ...]:
 
 
 def choose(
-    slug: str, lane: str, lane_config: dict, task: dict, environ: dict, role_overlays: dict | None = None
+    slug: str,
+    lane: str,
+    lane_config: dict,
+    task: dict,
+    environ: dict,
+    role_overlays: dict | None = None,
+    hosted: Collection[str] = (),
 ) -> ProfileDecision:
+    """Decide the launch profile; it counts as installed when this host resolves it or a placement target hosts it."""
     decision = pick(slug, lane, lane_config, task, environ)
-    if not installed(decision.profile):
+    if decision.profile not in hosted and not installed(decision.profile):
         raise ProfileUnresolved(
             f"task {task.get('id')} needs profile {decision.profile}, which is not installed: install it with "
             f"agentihooks init or {_remedy(slug, task)}"
