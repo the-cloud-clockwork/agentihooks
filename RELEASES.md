@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.708 · 2026-11-07
+
+### 2026-11-07 · 8c6a18ef976b · #9984 · @nestorcolt
+
+**Refuse a CPU saturated preferred hive at placement**
+
+Placement was choosing a preferred hive purely by its memory based "first room" estimate, ignoring real CPU and pod limits, so a CPU saturated hive kept winning eng and ci placements even while idle hives sat empty. This change makes the first room check honor host and pod CPU limits the same way the real room does, so a saturated preferred hive now fails the room check and placement correctly spills to the next available hive, matching how load actually looks in the registry.
+
 ## v2.17.706 · 2026-11-07
 
 ### 2026-11-07 · 236181ac7ab9 · #9967 · @agenticore-app
