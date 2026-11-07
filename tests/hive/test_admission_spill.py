@@ -140,17 +140,18 @@ def _load(launched, hive_id, **fields):
     store.redis.set(key, json.dumps({**json.loads(store.redis.get(key)), **fields}))
 
 
-def test_the_first_ranked_hive_takes_a_launch_under_cpu_load_below_the_memory_line(setup, capsys):  # noqa: F811
+def test_a_spill_past_a_cpu_saturated_first_ranked_hive_records_its_cpu_refusal(setup, capsys):  # noqa: F811
     write_hive(setup, prefer={"eng": 1})
     write_hive(setup, id="spare")
-    _load(setup, "remote", cpus=1, load5=2.0)
+    _load(setup, "remote", cpus=16, load5=28.7)
     request = request_for(setup)
     request.task[ACK_LATER] = True
     assert setup.launcher.spawn(request).status is Status.PENDING
     order = setup.launcher.orders_for(request.task["id"])
-    assert order.hive == "remote"
-    assert "placement_spill" not in setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
-    assert "hive_placement_spill" not in capsys.readouterr().err
+    assert order.hive == "spare"
+    refused = "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+    decision = setup.store.execution_registry.get("fixture", order.execution_id).profile_decision
+    assert decision["placement_spill"] == {"preferred": "remote", "refusal": refused}
 
 
 @pytest.mark.parametrize("in_pass", [False, True])
