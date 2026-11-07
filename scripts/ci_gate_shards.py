@@ -3,10 +3,11 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from scripts.ci_budget import rate_limit
-from scripts.ci_budget.rate_limit import gh_api
+
+gh_api = cast("Callable[..., subprocess.CompletedProcess[bytes]]", rate_limit.gh_api)
 
 RETRY_DELAYS = (5, 10, 20, None)
 POLL_SECONDS = 15

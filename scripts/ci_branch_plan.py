@@ -6,10 +6,12 @@ import re
 import subprocess
 import zipfile
 import zlib
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from itertools import takewhile
 from pathlib import Path
 from time import monotonic, sleep
+from typing import Any, cast
 from urllib.parse import urlencode
 
 from scripts.ci_budget import rate_limit
@@ -36,7 +38,7 @@ class Barrier(Exception):
         self.vetoes = vetoes or set()
 
 
-def _earlier(run: dict, args: argparse.Namespace) -> bool:
+def _earlier(run: dict[str, Any], args: argparse.Namespace) -> bool:
     return (
         run["id"] != args.run
         and run["event"] == "pull_request"
@@ -49,14 +51,14 @@ def _earlier(run: dict, args: argparse.Namespace) -> bool:
     )
 
 
-def _runs(actions: str, args: argparse.Namespace) -> list[dict]:
+def _runs(actions: str, args: argparse.Namespace) -> list[dict[str, Any]]:
     query = urlencode({"branch": args.head_ref, "event": "pull_request", "per_page": LISTED})
     listed = json.loads(_api(f"{actions}/workflows/test.yml/runs?{query}"))["workflow_runs"]
     return [run for run in listed if _earlier(run, args)][:RUNS]
 
 
-def _paged(endpoint: str, key: str) -> tuple[list[dict], int]:
-    found = []
+def _paged(endpoint: str, key: str) -> tuple[list[dict[str, Any]], int]:
+    found: list[dict[str, Any]] = []
     for page in range(1, PAGES + 1):
         listed = json.loads(_api(f"{endpoint}?per_page={PAGE_SIZE}&page={page}"))[key]
         found += listed
@@ -65,16 +67,16 @@ def _paged(endpoint: str, key: str) -> tuple[list[dict], int]:
     raise Barrier(f"it lists more than {PAGES} pages of {key}")
 
 
-def _started(job: dict) -> bool:
+def _started(job: dict[str, Any]) -> bool:
     return any(
         step["name"] in TEST_STEPS and (step["status"] == "in_progress" or step["conclusion"] not in (None, "skipped"))
         for step in job["steps"]
     )
 
 
-def _listing(actions: str, run: dict) -> tuple[list[dict], set[str], int]:
+def _listing(actions: str, run: dict[str, Any]) -> tuple[list[dict[str, Any]], set[str], int]:
     listed, pages = _paged(f"{actions}/runs/{run['id']}/artifacts", "artifacts")
-    required = set()
+    required: set[str] = set()
     for attempt in range(1, run["run_attempt"] + 1):
         jobs, more = _paged(f"{actions}/runs/{run['id']}/attempts/{attempt}/jobs", "jobs")
         pages += more
@@ -84,8 +86,10 @@ def _listing(actions: str, run: dict) -> tuple[list[dict], set[str], int]:
 
 
 def _schema(record: object) -> bool:
-    if not isinstance(record, dict) or not isinstance(manifest := record.get("manifest"), dict):
+    if not isinstance(record, dict) or not isinstance(manifest := cast("dict[str, Any]", record).get("manifest"), dict):
         return False
+    record = cast("dict[str, Any]", record)
+    manifest = cast("dict[str, Any]", manifest)
     units, tests = manifest.get("units"), manifest.get("tests")
     return (
         all(type(record.get(key)) is int for key in ("version", "run", "attempt", "pull"))
@@ -93,13 +97,16 @@ def _schema(record: object) -> bool:
         and all(_strings(record.get(key)) for key in ("passed", "failed", "flaky"))
         and _strings(units)
         and isinstance(tests, dict)
-        and all(_valid_test(test, len(units), set()) for test in tests.values())
+        and all(
+            _valid_test(test, len(cast("list[Any]", units)), set()) for test in cast("dict[str, Any]", tests).values()
+        )
     )
 
 
-def _invalid(record: object, name: str, run: dict, args: argparse.Namespace) -> str | None:
-    if not _schema(record) or record["version"] != 1:
+def _invalid(record: object, name: str, run: dict[str, Any], args: argparse.Namespace) -> str | None:
+    if not _schema(record) or cast("dict[str, Any]", record)["version"] != 1:
         return "the record schema is invalid"
+    record = cast("dict[str, Any]", record)
     expected = {"run": run["id"], "head": run["head_sha"], "pull": args.pull, "environment": args.environment}
     if differed := [key for key, value in expected.items() if record[key] != value]:
         return f"{', '.join(differed)} differed from its run"
@@ -110,7 +117,7 @@ def _invalid(record: object, name: str, run: dict, args: argparse.Namespace) -> 
     return None
 
 
-def _record(data: bytes, name: str, run: dict, args: argparse.Namespace) -> dict:
+def _record(data: bytes, name: str, run: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             record = json.loads(archive.read("record.json"))
@@ -125,15 +132,17 @@ def _present(root: str, commit: str) -> bool:
     return subprocess.run(["git", "-C", root, "fetch", "--no-tags", "origin", commit]).returncode == 0
 
 
-def _changes(root: str, commit: str, cache: dict) -> list | None:
+def _changes(root: str, commit: str, cache: dict[str, Any]) -> list[tuple[str, str | None, str | None]] | None:
     if commit not in cache:
-        cache[commit] = dep_manifest.changes(root, commit, "HEAD") if _present(root, commit) else None
+        cache[commit] = dep_manifest.changes(cast("Path", root), commit, "HEAD") if _present(root, commit) else None
     return cache[commit]
 
 
-def _read(pool: ThreadPoolExecutor, actions: str, run: dict, items: list[dict], args: argparse.Namespace) -> list[dict]:
+def _read(
+    pool: ThreadPoolExecutor, actions: str, run: dict[str, Any], items: list[dict[str, Any]], args: argparse.Namespace
+) -> list[dict[str, Any]]:
     downloads = [pool.submit(_api, f"{actions}/artifacts/{item['id']}/zip") for item in items]
-    records = []
+    records: list[dict[str, Any]] = []
     for item, download in zip(items, downloads):
         try:
             records.append(_record(download.result(), item["name"], run, args))
@@ -142,24 +151,33 @@ def _read(pool: ThreadPoolExecutor, actions: str, run: dict, items: list[dict], 
     return sorted(records, key=lambda record: -record["attempt"])
 
 
-def _nodes(tests) -> set[str]:
+def _nodes(tests: Iterable[str]) -> set[str]:
     return {dep_manifest.node(test) for test in tests}
 
 
-def _blocked(record: dict) -> set[str]:
+def _blocked(record: dict[str, Any]) -> set[str]:
     return _nodes(record["failed"]) | _nodes(record["flaky"])
 
 
-def _outcomes(record: dict, changed: list) -> tuple[set[str], set[str]]:
-    hit, _ = dep_manifest.invalidated(record["manifest"], changed)
+def _outcomes(record: dict[str, Any], changed: list[tuple[str, str | None, str | None]]) -> tuple[set[str], set[str]]:
+    hit, _ = cast(
+        "Callable[[dict[str, Any], list[tuple[str, str | None, str | None]]], tuple[set[str], str | None]]",
+        dep_manifest.invalidated,
+    )(record["manifest"], changed)
     known = _nodes(record["manifest"]["tests"])
     valid = known - _nodes(hit)
     blocked = _blocked(record)
     return _nodes(record["passed"]) & valid, blocked & valid | blocked - known
 
 
-def _evaluate(root: str, records: list[dict], cache: dict) -> list[tuple[dict, set[str], set[str]]]:
-    usable, missing, unfetched = [], [], set()
+def _evaluate(
+    root: str, records: list[dict[str, Any]], cache: dict[str, Any]
+) -> list[tuple[dict[str, Any], set[str], set[str]]]:
+    usable, missing, unfetched = (
+        cast("list[tuple[dict[str, Any], set[str], set[str]]]", []),
+        cast("list[str]", []),
+        cast("set[str]", set()),
+    )
     for record in records:
         changed = _changes(root, record["commit"], cache)
         if changed is None:
@@ -173,14 +191,14 @@ def _evaluate(root: str, records: list[dict], cache: dict) -> list[tuple[dict, s
     return usable
 
 
-def _warn(run: dict, reason: object) -> None:
+def _warn(run: dict[str, Any], reason: object) -> None:
     print(
         f"::warning title=Unusable branch record::Pull request run {run['id']}: {reason}; neither it nor any older"
         " run is reused."
     )
 
 
-def _settled(actions: str, args: argparse.Namespace) -> tuple[list[dict], int]:
+def _settled(actions: str, args: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
     deadline = monotonic() + args.wait_seconds
     runs, polls = _runs(actions, args), 1
     while any(run["status"] != "completed" for run in runs) and monotonic() < deadline:
@@ -189,9 +207,9 @@ def _settled(actions: str, args: argparse.Namespace) -> tuple[list[dict], int]:
     return runs, polls
 
 
-def considered(args: argparse.Namespace) -> tuple[list[tuple[dict, set[str], set[str]]], set[str]]:
+def considered(args: argparse.Namespace) -> tuple[list[tuple[dict[str, Any], set[str], set[str]]], set[str]]:
     actions = f"repos/{args.repository}/actions"
-    found, cache = [], {}
+    found, cache = cast("list[tuple[dict[str, Any], set[str], set[str]]]", []), cast("dict[str, Any]", {})
     with ThreadPoolExecutor() as pool:
         runs, requests = _settled(actions, args)
         done = takewhile(lambda run: run["status"] == "completed", runs)
@@ -218,9 +236,11 @@ def considered(args: argparse.Namespace) -> tuple[list[tuple[dict, set[str], set
     return found, set()
 
 
-def choose(found: list[tuple[dict, set[str], set[str]]], vetoed: set[str], dev: set[str]) -> list[dict]:
+def choose(
+    found: list[tuple[dict[str, Any], set[str], set[str]]], vetoed: set[str], dev: set[str]
+) -> list[dict[str, Any]]:
     vetoed = vetoed.union(*(vetoes for _, _, vetoes in found))
-    entries, taken = {}, set()
+    entries, taken = cast("dict[tuple[Any, Any], dict[str, Any]]", {}), cast("set[str]", set())
     for record, passed, _ in found:
         entry = entries.setdefault(
             (record["run"], record["attempt"]),
@@ -246,11 +266,11 @@ def _refused(args: argparse.Namespace) -> str | None:
     return None
 
 
-def branch_plan(args: argparse.Namespace) -> dict:
+def branch_plan(args: argparse.Namespace) -> dict[str, Any]:
     if reason := _refused(args):
         print(f"::notice title=No branch record::{reason}")
         return {"version": 1, "runs": [], "tests": []}
-    dev = set()
+    dev: set[str] = set()
     if args.dev_plan and args.dev_plan.is_file():
         dev = _nodes(json.loads(args.dev_plan.read_text())["tests"])
     entries = choose(*considered(args), dev)
@@ -287,7 +307,7 @@ def main(argv: list[str] | None = None) -> int:
             f"::warning title=Unusable branch record::{type(error).__name__}: {error}; no test is reused from an"
             " earlier pull request run."
         )
-        chosen = {"version": 1, "runs": [], "tests": []}
+        chosen = cast("dict[str, Any]", {"version": 1, "runs": [], "tests": []})
     args.out.write_text(json.dumps(chosen))
     if destination := os.environ.get("GITHUB_OUTPUT"):
         with Path(destination).open("a") as output:

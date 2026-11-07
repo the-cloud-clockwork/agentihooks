@@ -10,6 +10,8 @@ from scripts.ci_budget import rate_limit
 from scripts.ci_gate_shards import POLL_SECONDS, api
 from scripts.ci_queue_fail_fast import logged_loss
 
+read_jobs = cast("Callable[[str, int], list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)
+
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
 REQUIRED = {"select", "split", "test-count", "shard-check"}
@@ -219,9 +221,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, 
     deadline = rate_limit.deadline = time.monotonic() + DEADLINE_SECONDS
     while time.monotonic() < deadline:
         current(repository, ref, head)
-        jobs = cast("Callable[[str, int], list[dict[str, Any]]]", scripts.ci_budget.jobs.read_jobs)(
-            f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE
-        )
+        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)
         if verify(jobs, shards, lost=lambda job: logged_loss(repository, job, seen)):
             current(repository, ref, head)
             return
