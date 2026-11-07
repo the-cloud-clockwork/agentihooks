@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence:c41e40591a98e72fffb879607218f4a96dca59192e36911d977957eda15654be": {
+    "reader": "standards_reader",
+    "reason": "Replaces the typing.cast type argument for phase with None; cast returns phase unchanged at runtime, so the mutant is equivalent."
+  }
+}
