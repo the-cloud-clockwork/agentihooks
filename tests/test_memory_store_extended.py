@@ -7,11 +7,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# =============================================================================
-# Memory dataclass
-# =============================================================================
-
-
 class TestMemoryToDict:
     """Test Memory.to_dict() conversion."""
 
@@ -116,7 +111,10 @@ class TestMemoryFromDict:
         assert not hasattr(mem, "extra_field")
 
     def test_from_dict_does_not_mutate_input(self):
-        """from_dict() makes a shallow copy, doesn't mutate input."""
+        """from_dict() makes a shallow copy, doesn't mutate input.
+
+        Original dict should still have the string.
+        """
         from hooks.memory.store import Memory
 
         data = {
@@ -131,25 +129,21 @@ class TestMemoryFromDict:
         }
         original_tags = data["tags"]
         Memory.from_dict(data)
-        # Original dict should still have the string
         assert data["tags"] == original_tags
-
-
-# =============================================================================
-# MemoryStore — file fallback CRUD
-# =============================================================================
 
 
 class TestMemoryStoreFileFallback:
     """Test MemoryStore with file fallback (no Redis)."""
 
     def _make_store(self, tmp_path):
-        """Create a MemoryStore pointing to tmp_path."""
+        """Create a MemoryStore pointing to tmp_path.
+
+        Ensure Redis is not used.
+        """
         from hooks.memory.store import MemoryStore
 
         store = MemoryStore()
         store._file_path = tmp_path / "memories.jsonl"
-        # Ensure Redis is not used
         store._redis = None
         store._redis_checked = True
         return store
@@ -186,12 +180,14 @@ class TestMemoryStoreFileFallback:
         assert len(all_mems) == 3
 
     def test_list_all_with_offset(self, tmp_path):
-        """list_all() with offset skips entries."""
+        """list_all() with offset skips entries.
+
+        Offset 1, limit 2.
+        """
         store = self._make_store(tmp_path)
         store.save("first")
         store.save("second")
         store.save("third")
-        # Offset 1, limit 2
         mems = store.list_all(limit=2, offset=1)
         assert len(mems) == 2
 
@@ -302,20 +298,17 @@ class TestMemoryStoreFileFallback:
         assert mem.summary == "my summary"
 
     def test_file_read_all_corrupt_lines(self, tmp_path):
-        """_file_read_all() skips corrupt JSON lines."""
+        """_file_read_all() skips corrupt JSON lines.
+
+        Write a mix of valid and invalid lines.
+        """
         store = self._make_store(tmp_path)
-        # Write a mix of valid and invalid lines
         with open(store._file_path, "w") as f:
             f.write('{"id":"1","content":"valid"}\n')
             f.write("not valid json\n")
             f.write('{"id":"2","content":"also valid"}\n')
         entries = store._file_read_all()
         assert len(entries) == 2
-
-
-# =============================================================================
-# MemoryStore — Redis path (mocked)
-# =============================================================================
 
 
 class TestMemoryStoreRedisPath:

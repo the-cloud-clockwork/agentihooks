@@ -593,8 +593,9 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
     )
     reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "TTL", "PTTL"}
 
-    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
     class Member(fakeredis.FakeRedis):
+        """Fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client."""
+
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in reads:
                 return admin.execute_command(*args, **options)
@@ -628,6 +629,7 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
 
 
 def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts(monkeypatch):
+    """The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant."""
     import fakeredis
     from redis.exceptions import NoPermissionError
 
@@ -645,8 +647,9 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
     )
     reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
 
-    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
     class Member(fakeredis.FakeRedis):
+        """Fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client."""
+
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in reads:
                 return admin.execute_command(*args, **options)
@@ -672,7 +675,6 @@ def test_a_member_credential_records_its_pull_request_and_voids_older_task_lifts
             updates.append((task, fields, by))
 
     swarm = store.RedisStore(member)
-    # The agent listing reads through a read only Lua pipeline that fakeredis checks without the %R~ grant.
     swarm.agents = host.agents
     member.time = lambda: (100, 5)
     monkeypatch.setattr(swarm_cli, "connect", lambda: swarm)
@@ -713,8 +715,9 @@ def test_a_member_credential_records_its_pull_request_before_a_lift_cleanup_refu
     )
     reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "HVALS", "HMGET"}
 
-    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
     class Member(fakeredis.FakeRedis):
+        """Fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client."""
+
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in reads:
                 return admin.execute_command(*args, **options)

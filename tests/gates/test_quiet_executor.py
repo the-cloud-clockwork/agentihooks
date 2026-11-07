@@ -1,5 +1,8 @@
 """The quiet claim gate through the real hook executor and a bash flag shim: a quiet agent's Bash call is refused and
-its ledger command allowed, after progress Bash is allowed again, and an agent waiting on a task is never flagged."""
+its ledger command allowed, after progress Bash is allowed again, and an agent waiting on a task is never flagged.
+
+SHIM: mutmut's trampoline finds its config only from the checkout root.
+"""
 
 import importlib
 import json
@@ -23,7 +26,6 @@ quiet = importlib.import_module(f"{PACKAGE}.quiet")
 SHIM = (
     "#!/usr/bin/env bash\n"
     '[ -e "$HOME/.agentihooks/swarm/$AGENTIHOOKS_SWARM/gates/quiet/$AGENTIHOOKS_AGENT_NAME" ] || exit 0\n'
-    # mutmut's trampoline finds its config only from the checkout root.
     f'cd "{ROOT}" && exec {sys.executable} -m {PACKAGE} quiet\n'
 )
 LS = {"command": "ls", "description": "probe"}

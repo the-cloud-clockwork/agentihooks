@@ -13,9 +13,11 @@ class TestConfig:
     """Test configuration loading."""
 
     def test_log_enabled_default(self):
-        """LOG_ENABLED reads from CLAUDE_HOOK_LOG_ENABLED."""
+        """LOG_ENABLED reads from CLAUDE_HOOK_LOG_ENABLED.
+
+        Re-import to pick up env.
+        """
         with patch.dict(os.environ, {"CLAUDE_HOOK_LOG_ENABLED": "true"}):
-            # Re-import to pick up env
             import importlib
 
             import hooks.config as cfg

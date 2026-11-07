@@ -15,11 +15,6 @@ def _write_entries(path: Path, entries: list[dict]) -> None:
             f.write(json.dumps(entry) + "\n")
 
 
-# =============================================================================
-# _parse_entries()
-# =============================================================================
-
-
 class TestParseEntries:
     """Test the internal _parse_entries() helper."""
 
@@ -57,11 +52,6 @@ class TestParseEntries:
         f.write_text("")
         entries = _parse_entries(str(f))
         assert entries == []
-
-
-# =============================================================================
-# _extract_text()
-# =============================================================================
 
 
 class TestExtractText:
@@ -130,11 +120,6 @@ class TestExtractText:
         assert _extract_text(entry) == "description"
 
 
-# =============================================================================
-# search_transcripts()
-# =============================================================================
-
-
 class TestSearchTranscripts:
     """Test search_transcripts() function."""
 
@@ -177,11 +162,12 @@ class TestSearchTranscripts:
         return str(f)
 
     def test_search_finds_matching_entries(self, tmp_path):
+        """User question + assistant answer."""
         from hooks.memory.transcript_reader import search_transcripts
 
         log_path = self._make_log(tmp_path)
         results = search_transcripts("Python", log_path=log_path)
-        assert len(results) == 2  # user question + assistant answer
+        assert len(results) == 2
 
     def test_search_case_insensitive(self, tmp_path):
         from hooks.memory.transcript_reader import search_transcripts
@@ -191,11 +177,11 @@ class TestSearchTranscripts:
         assert len(results) == 2
 
     def test_search_filter_by_session(self, tmp_path):
+        """Only entries from s1 that mention Python."""
         from hooks.memory.transcript_reader import search_transcripts
 
         log_path = self._make_log(tmp_path)
         results = search_transcripts("Python", session_id="s1", log_path=log_path)
-        # Only entries from s1 that mention Python
         assert len(results) >= 1
         for r in results:
             assert r["session_id"] == "s1"
@@ -215,11 +201,11 @@ class TestSearchTranscripts:
         assert results == []
 
     def test_search_skips_summary_entries(self, tmp_path):
+        """ "summary" type entries should be skipped (only user/assistant)"""
         from hooks.memory.transcript_reader import search_transcripts
 
         log_path = self._make_log(tmp_path)
         results = search_transcripts("summary", log_path=log_path)
-        # "summary" type entries should be skipped (only user/assistant)
         assert results == []
 
     def test_search_returns_newest_first(self, tmp_path):
@@ -249,11 +235,6 @@ class TestSearchTranscripts:
         results = search_transcripts("keyword", log_path=str(f))
         assert len(results) == 1
         assert len(results[0]["content"]) <= 2000
-
-
-# =============================================================================
-# get_session_transcript()
-# =============================================================================
 
 
 class TestGetSessionTranscript:

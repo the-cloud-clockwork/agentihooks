@@ -300,6 +300,7 @@ def stop_server(server: subprocess.Popen) -> None:
 
 
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
+    """Every failure is a red request, whatever raised it."""
     for n in itertools.count():
         began = start + n * write_every()
         if began >= deadline:
@@ -316,12 +317,15 @@ def client(api: ResourceClient, name: str, item: str, start: float, deadline: fl
             api.request(SLUG, item)
             api.request(SLUG, "tasks?limit=100")
             results["reads"].append(time.monotonic() - read)
-        except Exception as exc:  # every failure is a red request, whatever raised it
+        except Exception as exc:
             results["errors"].append(f"{name}: {type(exc).__name__}: {exc}")
 
 
 def reader(api: ResourceClient, items: list[str], start: float, deadline: float, results: dict) -> None:
-    """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second."""
+    """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second.
+
+    Every failure is a red request, whatever raised it.
+    """
     for n in itertools.count():
         began = start + n / READS_PER_SECOND
         if began >= deadline:
@@ -331,7 +335,7 @@ def reader(api: ResourceClient, items: list[str], start: float, deadline: float,
             sent = time.monotonic()
             api.request(SLUG, items[n % len(items)])
             results["item_reads"].append(time.monotonic() - sent)
-        except Exception as exc:  # every failure is a red request, whatever raised it
+        except Exception as exc:
             results["errors"].append(f"{items[0]} reader: {type(exc).__name__}: {exc}")
 
 
@@ -340,7 +344,10 @@ def single_items(n: int) -> list[str]:
 
 
 def watcher(base: str, credentials: dict, deadline: float, results: dict) -> None:
-    """The operator's page: one event stream held open through the load, as the live page holds it."""
+    """The operator's page: one event stream held open through the load, as the live page holds it.
+
+    A dropped or silent stream is a red request.
+    """
     request = urllib.request.Request(
         f"{base}/api/v1/ledgers/{SLUG}/events", headers={**credentials, "Accept": "text/event-stream"}
     )
@@ -356,7 +363,7 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
                     raise
                 if not chunk and time.monotonic() < deadline:
                     raise ConnectionError("the server closed the stream before the load ended")
-    except Exception as exc:  # a dropped or silent stream is a red request
+    except Exception as exc:
         results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
 
 
@@ -374,6 +381,7 @@ def sample_cpu(pid: int, deadline: float, results: dict) -> None:
 
 
 def preflight(api: ResourceClient, name: str, item: str) -> None:
+    """Any refusal fails the gate before the timed window."""
     op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
     try:
         reply = api.mutate(SLUG, [{**op, "text": "Load check write preflight landed."}])
@@ -381,7 +389,7 @@ def preflight(api: ResourceClient, name: str, item: str) -> None:
         raise SystemExit(
             f"write preflight refused: HTTP {exc.code} {exc.reason}: {exc.read().decode(errors='replace')}"
         )
-    except Exception as exc:  # any refusal fails the gate before the timed window
+    except Exception as exc:
         raise SystemExit(f"write preflight refused: {type(exc).__name__}: {exc}")
     if rejected := (reply.get("data") or reply).get("rejected"):
         raise SystemExit(f"write preflight refused: write rejected: {rejected}")
@@ -518,8 +526,8 @@ def budgets(source: str) -> dict:
 
 
 def base_budgets(revision: str) -> dict:
+    """Repository relative, so a mutation sandbox copy inside the checkout still reads the tracked gate."""
     gate = Path(__file__)
-    # Repository relative, so a mutation sandbox copy inside the checkout still reads the tracked gate.
     show = subprocess.run(
         ["git", "show", f"{revision}:tests/ledger_load/{gate.name}"], cwd=gate.parent, capture_output=True, text=True
     )

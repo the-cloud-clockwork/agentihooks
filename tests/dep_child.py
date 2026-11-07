@@ -41,11 +41,11 @@ def follow(children: str, root: str) -> None:
     seen = set()
 
     def audit(event: str, args: tuple) -> None:
+        """An audit hook that raises fails the open it observes."""
         if event != "open" or not isinstance(args[0], (str, bytes, os.PathLike)):
             return
         if args[1] is not None and set(str(args[1])) & set("wax"):
             return
-        # An audit hook that raises fails the open it observes.
         try:
             path = os.path.abspath(os.fsdecode(args[0]))
             source = path.endswith(".py") and loading(sys._getframe(1))

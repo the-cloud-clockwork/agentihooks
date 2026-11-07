@@ -42,8 +42,8 @@ def test_the_service_caps_memory_cpu_and_threads_and_restarts_itself():
 
 
 def test_the_healthcheck_runs_the_write_probe_on_the_checkout_code():
+    """Named in parts: the mutation gate selects tests naming a changed module, and its workspace has no deploy folder."""
     check = SERVICE["healthcheck"]
-    # Named in parts: the mutation gate selects tests naming a changed module, and its workspace has no deploy folder.
     assert check["test"] == ["CMD", "python", "-m", ".".join(["scripts", "swarm_ledger", "ledger_health"])]
     assert (check["interval"], check["timeout"], check["retries"], check["start_period"]) == ("20s", "10s", 3, "60s")
     assert SERVICE["working_dir"].startswith("${LEDGER_CODE:?")

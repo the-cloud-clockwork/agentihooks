@@ -402,6 +402,7 @@ MEMBER_READS = {
 
 @pytest.mark.parametrize("kind", ["checks", "merge", "reply"])
 def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_drift(waiting, monkeypatch, kind):
+    """The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~."""
     import fakeredis
 
     _, ledger, state = waiting
@@ -421,8 +422,9 @@ def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_
         channels=auth.ACL_PATTERNS,
     )
 
-    # fakeredis drops %R~ read selectors, so direct reads go through the admin client; pipelines stay on the member.
     class Member(fakeredis.FakeRedis):
+        """Fakeredis drops %R~ read selectors, so direct reads go through the admin client; pipelines stay on the member."""
+
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in MEMBER_READS:
                 return admin.execute_command(*args, **options)
@@ -439,7 +441,6 @@ def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_
     runs = {"checks": "https://github.com/o/r/actions/runs/40200544185", "merge": URL}
     target = runs[kind] if kind in runs else InboxStore(member).send(ME, "operator", "which branch?").id
     monkeypatch.setattr(cli, "connect", lambda: RedisStore(member))
-    # The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~.
     agent = RedisStore(admin).agents("sw")[0]
     monkeypatch.setattr(cli, "_me", lambda store, args: agent)
     assert run("sw", "--as", ME, "wait", "--on", kind, target) == 0

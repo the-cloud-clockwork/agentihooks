@@ -82,9 +82,6 @@ def result_event(verdict: str, session: str = "sess-1") -> str:
     return json.dumps(event)
 
 
-# claude_args / codex_args
-
-
 def test_claude_args_keeps_the_base_flags_before_the_schema_flag(tmp_path):
     run = make_run(tmp_path, harness="claude", schema=SCHEMA)
     assert profile_run.claude_args(run) == [
@@ -116,9 +113,6 @@ def test_codex_args_keeps_the_base_flags_before_the_schema_flag(tmp_path):
     ]
 
 
-# claude_result
-
-
 def test_claude_result_skips_unparseable_and_non_matching_lines_to_find_the_last_result():
     text = "\n".join(
         [
@@ -144,9 +138,6 @@ def test_claude_result_defaults_to_empty_text_when_the_result_key_is_absent():
 def test_claude_result_without_any_result_event_is_empty():
     text = "\n".join(["not json", json.dumps({"type": "system"})])
     assert profile_run.claude_result(text) == ("", None)
-
-
-# codex_result
 
 
 def test_codex_result_initial_session_is_none_without_a_thread_started_event(tmp_path):
@@ -175,9 +166,6 @@ def test_codex_result_reads_the_message_file_when_one_was_written(tmp_path):
     (run.run_dir / "last-message.txt").write_text("hi there")
     output, _ = profile_run.codex_result(run, "")
     assert output == "hi there"
-
-
-# execute
 
 
 def test_execute_spawns_the_child_with_closed_stdin_its_own_session_and_the_given_timeout(monkeypatch, tmp_path):
@@ -210,9 +198,6 @@ def test_execute_spawns_the_child_with_closed_stdin_its_own_session_and_the_give
     )
     assert captured["kwargs"].get("start_new_session") is True
     assert captured["wait_timeout"] == 7.5
-
-
-# run_profile wiring
 
 
 def test_the_claude_argv_without_a_schema(fake_agentihooks, tmp_path):

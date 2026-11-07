@@ -1,3 +1,5 @@
+"""RECLAIM: Exits handled twice are reported but never fail the contract: JetStream redelivers at least once."""
+
 import math
 from collections import defaultdict
 
@@ -137,7 +139,6 @@ def hub_reclaim(records: list[dict], fault: dict, until: int) -> dict:
     return {"takeover_s": _seconds(fault["t"], takeover), "first_settle_s": _seconds(fault["t"], settle)}
 
 
-# Exits handled twice are reported but never fail the contract: JetStream redelivers at least once.
 RECLAIM = {"hive-kill": hive_reclaim, "nats-restart": nats_reclaim, "hub-kill": hub_reclaim}
 MEASURED = {
     "hive-kill": ("max_s",),

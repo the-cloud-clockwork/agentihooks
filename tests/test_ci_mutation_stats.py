@@ -134,6 +134,7 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
 
 @pytest.mark.parametrize("inherited", ["before", None])
 def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
+    """Collect_shard_stats sets MUTANT_UNDER_TEST; restoring it keeps a mutation run's later tests on their mutant."""
     import os
     import subprocess
     import sys
@@ -158,7 +159,6 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     subprocess.run(["git", "add", *files], cwd=original, check=True)
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    # collect_shard_stats sets MUTANT_UNDER_TEST; restoring it keeps a mutation run's later tests on their mutant.
     monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
     monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))

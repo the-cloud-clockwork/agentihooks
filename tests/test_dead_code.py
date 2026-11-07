@@ -200,9 +200,9 @@ def test_measurement_resolves_a_symlinked_tree(tmp_path):
 
 
 def test_the_allowlist_is_written_sorted_one_space_indented(tmp_path):
+    """Vulture orders by lowercased path; the allowlist orders by exact key, so C sorts first."""
     files = {"hooks/b.py": PLANTED, "hooks/a.py": PLANTED.replace("planted", "spare")}
     tree = _recorded(tmp_path, files | {"hooks/C.py": PLANTED.replace("planted", "third")})
-    # Vulture orders by lowercased path; the allowlist orders by exact key, so C sorts first.
     assert (tree / dead_code.ALLOWLIST).read_text() == '{\n "hooks/C.py": 1,\n "hooks/a.py": 1,\n "hooks/b.py": 1\n}\n'
 
 

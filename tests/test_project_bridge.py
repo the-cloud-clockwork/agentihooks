@@ -175,6 +175,7 @@ class TestTargetGates:
         assert not (repo / ".agents").exists()
 
     def test_copilot_injects_without_the_skills_link(self, repo, monkeypatch):
+        """Copilot scans .claude/skills itself — a second root would be noise."""
         monkeypatch.setenv("AGENTIHOOKS_TARGET", "copilot")
         monkeypatch.setattr(project_bridge, "_memory_file", lambda _root: None)
         calls = []
@@ -185,7 +186,6 @@ class TestTargetGates:
         )
         project_bridge.inject_project_context(str(repo))
         assert len(calls) == 1 and "first body" in calls[0]
-        # copilot scans .claude/skills itself — a second root would be noise.
         assert not (repo / ".agents").exists()
 
     def test_codex_injects_and_links(self, repo, monkeypatch):

@@ -24,7 +24,7 @@ class RealLedgerFolder(RuntimeError):
 
 
 def reserve_port() -> socket.socket:
-    # Bound but never listening: bind 0 skips the port in every process, while a SO_REUSEADDR server still binds it.
+    """Bound but never listening: bind 0 skips the port in every process, while a SO_REUSEADDR server still binds it."""
     hold = socket.socket()
     hold.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     hold.bind(("127.0.0.1", 0))

@@ -39,13 +39,16 @@ def _run(payload: dict, env: dict) -> subprocess.CompletedProcess:
 
 
 def _assert_stdout_is_empty_or_one_json(stdout: str) -> None:
-    """The one-JSON-object contract: nothing, or exactly one parseable object."""
+    """The one-JSON-object contract: nothing, or exactly one parseable object.
+
+    Raises if not parseable — that IS the assertion.
+    """
     stripped = stdout.strip()
     if not stripped:
         return
     lines = stripped.splitlines()
     assert len(lines) == 1, f"codex must receive AT MOST one stdout line, got {len(lines)}: {lines!r}"
-    json.loads(lines[0])  # raises if not parseable — that IS the assertion
+    json.loads(lines[0])
 
 
 class TestCodexSessionStartSingleEnvelope:
@@ -56,12 +59,12 @@ class TestCodexSessionStartSingleEnvelope:
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
+        """A real git repo on main/master with a clean tree is what makes ensure_on_dev() actually produce a switch
+        message — the exact condition that fed the second print.
+        """
         self._empty_home = str(tmp_path / "empty_agentihooks")
         (tmp_path / "empty_agentihooks").mkdir()
         (tmp_path / "empty_agentihooks" / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
-        # A real git repo on main/master with a clean tree is what makes
-        # ensure_on_dev() actually produce a switch message — the exact
-        # condition that fed the second print.
         repo = tmp_path / "repo"
         repo.mkdir()
         run = lambda *args: subprocess.run(  # noqa: E731
@@ -115,14 +118,12 @@ class TestCodexCiManifestoSingleEnvelope:
         }
 
     def test_single_json_envelope_on_user_prompt_submit(self):
-        # A prompt-secret hit also buffers a WARNING via inject_context() —
-        # that call site already routed through the emitter correctly before
-        # this fix. Without a second buffered source, an empty buffer makes
-        # flush() a no-op and the pre-fix bug (ci_manifesto's own raw print)
-        # would look like exactly one line by coincidence. Forcing a second
-        # buffered entry is what actually exercises the two-envelope bug:
-        # pre-fix this is [flushed envelope, ci_manifesto's raw print] = 2
-        # lines; post-fix both fold into the one flushed envelope.
+        """A prompt-secret hit also buffers a WARNING via inject_context() — that call site already routed through the
+        emitter correctly before this fix. Without a second buffered source, an empty buffer makes flush() a no-op and
+        the pre-fix bug (ci_manifesto's own raw print) would look like exactly one line by coincidence. Forcing a
+        second buffered entry is what actually exercises the two-envelope bug: pre-fix this is [flushed envelope,
+        ci_manifesto's raw print] = 2 lines; post-fix both fold into the one flushed envelope.
+        """
         key = "AKIA" + "TESTDUMMY0000000"
         env = self._env(CI_MANIFESTO_REFRESH_EVERY="1")
         result = _run(

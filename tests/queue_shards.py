@@ -1,3 +1,7 @@
+"""MAX_SHARDS: Five merge groups share the 36 runner queue pool, so each shard's fixed setup costs queue wait for every
+group.
+"""
+
 import argparse
 import hashlib
 import json
@@ -21,11 +25,11 @@ STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.69
 TARGET_SECONDS = 195
-# Five merge groups share the 36 runner queue pool, so each shard's fixed setup costs queue wait for every group.
 MAX_SHARDS = 16
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, int] | None = None) -> list[dict]:
+    """Some shard carries at least an even share, so a share over the target by a second, past float rounding, fails."""
     files = discover_test_files(root)
     grouped = grouped_files(root, files)
     sizes = source_sizes(root, files)
@@ -35,7 +39,6 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
         count = counts[version] if counts else 12
         total = sum(seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes)
         while True:
-            # Some shard carries at least an even share, so a share over the target by a second, past float rounding, fails.
             if (
                 not counts
                 and count < MAX_SHARDS
@@ -79,12 +82,12 @@ def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str],
 
 
 def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, str], sizes: dict[str, int]) -> float:
+    """Only the four worker share slows down; measured serial groups ran under their stored time."""
     serial = {}
     files = {node.split("::", 1)[0] for node in part}
     for node in part:
         if group := grouped.get(node.split("::", 1)[0]):
             serial[group] = serial.get(group, 0.0) + durations[node]
-    # Only the four worker share slows down; measured serial groups ran under their stored time.
     return max(
         SLOWDOWN * sum(durations[node] for node in part) / WORKERS,
         max((durations[node] for node in part), default=0.0),

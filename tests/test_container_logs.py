@@ -8,11 +8,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-# =============================================================================
-# ContainerLogTailer initialization
-# =============================================================================
-
-
 class TestContainerLogTailerInit:
     """Test ContainerLogTailer initialization and validation."""
 
@@ -69,11 +64,6 @@ class TestContainerLogTailerInit:
             ContainerLogTailer("ecs", "task-arn")
 
 
-# =============================================================================
-# _build_command() — Docker
-# =============================================================================
-
-
 class TestBuildDockerCommand:
     """Test Docker command building."""
 
@@ -112,15 +102,11 @@ class TestBuildDockerCommand:
         assert "web-app" in cmd
 
 
-# =============================================================================
-# _build_command() — Kubernetes
-# =============================================================================
-
-
 class TestBuildK8sCommand:
     """Test Kubernetes command building."""
 
     def test_basic_k8s_cmd(self):
+        """Default namespace."""
         from hooks.observability.container_logs import ContainerLogTailer
 
         tailer = ContainerLogTailer("k8s", "my-pod")
@@ -128,7 +114,6 @@ class TestBuildK8sCommand:
         assert cmd[0] == "kubectl"
         assert "my-pod" in cmd
         assert "-n" in cmd
-        # Default namespace
         idx = cmd.index("-n")
         assert cmd[idx + 1] == "default"
 
@@ -162,11 +147,6 @@ class TestBuildK8sCommand:
         tailer = ContainerLogTailer("k8s", "my-pod")
         cmd = tailer._build_command(follow=False, limit_lines=100, since="5m")
         assert "--since" in cmd
-
-
-# =============================================================================
-# _build_command() — ECS
-# =============================================================================
 
 
 class TestBuildEcsCommand:
@@ -204,11 +184,6 @@ class TestBuildEcsCommand:
         tailer = ContainerLogTailer("ecs", "task-arn", cluster="c", log_group="/ecs/svc")
         cmd = tailer._build_command(follow=False, limit_lines=100, since="30m")
         assert "--since" in cmd
-
-
-# =============================================================================
-# _stream_output()
-# =============================================================================
 
 
 class TestStreamOutput:
@@ -272,11 +247,6 @@ class TestStreamOutput:
         ):
             with pytest.raises(FileNotFoundError, match="not found"):
                 tailer._stream_output(["docker", "logs", "test"], None)
-
-
-# =============================================================================
-# tail() integration
-# =============================================================================
 
 
 class TestTail:
