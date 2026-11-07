@@ -1,11 +1,13 @@
+import io
 import json
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from hooks.targets.normalizer import normalize_payload
-from scripts.gates import Call, Gate, Who, entry
+from scripts.gates import Call, Gate, Who, entry, lift
 from scripts.gates.one_push import (
     OnePush,
     actions,
@@ -652,13 +654,14 @@ def test_redirections_and_their_targets_are_never_read_as_remote_or_refspec() ->
 def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull_request(
     tree: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import io
-    from unittest.mock import patch
+    def no_shared(home: Path | None) -> None:
+        return None
 
-    from scripts.gates import lift
+    def head(url: str) -> str:
+        return "a1"
 
-    monkeypatch.setattr(lift, "_shared", lambda home: None)
-    monkeypatch.setattr("scripts.gates.intent.pr_head", lambda url: "a1")
+    monkeypatch.setattr(lift, "_shared", no_shared)
+    monkeypatch.setattr("scripts.gates.intent.pr_head", head)
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
 
     def launch(reader: str) -> int:
@@ -676,10 +679,13 @@ def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull
 def test_a_spent_budget_never_reads_the_head_lift_for_a_launch_that_names_no_reader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.gates import lift
-
     asked: list[str] = []
-    monkeypatch.setattr(lift, "head_lifted", lambda slug, task, gate, home=None: asked.append(task) or True)
+
+    def head_lifted(slug: str, task: str, gate: str, home: Path | None = None) -> bool:
+        asked.append(task)
+        return True
+
+    monkeypatch.setattr(lift, "head_lifted", head_lifted)
     budget = SubagentBudget(launches=0)
     decision = budget.decide(Call(tool="Agent", tool_input={"name": "helper"}), ME, state(tmp_path))
     assert (decision.allowed, asked) == (False, [])
