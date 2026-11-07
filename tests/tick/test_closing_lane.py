@@ -112,7 +112,7 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
     monkeypatch.setattr(step, "floor_s", 300.0)
     monkeypatch.setattr(reboot, "boot_pass", planted)
     monkeypatch.setattr(engine, "run_group", group)
-    monkeypatch.setattr(pool, "running", lambda **kw: real_running(**kw, critical_s=1.0))
+    monkeypatch.setattr(pool, "running", lambda **kw: real_running(**kw, critical_s=1.0, reserves={}))
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
         assert not any(action.startswith("pass ended early") for action in actions)
