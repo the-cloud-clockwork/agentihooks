@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -33,7 +34,7 @@ def _keep(folder: Path) -> None:
     (folder / ".gitkeep").write_text("")
 
 
-def _write_json(path: Path, data: dict) -> None:
+def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
@@ -66,7 +67,11 @@ def _role_problems(roles: object) -> list[str]:
     if not roles:
         return ["wears no base role"]
     known = base_roles()
-    return [f"{role} is not a base role; pick from {', '.join(known)}" for role in roles if role not in known]
+    return [
+        f"{role} is not a base role; pick from {', '.join(known)}"
+        for role in cast(list[Any], roles)
+        if role not in known
+    ]
 
 
 def _plain(name: str) -> bool:
@@ -85,23 +90,24 @@ def _name_problems(name: str) -> list[str]:
     return []
 
 
-def _manifest(folder: Path) -> tuple[dict | None, str | None]:
+def _manifest(folder: Path) -> tuple[dict[str, Any] | None, str | None]:
     path = folder / "profile.yml"
     if not path.is_file():
         return None, "profile.yml is missing"
     try:
-        data = yaml.safe_load(path.read_text()) or {}
+        data: Any = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError:
         return None, "profile.yml is not valid YAML"
     if not isinstance(data, dict):
         return None, "profile.yml must be a mapping"
-    return data, None
+    return cast(dict[str, Any], data), None
 
 
 def problems(folder: Path) -> list[str]:
     data, error = _manifest(folder)
     if error:
         return [error]
+    assert data is not None
     found = [] if data.get("kind") == "overlay" else ["kind must be overlay"]
     found += _role_problems(data.get("wears"))
     if "extends" in data:

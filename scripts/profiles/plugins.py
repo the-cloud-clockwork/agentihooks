@@ -4,6 +4,7 @@ import json
 import os
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.context import profile_chain
 from hooks.context.profile_chain import PACKAGE_PREFIX
@@ -33,16 +34,16 @@ def role_home(chain: list[str]) -> bool:
     return any((profile_chain.PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)).is_dir() for name in chain)
 
 
-def carried(chain: list[str], operator: dict) -> dict[str, bool]:
+def carried(chain: list[str], operator: dict[str, bool]) -> dict[str, bool]:
     own = {} if role_home(chain) else {plugin: True for plugin, on in operator.items() if on}
     return {**own, **role_defaults(chain)}
 
 
-def allowed(base: dict, layered: dict, installed: Iterable[str] = ()) -> dict[str, bool]:
+def allowed(base: dict[str, bool], layered: dict[str, bool], installed: Iterable[str] = ()) -> dict[str, bool]:
     return {plugin: True for plugin, on in {**dict.fromkeys(installed, True), **base, **layered}.items() if on}
 
 
-def kept(home: dict, written: dict) -> list[str]:
+def kept(home: dict[str, bool], written: dict[str, bool]) -> list[str]:
     return [plugin for plugin, on in home.items() if on and plugin not in written]
 
 
@@ -63,7 +64,9 @@ def layer_skills(roots: Iterable[Path]) -> dict[str, Path]:
 
 def _installed(plugin: str, plugins_dir: Path) -> dict[str, Path]:
     try:
-        installs = json.loads((plugins_dir / "installed_plugins.json").read_text())["plugins"][plugin]
+        installs: list[dict[str, Any]] = json.loads((plugins_dir / "installed_plugins.json").read_text())["plugins"][
+            plugin
+        ]
     except (OSError, ValueError, KeyError):
         return {}
     for install in sorted(installs, key=lambda entry: entry.get("scope") != "user"):
@@ -71,7 +74,9 @@ def _installed(plugin: str, plugins_dir: Path) -> dict[str, Path]:
             continue
         root = Path(install["installPath"])
         try:
-            listed = json.loads((root / ".claude-plugin" / "plugin.json").read_text()).get("skills")
+            listed: list[Any] | str | None = json.loads((root / ".claude-plugin" / "plugin.json").read_text()).get(
+                "skills"
+            )
         except (OSError, ValueError):
             continue
         if isinstance(listed, list):
@@ -105,17 +110,19 @@ def replaced(plugin: str, chain: list[str], available: dict[str, Path], plugins_
 
 def claude_only(name: str) -> bool:
     """True when a plugin a profile of the chain enables in its own Claude layer has no Codex replacement."""
+    from types import ModuleType
+
     from scripts.claude_config import claude_home
     from scripts.targets._common import _install_module
 
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     resolved = _i._resolve_profile_chain(name)
     chain, roots = [n for n, _ in resolved], [root for _, root in resolved]
     plugins_dir = claude_home({k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}) / "plugins"
     layer = layer_skills([*(root for _, root in _i._bundle_roots()), *roots])
     for root in roots:
         path = _i._native_layer_path(root, "claude", _i._NATIVE_SETTINGS_NAME)
-        layered = (_i._load_native_layer(path).get("enabledPlugins") or {}) if path else {}
+        layered: dict[str, bool] = (_i._load_native_layer(path).get("enabledPlugins") or {}) if path else {}
         enabled = [plugin for plugin, on in layered.items() if on]
         available = {**plugin_skills(enabled, plugins_dir), **layer}
         if any(not replaced(plugin, chain, available, plugins_dir) for plugin in enabled):
