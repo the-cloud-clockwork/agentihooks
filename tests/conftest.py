@@ -49,6 +49,13 @@ def _is_redis(address):
     return isinstance(address, tuple) and address[1:2] == (REDIS_PORT,)
 
 
+def _store_client(environ: object = None) -> object:
+    """Reach the swarm Redis through the store client that tests patch, in place of the hook process client."""
+    from scripts.swarm import store
+
+    return store.redis_client(environ)
+
+
 def _refuse_redis_connect(sock, address):
     if _is_redis(address):
         raise ConnectionRefusedError(errno.ECONNREFUSED, f"the test suite refuses Redis at {address[0]}:{REDIS_PORT}")
@@ -304,6 +311,8 @@ def _isolate_real_user_paths(
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
     monkeypatch.setattr("hooks.context.operator_words._SHARED", [])
+    monkeypatch.setattr("scripts.swarm.hook_redis.client", _store_client)
+    monkeypatch.setattr("scripts.gates.modes.CACHE_S", 0)
     monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
     for _prefixed in (
         "hooks._redis._KEY_PREFIX",

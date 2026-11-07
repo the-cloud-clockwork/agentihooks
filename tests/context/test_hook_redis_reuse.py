@@ -6,6 +6,7 @@ import pytest
 
 from scripts.gates import modes
 from scripts.swarm import hook_redis
+from scripts.swarm.hook_redis import client as hook_client
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -45,7 +46,9 @@ class Slow:
 
 @pytest.fixture
 def built(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    monkeypatch.setattr(hook_redis, "client", hook_client)
     monkeypatch.setattr(hook_redis, "_clients", {})
+    monkeypatch.setattr(modes, "CACHE_S", 5.0)
     return []
 
 
