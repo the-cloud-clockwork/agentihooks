@@ -606,6 +606,12 @@ uses:
 - `seen` collects the records of every step that ended before the latest step
   became ready.
 
+A site's hook runs when the site's first step is ready. A site whose steps all
+run in the slow lane is no barrier, so later sites can start before its hook
+runs. A hook that sets pass state later steps read, such as the runtime fence,
+belongs on a site that holds a critical step; `run_tick` fences the runtime at
+`wrapper probes` for that reason.
+
 ```python
 from scripts.tick import engine, registry
 
@@ -637,8 +643,8 @@ Tick sites not listed have no hook.
 
 | Order in `run_tick` | Site | Hook |
 | --- | --- | --- |
-| 1 | `wrapper probes` | None |
-| 2 | `wrapper health` | Holds the ledger view and fences the runtime the rest of the pass uses |
+| 1 | `wrapper probes` | Fences the runtime the rest of the pass uses |
+| 2 | `wrapper health` | Holds the pass's ledger view |
 | 3 | `wrapper commands` | Starts the spawn stall watch, closed when the graph returns |
 | 4 | `wrapper phases` | Ends the pass when the ledger is binned or gone, else reads its pass state and clears the halt marks |
 | 5 | `wrapper refresh` | None |
