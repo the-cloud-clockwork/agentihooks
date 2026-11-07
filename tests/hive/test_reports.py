@@ -815,6 +815,14 @@ def test_a_failed_name_reap_does_not_answer_a_reap_of_the_same_name_for_a_new_ex
     assert runtime.reap_name(agent.name) is True
 
 
+def test_a_hive_report_names_the_executions_it_runs_under_a_name(remote):
+    _publish(remote)
+    agent = remote.agent
+    assert remote.reports.Reports(remote.redis).executions_of("silent-hive", agent.name) == []
+    assert remote.runtime.hive.executions_of(HIVE, "engineer@nobody-0001") == []
+    assert remote.runtime.hive.executions_of(HIVE, agent.name) == [f"{agent.execution_id}:{agent.generation}"]
+
+
 def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
     from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
 
