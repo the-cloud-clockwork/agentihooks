@@ -1,7 +1,6 @@
 {
  "scripts/swarm/tick.py": [
   "def _acknowledging_error",
-  "def _prepare",
   "def _running",
   "def tick"
  ],
