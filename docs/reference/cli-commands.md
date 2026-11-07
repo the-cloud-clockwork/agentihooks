@@ -367,6 +367,19 @@ agentihooks recall eval golden.json                                           # 
 
 ---
 
+## `agentihooks knowledge`
+
+Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, question, follow up, note, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. The default embedder counts hashed words, so matching is lexical. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
+
+```bash
+agentihooks knowledge ask "merge queue priority" --limit 5   # summary, recent changes, hits with their parent chain
+agentihooks knowledge refresh                                # embed what changed now
+```
+
+`--ledger` defaults to `AGENTIHOOKS_SWARM`. Each hit carries its parents, nearest first, so a task hit names its phase and a comment hit names its task and phase.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
