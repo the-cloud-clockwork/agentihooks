@@ -6,8 +6,9 @@ from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
 
 import nats as nats_client
+from nats.aio.client import Client
 from nats.aio.msg import Msg
-from nats.errors import NoRespondersError
+from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
@@ -37,6 +38,7 @@ MIN_FETCH_MS = 10
 LOOP_START_S = 5
 LOOP_STOP_S = 5
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
+FIRST_CONNECT_RETRIES = 5
 
 
 def queue_stream(name: str) -> str:
@@ -437,6 +439,24 @@ class NatsStateStore:
             return None
 
 
+async def _first_connect(url: str, config: BusConfig) -> Client:
+    """Connect within FIRST_CONNECT_RETRIES; a reconnecting client then retries without end."""
+    try:
+        client = await nats_client.connect(
+            url,
+            allow_reconnect=config.reconnect,
+            **({"max_reconnect_attempts": FIRST_CONNECT_RETRIES} if config.reconnect else {}),
+            **auth_options(config.credentials),
+        )
+    except NoServersError as error:
+        raise ConnectionError(
+            f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
+        ) from error
+    if config.reconnect:
+        client.options["max_reconnect_attempts"] = -1
+    return client
+
+
 class NatsBus:
     def __init__(self, config: BusConfig, url: str):
         self._config = config
@@ -446,14 +466,7 @@ class NatsBus:
         self._buckets: dict[str, NatsStateStore] = {}
         self._views: dict[str, Bus] = {}
         try:
-            self._nc = self._loop.run(
-                nats_client.connect(
-                    url,
-                    allow_reconnect=config.reconnect,
-                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
-                    **auth_options(config.credentials),
-                )
-            )
+            self._nc = self._loop.run(_first_connect(url, config))
             self._js = self._nc.jetstream()
             event_stream, dead_stream = EVENT_STREAM, DEAD_STREAM
             if config.provision or not config.scoped:

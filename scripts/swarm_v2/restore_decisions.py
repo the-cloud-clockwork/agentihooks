@@ -9,14 +9,19 @@ from scripts.swarm_v2 import operator_auth
 
 
 def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: Who) -> dict:
-    from scripts.swarm_ledger import ledger
+    from scripts.swarm_ledger import ledger, ledger_link
     from scripts.swarm_v2.control_service import page_credential
 
-    address = store.config(slug).api_url
+    config = store.config(slug)
+    address = config.control_url or config.api_url
     if not address:
         raise SwarmError("the Anton controller API address is unavailable")
     if who.pinned:
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or ledger.launch_token(slug, who.name)
+        token = (
+            operator_auth.agent_credential(slug, page_credential, who.name)
+            or os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN")
+            or ledger.launch_token(slug, who.name)
+        )
     else:
         token = operator_auth.credential(slug, page_credential, who)
     if not token:
@@ -28,7 +33,8 @@ def decide(store: RedisStore, slug: str, agent: AgentRecord, choice: str, who: W
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        context = ledger_link.transport().get("context") if address.startswith("https://") else None
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
             return json.loads(response.read())
     except urllib.error.HTTPError as error:
         detail = json.loads(error.read())
