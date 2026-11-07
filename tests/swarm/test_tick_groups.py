@@ -302,6 +302,7 @@ def test_the_wrapper_hands_metrics_the_action_count_and_after_the_reread_doc(
     assert len(states) > 1
 
 
+@pytest.mark.feature("tick-pass-fence-first-site")
 def test_the_wrapper_steps_after_fencing_read_the_fenced_runtime(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,

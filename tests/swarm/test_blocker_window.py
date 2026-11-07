@@ -136,6 +136,7 @@ def test_the_window_records_now_ms_divided_by_1000(store, master, monkeypatch):
     assert recorded == 2000.0
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_the_master_keeps_every_tool_while_blockers_sustain(store, master):
     _sustain(store)
     for tool, tool_input in (
@@ -164,6 +165,7 @@ def test_a_store_failure_fails_open(master, monkeypatch):
     assert blocker_window.pretool("Bash", {"command": "echo hi"}, SID) == (None, None)
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_checked_never_denies_the_master_and_notes_the_notice_kwargs(store, master, monkeypatch):
     captured = {}
     monkeypatch.setattr("hooks.common.inject_context", lambda *args, **kwargs: captured.update(kwargs))

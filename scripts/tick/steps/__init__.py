@@ -147,6 +147,7 @@ MODULES = (
     "scripts.tick.steps.place",
     "scripts.tick.steps.report",
     "scripts.tick.steps.tasks",
+    "scripts.tick.steps.territory",
 )
 
 for _module in MODULES:
