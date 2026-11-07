@@ -3,11 +3,12 @@ attempt's task waits on recovery on the ledger."""
 
 from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from scripts.swarm import lease
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm_v2.kubernetes.failures import FENCES, PENDING, Decision, Recovery
+from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, NODE_LOST, PENDING, Decision, Recovery
+from scripts.swarm_v2.kubernetes.unschedulable import reopen
 from scripts.swarm_v2.runtime.base import SpawnRequest, Status
 
 if TYPE_CHECKING:
@@ -20,21 +21,31 @@ RECORDED = "attempt-recovery-records"
 CLEARED = ""
 SUPERSEDED = "superseded"
 DEFERRED = "deferred"
+PLACED = "placed"
 STARTED = (Status.OK, Status.AMBIGUOUS)
 
 
 class TaskLedger(Protocol):
-    def state(self, slug: str) -> dict: ...
+    def state(self, slug: str) -> dict[str, Any]: ...
 
-    def update_task(self, slug: str, task_id: str, fields: dict) -> dict: ...
+    def update_task(
+        self,
+        slug: str,
+        task_id: str,
+        fields: dict[str, Any],
+        *,
+        if_state: tuple[str, ...] = (),
+        if_match: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 Relaunch = Callable[[SpawnRequest, AgentRecord], "Launch"]
 
 
 class Replacements:
-    def __init__(self, recovery: Recovery, relaunch: Relaunch, ledger: TaskLedger) -> None:
-        self.recovery, self.relaunch, self.ledger = recovery, relaunch, ledger
+    def __init__(self, recovery: Recovery, relaunch: Relaunch, ledger: TaskLedger, placed: bool = False) -> None:
+        """Placed fresh and node loss replacements return to hive placement through the task queue."""
+        self.recovery, self.relaunch, self.ledger, self.placed = recovery, relaunch, ledger, placed
         self.store, self.slug, self.controller = recovery.store, recovery.slug, recovery.controller
 
     def __call__(self) -> dict[str, str]:
@@ -60,8 +71,10 @@ class Replacements:
         self.controller.require()
         if occupant.execution_id != successor.execution_id:
             self._launched(decision)
-            self.store.redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
+            cast(Any, self.store).redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
             return SUPERSEDED
+        if self.placed and (decision.mode == FRESH or decision.reason == NODE_LOST):
+            return self._place(decision, successor)
         task = {
             "id": successor.task,
             "seat": successor.seat,
@@ -80,6 +93,14 @@ class Replacements:
         if outcome.status in STARTED:
             self._launched(decision)
         return outcome.status.value
+
+    def _place(self, decision: Decision, successor: AgentRecord) -> str:
+        """Reopen the replacement task for the next lane spawn to place on a hive."""
+        if not reopen(self.store, self.slug, self.controller, self.ledger, successor):
+            return DEFERRED
+        self._launched(decision)
+        cast(Any, self.store).redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
+        return PLACED
 
     def _row(self, task: str) -> dict:
         return next((row for row in self.ledger.state(self.slug)["tasks"] if row["id"] == task), {})

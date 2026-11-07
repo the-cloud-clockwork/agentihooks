@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from scripts.swarm.host_budget import Room
@@ -291,9 +293,9 @@ def test_a_fractional_pod_quota_counts_whole_pods():
 def test_an_undeclared_pool_sizes_the_room_from_the_quota_alone():
     listing = Listing([_pod()], quotas=[_quota(ANTON, {"pods": "2"})])
 
-    found = pool.WorkerPool(listing, None, LAUNCH)()
+    found = pool.WorkerPool(cast(Any, listing), None, LAUNCH)()
 
-    assert listing.selectors == []
+    assert listing.selectors == [""]
     assert (found.room, found.limit) == (6, "quota pods")
 
 
@@ -306,7 +308,7 @@ def test_an_unreadable_quota_falls_back_to_the_pool():
 def test_no_quota_and_an_undeclared_pool_has_unknown_room():
     listing = Listing([_pod()])
 
-    found = pool.WorkerPool(listing, None, LAUNCH)()
+    found = pool.WorkerPool(cast(Any, listing), None, LAUNCH)()
 
     assert listing.selectors == []
     assert found == Room(
@@ -336,7 +338,7 @@ def test_a_quota_quantity_that_is_not_a_quantity_falls_back_to_the_pool():
     listing = Listing([_pod(), _pod()], quotas=[_quota({"pods": "many"})])
 
     assert pool.WorkerPool(listing, POOL, LAUNCH)().room == 5
-    assert pool.WorkerPool(listing, None, LAUNCH)() == Room(
+    assert pool.WorkerPool(cast(Any, listing), None, LAUNCH)() == Room(
         None,
         "worker namespace quota is not a resource quantity: 'many'; "
         "worker pool undeclared: the Pod policy names no worker_pool, so spawns pass",
@@ -393,3 +395,30 @@ def test_the_pool_reading_names_the_policy_pod_limit_and_the_distinct_nodes_runn
 @pytest.mark.parametrize("error", [ApiRefused(403, "Forbidden"), OSError("reset")])
 def test_an_unlistable_worker_namespace_has_no_pool_reading(error):
     assert pool.reading(Listing(error=error), "swarm-workers", POOL) is None
+
+
+def _unschedulable(cpu: str = "2", memory: str = "4Gi") -> dict[str, Any]:
+    found = _pod("Pending", cpu, memory)
+    found["status"]["conditions"] = [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable"}]
+    return found
+
+
+def test_usage_skips_a_pending_pod_the_scheduler_reported_unschedulable() -> None:
+    assert pool.usage([_pod(), _pod("Pending"), _unschedulable()]) == pool.Usage(2, 4000, 8192)
+
+
+def test_quota_room_gives_back_what_unschedulable_pods_hold() -> None:
+    hard = {"pods": "6", "requests.cpu": "18", "requests.memory": "34Gi"}
+    used = {"pods": "6", "requests.cpu": "12", "requests.memory": "24Gi"}
+    listing = Listing([_unschedulable() for _ in range(6)], quotas=[_quota(hard, used)])
+
+    found = pool.WorkerPool(cast(Any, listing), None, LAUNCH)()
+
+    assert listing.selectors == [""]
+    assert (found.room, found.limit) == (6, "quota pods")
+
+
+def test_a_full_pool_of_unschedulable_pods_leaves_the_whole_pool_as_room() -> None:
+    found = pool.WorkerPool(cast(Any, Listing([_unschedulable() for _ in range(8)])), POOL, LAUNCH)()
+
+    assert (found.room, found.limit) == (7, "memory")
