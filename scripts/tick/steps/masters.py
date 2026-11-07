@@ -291,8 +291,10 @@ STEPS = (
         lane=SLOW,
     ),
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
-    CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG),
-    CallStep("tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc")),
+    CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG, kept=True),
+    CallStep(
+        "tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc"), kept=True
+    ),
     CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
     CallStep("seat alarm", SEATS, _held(tasks.placing(_seat_alarm)), LISTED, pass_domains("doc")),
     CallStep(
