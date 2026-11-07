@@ -563,10 +563,12 @@ def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_qu
     sessions = {f"claude:{ACCOUNT.replace('-', '_')}": 2, f"codex:{other}": 1}
     store.redis.set(f"{hives.key('hive-a')}:sessions", json.dumps(sessions))
     service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    assert service is not None
+    runtime: Any = service.runtime
     try:
         config = replace(store.config(SLUG), max_eng=2, max_ci=0)
-        service.runtime.herdr_runtime.host = lambda: None
-        decision = service.runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 0, "plan": 0})
+        runtime.herdr_runtime.host = lambda: None
+        decision = runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 0, "plan": 0})
     finally:
         service.stop()
 
