@@ -772,7 +772,11 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
         step for step in workflow["jobs"]["lint"]["steps"] if step.get("name") == "Hold the mapped feature tests"
     )
     assert step["if"] == "${{ !cancelled() }}"
-    assert step["run"].strip().endswith(
-        'exit 1\nfi\ncd "$RUNNER_TEMP/grader"\n'
-        'python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"'
+    assert (
+        step["run"]
+        .strip()
+        .endswith(
+            'exit 1\nfi\ncd "$RUNNER_TEMP/grader"\n'
+            'python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"'
+        )
     )
