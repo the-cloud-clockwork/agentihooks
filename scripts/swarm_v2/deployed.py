@@ -294,7 +294,9 @@ def _held(capacity: AccountCapacity) -> dict[str, int]:
     """Per account, the larger of its Kubernetes account reservations and the sessions live hives report, since a
     worker pod's hive reports the same session its reservation holds."""
     now = capacity.clock()
-    held = {account_key(account): count for account, count in fleet_held(capacity.store, now).items()}
+    held: dict[str, int] = {}
+    for account, count in fleet_held(capacity.store, now).items():
+        held[account_key(account)] = held.get(account_key(account), 0) + count
     for name, row in aggregate.read(capacity.store.redis, now / 1000).items():
         account = name.partition(":")[2]
         held[account] = max(held.get(account, 0), row["sessions"])

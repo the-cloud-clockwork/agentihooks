@@ -530,17 +530,17 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
 
 @pytest.mark.parametrize(
     ("reserved", "expected"),
-    [({}, (2, 1)), ({ACCOUNT: 1, "codex-fixtureatexample-com": 4}, (2, 4))],
+    [({}, (2, 1)), ({ACCOUNT.replace("-", "_"): 2, ACCOUNT: 1, "codex-fixtureatexample-com": 4}, (3, 4))],
 )
 def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_quota_rows(
-    tmp_path, monkeypatch, reserved, expected
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reserved: dict[str, int], expected: tuple[int, int]
+) -> None:
     from scripts.hive import registry as hives
 
     store = _store()
     other = "codex-fixtureatexample-com"
 
-    def fleet(given, now):
+    def fleet(given: RedisStore, now: int) -> dict[str, int]:
         assert given.redis is store.redis and now >= beat
         return dict(reserved)
 
