@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.697 · 2026-11-07
+
+### 2026-11-07 · 7f3751e66f2b · #9971 · @agenticore-app
+
+**Controller survives a ledger read timeout instead of exiting**
+
+Previously, if a controller pass hit a ledger read timeout (LedgerUnreachable), the whole process exited with code 1, costing a pass and forcing a pod restart. Now the run loop catches that error, logs it, backs off for one tick, and starts the next pass instead of exiting, so the controller stays alive through transient ledger hiccups. A `--once` invocation still reports failure via exit code 1. This should keep restart counts flat during ledger slowness, matching the swarm's resilience goals.
+
 ## v2.17.696 · 2026-11-07
 
 ### 2026-11-07 · 99108c3d7454 · #9960 · @agenticore-app
