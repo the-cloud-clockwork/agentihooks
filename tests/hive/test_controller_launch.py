@@ -643,6 +643,30 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     assert (launched.name, launched.seat) == (other.name, request.task["seat"])
 
 
+def test_a_later_expired_launch_of_the_same_name_is_reaped_by_its_own_execution(setup: SimpleNamespace) -> None:
+    from scripts.hive.orders import Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(first.__dict__))
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    later = replace(setup.launcher.orders_for("task"), expires_at=0)
+    assert later.execution_id != first.execution_id
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(later.__dict__))
+    assert setup.launcher.spawn(request) == "pending"
+    assert setup.store.execution_registry.get("fixture", later.execution_id).state == "ended"
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"])["id"] for _, fields in commands] == [
+        f"reap:{request.name}:{first.execution_id}",
+        f"reap:{request.name}:{later.execution_id}",
+    ]
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    assert Consumer(setup.store.redis, "remote", hive).poll_commands() == 2
+    assert [args for args, _ in hive.herdr.reap_name.call_args_list] == [(request.name,), (request.name,)]
+
+
 def test_unexpired_unacknowledged_order_is_never_retired(setup):
     from scripts.swarm import lease
     from scripts.swarm_v2.runtime.base import Status
