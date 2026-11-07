@@ -485,7 +485,7 @@ def test_the_load_window_is_five_minutes():
     assert (admission.LOAD_WINDOW_MS, admission.JOINED) == (300_000, "#joined")
 
 
-def test_a_first_ranked_hive_refuses_on_saturated_cpu_below_the_memory_line():
+def test_a_first_ranked_hive_refuses_on_saturated_cpu_below_the_memory_line() -> None:
     found = admission.room(reading(cpus=16, load5=28.7, available_mb=19 * GB, total_mb=64 * GB), first=True)
     assert found == admission.Room(
         0,
@@ -494,7 +494,7 @@ def test_a_first_ranked_hive_refuses_on_saturated_cpu_below_the_memory_line():
     )
 
 
-def test_a_first_ranked_hive_takes_the_lower_of_its_cpu_and_memory_room():
+def test_a_first_ranked_hive_takes_the_lower_of_its_cpu_and_memory_room() -> None:
     found = admission.room(reading(cpus=16, load5=12.1, available_mb=19 * GB, total_mb=64 * GB), first=True)
     assert found == admission.Room(
         1,
@@ -503,7 +503,7 @@ def test_a_first_ranked_hive_takes_the_lower_of_its_cpu_and_memory_room():
     )
 
 
-def test_a_first_ranked_hive_refuses_on_saturated_pod_cpu():
+def test_a_first_ranked_hive_refuses_on_saturated_pod_cpu() -> None:
     measured = reading(pod_available_mb=15000, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
     found = admission.room(measured, first=True)
     assert admission.refusal(found) == (

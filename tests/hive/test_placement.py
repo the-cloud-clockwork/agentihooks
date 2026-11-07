@@ -244,7 +244,7 @@ def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_pe
     assert (chosen.spill and chosen.spill.record()) == spill
 
 
-def test_a_cpu_saturated_preferred_hive_spills_to_an_idle_unranked_hive():
+def test_a_cpu_saturated_preferred_hive_spills_to_an_idle_unranked_hive() -> None:
     from scripts.hive import admission, placement
 
     total = 64_000

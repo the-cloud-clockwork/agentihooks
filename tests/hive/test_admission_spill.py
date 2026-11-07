@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -140,7 +141,10 @@ def _load(launched, hive_id, **fields):
     store.redis.set(key, json.dumps({**json.loads(store.redis.get(key)), **fields}))
 
 
-def test_a_spill_past_a_cpu_saturated_first_ranked_hive_records_its_cpu_refusal(setup, capsys):  # noqa: F811
+def test_a_spill_past_a_cpu_saturated_first_ranked_hive_records_its_cpu_refusal(
+    setup: SimpleNamespace,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     write_hive(setup, prefer={"eng": 1})
     write_hive(setup, id="spare")
     _load(setup, "remote", cpus=16, load5=28.7)
