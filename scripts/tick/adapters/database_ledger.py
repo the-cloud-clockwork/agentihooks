@@ -3,6 +3,7 @@ repository, so a tick pass with the database URL setting reads and writes its le
 
 import io
 import json
+import logging
 import os
 import urllib.error
 from collections.abc import Generator, Mapping
@@ -95,6 +96,7 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
         refused: Any = exc
         status, result = refused.status, refused.envelope()
     except (OSError, ValueError):
+        logging.getLogger(__name__).exception("Ledger API storage failure")
         failed: Any = APIError(500, "storage_error", "Resource could not be read or written")
         status, result = 500, failed.envelope()
     encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
