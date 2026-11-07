@@ -25,6 +25,7 @@
 /tests/test_no_whole_ledger.py @nestorcolt
 /scripts/tick_pattern.py @nestorcolt
 /scripts/tick/catalogue.py @nestorcolt
+/scripts/tick/new_step.py @nestorcolt
 /tests/tick/test_catalogue.py @nestorcolt
 /tests/TICK_PATTERN_ALLOWLIST.json @nestorcolt
 /tests/test_tick_pattern.py @nestorcolt
