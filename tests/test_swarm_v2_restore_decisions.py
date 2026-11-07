@@ -372,6 +372,10 @@ def test_page_derived_credentials_bind_only_their_own_master_name(
     assert (status, result["error_class"]) == (401, "unauthenticated")
     assert agent_credential(slug, lambda _: None, "coordinator") == ""
     assert agent_credential(slug, lambda _: page, "") == ""
+    pending.world.store.put_agent(slug, AgentRecord("coordinator", "master", "", state="finished"))
+    master = agent_credential(slug, lambda _: page, "coordinator")
+    status, result = post(pending, master, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (403, "forbidden_scope")
     assert pending.world.protected() == before
 
 
