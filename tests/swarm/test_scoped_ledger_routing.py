@@ -411,7 +411,11 @@ def test_a_lifecycle_request_uses_its_own_swarm_address(monkeypatch):
         def request(self, slug, path, payload):
             return {"data": (slug, path, payload)}
 
-    fake = SimpleNamespace(base=lambda slug: f"base:{slug}", credentials=lambda slug, service: {})
+    fake = SimpleNamespace(
+        base=lambda slug: f"base:{slug}",
+        credentials=lambda slug, service: {},
+        client=lambda slug, service: client.ResourceClient(f"base:{slug}", {}),
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
     monkeypatch.setattr(client, "ResourceClient", Recorder)
     result = ledger_client.LedgerClient()._lifecycle("other", {"action": "binned"})
