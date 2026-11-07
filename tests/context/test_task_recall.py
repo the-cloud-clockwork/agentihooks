@@ -121,7 +121,7 @@ def test_recall_renders_the_exact_block_from_one_vault_search() -> None:
 
 @pytest.mark.feature("brain-task-recall")
 def test_the_ledger_folder_defaults_under_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t9"}
     _, reads, _ = _search(env, None, None)
     assert reads == [call(tmp_path / "development-ledger", "demo", "tasks/t9")]
