@@ -141,6 +141,7 @@ class DistributedLaunch:
         self.launch_slots = LaunchSlots(controller.store.redis)
         self.accounts: AccountChooser | None = None
         self.planned: PlannedAccount | None = None
+        self.planned_harness: Callable[[str], str | None] | None = None
         self.opening: Callable[[SpawnRequest], str] = opening
 
     def spawn(
@@ -183,6 +184,7 @@ class DistributedLaunch:
             "execution_id": admitted.execution_id,
             "generation": admitted.generation,
             "account": terms.account,
+            "harness": admitted.harness or "claude",
             "profile": admitted.profile,
             "endpoints": {broadcast_bridge.API_URL: terms.api_url, **hosted_ledger()},
         }
@@ -235,7 +237,8 @@ class DistributedLaunch:
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
-        harness = request.task.get("harness", "claude")
+        planned_harness = None if self.planned_harness is None else self.planned_harness(request.task["id"])
+        harness = request.task.get("harness") or planned_harness or "claude"
         if self.accounts is not None:
             planned = None if self.planned is None else self.planned(request.task["id"], harness)
             account = self.accounts(terms.cap, planned, quota_predecessor(request.task), harness)

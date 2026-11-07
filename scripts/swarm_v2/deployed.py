@@ -248,6 +248,7 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     runtime.herdr_runtime.quota_accounts = FleetAccounts(route, workers.terms.cap)
     runtime.herdr_runtime.host = WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
     launcher.planned = runtime.herdr_runtime.planned_account
+    launcher.planned_harness = partial(_planned_harness, runtime.herdr_runtime)
     launcher.router = runtime.router
     runtime.relaunch = partial(launcher.relaunch, terms=workers.terms)
     return runtime
@@ -287,6 +288,11 @@ def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> Term
 
 def _held(capacity: AccountCapacity) -> dict[str, int]:
     return fleet_held(capacity.store, capacity.clock())
+
+
+def _planned_harness(herdr: HerdrRuntime, task_id: str) -> str | None:
+    """The harness the tick's quota plan placed the task on, read as the hive launcher reads it."""
+    return getattr(herdr, "_quota_tasks", {}).get(task_id)
 
 
 class GrantRelease:

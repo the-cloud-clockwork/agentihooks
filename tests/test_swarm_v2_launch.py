@@ -152,6 +152,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "execution_id": launch.agent.execution_id,
         "generation": 1,
         "account": ACCOUNT,
+        "harness": "claude",
         "profile": launch.agent.profile,
         "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
@@ -1262,13 +1263,30 @@ def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a
     asked: list[tuple[str | None, str]] = []
     world.launcher.accounts = lambda cap, planned, left, harness: asked.append((planned, harness)) or "codex-key"
     world.launcher.planned = lambda task, harness: f"{task}-{harness}"
+    world.launcher.planned_harness = {"task": "codex"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
-    task = {"id": "task", "seat": FIRST, "harness": "codex"}
-    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), task)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
 
     world.launcher.from_tick(request, world.terms, pod_target)
 
     assert asked == [("task-codex", "codex")]
     [sent] = world.runtime.requests
+    assert sent.task["harness"] == "codex"
     agent = world.store.execution(SLUG, sent.task["execution_id"])
     assert (agent.harness, agent.account) == ("codex", "codex-key")
+
+
+@pytest.mark.parametrize(
+    ("task", "plan", "harness"), [({"harness": "claude"}, "codex", "claude"), ({}, None, "claude")]
+)
+def test_a_task_harness_wins_over_the_plan_and_an_unplanned_task_launches_claude(
+    world: World, task: dict[str, str], plan: str | None, harness: str
+) -> None:
+    world.launcher.planned_harness = lambda task_id: plan
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST, **task})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert sent.task["harness"] == harness
