@@ -44,10 +44,7 @@ def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict
     installations: list[dict[str, Any]] = []
     page = 1
     while True:
-        result = api(f"orgs/{repo.split('/')[0]}/installations?page={page}&per_page=100")
-        if not isinstance(result, dict):
-            raise ValueError("app installation inventory incomplete")
-        result = cast(dict[str, Any], result)
+        result = cast(dict[str, Any], api(f"orgs/{repo.split('/')[0]}/installations?page={page}&per_page=100"))
         entries = result["installations"]
         installations.extend(entries)
         if len(entries) < 100:
