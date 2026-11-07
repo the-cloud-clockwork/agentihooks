@@ -257,6 +257,7 @@ def test_a_cpu_saturated_preferred_hive_spills_to_an_idle_unranked_hive():
     records[1].update(room=0, first_room=found.room, first_refusal=admission.refusal(found))
 
     chosen = placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW)
+    assert isinstance(chosen, placement.Choice)
     assert chosen.hive == "workstation"
     refused = "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
     assert chosen.spill and chosen.spill.record() == {"preferred": "hive-three", "refusal": refused}
