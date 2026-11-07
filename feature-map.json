@@ -1892,6 +1892,20 @@
       ]
     },
     {
+      "id": "brain-task-recall",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dk3",
+      "behaviour": "A session bound to a swarm task receives at session start the brain's vault search hits for the significant words of its task title, framed as recalled context and capped by the brain payload limit; no block without a bound task, a readable task, a reachable search or a hit matching half the query words.",
+      "seam": "hooks.context.brain_adapter.task_recall and inject_on_session_start",
+      "tests": [
+        "tests/context/test_task_recall.py::test_a_bound_task_recalls_brain_hits_for_its_title",
+        "tests/context/test_task_recall.py::test_hits_matching_under_half_the_query_words_are_dropped",
+        "tests/context/test_task_recall.py::test_no_recall_without_a_bound_task_and_a_matching_hit",
+        "tests/context/test_task_recall.py::test_recall_is_capped_by_the_payload_limit",
+        "tests/context/test_task_recall.py::test_session_start_injects_the_task_recall"
+      ]
+    },
+    {
       "id": "controller-survives-ledger-timeout",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-timeout",
