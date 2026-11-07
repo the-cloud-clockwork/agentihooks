@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 
@@ -195,7 +197,7 @@ def test_the_focus_sort_orders_the_queue_by_focus_rank_and_keeps_ties_in_queue_o
     assert focus_budget.ordered(queue, {"a": 1, "b": 0, "c": 1, "d": 0}) == [queue[1], queue[3], queue[0], queue[2]]
 
 
-def _spawned(tasks: list[dict[str, object]], focused: list[str], seats: int = 10) -> list[str]:
+def _spawned(tasks: list[dict[str, Any]], focused: list[str], seats: int = 10) -> list[str]:
     import fakeredis
 
     from scripts.swarm.store import RedisStore, SwarmConfig
