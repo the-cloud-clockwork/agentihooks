@@ -19,8 +19,8 @@ from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding, browser, bundle_copy, connectors, homes, plugins, sources
 from scripts.swarm import brain_binding
-from scripts.targets import claude_target
 from scripts.targets._common import _atomic_write, _install_module, agents_skills_home, build_persona
+from scripts.targets.claude_target import settings_document
 from scripts.targets.codex_hook_trust import trusted_state
 from scripts.targets.codex_target import codex_home
 
@@ -241,7 +241,7 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
 
 
 def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dict[str, Any]:
-    from scripts import profile_telemetry
+    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     env = doc["env"]
     if hosted := os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL"):
@@ -249,10 +249,8 @@ def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dic
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed
-    cast(Callable[[dict[str, Any], list[tuple[str, Path]], Path | None], None], profile_telemetry.apply_langfuse_env)(
-        doc, dirs, None
-    )
-    cast(Callable[[dict[str, Any]], None], profile_telemetry.apply_collector_env)(doc)
+    apply_langfuse_env(doc, dirs, None)
+    apply_collector_env(doc)
     return doc
 
 
@@ -264,7 +262,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Se
     personal: dict[str, Any] = _i.load_json(global_settings) if global_settings.exists() else {}
     # Claude reads the default home as an ancestor project folder when the working folder sits under it.
     excludes = [str(default_home / "CLAUDE.md"), str(default_home / "rules" / "**")]
-    settings: dict[str, Any] = cast(Callable[[dict[str, Any]], dict[str, Any]], claude_target.settings_document)(doc)
+    settings = cast(dict[str, Any], settings_document(doc))
     chain = [n for n, _ in dirs]
     enabled_plugins = _plugins(chain, settings.get("enabledPlugins") or {}, kept)
     if browser.enabled(chain):
