@@ -1,12 +1,12 @@
 """Brain recall for the swarm task a session is bound to."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from hooks.context import brain_adapter
 
-FEATURE = pytest.mark.feature("brain-task-recall")
 TITLE = "Placement stops picking a saturated hive"
 BOUND = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_SWARM_TASK": "t9", "LEDGER_DIR": "/nowhere"}
 
@@ -27,7 +27,7 @@ def _recall(env: dict, ledger: dict | None, found: dict | None) -> tuple[str | N
         return brain_adapter.task_recall(env), get.call_args_list
 
 
-@FEATURE
+@pytest.mark.feature("brain-task-recall")
 def test_a_bound_task_recalls_brain_hits_for_its_title() -> None:
     found = {"results": [_hit("lessons/hive-cpu.md", 3, 4, "A saturated hive kept winning placement")]}
     block, calls = _recall(BOUND, _ledger(), found)
@@ -39,7 +39,7 @@ def test_a_bound_task_recalls_brain_hits_for_its_title() -> None:
     assert query == ["placement", "stops", "picking", "saturated", "hive"]
 
 
-@FEATURE
+@pytest.mark.feature("brain-task-recall")
 def test_hits_matching_under_half_the_query_words_are_dropped() -> None:
     found = {"results": [_hit("journal/noise.md", 2, 5, "hive"), _hit("lessons/keep.md", 3, 5, "keep me")]}
     block, _ = _recall(BOUND, _ledger(), found)
@@ -47,7 +47,7 @@ def test_hits_matching_under_half_the_query_words_are_dropped() -> None:
     assert "lessons/keep.md" in block and "journal/noise.md" not in block
 
 
-@FEATURE
+@pytest.mark.feature("brain-task-recall")
 @pytest.mark.parametrize(
     ("env", "ledger", "found"),
     [
@@ -65,7 +65,7 @@ def test_no_recall_without_a_bound_task_and_a_matching_hit(env: dict, ledger: di
     assert block is None
 
 
-@FEATURE
+@pytest.mark.feature("brain-task-recall")
 def test_recall_is_capped_by_the_payload_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hooks.config.BRAIN_PAYLOAD_MAX_BYTES", 200)
     found = {"results": [_hit(f"lessons/l{i}.md", 4, 5, "saturated hive " * 40) for i in range(5)]}
@@ -74,8 +74,8 @@ def test_recall_is_capped_by_the_payload_limit(monkeypatch: pytest.MonkeyPatch) 
     assert len(block) <= 200
 
 
-@FEATURE
-def test_session_start_injects_the_task_recall(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+@pytest.mark.feature("brain-task-recall")
+def test_session_start_injects_the_task_recall(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path)
     monkeypatch.setattr("hooks.config.BRAIN_ENABLED", True)
     injected: list[tuple[str, str]] = []

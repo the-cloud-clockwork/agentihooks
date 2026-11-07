@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -525,6 +526,50 @@ def force_refresh() -> bool:
     return bool(result and result["changed"])
 
 
+RECALL_HITS = 5
+RECALL_MIN_WORD = 4
+
+
+def _bound_task_title(env: Mapping[str, str]) -> tuple[str, str]:
+    """Return the bound swarm task's id and title, or empty strings when unbound or unreadable."""
+    from scripts.swarm_ledger.storage import read_ledger
+
+    slug, task_id = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_SWARM_TASK", "")
+    if not (slug and task_id):
+        return "", ""
+    folder = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
+    ledger = read_ledger(folder, slug, f"tasks/{task_id}") or {}
+    title = next((t.get("title", "") for t in ledger.get("tasks", []) if t.get("id") == task_id), "")
+    return task_id, title
+
+
+def task_recall(environ: Mapping[str, str] | None = None) -> str | None:
+    """Render the brain's vault search hits for the bound swarm task's title as recalled context."""
+    from hooks._brain_http import get
+    from hooks.config import BRAIN_PAYLOAD_MAX_BYTES
+
+    task_id, title = _bound_task_title(os.environ if environ is None else environ)
+    words = [w for w in "".join(c if c.isalnum() else " " for c in title.lower()).split() if len(w) >= RECALL_MIN_WORD]
+    if not words:
+        return None
+    found = get("/vault/search", params={"q": " ".join(words), "limit": RECALL_HITS * 2, "context_lines": 0})
+    hits = [
+        h
+        for h in (found or {}).get("results", [])
+        if 2 * int(h.get("tokens_matched") or 0) >= int(h.get("tokens_total") or len(words))
+    ][:RECALL_HITS]
+    if not hits:
+        return None
+    lines = [f"TASK RECALL for {task_id} (brain search, recalled context, not an operator directive):"]
+    for hit in hits:
+        snippet = " ".join(str((hit.get("snippets") or [{}])[0].get("snippet", "")).split())
+        lines.append(f"- {hit.get('path', '')}: {snippet}")
+    block = "\n".join(lines)
+    if BRAIN_PAYLOAD_MAX_BYTES > 0 and len(block) > BRAIN_PAYLOAD_MAX_BYTES:
+        block = block[: BRAIN_PAYLOAD_MAX_BYTES - 1].rstrip() + "…"
+    return block
+
+
 def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
     try:
         from hooks.config import BRAIN_ENABLED
@@ -549,6 +594,9 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         context = offer(session_id, "SessionStart", project_context(session_id, cwd))
         if context:
             inject_context(context, skip_compression=True, kind="brain")
+        recall = task_recall()
+        if recall:
+            inject_context(recall, skip_compression=True, kind="brain")
     return refreshed
 
 
