@@ -233,6 +233,16 @@ def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> N
 def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
     from scripts.swarm_ledger.api import routes, schemas
 
+    assert schemas.LEDGER_PARTS == (
+        "tasks",
+        "_meta",
+        "phases",
+        "freezes",
+        "priorities",
+        "followups",
+        "alerts",
+        "overview",
+    )
     assert view.PARTS is schemas.LEDGER_PARTS
     assert routes.SINCE_SCHEMA["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
 
