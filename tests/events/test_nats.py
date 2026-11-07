@@ -511,7 +511,7 @@ def test_any_other_client_error_is_logged_in_one_line(caplog):
 
 def test_an_unreachable_bus_raises_and_logs_no_connect_attempt(caplog):
     caplog.set_level("DEBUG")
-    with pytest.raises(nats_errors.NoServersError):
+    with pytest.raises(ConnectionError, match="answered the first connect within"):
         nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
     assert [record.getMessage() for record in caplog.records if record.name.startswith("nats")] == []
 
@@ -519,7 +519,7 @@ def test_an_unreachable_bus_raises_and_logs_no_connect_attempt(caplog):
 @pytest.mark.wall_clock
 def test_an_unreachable_bus_gives_up_within_seconds():
     started = time.monotonic()
-    with pytest.raises(nats_errors.NoServersError):
+    with pytest.raises(ConnectionError, match="answered the first connect within"):
         nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))
     assert time.monotonic() - started < nats.FIRST_CONNECT_S * 2
 

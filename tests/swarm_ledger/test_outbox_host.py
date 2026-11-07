@@ -1,3 +1,4 @@
+import re
 import threading
 from contextlib import nullcontext
 from pathlib import Path
@@ -449,5 +450,8 @@ def test_failed_opens_with_nats_unreachable_log_only_the_relay_line_and_keep_the
     repository, _ = _reload_with_nats_unreachable(tmp_path, monkeypatch)
     lines = capsys.readouterr().err.splitlines()
     assert len(lines) >= 1
-    assert lines == ["ledger bus relay: nats: no servers available for connection"] * len(lines)
+    shape = re.compile(
+        r"ledger bus relay: nats: no server at nats://127\.0\.0\.1:\d+ answered the first connect within 5 retries"
+    )
+    assert [line for line in lines if not shape.fullmatch(line)] == []
     assert _unsent(repository) == 1
