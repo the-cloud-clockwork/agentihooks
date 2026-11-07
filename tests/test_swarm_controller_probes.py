@@ -167,8 +167,11 @@ def test_the_controller_command_runs_each_probe(monkeypatch, action):
 
 
 @pytest.mark.parametrize("action", ["live", "ready"])
-def test_the_controller_command_fails_its_probe_when_redis_refuses_the_connection(monkeypatch, capsys, action):
+def test_the_controller_command_fails_its_probe_when_redis_refuses_the_connection(monkeypatch, capsys, tmp_path, action):
     from scripts.swarm.store import SwarmError
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_REDIS_GRACE_S", "0")
 
     def refused():
         raise SwarmError("Redis is unreachable")
