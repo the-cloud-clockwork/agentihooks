@@ -4,8 +4,10 @@ The tick raises the flag as the verdict file gates/quiet/<agent>, which a bash s
 stands every call is refused except the ledger, swarm and msg commands, until `swarm <slug> progress` clears it.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from scripts.gates import log
 from scripts.gates.base import Decision, Who
@@ -58,17 +60,23 @@ def holding(agent, rows):
     )
 
 
-def quiet_minutes(redis, slug, agents, rows, now_ms):
-    """Minutes each worker holding its claim has gone without a progress signal; a declared wait is never quiet and
-    its end restarts the clock, and an agent with no signal at all, not even a start time, is not measured."""
-    found = {}
+def quiet_since(redis: Any, slug: str, agents: Iterable[Any], rows: dict[str, Any], now_ms: int) -> dict[str, int]:
+    """Last progress signal of each worker holding its claim; a declared wait is never quiet and its end restarts the
+    clock, and an agent with no signal at all, not even a start time, is not measured."""
+    found: dict[str, int] = {}
     for agent in agents:
         if not holding(agent, rows) or declared_wait(redis, slug, agent.name, now_ms):
             continue
-        signal = last_signal(redis, slug, agent)
-        if signal:
-            found[agent.name] = (now_ms - signal) // MINUTE_MS
+        if signal := last_signal(redis, slug, agent):
+            found[agent.name] = signal
     return found
+
+
+def quiet_minutes(redis: Any, slug: str, agents: Iterable[Any], rows: dict[str, Any], now_ms: int) -> dict[str, int]:
+    """Minutes each worker holding its claim has gone without a progress signal, measured from ``quiet_since``."""
+    return {
+        name: (now_ms - signal) // MINUTE_MS for name, signal in quiet_since(redis, slug, agents, rows, now_ms).items()
+    }
 
 
 def refusal(slug, task_id, minutes):

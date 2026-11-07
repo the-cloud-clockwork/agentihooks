@@ -117,16 +117,18 @@ def _urgent(store: Any, slug: str) -> list[Signal]:
 def _quiet(store: Any, slug: str, at: int) -> list[Signal]:
     claimed = dict[str, Any](_stored(store, slug, URGENT_KEY).get(urgent_hold.CLAIMED, {}))
     stale = limits().stale_minutes * MINUTE_MS
-    found: list[Signal] = []
-    for agent in store.agents(slug):
-        held = bool(quiet_gate.holding(agent, claimed))  # pyright: ignore[reportUnknownMemberType]
-        if not held or quiet_gate.declared_wait(store.redis, slug, agent.name, at):  # pyright: ignore[reportUnknownMemberType]
-            continue
-        since = quiet_gate.last_signal(store.redis, slug, agent)  # pyright: ignore[reportUnknownMemberType]
-        if since and at - since >= stale:
-            evidence = QUIET.format(name=agent.name, minutes=(at - since) // MINUTE_MS)
-            found.append(Signal(f"Urgent task {claimed[agent.task]['title']} claim quiet", since, evidence, stale))
-    return sorted(found, key=lambda signal: signal.name)
+    agents = {agent.name: agent for agent in store.agents(slug)}
+    quiet = quiet_gate.quiet_since(store.redis, slug, agents.values(), claimed, at)
+    return [
+        Signal(
+            f"Urgent task {claimed[agents[name].task]['title']} claim quiet",
+            since,
+            QUIET.format(name=name, minutes=(at - since) // MINUTE_MS),
+            stale,
+        )
+        for name, since in sorted(quiet.items())
+        if at - since >= stale
+    ]
 
 
 def signals(store: Any, slug: str, at: int, early: dict[str, Any]) -> tuple[list[Signal], dict[str, Any]]:

@@ -1,6 +1,7 @@
 """Degradation held an hour asks the front door master whether it is a panic mode call."""
 
 import json
+from typing import Any
 
 import pytest
 
@@ -259,76 +260,61 @@ def test_a_planted_two_hour_no_launch_window_sends_the_master_the_panic_question
 ENGINEER = "engineer@1-1"
 
 
-def urgent_claim(store, at, **fields):
+def claimed_task(task_id: str, claimed_by: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "id": task_id,
+        "phase": "p1",
+        "lane": "eng",
+        "rank": "urgent",
+        "state": "claimed",
+        "claimed_by": claimed_by,
+        **fields,
+    }
+
+
+def observe_tasks(store: Any, at: int, *tasks: dict[str, Any]) -> None:
     from scripts.swarm.health import urgent_hold
 
-    task = {"id": "t9", "title": "fix the outage", "phase": "p1", "lane": "eng", "rank": "urgent"}
-    found = {
-        "overview": "o",
-        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
-        "tasks": [{**task, "state": "claimed", "claimed_by": ENGINEER, **fields}],
-    }
+    found = {"overview": "o", "phases": [{"id": "p1", "title": "build", "depends_on": []}], "tasks": list(tasks)}
     urgent_hold.observe(store, SLUG, found, at)
 
 
-def claimant(store, started_at, lane="eng"):
+def urgent_claim(store: Any, at: int, claimed_by: str = ENGINEER) -> None:
+    observe_tasks(store, at, claimed_task("t9", claimed_by, title="fix the outage"))
+
+
+def claimant(store: Any, started_at: int, lane: str = "eng", name: str = ENGINEER, task: str = "t9") -> None:
     from scripts.swarm.store import AgentRecord
 
-    store.put_agent(SLUG, AgentRecord(ENGINEER, lane, "t9", started_at=started_at))
+    store.put_agent(SLUG, AgentRecord(name, lane, task, started_at=started_at))
 
 
-def test_urgent_hold_records_only_urgent_claimed_tasks_with_their_claimant(store):
+def test_urgent_hold_records_only_urgent_claimed_tasks_with_their_claimant(store: Any) -> None:
     from scripts.swarm.health import urgent_hold
 
-    found = {
-        "overview": "o",
-        "phases": [{"id": "p1", "title": "build", "depends_on": []}],
-        "tasks": [
-            {
-                "id": "a",
-                "title": "hot",
-                "phase": "p1",
-                "lane": "eng",
-                "rank": "urgent",
-                "state": "claimed",
-                "claimed_by": ENGINEER,
-            },
-            {"id": "b", "title": "calm", "phase": "p1", "lane": "eng", "state": "claimed", "claimed_by": "x"},
-            {
-                "id": "c",
-                "title": "review",
-                "phase": "p1",
-                "lane": "eng",
-                "rank": "urgent",
-                "state": "pr",
-                "claimed_by": "y",
-            },
-            {
-                "id": "d",
-                "title": "gone",
-                "phase": "p1",
-                "lane": "eng",
-                "rank": "urgent",
-                "state": "claimed",
-                "claimed_by": "z",
-                "out_of_scope": True,
-            },
-        ],
-    }
-    urgent_hold.observe(store, SLUG, found, START)
+    observe_tasks(
+        store,
+        START,
+        claimed_task("a", ENGINEER, title="hot"),
+        claimed_task("b", "x", title="calm", rank=""),
+        claimed_task("c", "y", title="review", state="pr"),
+        claimed_task("d", "z", title="gone", out_of_scope=True),
+        {"id": "e", "phase": "p1", "lane": "eng", "rank": "urgent", "state": "claimed"},
+    )
     assert urgent_hold.read(store, SLUG)["claimed"] == {
-        "a": {"title": "hot", "claimed_by": ENGINEER, "state": "claimed"}
+        "a": {"title": "hot", "claimed_by": ENGINEER, "state": "claimed"},
+        "e": {"title": "e", "claimed_by": "", "state": "claimed"},
     }
 
 
-def test_no_urgent_claim_leaves_the_stored_hold_without_a_claimed_key(store):
+def test_no_urgent_claim_leaves_the_stored_hold_without_a_claimed_key(store: Any) -> None:
     from scripts.swarm.health import urgent_hold
 
-    urgent_hold.observe(store, SLUG, {"overview": "o", "phases": [], "tasks": []}, START)
+    observe_tasks(store, START)
     assert urgent_hold.read(store, SLUG) == {"at": START, "tasks": {}}
 
 
-def test_an_urgent_claim_quiet_past_the_stale_window_is_a_signal_from_its_last_progress(store):
+def test_an_urgent_claim_quiet_past_the_stale_window_is_a_signal_from_its_last_progress(store: Any) -> None:
     urgent_claim(store, START)
     claimant(store, START - 30 * MINUTE)
     found = panic_call.signals(store, SLUG, START, {})[0]
@@ -338,7 +324,20 @@ def test_an_urgent_claim_quiet_past_the_stale_window_is_a_signal_from_its_last_p
     assert found[0].evidence == f"claimed by {ENGINEER} with no progress for 30 minutes"
 
 
-def test_an_urgent_claim_inside_the_stale_window_or_with_a_declared_wait_is_no_signal(store):
+def test_quiet_urgent_claims_are_signals_in_claimant_name_order(store: Any) -> None:
+    observe_tasks(
+        store,
+        START,
+        claimed_task("t2", "engineer@1-2", title="second"),
+        claimed_task("t1", "engineer@1-1", title="first"),
+    )
+    claimant(store, START - HOUR, name="engineer@1-2", task="t2")
+    claimant(store, START - 2 * HOUR, name="engineer@1-1", task="t1")
+    found = panic_call.signals(store, SLUG, START, {})[0]
+    assert [signal.name for signal in found] == ["Urgent task first claim quiet", "Urgent task second claim quiet"]
+
+
+def test_an_urgent_claim_inside_the_stale_window_or_with_a_declared_wait_is_no_signal(store: Any) -> None:
     from scripts.swarm import idle
 
     urgent_claim(store, START)
@@ -349,7 +348,7 @@ def test_an_urgent_claim_inside_the_stale_window_or_with_a_declared_wait_is_no_s
     assert panic_call.signals(store, SLUG, START, {})[0] == []
 
 
-def test_a_quiet_claim_by_another_agent_or_lane_is_no_signal(store):
+def test_a_quiet_claim_by_another_agent_or_lane_is_no_signal(store: Any) -> None:
     urgent_claim(store, START, claimed_by="engineer@1-2")
     claimant(store, START - 2 * HOUR)
     assert panic_call.signals(store, SLUG, START, {})[0] == []
@@ -360,7 +359,7 @@ def test_a_quiet_claim_by_another_agent_or_lane_is_no_signal(store):
     assert panic_call.signals(store, SLUG, START, {})[0] == []
 
 
-def test_the_stale_window_follows_the_health_setting(store, monkeypatch):
+def test_the_stale_window_follows_the_health_setting(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_STALE_MINUTES", "50")
     urgent_claim(store, START)
     claimant(store, START - 45 * MINUTE)
@@ -369,7 +368,7 @@ def test_the_stale_window_follows_the_health_setting(store, monkeypatch):
     assert [signal.after for signal in found] == [50 * MINUTE]
 
 
-def test_a_quiet_urgent_claim_is_asked_at_the_stale_window_and_once_each_hour_after(store):
+def test_a_quiet_urgent_claim_is_asked_at_the_stale_window_and_once_each_hour_after(store: Any) -> None:
     enforce(store)
     urgent_claim(store, START)
     claimant(store, START)
@@ -380,7 +379,9 @@ def test_a_quiet_urgent_claim_is_asked_at_the_stale_window_and_once_each_hour_af
     assert len(items(store)) == 2
 
 
-def test_a_planted_quiet_urgent_claim_sends_the_master_one_panic_question_in_one_watch_pass(store, monkeypatch):
+def test_a_planted_quiet_urgent_claim_sends_the_master_one_panic_question_in_one_watch_pass(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     enforce(store)
     urgent_claim(store, START)
     claimant(store, START - 45 * MINUTE)
