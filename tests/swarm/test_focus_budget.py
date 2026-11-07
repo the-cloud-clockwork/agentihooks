@@ -215,13 +215,13 @@ def _spawned(tasks: list[dict[str, Any]], focused: list[str], seats: int = 10) -
 
 @pytest.mark.feature("swarm-focus")
 def test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus() -> None:
-    tasks = [work("older", rank=None), work("newer", rank="urgent")]
+    tasks = [{**work("older"), "rank": None}, work("newer", rank="urgent")]
     assert _spawned(tasks, ["older", "newer"]) == ["newer", "older"]
 
 
 @pytest.mark.feature("swarm-focus")
 def test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat() -> None:
-    tasks = [work("older", rank=None), work("newer", rank="urgent")]
+    tasks = [{**work("older"), "rank": None}, work("newer", rank="urgent")]
     assert _spawned(tasks, ["older", "newer"], seats=1) == ["newer"]
 
 
