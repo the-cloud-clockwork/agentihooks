@@ -1,6 +1,7 @@
 import argparse
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Any, cast
 
 from scripts.swarm import merge_queue, queue_record
 from scripts.swarm.store import SwarmError
@@ -16,15 +17,16 @@ OPEN = """query($owner: String!, $name: String!, $after: String) { repository(ow
 } }"""
 
 
-def green(pull: dict) -> bool:
+def green(pull: dict[str, Any]) -> bool:
     return any(
-        (node["commit"]["statusCheckRollup"] or {}).get("state") == "SUCCESS" for node in pull["commits"]["nodes"]
+        (node["commit"]["statusCheckRollup"] or cast(dict[str, Any], {})).get("state") == "SUCCESS"
+        for node in pull["commits"]["nodes"]
     )
 
 
-def candidates(repo: str, run) -> list[dict]:
+def candidates(repo: str, run: Callable[..., Any]) -> list[dict[str, Any]]:
     owner, name = repo.split("/")
-    found, after = [], None
+    found, after = cast(list[dict[str, Any]], []), None
     while True:
         variables = {"owner": owner, "name": name} | ({"after": after} if after else {})
         page = merge_queue.graphql(OPEN, variables, run)["repository"]["pullRequests"]
@@ -36,10 +38,17 @@ def candidates(repo: str, run) -> list[dict]:
         after = page["pageInfo"]["endCursor"]
 
 
-def sweep(repo: str, run=subprocess.run, journal=queue_record.Journal) -> Iterator[dict]:
+def sweep(
+    repo: str, run: Callable[..., Any] = subprocess.run, journal: Callable[..., Any] = queue_record.Journal
+) -> Iterator[dict[str, Any]]:
     for pull in candidates(repo, run):
         try:
-            result = merge_queue.operate("queue", pull["url"], run, journal=journal(pull["url"], run))
+            result = cast(
+                dict[str, Any],
+                cast("Callable[..., Any]", merge_queue.operate)(
+                    "queue", pull["url"], run, journal=journal(pull["url"], run)
+                ),
+            )
             outcome = "waiting" if result.get("waiting") else "queued" if result["queued"] else result["state"].lower()
         except SwarmError as exc:
             outcome = f"refused: {exc}"

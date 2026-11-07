@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX, INTERNAL_RUN
 from scripts import aicode_tokens, codex_router, openbao_kv, openbao_step, term_colors
@@ -43,25 +44,27 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _codex_login(home: Path, device_auth: bool, environ: Mapping[str, str], run: Callable) -> int:
+def _codex_login(home: Path, device_auth: bool, environ: Mapping[str, str], run: Callable[..., Any]) -> int:
     child = {**envs.codex_subscription_child(environ), "CODEX_HOME": str(home), INTERNAL_RUN: "1"}
     argv = [shutil.which("codex") or "codex", "login", *(["--device-auth"] if device_auth else []), *FILE_STORE]
     try:
-        return run(argv, env=child).returncode
+        return cast(int, run(argv, env=child).returncode)
     except OSError as exc:
         _fail(f"cannot run codex: {exc.strerror or exc}")
         return 1
 
 
-def _tokens(home: Path, name: str = "auth.json") -> dict:
+def _tokens(home: Path, name: str = "auth.json") -> dict[str, Any]:
     try:
         tokens = json.loads((home / name).read_bytes()).get("tokens")
     except (OSError, ValueError, AttributeError):
         return {}
-    return tokens if isinstance(tokens, dict) else {}
+    return cast(dict[str, Any], tokens) if isinstance(tokens, dict) else {}
 
 
-def _login(slug: str, device_auth: bool, environ: Mapping[str, str], run: Callable) -> tuple[int, dict]:
+def _login(
+    slug: str, device_auth: bool, environ: Mapping[str, str], run: Callable[..., Any]
+) -> tuple[int, dict[str, Any]]:
     home = homes() / slug
     created = not home.exists()
     home.mkdir(parents=True, exist_ok=True)
@@ -82,14 +85,14 @@ def _names(prefix: str, slugs: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _describe(slug: str, access: str, rc: Path) -> None:
-    claims = codex_router._claims(access)
-    auth = claims.get(codex_router.OPENAI_AUTH_CLAIM) or {}
+    claims = cast(dict[str, Any], cast("Callable[..., Any]", codex_router._claims)(access))
+    auth = claims.get(codex_router.OPENAI_AUTH_CLAIM) or cast(dict[str, Any], {})
     exp = claims.get("exp")
     print(
         DESCRIBE.format(
             name=f"{CODEX_TOKEN_PREFIX}{slug}",
             rc=rc,
-            workspace=codex_router._chatgpt_account_id(claims) or UNKNOWN,
+            workspace=cast("Callable[..., Any]", codex_router._chatgpt_account_id)(claims) or UNKNOWN,
             plan=auth.get("chatgpt_plan_type") or UNKNOWN,
             expires=time.strftime(EXPIRY_FORMAT, time.gmtime(exp)) if isinstance(exp, int) else UNKNOWN,
         )
@@ -99,15 +102,15 @@ def _describe(slug: str, access: str, rc: Path) -> None:
 def main(
     args: list[str],
     environ: Mapping[str, str] | None = None,
-    run: Callable = subprocess.run,
+    run: Callable[..., Any] = subprocess.run,
     console: Console | None = None,
-    opener: Callable | None = None,
+    opener: Callable[..., Any] | None = None,
 ) -> int:
     environ = os.environ if environ is None else environ
     options = _parser().parse_args(args)
-    from scripts.gates.entry import native
+    from scripts.gates import entry
 
-    if native("sign-ins", "codex-login", environ):
+    if cast("Callable[..., Any]", entry.native)("sign-ins", "codex-login", environ):
         return 2
     print(term_colors.blue(aicode_tokens.SLUG_NOTE.format(prefix=CODEX_TOKEN_PREFIX)))
     try:
@@ -125,7 +128,7 @@ def main(
     aicode_tokens.write_rc(rc, {name: tokens["access_token"], REFRESH_FLAG: "true"}, _names(CODEX_TOKEN_PREFIX, old))
     _describe(slug, tokens["access_token"], rc)
     try:
-        bao = openbao_step.target(options.openbao, environ, console or Console(), opener)
+        bao = cast("Callable[..., Any]", openbao_step.target)(options.openbao, environ, console or Console(), opener)
     except StoreRefused as exc:
         _fail(str(exc))
         return 1

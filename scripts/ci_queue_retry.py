@@ -4,9 +4,13 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
-from scripts.ci_budget.rate_limit import gh_api
+from scripts.ci_budget import rate_limit
+
+gh_api = cast("Callable[..., subprocess.CompletedProcess[Any]]", rate_limit.gh_api)
 
 SHARD = "unit"
 RERUN = "unit rerun"
@@ -36,7 +40,7 @@ def runner_lost(text: str) -> bool:
     return bool(RUNNER_LOSS.search(text)) and not (FAILED_RESULT.search(text) or STEP_TIMED_OUT.search(text))
 
 
-def job_names(workflow: dict) -> dict[str, str]:
+def job_names(workflow: dict[Any, Any]) -> dict[str, str]:
     names = {job_id: spec.get("name", job_id) for job_id, spec in workflow["jobs"].items()}
     if (
         names.get("gate-required")
@@ -48,7 +52,7 @@ def job_names(workflow: dict) -> dict[str, str]:
     return names
 
 
-def polling_jobs(workflow: dict) -> set[str]:
+def polling_jobs(workflow: dict[Any, Any]) -> set[str]:
     names = job_names(workflow)
     return {
         names[job_id]
@@ -61,7 +65,7 @@ def polling_jobs(workflow: dict) -> set[str]:
     }
 
 
-def dependents(workflow: dict, root: str = SHARD) -> set[str]:
+def dependents(workflow: dict[Any, Any], root: str = SHARD) -> set[str]:
     jobs = workflow["jobs"]
     names = job_names(workflow)
     polling = polling_jobs(workflow)
@@ -77,7 +81,7 @@ def dependents(workflow: dict, root: str = SHARD) -> set[str]:
     return {names[job_id] for job_id in found}
 
 
-def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
+def decide(run: dict[str, Any], failed: list[dict[str, Any]], workflow: dict[Any, Any]) -> tuple[bool, str]:
     if run.get("event") != "merge_group" or run.get("conclusion") not in ("failure", "cancelled"):
         return False, "not a failed merge group run"
     if run.get("run_attempt") != 1:
@@ -98,7 +102,7 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
 
 
 def _api(*args: str) -> str:
-    return gh_api(list(args), timeout=120, text=True).stdout
+    return cast(str, gh_api(list(args), timeout=120, text=True).stdout)
 
 
 def log_errors(repo: str, job_id: int) -> list[str]:
@@ -117,9 +121,9 @@ def job_text(repo: str, job_id: int, log: bool) -> str:
     return "\n".join(notes)
 
 
-def failed_jobs(repo: str, run_id: int) -> list[dict]:
+def failed_jobs(repo: str, run_id: int) -> list[dict[str, Any]]:
     jobs = json.loads(_api(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"))
-    failed = []
+    failed: list[dict[str, Any]] = []
     for job in jobs["jobs"]:
         shard = base_name(job["name"]) == SHARD
         if job["conclusion"] not in ("failure", "timed_out") and not (shard and job["conclusion"] == "cancelled"):
@@ -134,12 +138,12 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
     return failed
 
 
-def pull_number(run: dict) -> int | None:
+def pull_number(run: dict[str, Any]) -> int | None:
     match = QUEUE_BRANCH.search(str(run.get("head_branch")))
     return int(match.group(1)) if match else None
 
 
-def requeue(pull: dict) -> tuple[bool, str]:
+def requeue(pull: dict[str, Any]) -> tuple[bool, str]:
     if pull.get("state") != "OPEN" or pull.get("isInMergeQueue"):
         return False, "pull request is not open outside the queue"
     head_at = pull["commits"]["nodes"][-1]["commit"]["committedDate"]
@@ -152,7 +156,7 @@ def requeue(pull: dict) -> tuple[bool, str]:
     return True, "first failed checks removal of this head"
 
 
-def pull_state(repo: str, number: int) -> dict:
+def pull_state(repo: str, number: int) -> dict[str, Any]:
     owner, name = repo.split("/")
     query = (
         f'query{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{number}){{'
@@ -163,7 +167,7 @@ def pull_state(repo: str, number: int) -> dict:
     return json.loads(_api("graphql", "-f", f"query={query}"))["data"]["repository"]["pullRequest"]
 
 
-def pull_after_exit(repo: str, number: int) -> dict:
+def pull_after_exit(repo: str, number: int) -> dict[str, Any]:
     pull = pull_state(repo, number)
     for _ in range(EXIT_POLLS):
         if not pull.get("isInMergeQueue"):
@@ -188,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
     node = head = ""
     if retry:
-        pull = pull_after_exit(args.repo, number)
+        pull = pull_after_exit(args.repo, cast(int, number))
         allowed, why = requeue(pull)
         retry, reason = allowed, f"{reason}; {why}"
         if retry:
