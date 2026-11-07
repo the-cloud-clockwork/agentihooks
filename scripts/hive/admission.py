@@ -174,7 +174,9 @@ def room(
     free, floor = measured.get("disk_free_gb"), measured.get("disk_floor_gb")
     if free is not None and floor is not None and free < floor:
         return Room(0, DISK, f"{free} GB free on the agent home, below the {floor} GB worktree floor")
-    limits = _first(measured, pending) if first else _host(measured, pending) + _pod(measured, pending)
+    limits = _host(measured, pending) + _pod(measured, pending)
+    if first:
+        limits = _first(measured, pending) + [limit for limit in limits if limit[1] == CPU]
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
         limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
