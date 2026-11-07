@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__mcp_servers:71e79f551e3334b7349d44a0987a6f07575e35c600232c3103d61cee0bc16e7d": {
+    "reader": "standards_reader",
+    "reason": "In x__mcp_servers, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

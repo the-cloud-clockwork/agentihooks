@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__resolve:dd711cc30fc5a33afa1e4780704067ee5d02803fee7aa9fc7113349865950024": {
+    "reader": "standards_reader",
+    "reason": "In x__resolve, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to \"MODULETYPE\"); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

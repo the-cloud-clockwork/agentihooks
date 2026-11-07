@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/manifestos.py:scripts.profiles.manifestos.x_choice:033a47d2dc9d173072328cdb1b0374e092a818afe398c586129403b2a2340f93": {
+    "reader": "standards_reader",
+    "reason": "In x_choice, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

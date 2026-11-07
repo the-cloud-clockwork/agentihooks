@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__chain:1732f0cce6dbbf42fb263dbebba552ded2d803624ec39269e1588ea496d5e609": {
+    "reader": "standards_reader",
+    "reason": "In x__chain, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}
