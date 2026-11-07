@@ -2,11 +2,15 @@ import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
 from scripts.hive import cli, daemon, headroom, registry
 from scripts.hive.orders import Orders
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 pytestmark = pytest.mark.unit
 
@@ -394,3 +398,56 @@ def test_publish_reads_pod_load_against_the_previous_live_reading(redis, proc, c
 
 def test_the_cgroup_folder_defaults_to_the_cgroup_v2_mount():
     assert DEFAULT_CGROUP == Path("/sys/fs/cgroup")
+
+
+STAT = "cpu  600 0 200 1000 100 0 50 50 50 0\ncpu0 600 0 200 1000 100 0 50 50 50 0\n"
+
+
+def test_measure_reads_the_node_cpu_ticks_without_used_cpus_on_a_first_reading(
+    proc: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
+    (proc / "stat").write_text(STAT)
+    measured = headroom.measure(0, 20_000, proc)
+    assert measured["cpu_ticks"] == [900, 2000]
+    assert "used_cpus" not in measured
+
+
+@pytest.mark.parametrize(
+    ("previous", "used"),
+    [
+        ({"cpu_ticks": [500, 1000], "measured_at": 5_000}, {"used_cpus": 3.2}),
+        ({"cpu_ticks": [900, 1000], "measured_at": 5_000}, {"used_cpus": 0.0}),
+        ({"cpu_ticks": [0, 1999], "measured_at": 5_000}, {"used_cpus": 7200.0}),
+        ({"measured_at": 5_000}, {}),
+        ({"cpu_ticks": [901, 1000], "measured_at": 5_000}, {}),
+        ({"cpu_ticks": [500, 2000], "measured_at": 5_000}, {}),
+    ],
+)
+def test_measure_reads_used_cpus_from_node_ticks_since_the_previous_reading(
+    proc: Path, monkeypatch: pytest.MonkeyPatch, previous: dict, used: dict
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
+    (proc / "stat").write_text(STAT)
+    measured = headroom.measure(0, 20_000, proc, previous)
+    assert {field: value for field, value in measured.items() if field == "used_cpus"} == used
+
+
+@pytest.mark.parametrize("stat", ["", "cpu  x 0 0 0\n"])
+def test_measure_keeps_the_load_reading_without_a_readable_cpu_stat(proc: Path, stat: str) -> None:
+    (proc / "stat").write_text(stat)
+    measured = headroom.measure(0, 20_000, proc, {"cpu_ticks": [0, 1], "measured_at": 5_000})
+    assert measured["load5"] == 3.456
+    assert "cpu_ticks" not in measured and "used_cpus" not in measured
+
+
+def test_publish_reads_used_cpus_against_the_previous_live_reading(
+    redis: "Redis", proc: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 16)
+    (proc / "stat").write_text(STAT)
+    headroom.publish(redis, "box", 5_000, proc)
+    assert "used_cpus" not in json.loads(redis.get(headroom.key("box")))
+    (proc / "stat").write_text("cpu  1100 0 200 1500 100 0 100 0 0 0\n")
+    headroom.publish(redis, "box", 20_000, proc)
+    assert json.loads(redis.get(headroom.key("box")))["used_cpus"] == 8.0
