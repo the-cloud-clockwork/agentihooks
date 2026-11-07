@@ -1304,7 +1304,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Set-Cookie", "; ".join([f"{SESSION_COOKIE}{slug}={credential}", *attributes]))
         self.end_headers()
         self.wfile.write(data)
-        return None
 
     def probe_write(self) -> None:
         with core.LOCK:

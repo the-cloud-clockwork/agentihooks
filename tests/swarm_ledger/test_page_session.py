@@ -75,6 +75,15 @@ def test_no_served_ledger_page_carries_the_ledger_token(live: dict) -> None:
     assert live["admin"] not in server.page_for(SLUG)
 
 
+@pytest.mark.parametrize("path", ["/", "/?view=bin"])
+def test_no_served_home_page_carries_the_ledger_token(live: dict, path: str) -> None:
+    status, body, _ = send(live, "GET", path)
+
+    assert status == 200
+    assert live["admin"] not in body.decode()
+    assert "ledger-token" not in body.decode()
+
+
 def test_a_session_cookie_alone_carries_operator_writes(live: dict) -> None:
     with allowed(live):
         status, cookie, _ = open_session(live)
@@ -90,9 +99,10 @@ def test_a_session_cookie_alone_carries_operator_writes(live: dict) -> None:
 
 def test_a_session_needs_an_allowed_origin(live: dict) -> None:
     with allowed(live):
-        status, cookie, _ = open_session(live, Origin="http://elsewhere.test")
+        status, cookie, body = open_session(live, Origin="http://elsewhere.test")
 
     assert status == 403
+    assert body == b"origin not allowed"
     assert not cookie
 
 
@@ -133,9 +143,10 @@ def test_the_auth_service_issues_the_signed_operator_session(auth: dict) -> None
 
 def test_the_auth_service_refuses_a_session_without_the_operator(auth: dict) -> None:
     with allowed(auth):
-        status, cookie, _ = open_session(auth, **{"Cf-Access-Jwt-Assertion": "someone"})
+        status, cookie, body = open_session(auth, **{"Cf-Access-Jwt-Assertion": "someone"})
 
     assert status == 403
+    assert body == b"no operator session"
     assert not cookie
 
 
@@ -143,9 +154,10 @@ def test_edge_mode_without_an_auth_service_opens_no_session(live: dict, monkeypa
     monkeypatch.delenv("AGENTIHOOKS_AUTH_URL", raising=False)
     monkeypatch.setenv("SWARM_AUTH_MODE", "edge")
     with allowed(live):
-        status, cookie, _ = open_session(live)
+        status, cookie, body = open_session(live)
 
     assert status == 503
+    assert body == b"no operator session"
     assert not cookie
 
 
