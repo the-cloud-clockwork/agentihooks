@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.706 · 2026-11-07
+
+### 2026-11-07 · 236181ac7ab9 · #9967 · @agenticore-app
+
+**Share one ledger part list between the export schema and the tick view**
+
+This change fixes a duplication risk where the ledger export schema and the tick ledger view each kept their own hardcoded list of ledger parts, which could silently drift out of sync as new parts were added. Both now read a single shared constant, LEDGER_PARTS, defined once in the schemas module, and a new seam test confirms they reference the same list object. This closes issue #9446 and ensures future ledger part additions stay consistent across export and tick views automatically.
+
 ## v2.17.704 · 2026-11-07
 
 ### 2026-11-07 · 4572e84f89a5 · #10007 · @agenticore-app
