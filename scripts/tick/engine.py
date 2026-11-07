@@ -526,8 +526,8 @@ def _eager(
                 offsets[step.name] = _offset()
                 if step.name in rest | _shut(gate, step, records):
                     records[step.name] = _ended(found, _rested(step))
-                elif (joins := _cut_off(step, lane, (dropped, cut), found, held_back)) is not None:
-                    joins.add(step.name)
+                elif (cut_by := _cut_off(step, lane, (dropped, cut), found, held_back)) is not None:
+                    cut_by.add(step.name)
                     records[step.name] = _ended(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
