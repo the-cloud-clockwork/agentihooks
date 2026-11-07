@@ -1,5 +1,6 @@
 """The ledger page carries no operator token: the browser holds an operator session cookie instead."""
 
+import email.message
 import http.client
 import json
 import re
@@ -184,6 +185,17 @@ def test_an_unmarked_cookie_carries_no_credential(live: dict) -> None:
     assert cookie[name].value.startswith("page:")
     assert write(live, Cookie=f"{name}={credential}") == 403
     assert write(live, Cookie=f"{name}=bearer:{credential}") == 403
+
+
+def test_a_named_ledger_token_keeps_the_session_cookie_out() -> None:
+    headers = email.message.Message()
+    headers["X-Ledger-Token"] = "named"
+    headers["Cookie"] = f"ledger-session-{SLUG}=bearer:from-cookie"
+
+    server.session_credential(headers, f"/api/{SLUG}")
+
+    assert headers.get("Authorization") is None
+    assert headers.get_all("X-Ledger-Token") == ["named"]
 
 
 def test_the_page_renews_its_session_before_it_expires() -> None:
