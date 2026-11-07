@@ -22,9 +22,11 @@ STATE = {
     "phases": [{"id": "p1", "done": False}],
 }
 
+Queued = list[tuple[str, list[dict[str, Any]], bool]]
+
 
 @pytest.fixture
-def stored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[dict[str, Any]], bool]]:
+def stored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Queued:
     """A ledger module that queues every write and refuses calls, with the view of ``sw`` stored at generation 7."""
     from scripts.scheduler import service
 
@@ -52,7 +54,7 @@ def stored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, l
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it(stored: list) -> None:
+def test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it(stored: Queued) -> None:
     with view.holding():
         held = view.hold_stored("sw")
         assert held is not None and held.generation == 7
@@ -75,7 +77,7 @@ def test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it(sto
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_an_offline_pass_refuses_fresh_reads_at_once(stored: list) -> None:
+def test_an_offline_pass_refuses_fresh_reads_at_once(stored: Queued) -> None:
     client = LedgerClient()
     token = OFFLINE.set(True)
     try:
@@ -166,7 +168,7 @@ def test_a_refusing_server_still_ends_the_pass(monkeypatch: pytest.MonkeyPatch) 
     [{"if_state": ["claimed"]}, {"if_match": {"claimed_by": "e2"}}],
     ids=["state", "match"],
 )
-def test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused(stored: list, guard: dict) -> None:
+def test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused(stored: Queued, guard: dict[str, Any]) -> None:
     from scripts.swarm.ledger_client import LedgerRefused
 
     with view.holding():
@@ -183,7 +185,7 @@ def test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused(stored: 
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_an_offline_write_whose_guard_holds_is_queued(stored: list) -> None:
+def test_an_offline_write_whose_guard_holds_is_queued(stored: Queued) -> None:
     with view.holding():
         view.hold_stored("sw")
         token = OFFLINE.set(True)
@@ -198,7 +200,7 @@ def test_an_offline_write_whose_guard_holds_is_queued(stored: list) -> None:
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_an_offline_write_matching_a_held_field_is_queued(stored: list) -> None:
+def test_an_offline_write_matching_a_held_field_is_queued(stored: Queued) -> None:
     with view.holding():
         view.hold_stored("sw")
         token = OFFLINE.set(True)
@@ -211,7 +213,7 @@ def test_an_offline_write_matching_a_held_field_is_queued(stored: list) -> None:
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_an_offline_write_without_a_held_view_is_queued_unguarded(stored: list) -> None:
+def test_an_offline_write_without_a_held_view_is_queued_unguarded(stored: Queued) -> None:
     with view.holding():
         token = OFFLINE.set(True)
         try:
@@ -231,7 +233,7 @@ def test_a_first_read_stores_the_view_even_at_generation_zero(tmp_path: Path) ->
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_a_server_that_stops_mid_pass_leaves_the_held_view_in_place(
+def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.scheduler import service

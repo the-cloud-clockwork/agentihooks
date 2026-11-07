@@ -83,8 +83,10 @@
         "tests/tick/test_offline_view.py::test_a_refusing_server_still_ends_the_pass",
         "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused",
         "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_holds_is_queued",
+        "tests/tick/test_offline_view.py::test_an_offline_write_matching_a_held_field_is_queued",
+        "tests/tick/test_offline_view.py::test_an_offline_write_without_a_held_view_is_queued_unguarded",
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
-        "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_leaves_the_held_view_in_place",
+        "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view"
       ]
     },
