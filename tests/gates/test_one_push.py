@@ -647,3 +647,25 @@ def test_redirections_and_their_targets_are_never_read_as_remote_or_refspec() ->
     assert positionals(words) == ["origin", "task"]
     assert positionals(["origin", "2>"]) == ["origin"]
     assert positionals(["origin", "2>/dev/null", "task"]) == ["origin", "task"]
+
+
+def test_one_head_bound_subagents_lift_lets_the_reader_it_paid_for_open_the_pull_request(tree, tmp_path, monkeypatch):
+    import io
+    from unittest.mock import patch
+
+    from scripts.gates import lift
+
+    monkeypatch.setattr(lift, "_shared", lambda home: None)
+    monkeypatch.setattr("scripts.gates.intent.pr_head", lambda url: "a1")
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
+
+    def launch(reader: str) -> int:
+        payload = {"tool_name": "Agent", "tool_input": {"name": reader, "prompt": "review"}}
+        with patch("sys.stderr", io.StringIO()), patch.dict(entry.GATES, {"subagents": SubagentBudget(launches=1)}):
+            return entry.main(["subagents"], io.StringIO(json.dumps(payload)), env, tmp_path)
+
+    assert launch("standards-reader") == 0
+    assert launch("spec-reader") == 2
+    lift.lift_agent(ME, "subagents", tmp_path, pull={"url": URL, "head": "a1"})
+    assert launch("spec-reader") == 0
+    assert gate().decide(bash("gh pr ready", tree), ME, state(tmp_path)).allowed
