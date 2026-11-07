@@ -30,6 +30,7 @@ from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
 from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, load_policy
 from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, TerminalObjects, TerminalTemplate
 from scripts.swarm_v2.kubernetes.terminal_views import TerminalViews
+from scripts.swarm_v2.kubernetes.unschedulable import Unschedulable
 from scripts.swarm_v2.kubernetes.watch import OWNER_LABEL, CursorExpired, owner_for
 from scripts.swarm_v2.launch import DistributedLaunch, LaunchTerms
 from scripts.swarm_v2.operator_auth import OPERATOR
@@ -324,6 +325,7 @@ class RecoveryPass:
         self.replacements: Replacements | None = None
         self.choose: Callable[[], list[str]] | None = None
         self.completion: Completion | None = None
+        self.ending: Unschedulable | None = None
 
     def __call__(self) -> dict[str, str]:
         pods, version = self.api.snapshot(self.selector)
@@ -338,6 +340,8 @@ class RecoveryPass:
         if self.choose is not None:
             for line in self.choose():
                 print(line, flush=True)
+        if self.ending is not None:
+            self.ending(pods)
         if self.replacements is not None:
             self.replacements()
         if self.completion is not None:
@@ -393,7 +397,8 @@ def recovery_pass(
     cleanup = Cleanup(controller.store, slug, api, controller.require, attach, releases["grant"])
     recovering.completion = Completion(controller.store, slug, cleanup)
     if ledger is not None:
-        recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger)
+        recovering.replacements = Replacements(recovery, service.runtime.relaunch, ledger, placed=True)
+        recovering.ending = Unschedulable(controller.store, slug, controller, ledger)
     if environ is not None:
         recovering.choose = partial(proof_swarm.choose_fresh, environ, recovery)
     return recovering

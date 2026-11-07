@@ -34,6 +34,9 @@ class Usage:
     memory_mib: int
 
 
+NOTHING = Usage(0, 0, 0)
+
+
 def _amount(quantity: str) -> Decimal:
     found = QUANTITY.fullmatch(quantity)
     refused = ValueError(f"not a resource quantity: {quantity!r}")
@@ -69,9 +72,31 @@ def requests(pod: dict) -> tuple[int, int]:
     )
 
 
+def unschedulable(pod: dict) -> bool:
+    """A Pending Pod the scheduler reported it cannot place on any node."""
+    status = pod.get("status", {})
+    return status.get("phase") == "Pending" and any(
+        condition.get("type") == "PodScheduled"
+        and condition.get("status") == "False"
+        and condition.get("reason") == "Unschedulable"
+        for condition in status.get("conditions", [])
+    )
+
+
+def _tally(pods: list[dict]) -> Usage:
+    asked = [requests(pod) for pod in pods]
+    return Usage(len(asked), sum(row[0] for row in asked), sum(row[1] for row in asked))
+
+
 def usage(pods: list[dict]) -> Usage:
-    live = [requests(pod) for pod in pods if pod.get("status", {}).get("phase") not in FINISHED]
-    return Usage(len(live), sum(row[0] for row in live), sum(row[1] for row in live))
+    return _tally(
+        [pod for pod in pods if pod.get("status", {}).get("phase") not in FINISHED and not unschedulable(pod)]
+    )
+
+
+def stranded(pods: list[dict]) -> Usage:
+    """What unschedulable Pods hold of the namespace quota while they can never run."""
+    return _tally([pod for pod in pods if unschedulable(pod)])
 
 
 def pool_room(pool: dict, launch: dict, used: Usage) -> Room:
@@ -131,10 +156,13 @@ def _left(quotas: list[dict]) -> dict[str, int]:
     return left
 
 
-def quota_room(quotas: list[dict], launch: dict) -> Room | None:
+def quota_room(quotas: list[dict], launch: dict, held: Usage = NOTHING) -> Room | None:
+    """`held` is what unschedulable Pods count against the quota; it is given back as room."""
     left = _left(quotas)
     if not left:
         return None
+    back = {PODS: held.pods, CPU: held.cpu_millis, MEMORY: held.memory_mib}
+    left = {resource: free + back[resource] for resource, free in left.items()}
     each = {PODS: 1, CPU: launch["cpu_millis"], MEMORY: launch["memory_mib"]}
     named = [resource for resource in UNITS if resource in left]
     fits = {resource: left[resource] // each[resource] for resource in named}
@@ -151,34 +179,38 @@ def quota_room(quotas: list[dict], launch: dict) -> Room | None:
 
 
 class WorkerPool:
-    """Lists every Pod and quota in the worker namespace, with no label selector."""
+    """Lists every Pod and quota in the worker namespace, with no label selector, the Pods once per reading."""
 
     def __init__(self, api: PodApi, pool: dict | None, launch: dict) -> None:
         self.api, self.pool, self.launch = api, pool, launch
 
     def __call__(self) -> Room:
-        readings = [self._quota(), self._pool()]
+        try:
+            pods: list[dict] | str = self.api.list_pods("")
+        except (ApiRefused, OSError) as error:
+            pods = type(error).__name__
+        readings = [self._quota(pods), self._pool(pods)]
         known = [reading for reading in readings if reading.room is not None]
         if known:
             return min(known, key=lambda reading: reading.room)
         return Room(None, f"{'; '.join(reading.reason for reading in readings)}, so spawns pass", UNKNOWN)
 
-    def _quota(self) -> Room:
+    def _quota(self, pods: list[dict] | str) -> Room:
         try:
-            found = quota_room(self.api.list_quotas(), self.launch)
+            held = stranded(pods) if isinstance(pods, list) else NOTHING
+            found = quota_room(self.api.list_quotas(), self.launch, held)
         except (ApiRefused, OSError) as error:
             return Room(None, f"worker namespace quota cannot be read ({type(error).__name__})")
         except ValueError as error:
             return Room(None, f"worker namespace quota is {error}")
         return found or Room(None, "worker namespace quota sets no Pod, CPU or memory limit")
 
-    def _pool(self) -> Room:
+    def _pool(self, pods: list[dict] | str) -> Room:
+        """`pods` is the listing, or the name of the error that refused it."""
         if self.pool is None:
             return Room(None, "worker pool undeclared: the Pod policy names no worker_pool")
-        try:
-            pods = self.api.list_pods("")
-        except (ApiRefused, OSError) as error:
-            return Room(None, f"worker pool unknown: the worker Pods cannot be listed ({type(error).__name__})")
+        if isinstance(pods, str):
+            return Room(None, f"worker pool unknown: the worker Pods cannot be listed ({pods})")
         try:
             used = usage(pods)
         except ValueError as error:
