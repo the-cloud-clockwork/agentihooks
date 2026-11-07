@@ -18,6 +18,7 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
+from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
@@ -69,10 +70,14 @@ def _hive_ledger(cli: Any, get: Get) -> None:
 
 def _ledger_health(cli: Any, get: Get) -> None:
     ledger, slug = get("ledger"), get("slug")
-    if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-        slug,
-        cli.now_ms(),
-        lambda: isinstance(ledger.metadata(slug), dict),  # pyright: ignore[reportUnknownMemberType]
+    if (
+        isinstance(ledger, ledger_client.LedgerClient)
+        and not outage.ledger_health(
+            slug,
+            cli.now_ms(),
+            lambda: isinstance(ledger.metadata(slug), dict),  # pyright: ignore[reportUnknownMemberType]
+        )
+        and ledger_view.stored(slug) is None
     ):
         get("box")["stop"] = ["Ledger health probe failed"]
 

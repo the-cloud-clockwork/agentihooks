@@ -38,6 +38,7 @@ __all__ = [
     "queued",
     "refreshed",
     "start",
+    "stored",
     "view_file",
     "wrote",
 ]
@@ -163,7 +164,7 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     except (KeyError, IndexError, TypeError, AttributeError):
         reply, generation = reader(0, PARTS), None
         state = reply["data"]
-    if reply["generation"] != generation:
+    if stored is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
     return LedgerView(reply["generation"], state)
 
@@ -195,8 +196,23 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
-    _hold(slug, view, refresh)
+    _hold(slug, view, _kept(refresh))
     return view
+
+
+def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
+    """``refresh``, answering with the view the pass already holds when the server stops answering mid pass."""
+
+    def renew() -> LedgerView:
+        """The held view patched with one delta read, or the held view as it is while the server is not answering."""
+        try:
+            return refresh()
+        except urllib.error.HTTPError:
+            raise
+        except OSError:
+            return cast(Held, HELD.get()).view
+
+    return renew
 
 
 def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:
@@ -206,17 +222,21 @@ def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -
     REFRESH.set(None if view is None else (slug, renew))
 
 
-def hold_stored(slug: str, service: bool) -> LedgerView | None:
-    """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
-    the host stores none."""
+def stored(slug: str) -> LedgerView | None:
+    """The last good view of this swarm's ledger stored on this host, or nothing when the host stores none."""
     from scripts.scheduler import service as scheduler
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
 
-    stored = read_export_file(view_file(_ledger().base(slug), slug, scheduler.runtime_dir()))
-    if stored is None:
-        return None
-    view = LedgerView(stored[0], stored[1])
-    _hold(slug, view, lambda: cast(Held, HELD.get()).view)
+    found = read_export_file(view_file(_ledger().base(slug), slug, scheduler.runtime_dir()))
+    return None if found is None else LedgerView(found[0], found[1])
+
+
+def hold_stored(slug: str) -> LedgerView | None:
+    """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
+    the host stores none."""
+    view = stored(slug)
+    if view is not None:
+        _hold(slug, view, lambda: cast(Held, HELD.get()).view)
     return view
 
 

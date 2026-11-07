@@ -1,5 +1,6 @@
 """A tick pass against a real ledger server behind a proxy that is made slow or stopped keeps launching."""
 
+import contextlib
 import socket
 import threading
 import time
@@ -80,17 +81,12 @@ class Proxy:
     @staticmethod
     def _pipe(source: socket.socket, target: socket.socket) -> None:
         """Copy bytes from source to target until either side closes."""
-        try:
+        with contextlib.suppress(OSError):
             while chunk := source.recv(65536):
                 target.sendall(chunk)
-        except OSError:
-            pass
-        finally:
-            for side in (source, target):
-                try:
-                    side.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
+        for side in (source, target):
+            with contextlib.suppress(OSError):
+                side.shutdown(socket.SHUT_RDWR)
 
 
 @pytest.mark.wall_clock

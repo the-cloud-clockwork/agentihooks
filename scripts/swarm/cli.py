@@ -62,7 +62,6 @@ import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
-from contextvars import Token
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
@@ -338,29 +337,19 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
         return
     try:
         ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
-    except urllib.error.HTTPError as exc:
-        if exc.code < 500:
-            raise
-        _hold_stored(beating, slug, ledger, exc)
     except OSError as exc:
-        _hold_stored(beating, slug, ledger, exc)
+        if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+            raise
+        _hold_stored(beating, slug, exc)
 
 
-def _hold_stored(beating: ExitStack, slug: str, ledger: LedgerClient, exc: OSError) -> None:
+def _hold_stored(beating: ExitStack, slug: str, exc: OSError) -> None:
     """Hold the last good view of ledger ``slug`` for the pass and run it offline, or raise when none is stored."""
-    if ledger_view.hold_stored(slug, ledger.service) is None:
+    if ledger_view.hold_stored(slug) is None:
         raise LedgerUnreachable(f"ledger {slug}: no stored view to run from while the server is not answering") from exc
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
-    offline = ledger_client.OFFLINE.set(True)
-    beating.callback(_end_offline, offline)
-
-
-def _end_offline(token: Token[bool]) -> None:
-    """End the pass's offline mode, even when the pass ends in another context than the one that started it."""
-    try:
-        ledger_client.OFFLINE.reset(token)
-    except ValueError:
-        ledger_client.OFFLINE.set(False)
+    ledger_client.OFFLINE.set(True)
+    beating.callback(ledger_client.OFFLINE.set, False)
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):
