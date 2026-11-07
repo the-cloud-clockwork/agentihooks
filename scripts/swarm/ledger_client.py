@@ -6,7 +6,7 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
@@ -48,8 +48,10 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     held = view.current()
     for op in ops:
-        row = held.read("tasks", op["item"].removeprefix("tasks/")) if held and op["op"] == "task_update" else None
-        states, expected = op.get("if_state") or [], op.get("if_match") or {}
+        found = held.read("tasks", op["item"].removeprefix("tasks/")) if held and op["op"] == "task_update" else None
+        row = cast(dict[str, Any], found) if isinstance(found, dict) else None
+        states: list[str] = op.get("if_state") or []
+        expected: dict[str, Any] = op.get("if_match") or {}
         moved = row is not None and (
             bool(states)
             and row.get("state") not in states
@@ -58,6 +60,11 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if moved:
             raise LedgerRefused(f"ledger {slug} refused: {op['item']} moved since the last good view")
     return ops
+
+
+def _ledger_queue(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """The answer of ``ledger`` queueing ``ops`` for ledger ``slug`` in the local outbox."""
+    return ledger.queue(slug, ops, service)
 
 
 def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
@@ -106,7 +113,7 @@ class LedgerClient:
             raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         try:
             if OFFLINE.get() and ops:
-                return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+                return _queued(ops, _ledger_queue(ledger, slug, _guarded(slug, ops), service))
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc

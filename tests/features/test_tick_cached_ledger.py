@@ -75,15 +75,17 @@ class Proxy:
         except OSError:
             client.close()
             return
-        for source, target in ((client, server), (server, client)):
-            threading.Thread(target=self._pipe, args=(source, target), daemon=True).start()
+        host = (f"Host: 127.0.0.1:{self.port}".encode(), f"Host: 127.0.0.1:{self.upstream}".encode())
+        for source, target, swap in ((client, server, host), (server, client, (b"", b""))):
+            threading.Thread(target=self._pipe, args=(source, target, swap), daemon=True).start()
 
     @staticmethod
-    def _pipe(source: socket.socket, target: socket.socket) -> None:
-        """Copy bytes from source to target until either side closes."""
+    def _pipe(source: socket.socket, target: socket.socket, swap: tuple[bytes, bytes]) -> None:
+        """Copy bytes from source to target until either side closes, naming the ledger server's own address in the
+        Host header so the server's host check passes."""
         with contextlib.suppress(OSError):
             while chunk := source.recv(65536):
-                target.sendall(chunk)
+                target.sendall(chunk.replace(*swap) if swap[0] else chunk)
         for side in (source, target):
             with contextlib.suppress(OSError):
                 side.shutdown(socket.SHUT_RDWR)
@@ -105,7 +107,8 @@ def test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopp
     proxy = Proxy(int(swarm.ledger.env["LEDGER_PORT"]))
     monkeypatch.setattr(_ledger(), "BASE", proxy.base)
     ledger, runtime = LedgerClient(), FakeRuntime()
-    cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
+    warmed = cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
+    assert "Ledger health probe failed" not in warmed, warmed
     store.update(slug, state="running")
     proxy.fault(fault)
     started = time.monotonic()

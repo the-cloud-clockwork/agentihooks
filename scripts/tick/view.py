@@ -210,7 +210,7 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
         except urllib.error.HTTPError:
             raise
         except OSError:
-            return cast(Held, HELD.get()).view
+            return HELD.get().view  # pyright: ignore[reportOptionalMemberAccess]
 
     return renew
 
@@ -227,7 +227,9 @@ def stored(slug: str) -> LedgerView | None:
     from scripts.scheduler import service as scheduler
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
 
-    found = read_export_file(view_file(_ledger().base(slug), slug, scheduler.runtime_dir()))
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
+    found = read_export_file(view_file(base, slug, scheduler.runtime_dir()))
     return None if found is None else LedgerView(found[0], found[1])
 
 
@@ -236,7 +238,7 @@ def hold_stored(slug: str) -> LedgerView | None:
     the host stores none."""
     view = stored(slug)
     if view is not None:
-        _hold(slug, view, lambda: cast(Held, HELD.get()).view)
+        _hold(slug, view, lambda: HELD.get().view)  # pyright: ignore[reportOptionalMemberAccess]
     return view
 
 
@@ -250,7 +252,6 @@ def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
     document = dict(held.view.document)
     document["tasks"] = [{**task, **fields.get(task.get("id"), {})} for task in held.view.tasks]
     held.view = LedgerView(held.view.generation, document)
-    CURRENT.set(held.view)
     return document
 
 

@@ -38,7 +38,7 @@ def stored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, l
         raise AssertionError("an offline pass never calls the server")
 
     ledger = SimpleNamespace(
-        base=lambda slug: "http://ledger",
+        base=lambda slug: "http://ledger" if slug == "sw" else "http://elsewhere",
         credentials=lambda slug, service: {},
         REQUEST_TIMEOUT=4,
         queue=queue,
@@ -59,17 +59,19 @@ def test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it(sto
         assert view.document("sw") == STATE
         token = OFFLINE.set(True)
         try:
-            task = LedgerClient().update_task("sw", "t1", {"state": "claimed", "claimed_by": "e1"})
+            task = LedgerClient(service=True).update_task("sw", "t1", {"state": "claimed", "claimed_by": "e1"})
         finally:
             OFFLINE.reset(token)
         assert task == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
-        [(slug, ops, _)] = stored
-        assert (slug, ops[0]["op"], ops[0]["item"]) == ("sw", "task_update", "tasks/t1")
+        [(slug, ops, service)] = stored
+        assert (slug, ops[0]["op"], ops[0]["item"], service) == ("sw", "task_update", "tasks/t1", True)
+        view.wrote()
         current = view.current()
         assert current is not None and current.generation == 7
         assert current.read("tasks", "t1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
         assert current.read("tasks", "t2") == {"id": "t2", "state": "claimed"}
-        assert view.document("sw")["_meta"] == STATE["_meta"]
+        held = view.document("sw")
+        assert held is not None and held["_meta"] == STATE["_meta"]
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
@@ -116,7 +118,7 @@ def refusal(code: int) -> urllib.error.HTTPError:
     ids=["stopped", "slow", "failing"],
 )
 def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
-    failure: OSError, monkeypatch: pytest.MonkeyPatch
+    failure: OSError, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     timeouts: list[float | None] = []
     stored = view.LedgerView(7, STATE)
@@ -126,12 +128,13 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
         raise failure
 
     monkeypatch.setattr(cli.ledger_view, "start", start)
-    monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: stored)
+    monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: stored if slug == "sw" else None)
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))
         assert OFFLINE.get() is True
     assert OFFLINE.get() is False
     assert timeouts == [ledger_client.SNAPSHOT_TIMEOUT_S]
+    assert "ledger sw not answering" in capsys.readouterr().err
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
@@ -170,7 +173,7 @@ def test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused(stored: 
         view.hold_stored("sw")
         token = OFFLINE.set(True)
         try:
-            with pytest.raises(LedgerRefused, match="tasks/t1 moved since the last good view"):
+            with pytest.raises(LedgerRefused, match="ledger sw refused: tasks/t1 moved since the last good view"):
                 LedgerClient().update_task("sw", "t1", {"claimed_by": "e1"}, **guard)
         finally:
             OFFLINE.reset(token)
@@ -191,6 +194,31 @@ def test_an_offline_write_whose_guard_holds_is_queued(stored: list) -> None:
         finally:
             OFFLINE.reset(token)
     assert task == {"id": "t1", "state": "open", "claimed_by": "e1"}
+    assert len(stored) == 1
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_an_offline_write_matching_a_held_field_is_queued(stored: list) -> None:
+    with view.holding():
+        view.hold_stored("sw")
+        token = OFFLINE.set(True)
+        try:
+            task = LedgerClient().update_task("sw", "t2", {"claimed_by": "e1"}, if_match={"state": "claimed"})
+        finally:
+            OFFLINE.reset(token)
+    assert task == {"id": "t2", "state": "claimed", "claimed_by": "e1"}
+    assert len(stored) == 1
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_an_offline_write_without_a_held_view_is_queued_unguarded(stored: list) -> None:
+    with view.holding():
+        token = OFFLINE.set(True)
+        try:
+            task = LedgerClient().update_task("sw", "t1", {"claimed_by": "e1"}, if_state=("claimed",))
+        finally:
+            OFFLINE.reset(token)
+    assert task == {}
     assert len(stored) == 1
 
 
