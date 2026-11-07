@@ -1,9 +1,10 @@
 import subprocess
+import time
 
 import pytest
 
 from hooks.context import claim_watch
-from scripts.swarm import ledger_client
+from scripts.swarm import ledger_client, store
 from scripts.swarm_ledger import ledger_workspace
 
 pytestmark = pytest.mark.unit
@@ -15,16 +16,29 @@ ENV = {
     "AGENTIHOOKS_SWARM_TASK": "t1",
     "AGENTIHOOKS_SWARM_LANE": "eng",
 }
+KEY = f"{store.PREFIX}:sw:claim:t1"
+OTHER = "engineer@a1b2c3-0009"
 
 
-class Ledger:
-    def __init__(self, row):
-        self.row = row
-        self.reads = []
+class Pushed:
+    def __init__(self, holder: str | None) -> None:
+        self.holder = holder
+        self.reads: list[str] = []
 
-    def task(self, slug, task_id):
-        self.reads.append((slug, task_id))
-        return self.row
+    def get(self, key: str) -> str | None:
+        self.reads.append(key)
+        return self.holder
+
+
+class Down:
+    def __init__(self) -> None:
+        self.reads: list[str] = []
+
+    def get(self, key: str) -> str | None:
+        import redis
+
+        self.reads.append(key)
+        raise redis.ConnectionError("refused")
 
 
 class Spawn:
@@ -75,17 +89,24 @@ def hosted(monkeypatch: pytest.MonkeyPatch) -> list:
     return reads
 
 
-def _check(row, env=ENV, now=1000.0):
-    ledger, spawn = Ledger(row), Spawn()
-    return claim_watch.check(env, ledger, now, spawn), ledger, spawn
+def _check(holder: str | None, env: dict = ENV, now: float = 1000.0) -> tuple:
+    redis, spawn = Pushed(holder), Spawn()
+    return claim_watch.check(env, redis, now, spawn), redis, spawn
 
 
-def test_a_reopened_task_stops_its_old_hive_claimant_at_its_next_tool_call(hive):
-    stop, ledger, spawn = _check({"id": "t1", "state": "open", "claimed_by": ""})
+def test_the_watched_key_is_the_task_claim_the_tick_pushes() -> None:
+    assert claim_watch.key("sw", "t1") == KEY
 
-    assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="nobody")
-    assert ledger.reads == [("sw", "t1")]
-    assert hive == [ENV]
+
+def test_a_new_claimant_stops_the_old_one_at_its_next_tool_call() -> None:
+    folder = ledger_workspace.folder("sw", "t1")
+    folder.mkdir(parents=True)
+    (folder / "progress.md").write_text("earlier step\n")
+
+    stop, redis, spawn = _check(OTHER)
+
+    assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+    assert redis.reads == [KEY]
     assert spawn.calls == [
         (
             ["agentihooks", "swarm", "sw", "--as", NAME, "exit"],
@@ -97,43 +118,20 @@ def test_a_reopened_task_stops_its_old_hive_claimant_at_its_next_tool_call(hive)
             },
         )
     ]
-    progress = (ledger_workspace.folder("sw", "t1") / "progress.md").read_text()
-    assert progress == claim_watch.NOTE.format(at="1970-01-01T00:16:40Z", name=NAME, owner="nobody")
-
-
-def test_a_new_claimant_stops_the_old_one_and_the_note_names_it(hive):
-    folder = ledger_workspace.folder("sw", "t1")
-    folder.mkdir(parents=True)
-    (folder / "progress.md").write_text("earlier step\n")
-
-    stop, _, spawn = _check({"id": "t1", "state": "claimed", "claimed_by": "engineer@a1b2c3-0009"})
-
-    assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="engineer@a1b2c3-0009")
-    assert len(spawn.calls) == 1
     assert (folder / "progress.md").read_text() == "earlier step\n" + claim_watch.NOTE.format(
-        at="1970-01-01T00:16:40Z", name=NAME, owner="engineer@a1b2c3-0009"
+        at="1970-01-01T00:16:40Z", name=NAME, owner=OTHER
     )
 
 
-def test_the_claimant_itself_keeps_working(hive):
-    stop, _, spawn = _check({"id": "t1", "state": "claimed", "claimed_by": NAME})
+def test_the_claimant_itself_keeps_working() -> None:
+    stop, _, spawn = _check(NAME)
 
     assert stop is None
     assert spawn.calls == []
     assert not (ledger_workspace.folder("sw", "t1") / "progress.md").exists()
 
 
-def test_a_workstation_worker_keeps_an_emptied_claim_the_tick_restores(monkeypatch):
-    from scripts.hive import scope
-
-    monkeypatch.setattr(scope, "member", lambda environ=None: "")
-    stop, _, spawn = _check({"id": "t1", "state": "open", "claimed_by": ""})
-
-    assert stop is None
-    assert spawn.calls == []
-
-
-def test_a_missing_task_row_keeps_the_session(hive):
+def test_an_absent_pushed_claim_keeps_the_session() -> None:
     stop, _, spawn = _check(None)
 
     assert stop is None
@@ -151,48 +149,111 @@ def test_a_missing_task_row_keeps_the_session(hive):
         {**ENV, "AGENTIHOOKS_WORKER_RUN": "1"},
     ],
 )
-def test_only_a_swarm_worker_session_is_checked(hive, env):
-    stop, ledger, spawn = _check({"id": "t1", "state": "open", "claimed_by": ""}, env=env)
+def test_only_a_swarm_worker_session_is_checked(env: dict) -> None:
+    stop, redis, spawn = _check(OTHER, env=env)
 
     assert stop is None
-    assert ledger.reads == []
+    assert redis.reads == []
     assert spawn.calls == []
 
 
-def test_the_ci_lane_is_checked(hive):
-    stop, _, _ = _check({"id": "t1", "state": "open", "claimed_by": ""}, env={**ENV, "AGENTIHOOKS_SWARM_LANE": "ci"})
+def test_the_ci_lane_is_checked() -> None:
+    stop, _, _ = _check(OTHER, env={**ENV, "AGENTIHOOKS_SWARM_LANE": "ci"})
 
     assert stop is not None
 
 
-def test_a_reopened_task_stops_on_the_call_after_a_successful_check(hive):
-    row = {"id": "t1", "state": "claimed", "claimed_by": NAME}
-    ledger, spawn = Ledger(row), Spawn()
+def test_a_pushed_answer_is_kept_thirty_seconds_then_read_again() -> None:
+    redis, spawn = Pushed(NAME), Spawn()
 
-    assert claim_watch.check(ENV, ledger, 1000.0, spawn) is None
-    row.update(state="open", claimed_by="")
-    assert claim_watch.check(ENV, ledger, 1001.0, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner="nobody"
+    assert claim_watch.CACHE_S >= 30
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
+    redis.holder = OTHER
+    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S - 1, spawn) is None
+    assert redis.reads == [KEY]
+    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
+        task="t1", slug="sw", owner=OTHER
     )
-    assert ledger.reads == [("sw", "t1"), ("sw", "t1")]
+    assert redis.reads == [KEY, KEY]
     assert len(spawn.calls) == 1
 
 
-def test_the_pre_tool_hook_denies_the_next_call_of_a_reopened_claimant(hive, monkeypatch):
+def test_a_cached_answer_of_another_agent_is_not_reused() -> None:
+    assert claim_watch.check(ENV, Pushed(NAME), 1000.0, Spawn()) is None
+    successor, spawn = {**ENV, "AGENTIHOOKS_AGENT_NAME": OTHER}, Spawn()
+    redis = Pushed(OTHER)
+
+    assert claim_watch.check(successor, redis, 1001.0, spawn) is None
+    assert redis.reads == [KEY]
+
+
+def test_an_unreachable_redis_keeps_the_session_and_is_not_asked_again_inside_the_window() -> None:
+    redis, spawn = Down(), Spawn()
+
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) is None
+    assert redis.reads == [KEY]
+    assert spawn.calls == []
+
+
+def test_no_redis_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(claim_watch, "_client", lambda environ: None)
+
+    assert claim_watch.check(ENV, None, 1000.0, Spawn()) is None
+
+
+def test_the_pre_tool_hook_denies_the_next_call_of_a_replaced_claimant(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks import hook_manager
 
-    ledger, spawn = Ledger({"id": "t1", "state": "open", "claimed_by": ""}), Spawn()
+    redis, spawn = Pushed(OTHER), Spawn()
     for key, value in ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
-    monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient.task", lambda _, slug, task: ledger.task(slug, task))
+    monkeypatch.setattr(claim_watch, "_client", lambda environ: redis)
     monkeypatch.setattr(claim_watch.subprocess, "Popen", spawn)
 
     with pytest.raises(hook_manager.BlockAction, match="no longer claimed by you"):
         hook_manager.on_pre_tool_use(
             {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "git status"}, "cwd": "/"}
         )
-    assert ledger.reads == [("sw", "t1")]
+    assert redis.reads == [KEY]
+    assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
+
+
+def test_a_ledger_answering_after_five_seconds_does_not_slow_a_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    def slow(*args: object, **kwargs: object) -> dict:
+        time.sleep(5)
+        return {"id": "t1", "state": "claimed", "claimed_by": NAME}
+
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
+    monkeypatch.setattr(ledger_client.LedgerClient, "task", slow)
+    monkeypatch.setattr(ledger_client.LedgerClient, "item", slow)
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
+    monkeypatch.setattr(claim_watch, "_client", lambda environ: Pushed(NAME))
+    started = time.monotonic()
+
+    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") is None
+    assert time.monotonic() - started < 0.1
+
+
+def test_a_lost_pushed_claim_still_exits_through_the_swarm_gates(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.context import context_recycle, swarm_gates
+
+    spawn = Spawn()
+    for key, value in ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
+    monkeypatch.setattr(claim_watch, "_client", lambda environ: Pushed(OTHER))
+    monkeypatch.setattr(claim_watch.subprocess, "Popen", spawn)
+
+    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") == claim_watch.STOP.format(
+        task="t1", slug="sw", owner=OTHER
+    )
     assert [argv for argv, _ in spawn.calls] == [["agentihooks", "swarm", "sw", "--as", NAME, "exit"]]
 
 
@@ -261,24 +322,6 @@ def test_a_failing_swarm_gate_is_logged_and_the_next_one_still_runs(monkeypatch,
     logged.clear()
     assert swarm_gates.pretool("Bash", {}, "s1") == "handoff"
     assert logged == [("claim watch failed", {"error": "no transcript"})]
-
-
-def test_a_slow_hosted_ledger_costs_one_short_read_and_the_call_passes(
-    hive: list, hosted: list, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from hooks.context import context_recycle, swarm_gates
-
-    logged = []
-    for key, value in ENV.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
-    monkeypatch.setattr(context_recycle, "gate", lambda *args: None)
-    monkeypatch.setattr(swarm_gates, "log", lambda message, payload: logged.append((message, payload)))
-
-    assert swarm_gates.pretool("Bash", {"command": "ls"}, "s1") is None
-    assert hosted == [("sw", "tasks/t1", claim_watch.READ_TIMEOUT)]
-    assert claim_watch.READ_TIMEOUT == 2
-    assert logged == [("claim watch failed", {"error": "timed out"})]
 
 
 def test_other_ledger_clients_keep_three_ten_second_attempts(hosted: list) -> None:
