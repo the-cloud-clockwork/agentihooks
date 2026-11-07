@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.686 · 2026-11-07
+
+### 2026-11-07 · c507833b3986 · #9943 · @agenticore-app
+
+**Reap a later expired launch of the same name by its own execution**
+
+This change hardens the hive launch controller so that when a launch expires without acknowledgement and is retired, its reap command is keyed on the specific launch execution rather than just the agent name. Previously, a later relaunch sharing the same name could have its reap command dropped as a duplicate, potentially leaving a stale pane running. Now a controller test confirms that two separate expirations of the same agent name each produce their own reap command in the hive stream, both correctly executed, closing the gap where expired launches could silently fail to be cleaned up.
+
 ## v2.17.685 · 2026-11-07
 
 ### 2026-11-07 · 517e2667cd96 · #9893 · @agenticore-app
