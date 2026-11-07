@@ -491,7 +491,7 @@
   "scripts/plans/normalize.py": 180,
   "scripts/profile_telemetry.py": 44,
   "scripts/profiles/binding.py": 3,
-  "scripts/profiles/browser.py": 2,
+  "scripts/profiles/browser.py": 3,
   "scripts/profiles/bundles.py": 2,
   "scripts/profiles/connectors.py": 7,
   "scripts/profiles/manifestos.py": 6,

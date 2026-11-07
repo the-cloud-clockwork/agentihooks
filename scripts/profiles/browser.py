@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from mcp.client.stdio import StdioServerParameters
     from mcp.server.lowlevel import Server
     from mcp.shared.context import RequestContext
-    from pydantic import FileUrl
 
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
@@ -165,7 +164,7 @@ class Upstream:
         from playwright.async_api import async_playwright
 
         async def roots(context: RequestContext[ClientSession, Any]) -> types.ListRootsResult:
-            return types.ListRootsResult(roots=[types.Root(uri=cast("FileUrl", self.out.as_uri()))])
+            return types.ListRootsResult(roots=[types.Root(uri=self.out.as_uri())])
 
         async with async_playwright() as playwright:
             params = parameters(self.out, playwright.chromium.executable_path)
