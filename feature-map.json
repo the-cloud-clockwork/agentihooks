@@ -628,7 +628,7 @@
       "tests": [
         "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
         "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock",
-        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_closing_raises_still_releases_its_tick_lock"
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock"
       ]
     },
     {
