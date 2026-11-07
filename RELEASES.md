@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.680 · 2026-11-07
+
+### 2026-11-07 · 42a19a8f0d15 · #9920 · @agenticore-app
+
+**Keep the controller lease through a pass and reissue stale epoch launch orders**
+
+This fixes the stale-epoch launch failures where seats stayed empty: the controller lease was dropping during slow passes because any hosted lease outage (network blip or 5xx) stopped the heartbeat entirely, letting the epoch roll over mid-pass; now only genuine 4xx refusals stop the beat, so transient failures no longer end renewal. Additionally, when the hive refuses an order for a stale epoch, HiveLaunch now reissues it under the pass's current epoch within the same pass instead of repeatedly failing against the old one.
+
+### 2026-11-06 · e661f2277669 · #9891 · @agenticore-app
+
+**Move territory, parked dependencies and the swarm settle into the territory step module**
+
+This continues the sweep splitting the monolithic tick module into focused step modules: territory overlap checks, parked and stacked dependency handling, and swarm settle/close logic are relocated verbatim into a new `scripts.tick.steps.territory` module and registered there, while `scripts.swarm.tick` re-exports the names so existing patched seams keep working. New tests pin the re-exports and behavior directly. The move trims the tick module's type-check baseline from 1495 to 1264 issues and removes 14 names from the allowlist, continuing the gradual, mutation-tested decomposition started in #9869.
+
 ## v2.17.678 · 2026-11-06
 
 ### 2026-11-06 · c115a32d08c8 · #9931 · @agenticore-app
