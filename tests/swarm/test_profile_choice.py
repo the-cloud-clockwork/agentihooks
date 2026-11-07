@@ -347,6 +347,15 @@ def test_installed_asks_the_profile_resolver(monkeypatch):
     assert REAL_INSTALLED("ghost") is False
 
 
+def test_a_bundle_only_profile_a_placement_target_hosts_is_not_refused(monkeypatch):
+    monkeypatch.setattr(profile_choice, "installed", lambda name: name != "frontend")
+    task = {**TASK, "profile": "frontend"}
+    decision = profile_choice.choose("sw", "eng", {}, task, {}, hosted=frozenset({"brain", "frontend"}))
+    assert decision == profile_choice.ProfileDecision("frontend", "task", "explicit task profile")
+    with pytest.raises(profile_choice.ProfileUnresolved):
+        profile_choice.choose("sw", "eng", {}, task, {}, hosted=frozenset({"brain"}))
+
+
 def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, ledger_file):
     asked("frontend")
     calls = []

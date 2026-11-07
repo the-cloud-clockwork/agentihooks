@@ -57,6 +57,21 @@ def test_resolves_profile_before_hive_selection(setup):
     assert launch.ROLE_PROFILES["cicd"] == "ci"
 
 
+def test_the_profile_check_sees_the_profiles_its_target_hives_advertise(setup):
+    from scripts.hive import config as hive_config
+    from scripts.hive import launch
+
+    write_hive(setup, id="other")
+    write_hive(setup, id="gone")
+    setup.store.redis.set(hive_config._key("remote"), json.dumps({"profiles": ["brain", "frontend"]}))
+    setup.store.redis.set(hive_config._key("other"), json.dumps({"profiles": ["qa"]}))
+    setup.store.redis.set(hive_config._key("gone"), json.dumps({"profiles": ["smith"]}))
+    hives = [hive for hive in setup.launcher.hives() if hive["id"] != "gone"]
+    assert launch.hosted_profiles(setup.store.redis, hives) == frozenset({"brain", "frontend", "qa"})
+    setup.launcher._select(setup.config, "eng", {"id": "task"}, excluded={"gone"})
+    assert setup.herdr._profile_decision.call_args.args[-1] == frozenset({"brain", "frontend", "qa"})
+
+
 def test_selects_an_advertised_claude_slot(setup):
     chosen = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert chosen.hive == "remote"
