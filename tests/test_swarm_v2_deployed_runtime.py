@@ -1184,6 +1184,34 @@ def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeyp
     assert json.loads(pods.maps[0]["data"]["launch.json"])["exporter"] == ["python", "-m", "exporter"]
 
 
+def test_the_tick_runtime_routes_claude_and_codex_and_reads_the_planned_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof"))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        runtime = service.runtime
+        launcher = runtime.launch.func.__self__
+        route = runtime.herdr_runtime.quota_accounts.route
+        runtime.herdr_runtime._quota_tasks = {"t1": "codex"}
+        planned = (launcher.planned_harness("t1"), launcher.planned_harness("t2"))
+    finally:
+        service.stop()
+
+    assert planned == ("codex", None)
+    assert launcher.accounts == route.choose
+    assert {harness: (found.harness, found.keys.index) for harness, found in route.routes.items()} == {
+        "claude": ("claude", "swarm-claude-accounts"),
+        "codex": ("codex", "swarm-codex-accounts"),
+    }
+    for found in route.routes.values():
+        assert found.quota.slug == SLUG
+        with pytest.raises(GrantRefused) as refused:
+            found.quota.authorize("not-a-grant")
+        assert str(refused.value) == "launch grant is malformed"
+
+
 @pytest.mark.parametrize("value", [None, ""])
 def test_an_unset_exporter_setting_names_the_image_session_exporter(tmp_path, value):
     workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)

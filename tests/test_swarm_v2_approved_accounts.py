@@ -582,3 +582,17 @@ def test_a_launch_account_comes_from_the_route_of_its_harness() -> None:
     assert routes.choose(2, None, None, "claude") == "akey"
     assert routes.choose(2, "akey", None, "codex") == "alpha-personal"
     assert routes.choose(2, None, None, "other") is None
+
+
+def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predecessor_to_their_route() -> None:
+    store, observations = _quota()
+    claude = approved.AccountRoute(lambda: frozenset({"akey", "bkey"}), observations, lambda: {"bkey": 1}, "claude")
+    routes = approved.HarnessRoutes({"claude": claude})
+    _observe(store, "akey")
+
+    assert routes.rows(4, NOW_MS / 1000) == claude.rows(4, NOW_MS / 1000)
+    assert routes.rows(4, NOW_MS / 1000)[0].week_resets_at == NOW_MS // 1000 + 48 * HOUR
+    assert routes.choose(2, None, None, "claude") == "akey"
+    assert routes.choose(2, "bkey", None, "claude") == "bkey"
+    assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))
+    assert routes.choose(2, None, ("claude", "akey"), "claude") != "akey"
