@@ -8,9 +8,9 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from . import service
+from . import embedders, service
 from .chunks import Document
-from .index import HashEmbedder, KnowledgeIndex
+from .index import KnowledgeIndex
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,7 +45,12 @@ def main(
     if not slug:
         print("knowledge: name a ledger with --ledger", file=sys.stderr)
         return 2
-    index = KnowledgeIndex(service.index_path(slug, environ), HashEmbedder())
+    try:
+        choice = embedders.choose(environ)
+    except ValueError as error:
+        print(f"knowledge: {error}", file=sys.stderr)
+        return 2
+    index = KnowledgeIndex(service.index_path(slug, environ, choice.name), choice.embedder)
     now = int(clock() * 1000)
     if args.command == "refresh":
         answer = vars(service.refresh(index, reader(slug), now))
