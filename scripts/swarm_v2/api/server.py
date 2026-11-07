@@ -1,5 +1,7 @@
 import json
 import re
+import socket
+import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scripts.swarm_v2.api.artifacts import MAX_REQUEST, ArtifactsAPI
@@ -14,6 +16,7 @@ from scripts.swarm_v2.api.tasks import TasksAPI
 from scripts.swarm_v2.auth_context import GrantRefused
 
 MAX_BODY_BYTES = 65_536
+HANDSHAKE_S = 10
 LENGTH = "Content-Length"
 AUTHORIZATION = "Authorization"
 JSON_CONTENT = ("Content-Type", "application/json")
@@ -55,7 +58,7 @@ class Routes:
 
 
 class ExecutionsHandler(BaseHTTPRequestHandler):
-    api: ExecutionsAPI | Routes
+    api: "ExecutionsAPI | Routes | RecoveryAPI"
 
     def do_GET(self) -> None:
         self.reply(*self.api.route("GET", self.path, str(self.headers.get(AUTHORIZATION)), None))
@@ -94,5 +97,25 @@ class ExecutionsHandler(BaseHTTPRequestHandler):
         return
 
 
+class TLSServer(ThreadingHTTPServer):
+    tls: ssl.SSLContext
+
+    def finish_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        request.settimeout(HANDSHAKE_S)
+        secure = self.tls.wrap_socket(request, server_side=True)
+        secure.settimeout(None)
+        try:
+            super().finish_request(secure, client_address)
+        finally:
+            secure.close()
+
+
 def serve(api: ExecutionsAPI | Routes, host: str, port: int) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
+
+
+def serve_tls(api: RecoveryAPI, host: str, port: int, context: ssl.SSLContext) -> ThreadingHTTPServer:
+    """Serve the given routes over TLS with the given server context."""
+    server = TLSServer((host, port), type(ExecutionsHandler.__name__, (ExecutionsHandler,), {"api": api}))
+    server.tls = context
+    return server
