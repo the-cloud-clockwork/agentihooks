@@ -61,7 +61,8 @@ def atomic_write(path: Path, data: bytes, mode: int) -> None:
 
 
 def _blocks(lines: list[str]) -> list[tuple[int, int]]:
-    spans, start = [], None
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
     for index, line in enumerate(lines):
         marker = line.rstrip()
         if marker == START:
@@ -78,7 +79,7 @@ def has_block(text: str) -> bool:
 
 def token_exports(text: str) -> dict[str, str]:
     lines = text.splitlines()
-    found = {}
+    found: dict[str, str] = {}
     for start, end in _blocks(lines):
         for line in lines[start + 1 : end]:
             try:
