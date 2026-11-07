@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -75,7 +76,8 @@ def test_unschedulable_finalization_resumes_after_the_agent_was_ended(
     elif change == "deleted":
         pods = []
     elif change == "seat_moved":
-        world.launch(world.live, world.fx["first"])
+        successor = replace(world.old, execution_id="", generation=0, state="working")
+        world.live.admit(successor, world.old.execution_id)
 
     assert ending(pods) == {world.old.execution_id: "ended"}
     final = retention.final(world.store, cases.SLUG, world.old.execution_id)
