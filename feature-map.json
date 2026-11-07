@@ -1903,7 +1903,7 @@
         "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server",
         "tests/tick/test_database_ledger_routes.py::test_a_missing_ledger_answers_the_server_404_body",
         "tests/tick/test_database_ledger_routes.py::test_a_storage_failure_answers_the_server_500_body_and_logs_it",
-        "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_utf8_text",
+        "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_ascii_json",
         "tests/tick/test_database_ledger_routes.py::test_an_export_reply_is_not_bounded",
         "tests/tick/test_database_ledger_routes.py::test_a_write_runs_as_the_service_principal",
         "tests/tick/test_database_ledger_routes.py::test_a_streamed_reply_and_a_task_page_answer_as_the_server_sends_them",

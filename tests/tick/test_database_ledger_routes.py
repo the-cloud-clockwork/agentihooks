@@ -70,12 +70,12 @@ def test_a_storage_failure_answers_the_server_500_body_and_logs_it(
 
 
 @pytest.mark.feature("swarm-tick-database-ledger")
-def test_a_read_is_bounded_and_encoded_as_utf8_text(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_read_is_bounded_and_encoded_as_ascii_json(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _routes(monkeypatch, ledger_get={"data": "café"})
     bounded: list[object] = []
     monkeypatch.setattr(database_ledger, "resources", SimpleNamespace(bounded=bounded.append))
     exchange, found = _exchange(), _found()
-    assert database_ledger.answer(found, exchange, "sw", "tasks") == (200, '{"data": "café"}'.encode())
+    assert database_ledger.answer(found, exchange, "sw", "tasks") == (200, b'{"data": "caf\\u00e9"}')
     assert bounded == [{"data": "café"}]
     assert seen == [("ledger_get", (exchange, found, "sw", "tasks"))]
 

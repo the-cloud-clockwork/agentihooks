@@ -98,8 +98,8 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         failed: Any = APIError(500, "storage_error", "Resource could not be read or written")
-        status, result = 500, failed.envelope()
-    encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        status, result = failed.status, failed.envelope()
+    encoded = result if isinstance(result, str) else json.dumps(result)
     return status, encoded.encode()
 
 
