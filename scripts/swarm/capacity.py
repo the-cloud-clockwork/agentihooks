@@ -658,13 +658,17 @@ def placement_ready(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
-    refused = placement_waits.read(store, slug)
+    refused: dict[str, dict[str, Any]] = placement_waits.read(store, slug)
     eligible, actions = {}, []
     for lane, tasks in ready.items():
         eligible[lane] = []
         for task in tasks:
             wait = refused.get(task["id"])
-            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+            if (
+                wait
+                and wait["lane"] == lane
+                and now_ms - wait.get("seen_at", wait["started_at"]) < placement_waits.FRESH_MS
+            ):
                 actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
             else:
                 eligible[lane].append(task)

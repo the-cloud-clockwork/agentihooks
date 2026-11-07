@@ -2728,3 +2728,19 @@ def test_the_tick_host_is_the_room_the_tick_last_granted() -> None:
     assert capacity.tick_host(replace(inputs, previous={"host": {**granted, "room": None}})) is None
     assert capacity.tick_host(replace(inputs, previous={"host": {"room": 6}})) is None
     assert capacity.tick_host(replace(inputs, previous={})) is None
+
+
+def test_a_legacy_placement_refusal_without_seen_at_is_fresh_from_its_start() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive for eng has room", "started_at": 1_000}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}, {"id": "e1"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS - 1)
+    expired = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS)
+    assert fresh == (
+        {"eng": [{"id": "e1"}]},
+        ["capacity skipped eng task e0: fresh placement refusal: no hive for eng has room"],
+    )
+    assert expired == (ready, [])
