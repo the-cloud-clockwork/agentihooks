@@ -22,7 +22,7 @@ RESPONSE_TIMEOUT_S = 60
 
 
 class Client:
-    def __init__(self, socket_path: str, name: str):
+    def __init__(self, socket_path: str, name: str) -> None:
         self.name = name
         self.ws = unix_connect(socket_path, max_size=None)
         self.next_id = 1

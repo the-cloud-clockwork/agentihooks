@@ -3,7 +3,8 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any, Callable, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 from scripts.ci_budget import rate_limit
 

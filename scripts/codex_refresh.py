@@ -63,7 +63,7 @@ NO_BAO_REFRESH = "OpenBao holds no refresh token for it"
 
 
 class GrantError(RuntimeError):
-    def __init__(self, status: int, error: str):
+    def __init__(self, status: int, error: str) -> None:
         super().__init__(f"HTTP {status} {error or NO_OAUTH_ERROR}" if status else f"unreachable: {error}")
         self.status = status
         self.error = error

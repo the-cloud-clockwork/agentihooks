@@ -4,9 +4,13 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from scripts.routing.settings import SettingsStore
 
 
-def _routing_settings():
+def _routing_settings() -> "SettingsStore":
     from scripts.routing import place
     from scripts.routing.settings import open_store
 

@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -38,7 +39,7 @@ def _trusted(data: dict[str, Any], directory: Path) -> bool:
     )
 
 
-def _scope(directory: Path):
+def _scope(directory: Path) -> Iterator[Path]:
     # Claude does not count a trusted folder above the launch folder's git root.
     for path in (directory, *directory.parents):
         yield path

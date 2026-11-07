@@ -33,7 +33,7 @@ UNUSABLE = (subprocess.SubprocessError, OSError, KeyError, TypeError, ValueError
 
 
 class Barrier(Exception):
-    def __init__(self, reason: str, vetoes: set[str] | None = None):
+    def __init__(self, reason: str, vetoes: set[str] | None = None) -> None:
         super().__init__(reason)
         self.vetoes = vetoes or set()
 

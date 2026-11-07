@@ -113,7 +113,7 @@ class RowMarks:
 
 
 class RoutingError(RuntimeError):
-    def __init__(self, message: str, results: list[ProbeResult] | None = None):
+    def __init__(self, message: str, results: list[ProbeResult] | None = None) -> None:
         super().__init__(message)
         self.results = results or []
 
