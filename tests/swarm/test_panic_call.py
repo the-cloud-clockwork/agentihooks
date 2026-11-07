@@ -211,6 +211,25 @@ def test_a_repeated_send_of_the_same_hour_is_one_item(store):
     assert len(items(store)) == 1
 
 
+def test_the_question_names_its_utc_start_and_the_item_carries_its_hour_ref(store, monkeypatch):
+    import hashlib
+    import time
+
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    try:
+        enforce(store)
+        stall_launches(store, START)
+        panic_call.step(store, SLUG, START + HOUR)
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+    (item,) = items(store)
+    assert "for 60 minutes, since 15 January 08:00 UTC. Evidence: " in item.text
+    ref = f"panic-call:{SLUG}:No agent launch|{START}:1"
+    assert (item.ref, item.id) == (ref, hashlib.sha256(ref.encode()).hexdigest()[:12])
+
+
 def test_the_spawn_stall_watch_runs_the_panic_call_after_each_pass(store, monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(spawn_stall, "observe", lambda *args: {})
