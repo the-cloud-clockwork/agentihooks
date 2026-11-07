@@ -163,7 +163,7 @@ def _codex_source(account: "codex_router.CodexAccount", quota: "CodexQuota | Non
 
 def codex_rows(
     accounts: list["codex_router.CodexAccount"],
-    quotas: "dict[str, CodexQuota | None]",
+    quotas: "Mapping[str, CodexQuota | None]",
     sessions: dict[str, int],
     now: float,
     environ: Mapping[str, str] | None = None,
@@ -294,7 +294,7 @@ def with_unrouted(
 
 def next_account(
     pool: list["codex_router.CodexAccount"],
-    quotas: "dict[str, CodexQuota | None]",
+    quotas: "Mapping[str, CodexQuota | None]",
     sessions: dict[str, int],
     now: float,
     environ: dict[str, str],

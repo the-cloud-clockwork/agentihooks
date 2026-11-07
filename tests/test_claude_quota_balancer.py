@@ -1147,3 +1147,34 @@ def test_the_master_overflow_ranks_by_the_fable_week_when_asked(monkeypatch, tmp
     assert (
         balancer.select_master_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000).account == "A"
     )
+
+
+@pytest.mark.parametrize("stored", [{"version": 2, "modes": {"normal": {}}}, [1]])
+def test_a_cache_of_another_version_or_shape_reads_as_empty(tmp_path: Path, stored: object) -> None:
+    cache = tmp_path / "cache.json"
+    cache.write_text(json.dumps(stored))
+
+    assert balancer._read_cache(cache) == {"version": 1, "modes": {}}
+
+
+def test_cached_observations_skip_entries_missing_a_result_or_a_time(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        balancer,
+        "probe_credentials",
+        lambda credentials, *args, **kwargs: [
+            balancer.parse_probe(item.account, _stream(0.20, 0.30), 100) for item in credentials
+        ],
+    )
+    cache = tmp_path / "cache.json"
+    alpha = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret-a")
+    beta = balancer.Credential("AH_CC_TOKEN_BETA", "secret-b")
+    balancer.collect_results([alpha, beta], cache_file=cache, environ={}, now=1000)
+    data = json.loads(cache.read_text())
+    first, second = data["modes"]["normal"]["accounts"].values()
+    first["result"] = None
+    del second["observed_at"]
+    cache.write_text(json.dumps(data))
+
+    assert balancer.cached_observations(cache_file=cache) == []

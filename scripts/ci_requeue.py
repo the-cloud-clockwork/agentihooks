@@ -39,7 +39,7 @@ def candidates(repo: str, run: Callable[..., Any]) -> list[dict[str, Any]]:
 
 
 def sweep(
-    repo: str, run: Callable[..., Any] = subprocess.run, journal: Callable[..., Any] = queue_record.Journal
+    repo: str, run: Any = subprocess.run, journal: Callable[..., Any] = queue_record.Journal
 ) -> Iterator[dict[str, Any]]:
     for pull in candidates(repo, run):
         try:

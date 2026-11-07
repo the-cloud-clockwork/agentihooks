@@ -172,7 +172,7 @@ def watcher(runner: str, *, deferred: bool = False) -> dict[str, Any]:
     }
 
 
-def normalize(workflows: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def normalize(workflows: dict[str, dict[Any, Any]]) -> dict[str, dict[Any, Any]]:
     normalized = deepcopy(workflows)
     for workflow in normalized.values():
         jobs = cast("dict[str, dict[str, Any]]", workflow.get("jobs") or {})

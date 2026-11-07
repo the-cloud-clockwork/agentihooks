@@ -8,7 +8,6 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from http.client import HTTPResponse
 from typing import Any, cast
 
 from scripts.claude_quota_balancer import AUTH_REJECTED, ProbeResult, QuotaWindow, _error_result, _state, revoked_result
@@ -107,7 +106,7 @@ def _request(token: str, model: str) -> urllib.request.Request:
 
 
 def _exchange(
-    opener: Callable[..., HTTPResponse], request: urllib.request.Request, timeout: float
+    opener: Callable[..., Any], request: urllib.request.Request, timeout: float
 ) -> tuple[int, Mapping[str, str], bytes]:
     try:
         with opener(request, timeout=timeout) as response:
@@ -120,7 +119,7 @@ def probe(
     account: str,
     token: str,
     model: str,
-    opener: Callable[..., HTTPResponse] | None = None,
+    opener: Callable[..., Any] | None = None,
     timeout: float = TIMEOUT_S,
 ) -> ProbeResult:
     started = time.monotonic()

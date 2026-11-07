@@ -9,7 +9,7 @@ import shlex
 import sys
 from collections.abc import Callable, Mapping
 from http.client import HTTPResponse
-from typing import cast
+from typing import Any, cast
 from urllib.request import Request, urlopen
 
 from scripts import openbao_kv
@@ -21,11 +21,11 @@ TIMEOUT_S = 3
 USAGE = "usage: agentihooks access env"
 
 
-def _opener(request: Request, timeout: float) -> HTTPResponse:
+def _opener(request: Request | str, timeout: float) -> HTTPResponse:
     return urlopen(request, timeout=min(timeout, TIMEOUT_S))
 
 
-def values(environ: Mapping[str, str], opener: Callable[[Request, float], HTTPResponse] = _opener) -> dict[str, str]:
+def values(environ: Mapping[str, str], opener: Callable[..., Any] = _opener) -> dict[str, str]:
     bao = cast(
         "Callable[[Mapping[str, str], Callable[[Request, float], HTTPResponse]], openbao_kv.OpenBao | None]",
         openbao_kv.from_env,
