@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from scripts.swarm.timing import WALLS, WINDOW
+from scripts.tick.pool import SPAWN_RESERVE_S
 
 __all__ = [
     "CRITICAL_S",
@@ -31,7 +32,7 @@ CRITICAL_S = 60.0
 WIDE_S = 120.0
 SLOW_S = 600.0
 HEADROOM = 1.5
-SPAWN_START_S = 40.0
+SPAWN_START_S = CRITICAL_S - SPAWN_RESERVE_S
 LIGHT_S = 2.0
 REBUILT = "tick:walls-rebuilt"
 _LEDGER_READ_S = 3.0
