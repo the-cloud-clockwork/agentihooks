@@ -20,6 +20,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from importlib import import_module, metadata
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -304,7 +305,7 @@ def _native_layer_path(root: Path, target: str, names: dict[str, str]) -> Path |
     return candidate if candidate.exists() else None
 
 
-def _load_native_layer(path: Path) -> dict:
+def _load_native_layer(path: Path) -> dict[str, Any]:
     """Load a native settings/MCP layer as a plain dict, JSON or TOML by suffix.
 
     TOML is parsed to a plain dict rather than a tomlkit document: this value is
