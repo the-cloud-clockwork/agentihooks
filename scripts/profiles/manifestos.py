@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from hooks import config
 from hooks.context import profile_chain
@@ -12,11 +14,11 @@ from hooks.context import profile_chain
 ENABLED = "CI_MANIFESTO_ENABLED"
 
 
-def _env(root: Path) -> dict:
+def _env(root: Path) -> dict[str, Any]:
     from scripts.install import _NATIVE_SETTINGS_NAME, _load_native_layer, _native_layer_path
 
     path = _native_layer_path(root, "claude", _NATIVE_SETTINGS_NAME)
-    return (_load_native_layer(path).get("env") or {}) if path else {}
+    return (cast(Callable[[Path], dict[str, Any]], _load_native_layer)(path).get("env") or {}) if path else {}
 
 
 def enabled(
@@ -28,14 +30,14 @@ def enabled(
     return value.lower() in ("true", "1", "yes")
 
 
-def _names(value) -> list[str]:
-    return [str(name) for name in (value if isinstance(value, list) else [value] if value else [])]
+def _names(value: Any) -> list[str]:
+    return [str(name) for name in (cast(list[Any], value) if isinstance(value, list) else [value] if value else [])]
 
 
 def choice(dirs: list[tuple[str, Path]]) -> dict[str, bool]:
     chosen: dict[str, bool] = {}
     for _, path in dirs:
-        picks = profile_chain.manifestos(path)
+        picks = cast(Callable[[Path], dict[str, Any]], profile_chain.manifestos)(path)
         for name in _names(picks.get("include")):
             chosen[config.manifesto_name(name)] = True
         for name in _names(picks.get("exclude")):
@@ -73,10 +75,16 @@ def main(argv: list[str] | None = None) -> int:
     listing = commands.add_parser("list", help="Print which package roles receive each bundle manifesto")
     listing.add_argument("--bundle", type=Path, help="Bundle to read (default: the linked bundle)")
     args = parser.parse_args(argv)
-    state = profile_chain.read_state()
-    bundle = args.bundle or profile_chain.bundle_path(state)
-    user = None if args.bundle else profile_chain.user_bundle_path(state)
-    shared = None if args.bundle else profile_chain.shared_bundle_path(state)
+    state = cast(Callable[[], dict[str, Any]], profile_chain.read_state)()
+    bundle = args.bundle or cast(Callable[[dict[str, Any]], "Path | None"], profile_chain.bundle_path)(state)
+    user = (
+        None if args.bundle else cast(Callable[[dict[str, Any]], "Path | None"], profile_chain.user_bundle_path)(state)
+    )
+    shared = (
+        None
+        if args.bundle
+        else cast(Callable[[dict[str, Any]], "Path | None"], profile_chain.shared_bundle_path)(state)
+    )
     found = [Path(path) for path in config._resolve_manifesto_paths(bundle, user_root=user, shared_root=shared)]
     if not found:
         folder = Path(bundle) / "manifestos" if bundle is not None else "the default manifesto folder"

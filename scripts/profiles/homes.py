@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from scripts.profiles import binding
 
@@ -17,7 +18,7 @@ PROC = Path("/proc")
 
 
 def live_homes(proc: Path = PROC) -> list[Path]:
-    found = []
+    found: list[Path] = []
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
@@ -54,7 +55,7 @@ def owner(root: Path, home: Path) -> str | None:
     return parts[1] if len(parts) == 4 and parts[0] == HOMES else None
 
 
-def fresh(root: Path, name: str, stamp: dict) -> Path:
+def fresh(root: Path, name: str, stamp: dict[str, Any]) -> Path:
     homes = _homes(root, name)
     homes.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(json.dumps(stamp, sort_keys=True).encode()).hexdigest()[:12]
