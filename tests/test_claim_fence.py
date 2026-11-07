@@ -1,12 +1,13 @@
 import json
 import threading
+import time
 from collections.abc import Callable
 from unittest.mock import Mock, patch
 
 import pytest
 
 from scripts.events.config import BusConfig
-from scripts.events.memory import open_bus
+from scripts.events.memory import MemoryBus, open_bus
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -92,7 +93,7 @@ def test_unreachable_authority_blocks_actions_without_killing_the_agent(monkeypa
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.CHECK_FAILED
     assert claim_fence.ATTEMPTS == 3
     assert connect.call_count == 3
-    assert pause.call_args_list == [((0.5,), {}), ((0.5,), {})]
+    assert pause.call_args_list == [((claim_fence.DELAY,), {}), ((claim_fence.DELAY,), {})]
     kill.assert_not_called()
 
 
@@ -109,7 +110,7 @@ def test_a_launch_prompt_passes_when_one_bus_read_fails_before_an_owned_claim(mo
     ):
         assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) is None
     assert connect.call_count == 2
-    pause.assert_called_once_with(0.5)
+    pause.assert_called_once_with(claim_fence.DELAY)
     kill.assert_not_called()
 
 
@@ -127,7 +128,7 @@ def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monk
     ):
         assert claim_fence.check({"hook_event_name": "UserPromptSubmit"}) == claim_fence.REVOKED
     assert connect.call_count == 2
-    pause.assert_called_once_with(0.5)
+    pause.assert_called_once_with(claim_fence.DELAY)
     kill.assert_called_once_with(4321)
 
 
@@ -151,7 +152,7 @@ def test_a_failed_claim_state_read_is_retried_before_blocking(monkeypatch, recov
     assert bus.state.call_args_list == [(("spoke-work",), {})] * attempts
     assert bus.state.return_value.get.call_args_list == [(("claim-a",), {})] * attempts
     assert bus.close.call_count == attempts
-    assert pause.call_args_list == [((0.5,), {})] * (attempts - 1)
+    assert pause.call_args_list == [((claim_fence.DELAY,), {})] * (attempts - 1)
     kill.assert_not_called()
 
 
@@ -243,7 +244,7 @@ def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
     handler.assert_called_once_with(payload)
 
 
-def _held_claim(monkeypatch: pytest.MonkeyPatch) -> object:
+def _held_claim(monkeypatch: pytest.MonkeyPatch) -> MemoryBus:
     bus = open_bus(BusConfig())
     revision = bus.state("spoke-work").create("claim-a", b'{"state":"started"}')
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": revision}))
@@ -259,10 +260,7 @@ def _stalled_bus(release: threading.Event) -> Callable[[BusConfig], None]:
 
 
 @pytest.mark.parametrize("cached", [False, True])
-def test_slow_nats_costs_at_most_the_bound(monkeypatch, cached):
-    import threading
-    import time
-
+def test_slow_nats_costs_at_most_the_bound(monkeypatch: pytest.MonkeyPatch, cached: bool) -> None:
     from hooks.context import claim_fence
 
     bus = _held_claim(monkeypatch)
@@ -286,7 +284,7 @@ def test_slow_nats_costs_at_most_the_bound(monkeypatch, cached):
     kill.assert_not_called()
 
 
-def test_a_moved_claim_still_blocks_after_a_cached_positive_answer(monkeypatch):
+def test_a_moved_claim_still_blocks_after_a_cached_positive_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
     bus = _held_claim(monkeypatch)
@@ -302,9 +300,7 @@ def test_a_moved_claim_still_blocks_after_a_cached_positive_answer(monkeypatch):
     kill.assert_called_once_with(4321)
 
 
-def test_a_cached_answer_covers_only_its_own_claim_generation(monkeypatch):
-    import threading
-
+def test_a_cached_answer_covers_only_its_own_claim_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
     bus = _held_claim(monkeypatch)

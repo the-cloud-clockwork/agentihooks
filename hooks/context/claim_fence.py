@@ -13,7 +13,7 @@ from scripts.events.factory import open_bus
 
 VARIABLE = "AGENTIHOOKS_CLAIM_FENCE"
 ATTEMPTS = 3
-DELAY = 0.5
+DELAY = 0.2
 BOUND = 1.0
 CHECK_FAILED = "Claim ownership could not be verified; agent actions are blocked."
 REVOKED = "Claim ownership changed; this agent is ending."
@@ -78,6 +78,8 @@ def cached(raw: str) -> bool:
 def remember(raw: str) -> None:
     """Record that this claim generation was seen held."""
     path = marker(raw)
+    if path.exists():
+        return
     with suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
