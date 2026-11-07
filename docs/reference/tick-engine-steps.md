@@ -673,8 +673,8 @@ binned or gone. After the graph, the held exception is raised as before, and
 The `masters.run_site` runner and its per site box are gone; the master sites
 share the pass box. Placement no longer holds the host placement lock around
 its sites: each step of `placement notices` (quota notice), `placement acks`,
-`master seats`, `placement` (every step but `bottleneck remedy`) and
-`dispatch seat` takes `tick.PLACING` in its own
+`master seats`, `dispatch seat` and `placement` (every step but
+`bottleneck remedy`) takes `tick.PLACING` in its own
 body through `scripts.tick.steps.tasks.placing`.
 
 ## Pass state
@@ -797,8 +797,8 @@ and placement steps are in bold; the others hold steps from other changes.
 | 11 | `placement notices` | After `place`, inside the placing lock | quota notice, lost runner (slow lane), time left (slow lane) |
 | 12 | **`placement acks`** | After `placement notices`, inside the placing lock | collect acks, codex hook order |
 | 13 | `master seats` | Inside the placing lock, only when the swarm is not sleeping | master down, tick master, master scale, seat alarm |
-| 14 | **`placement`** | After the master seats, inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
-| 15 | `dispatch seat` | Last site inside the placing lock | dispatch seat |
+| 14 | `dispatch seat` | After the master seats, inside the placing lock, ahead of lane placement so a pending dispatcher trigger takes the next free hive slot | dispatch seat |
+| 15 | **`placement`** | Last site inside the placing lock, only when the swarm is not sleeping | rank pass, bottleneck remedy, preempt, spawn |
 | 16 | `master watch` | After the placing lock | night watch, master alarm |
 | 17 | `close` | Last line of the pass | conversations, session models, handoff transfers, **settle**, **close space** |
 
