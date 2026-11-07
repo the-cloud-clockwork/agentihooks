@@ -286,11 +286,39 @@ def test_level_is_one_with_no_passes_and_ignores_old_ones(store):
     assert panic.level(store, HOUR) == 1.0
 
 
-def test_engage_keeps_the_first_panic_and_adds_fixes(store):
+def test_engage_keeps_the_first_panic_and_adds_fixes(store: RedisStore) -> None:
     panic.engage(store, "auto", True, [], 100)
     found = panic.engage(store, "pressed", False, [FIX, FIX], 200)
-    assert found == panic.Panic(100, "auto", False, (FIX,))
+    assert found == panic.Panic(100, "auto", True, (FIX,))
     assert panic.state(store) == found
+
+
+def test_a_fix_added_to_an_automatic_panic_still_releases_once_stable(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    now = 2 * HOUR
+    _errors(store, panic.THRESHOLD, now)
+    panic.alarm(store, now)
+    panic.engage(store, "pressed", False, (fix for fix in [FIX]), now + 1)
+    assert panic.state(store) == panic.Panic(now, f"{panic.THRESHOLD} errors in the last hour", True, (FIX,))
+    later = now + WINDOW + 1
+    _passes(store, 9, 1, later)
+    assert panic.alarm(store, later) == "panic released: the fleet is back at business as usual"
+    assert panic.state(store) is None
+
+
+def test_pressing_on_without_a_fix_makes_an_automatic_panic_manual(store: RedisStore) -> None:
+    panic.engage(store, "auto", True, [], 100)
+    assert panic.engage(store, "pressed", False, [], 200) == panic.Panic(100, "auto", False, ())
+
+
+def test_a_panic_a_person_turns_on_without_a_fix_stays_manual(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    panic.engage(store, "pressed", False, [], 0)
+    _passes(store, 10, 0, WINDOW + 1)
+    assert panic.alarm(store, WINDOW + 1) == ""
+    assert panic.state(store) == panic.Panic(0, "pressed", False, ())
 
 
 def test_engage_on_an_automatic_panic_stays_automatic(store):
@@ -528,6 +556,7 @@ def master(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_opens_the_master_hotfix_window(store, master):
     panic.engage(store, "60 errors in the last hour", True, [], blocker_window._now_ms(store))
     notice, block = blocker_window.pretool("Write", {"file_path": "/etc/x"}, SID)
@@ -535,7 +564,7 @@ def test_panic_opens_the_master_hotfix_window(store, master):
     assert notice is not None
     assert "panic for 0 minutes" in notice
     assert f"agentihooks swarm {SLUG} panic on --fix <pr url>" in notice
-    assert block is not None
+    assert block is None
 
 
 def test_the_master_may_press_the_panic_button(store, master):
@@ -558,6 +587,7 @@ def test_the_master_may_press_the_panic_button(store, master):
         "argocd app sync x",
     ],
 )
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions(store, command):
     panic.engage(store, "60 errors in the last hour", True, [], 0)
     notice, block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")

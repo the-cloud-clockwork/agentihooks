@@ -14,6 +14,7 @@ PASS = Domain("pass")
 AGENTS = Domain("agents")
 TASKS = Domain("tasks")
 SWARM = Domain("swarm")
+DEADLINE = "deadline"
 
 
 class Declared(TypedDict, total=False):
@@ -60,8 +61,13 @@ class CallStep:
 
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""
-        found = self.call(import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS))
+        found = self.call(import_module("scripts.swarm.tick"), partial(_pass_or_deadline, ctx))
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
+
+
+def _pass_or_deadline(ctx: Context, key: str) -> Any:
+    """Return the context deadline under ``deadline``, else the pass value under ``key``."""
+    return ctx.deadline if key == DEADLINE else ctx.view.read(PASS, key)
 
 
 def actions_of(name: str) -> Domain:
@@ -140,6 +146,7 @@ MODULES = (
     "scripts.tick.steps.place",
     "scripts.tick.steps.report",
     "scripts.tick.steps.tasks",
+    "scripts.tick.steps.territory",
 )
 
 for _module in MODULES:

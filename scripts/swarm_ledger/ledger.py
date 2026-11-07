@@ -414,8 +414,12 @@ def mine(state, name):
     return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))
 
 
-def cmd_join(args):
+def cmd_join(args: Any) -> None:
     send(args, "join", role=args.role)
+    if args.role == "orchestrator":
+        from scripts.swarm_ledger.adapters.safety_nudge import record_master
+
+        record_master(os.environ)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 

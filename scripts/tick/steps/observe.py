@@ -14,6 +14,7 @@ from typing import Any
 
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
+from scripts.tick.engine import SLOW
 from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
@@ -27,6 +28,7 @@ master_retire: Any = import_module("scripts.swarm.master_retire")
 master_start: Any = import_module("scripts.swarm.master_start")
 readiness: Any = import_module("scripts.swarm.readiness")
 reaper: Any = import_module("scripts.swarm.reaper")
+retire_watch: Any = import_module("scripts.swarm.retire_watch")
 
 RAISED = "raised"
 PASS_SETUP = "pass setup"
@@ -142,7 +144,7 @@ def step_spawn_due(
         and config.engine != tick.EVENTS_ENGINE
         and not tick.lifetime.sleeping(slug, store, rows)
     ):
-        if store.redis.exists(due):
+        if store.redis.exists(due) and tick.panic.state(store) is None:
             claimed = dict(rows)
             with tick.PLACING, tick._placement_pass(runtime):
                 actions += tick.skip_refused(tick._spawn, slug, config, store, ledger, runtime, claimed, doc, now_ms)
@@ -256,7 +258,8 @@ def _verify(slug: str, store: Any, ledger: Any, runtime: Any, rows: dict[str, An
             store.redis.hset(store.key(slug, "launch-assignments"), agent.task, json.dumps(saved))
             actions.append(held)
             continue
-        if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        gone = retire_watch.reported_gone(store, agent, now_ms)
+        if not gone and not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             store.put_agent(slug, replace(agent, state="retiring"))
             actions.append(f"could not retire {agent.name} after mismatched {fields}, retrying next tick")
             continue
@@ -376,7 +379,8 @@ def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int)
     local = agent.runtime_backend == "local"
     exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
     kept = replace(agent, pane_id="") if exited else agent
-    if not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
+    gone = retire_watch.reported_gone(store, agent, now_ms)
+    if not gone and not runtime.retire(kept, homes=reaper.scratch_homes(slug, agent.task)):
         return False
     if exited:
         failed_panes.hold(store, slug, agent, now_ms, tick.EXITED_BEFORE_LIFE)
@@ -470,7 +474,7 @@ STEPS = (
     ),
     CallStep("spawn hold clear", PASS_SETUP, partial(_run, step_spawn_hold_clear)),
     CallStep("pass budget", PASS_SETUP, partial(_run, step_pass_budget)),
-    CallStep("pane evidence", "observe", partial(_run, step_pane_evidence)),
+    CallStep("pane evidence", "observe", partial(_run, step_pane_evidence), lane=SLOW),
     CallStep("execution reconcile", "observe", partial(_run, step_execution_reconcile)),
     CallStep("master move fail over", "observe", partial(_run, step_master_move_fail_over), CONFIGURED, CONFIG),
     CallStep("recover master", "observe", partial(_run, step_recover_master), CONFIGURED, CONFIG),

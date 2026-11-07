@@ -231,21 +231,23 @@ def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, 
 
     A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane step, and
     every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
-    for the sites between: only the steps of the site it names need it too.
+    for the sites between: only the steps of the site it names need it too. The barrier holds whatever a step
+    declares, because site hooks and steps read pass values no declaration names.
     """
     found = _backward(tuple(steps), sites)
     late = _late(found)
-    members = {site: frozenset(s.name for s in found if s.group == site and s.name not in late) for site in sites}
-    barrier: dict[str, frozenset[str]] = {}
-    held: dict[str, frozenset[str]] = {}
-    previous: frozenset[str] = frozenset()
+    members = {site: tuple(s for s in found if s.group == site and s.name not in late) for site in sites}
+    barrier: dict[str, tuple[Step, ...]] = {}
+    held: dict[str, tuple[Step, ...]] = {}
+    previous: tuple[Step, ...] = ()
     for site in sites:
-        barrier[site] = previous | held.pop(site, frozenset())
+        barrier[site] = previous + held.pop(site, ())
         if joins and site in joins:
-            held[joins[site]] = held.get(joins[site], frozenset()) | members[site]
+            held[joins[site]] = held.get(joins[site], ()) + members[site]
         else:
             previous = members[site] or previous
-    return tuple(_barrier(step, barrier[step.group]) if barrier.get(step.group) else step for step in found)
+    edged = ((step, frozenset(other.name for other in barrier.get(step.group, ()))) for step in found)
+    return tuple(_barrier(step, needs) if needs else step for step, needs in edged)
 
 
 def _late(steps: tuple[Step, ...]) -> frozenset[str]:
