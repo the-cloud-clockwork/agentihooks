@@ -4,7 +4,10 @@ import json
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from hooks.context import profile_chain
 from hooks.context.profile_chain import PACKAGE_PREFIX
@@ -110,12 +113,10 @@ def replaced(plugin: str, chain: list[str], available: dict[str, Path], plugins_
 
 def claude_only(name: str) -> bool:
     """True when a plugin a profile of the chain enables in its own Claude layer has no Codex replacement."""
-    from types import ModuleType
-
     from scripts.claude_config import claude_home
     from scripts.targets._common import _install_module
 
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     resolved = _i._resolve_profile_chain(name)
     chain, roots = [n for n, _ in resolved], [root for _, root in resolved]
     plugins_dir = claude_home({k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}) / "plugins"

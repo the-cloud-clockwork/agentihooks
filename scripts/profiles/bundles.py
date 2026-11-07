@@ -6,8 +6,10 @@ import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from hooks.context import conditions, profile_chain
 from scripts.targets._common import _install_module
@@ -34,7 +36,7 @@ def _holders(kinds: list[str]) -> str:
 
 
 def warn_unavailable() -> None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     for kind, path in cast(Callable[[dict[str, Any]], "list[tuple[str, Path]]"], profile_chain.missing_bundle_roots)(
         _i._load_state()
     ):
@@ -75,14 +77,14 @@ def cmd_bundle(
 
 
 def _linked(user: bool = False, shared: bool = False) -> Path | None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     getters = {"root": _i._get_bundle_path, "shared": _i._get_shared_bundle_path, "user": _i._get_user_bundle_path}
     return getters[_slot(user, shared)]()
 
 
 def pull(rebase: bool = False, user: bool = False, shared: bool = False) -> None:
     """Git pull the linked bundle directory."""
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     label = _names(user, shared)[1]
     bundle_dir = _linked(user, shared)
     if not bundle_dir:
@@ -115,7 +117,7 @@ def pull(rebase: bool = False, user: bool = False, shared: bool = False) -> None
 
 def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> None:
     """Link a bundle directory as the root bundle, or as the shared or user bundle beside it."""
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     if bundle_dir is None:
         print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
         sys.exit(1)
@@ -164,7 +166,7 @@ def _generated(path: Path, entry: dict[str, Any]) -> bool:
 
 
 def _sweep_generated(root: Path, label: str = "user bundle") -> None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     swept: list[Path] = []
     for link, entry in _i._state_links().items():
         path = Path(link)
@@ -177,7 +179,7 @@ def _sweep_generated(root: Path, label: str = "user bundle") -> None:
 
 def unlink(user: bool = False, shared: bool = False) -> None:
     """Unlink the root bundle, or only the shared or user bundle."""
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     key, label = _names(user, shared)
     state = _i._load_state()
     bundle = state.get(key)
@@ -204,7 +206,7 @@ def unlink(user: bool = False, shared: bool = False) -> None:
 
 def list_bundle(user: bool = False, shared: bool = False) -> None:
     """Show the linked bundle and its contents."""
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     key, label = _names(user, shared)
     bundle = _linked(user, shared)
     if not bundle:

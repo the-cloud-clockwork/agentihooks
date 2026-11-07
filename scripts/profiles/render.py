@@ -12,8 +12,10 @@ import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
@@ -47,7 +49,7 @@ FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc))
 
 
 def rendered_root() -> Path:
-    return cast(ModuleType, _install_module()).AGENTIHOOKS_STATE_DIR / "profiles"
+    return cast("ModuleType", _install_module()).AGENTIHOOKS_STATE_DIR / "profiles"
 
 
 def live_root() -> Path:
@@ -55,7 +57,7 @@ def live_root() -> Path:
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
     if running == installed or not rendered_root().resolve().is_relative_to(live_root().resolve()):
         return
@@ -71,7 +73,7 @@ def _global_env() -> dict[str, str]:
 
 
 def _resolve(name: str) -> Path | None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     copy = bundle_copy.current()
     if copy is None or name.startswith(profile_chain.PACKAGE_PREFIX):
         return _i._resolve_profile_dir(name)
@@ -86,7 +88,7 @@ def _resolve(name: str) -> Path | None:
 
 def _resolve_chain(names: list[str]) -> list[tuple[str, Path]]:
     if bundle_copy.current() is None:
-        return cast(ModuleType, _install_module())._resolve_profile_chain(",".join(names))
+        return cast("ModuleType", _install_module())._resolve_profile_chain(",".join(names))
     return [(name, cast(Path, _resolve(name))) for name in profile_chain.expand_profiles(names, _resolve)]
 
 
@@ -109,7 +111,7 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
 
 
 def _bundle() -> Path | None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     bundle = bundle_copy.current() or _i._get_bundle_path()
     linked: Any = cast(dict[str, Any], _i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
@@ -122,7 +124,7 @@ def _bundle() -> Path | None:
 def _user() -> Path | None:
     if bundle_copy.is_pinned():
         return bundle_copy.current_user()
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     user = _i._get_user_bundle_path()
     linked: Any = cast(dict[str, Any], _i._load_state().get("user_bundle") or {}).get("path")
     if user is None and linked:
@@ -135,7 +137,7 @@ def _user() -> Path | None:
 def _shared() -> Path | None:
     if bundle_copy.is_pinned():
         return bundle_copy.current_shared()
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     shared = _i._get_shared_bundle_path()
     linked: Any = cast(dict[str, Any], _i._load_state().get("shared_bundle") or {}).get("path")
     if shared is None and linked:
@@ -147,7 +149,7 @@ def _shared() -> Path | None:
 
 
 def _base_digest() -> str:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     digest = hashlib.sha256()
     for name in sorted(_i._NATIVE_BASE_NAME.values()):
         digest.update((_i.PROFILES_DIR / "_base" / name).read_bytes())
@@ -161,7 +163,7 @@ def _overlays(dirs: list[tuple[str, Path]]) -> list[str]:
 
 def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
     digest = hashlib.sha256()
-    for root in [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
+    for root in [cast("ModuleType", _install_module()).PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
         for path in sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
             digest.update(f"{bundle_copy.identity(path)}\0".encode())
             digest.update(path.read_bytes())
@@ -215,7 +217,7 @@ def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
 def _features(
     subdir: str, keep: Callable[[Path], bool], bundle: Path | None, dirs: list[tuple[str, Path]]
 ) -> dict[str, Path]:
-    sources = [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR / subdir] + [
+    sources = [cast("ModuleType", _install_module()).PACKAGE_FEATURES_DIR / subdir] + [
         r / ".claude" / subdir for r in _roots(bundle, dirs)
     ]
     found: dict[str, Path] = {}
@@ -226,7 +228,7 @@ def _features(
 
 
 def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     base = _i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target])
     doc = _i.substitute_paths(base, dst=str(_i.install_root()))
     doc = _i.substitute_paths(doc, "__PYTHON__", str(_i._detect_venv() or sys.executable))
@@ -255,7 +257,7 @@ def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dic
 
 
 def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict[str, Any]:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     doc = claude_environment(_settings("claude", bundle, dirs), dirs)
     default_home = claude_home(_global_env())
     global_settings = default_home / "settings.json"
@@ -303,7 +305,7 @@ def channels(name: str) -> str:
 
 
 def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     documentation = profile_chain.role(dirs) == "documentation"
     servers = {} if documentation else dict(_i._build_mcp_config("all")["mcpServers"])
     roots = [root for _, root in dirs] if documentation else _roots(bundle, dirs)
@@ -346,7 +348,7 @@ def _seed(src: Path) -> dict[str, Any]:
 
 
 def _claude_json(out: Path, servers: dict[str, Any]) -> None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     dst = out / ".claude.json"
     doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
     doc.setdefault("hasCompletedOnboarding", True)
@@ -451,7 +453,7 @@ def _claude_fresh(root: Path, stamp: dict[str, Any], required: set[str]) -> bool
 
 def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     _i._load_claude_runtime_env()
     bundle, dirs = _bundle(), _chain(name, overlays)
     key = home_key(name, overlays)
@@ -560,7 +562,7 @@ def render_codex(
 
     from scripts.profiles import codex_master
 
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     # render_claude binds the recorded bundle copy inside the home; resolve the chain only after it.
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     bundle, dirs = _bundle(), _chain(name, overlays)
@@ -673,7 +675,7 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     # Copilot sends header values literally, so this file holds the resolved gateway credential.
     with os.fdopen(os.open(out / "mcp-config.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
         f.write(json.dumps(config, indent=2) + "\n")
-    cast(ModuleType, _install_module()).save_json(out / STAMP, current)
+    cast("ModuleType", _install_module()).save_json(out / STAMP, current)
     return out
 
 
@@ -756,7 +758,7 @@ def rendered_profiles(target: str) -> list[str]:
 
 
 def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     done: list[str] = []
     for key in rendered_profiles(target):
         if key in skip:
@@ -773,7 +775,7 @@ def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
 
 
 def _seed_linked_profiles(out: Path) -> None:
-    _i = cast(ModuleType, _install_module())
+    _i = cast("ModuleType", _install_module())
     state_file = out / "state.json"
     state: dict[str, Any] = _i.load_json(state_file) if state_file.exists() else {}
     state["linked_profiles"] = _i._get_linked_profiles()

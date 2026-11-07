@@ -6,10 +6,11 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from mcp import ClientSession, types
     from mcp.client.stdio import StdioServerParameters
     from mcp.server.lowlevel import Server
@@ -35,7 +36,7 @@ def proxy_enabled(chain: list[str]) -> bool:
 
 
 def spec() -> dict[str, Any]:
-    install = cast(ModuleType, _install_module())
+    install = cast("ModuleType", _install_module())
     return {"command": str(install._detect_venv() or sys.executable), "args": ["-I", "-m", __name__]}
 
 

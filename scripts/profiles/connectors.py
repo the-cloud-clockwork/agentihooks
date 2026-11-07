@@ -12,8 +12,10 @@ import json
 import os
 import re
 from pathlib import Path
-from types import ModuleType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from scripts.targets._common import (
     _install_module,
@@ -136,7 +138,7 @@ def codex(servers: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], dict[str,
 
 
 def write(dst: Path, manifest: dict[str, Any], profile: str, target: str) -> None:
-    say = cast(ModuleType, _install_module())._cprint
+    say = cast("ModuleType", _install_module())._cprint
     for name, row in manifest.items():
         if not row["mounted"]:
             say(f"  [!!] MCP '{name}' is not mounted for {profile} ({target}): {row['reason']}")

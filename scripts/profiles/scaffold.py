@@ -104,10 +104,9 @@ def _manifest(folder: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def problems(folder: Path) -> list[str]:
-    data, error = _manifest(folder)
+    data, error = cast("tuple[dict[str, Any], str | None]", _manifest(folder))
     if error:
         return [error]
-    assert data is not None
     found = [] if data.get("kind") == "overlay" else ["kind must be overlay"]
     found += _role_problems(data.get("wears"))
     if "extends" in data:
