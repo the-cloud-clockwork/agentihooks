@@ -4,6 +4,7 @@ from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -216,7 +217,6 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.feature("swarm-tick-delta-reads")
 def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
-    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
     state = {
         **STATE,
         "freezes": [{"verb": "focus", "target": "p1"}],
@@ -228,6 +228,25 @@ def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> N
     held = view.refreshed(tmp_path / "sw.json", Reader({"generation": 3, "data": state}))
     assert held.document == state
     assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
+    from scripts.swarm_ledger.api import routes, schemas
+
+    assert schemas.LEDGER_PARTS == (
+        "tasks",
+        "_meta",
+        "phases",
+        "freezes",
+        "priorities",
+        "followups",
+        "alerts",
+        "overview",
+    )
+    assert view.PARTS is schemas.LEDGER_PARTS
+    schema = cast("dict[str, dict[str, dict[str, dict[str, list[str]]]]]", routes.SINCE_SCHEMA)
+    assert schema["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
 
 
 class Whole:
