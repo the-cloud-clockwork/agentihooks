@@ -3,6 +3,7 @@ import os
 import socket
 import sqlite3
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -364,6 +365,7 @@ def serving(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _ledger_exit_guard:
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.legacy, "adopt", Mock())
     return tmp_path
 

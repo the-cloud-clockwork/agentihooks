@@ -152,6 +152,7 @@ def test_the_runtime_request_carries_the_grant_the_execution_and_its_generation(
         "execution_id": launch.agent.execution_id,
         "generation": 1,
         "account": ACCOUNT,
+        "harness": "claude",
         "profile": launch.agent.profile,
         "endpoints": {"AGENTIHOOKS_SWARM_API_URL": API},
     }
@@ -857,7 +858,7 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
 
 def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_cap(world):
     asked = []
-    world.launcher.accounts = lambda cap, planned, predecessor: asked.append(cap) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, predecessor, harness: asked.append(cap) or "routed-key"
     name = world.store.next_name(SLUG, "eng")
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
@@ -886,7 +887,7 @@ def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_
     world, envelope, assignment, predecessor
 ):
     asked = []
-    world.launcher.accounts = lambda cap, planned, left: asked.append((cap, planned, left)) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, left, harness: asked.append((cap, planned, left)) or "routed-key"
     world.launcher.planned = {"task": "planned-key"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     task = {"id": "task", "seat": FIRST, "handoff_envelope": envelope, "launch_assignment": assignment}
@@ -899,7 +900,7 @@ def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_
 
 def test_a_tick_spawn_without_a_plan_reader_hands_its_route_no_planned_account(world):
     asked = []
-    world.launcher.accounts = lambda cap, planned, left: asked.append(planned) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, left, harness: asked.append(planned) or "routed-key"
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
 
@@ -909,7 +910,7 @@ def test_a_tick_spawn_without_a_plan_reader_hands_its_route_no_planned_account(w
 
 
 def test_a_tick_spawn_whose_route_finds_no_account_is_unavailable_before_admission(world):
-    world.launcher.accounts = lambda cap, planned, predecessor: None
+    world.launcher.accounts = lambda cap, planned, predecessor, harness: None
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
 
@@ -1124,7 +1125,7 @@ def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_record
 
 
 @pytest.mark.parametrize(
-    "chooser", [None, lambda cap, planned, predecessor: None], ids=["reservation full", "no account with room"]
+    "chooser", [None, lambda cap, planned, predecessor, harness: None], ids=["reservation full", "no account with room"]
 )
 def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(world, chooser):
     world.launch(FIRST)
@@ -1256,3 +1257,36 @@ def test_registration_reports_a_missing_global_reservation(world, monkeypatch):
     monkeypatch.setattr(type(world.launcher.launch_slots), "acknowledge", lambda self, execution: False)
     with pytest.raises(SwarmError, match="^reservation_expired$"):
         world.launcher.registered(world.session(launch), launch.grant)
+
+
+def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a_codex_agent(world: World) -> None:
+    asked: list[tuple[str | None, str]] = []
+    world.launcher.accounts = lambda cap, planned, left, harness: asked.append((planned, harness)) or "codex-key"
+    world.launcher.planned = lambda task, harness: f"{task}-{harness}"
+    world.launcher.planned_harness = {"task": "codex"}.get
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    assert asked == [("task-codex", "codex")]
+    [sent] = world.runtime.requests
+    assert sent.task["harness"] == "codex"
+    agent = world.store.execution(SLUG, sent.task["execution_id"])
+    assert (agent.harness, agent.account) == ("codex", "codex-key")
+
+
+@pytest.mark.parametrize(
+    ("task", "plan", "harness"), [({"harness": "claude"}, "codex", "claude"), ({}, None, "claude")]
+)
+def test_a_task_harness_wins_over_the_plan_and_an_unplanned_task_launches_claude(
+    world: World, task: dict[str, str], plan: str | None, harness: str
+) -> None:
+    world.launcher.planned_harness = lambda task_id: plan
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST, **task})
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert sent.task["harness"] == harness

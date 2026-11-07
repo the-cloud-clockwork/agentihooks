@@ -1,4 +1,5 @@
 import threading
+from contextlib import nullcontext
 from unittest.mock import Mock
 
 import pytest
@@ -102,6 +103,7 @@ def test_the_shared_server_runs_watch_and_follow_under_the_retrying_runner(monke
     monkeypatch.setattr(ledger_server.storage, "shared", lambda: True)
     monkeypatch.setattr(ledger_server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(ledger_server.threading, "Thread", Mock())
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     ledger_server.serve()
     targets = [call.kwargs["target"] for call in ledger_server.threading.Thread.call_args_list]
     assert [targets[1].__wrapped__, targets[4].__wrapped__] == [

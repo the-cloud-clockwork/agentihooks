@@ -207,7 +207,7 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets, note_left
+from scripts.tick.steps import Left, PassBox, budgets
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -440,14 +440,6 @@ class _Wrapper:
         early = self._acted(records, ("wrapper phases", "wrapper reboot"))
         return early + tick + self.checked + self._acted(records, ("wrapper events",))
 
-    def _noted(self, found: dict[str, Any], key: str) -> Any:
-        """Return ``found[key]``, noting the steps the pass left on the box first when no step stored it."""
-        try:
-            return found[key]
-        except Left:
-            note_left(self.box, self.seen.values())
-            raise
-
     def _hold(self) -> bool:
         """Hold the pass's ledger view."""
         _hold_view(self.beating, self.slug, self.ledger)
@@ -494,10 +486,12 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan, raise what the intent check held and keep its view and checked actions."""
+        """End the tick's scan, raise what the intent check held and keep its view and checked actions when it stored
+        them; an intent check that overran its budget stored nothing and leaves the pass going."""
         self.ticks.close()
         host_steps.raise_held(self.judging)
-        self.box["view"], self.checked = self._noted(self.judging, "judged")
+        if "judged" in self.judging:
+            self.box["view"], self.checked = self.judging["judged"]
         return True
 
     def _reread(self) -> bool:
