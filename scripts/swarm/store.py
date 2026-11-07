@@ -546,7 +546,7 @@ class RedisStore:
 
     def _project_row(self, pipe: Any, slug: str, agent: AgentRecord, previous: AgentRecord | None) -> None:
         from scripts.swarm.execution import PROJECTION_OMITTED
-        from scripts.swarm.tick import agent_status
+        from scripts.tick.steps.claims import agent_status
 
         row = {field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}
         pipe.hset(self.key(slug, "agents"), agent.name, json.dumps(row))

@@ -1,19 +1,7 @@
 {
  "scripts/swarm/tick.py": [
-  "def Claims",
-  "def Ledger",
-  "def Placed",
-  "def Runtime",
-  "def SpawnError",
   "def _acknowledging_error",
-  "def _claimable",
-  "def _demoted",
-  "def _launch_order",
-  "def _owned_tasks",
   "def _running",
-  "def agent_status",
-  "def claim_view",
-  "def ready_in_order",
   "def tick"
  ],
  "scripts/tick/steps/agents.py": [
