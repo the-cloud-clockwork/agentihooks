@@ -606,6 +606,8 @@ def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predece
 
     assert routes.rows(4, NOW_MS / 1000) == claude.rows(4, NOW_MS / 1000)
     assert routes.rows(4, NOW_MS / 1000)[0].week_resets_at == NOW_MS // 1000 + 48 * HOUR
+    assert routes.banded_rows(4, NOW_MS / 1000) == claude.banded_rows(4, NOW_MS / 1000)
+    assert [row.name for row in routes.banded_rows(4, NOW_MS / 1000)] == ["akey", "bkey"]
     assert routes.choose(2, None, None, "claude") == "akey"
     assert routes.choose(2, "bkey", None, "claude") == "bkey"
     assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))

@@ -112,6 +112,9 @@ class HarnessRoutes:
     def rows(self, cap: int, now: float) -> list[Account]:
         return [row for route in self.routes.values() for row in route.rows(cap, now)]
 
+    def banded_rows(self, cap: int, now: float) -> list[Account]:
+        return [row for route in self.routes.values() for row in route.banded_rows(cap, now)]
+
     def choose(self, cap: int, planned: str | None, predecessor: tuple[str, str] | None, harness: str) -> str | None:
         route = self.routes.get(harness)
         return None if route is None else route.choose(cap, planned, predecessor)
