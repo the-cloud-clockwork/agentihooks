@@ -1456,6 +1456,49 @@ def test_a_claim_whose_agent_its_hive_still_lists_is_kept(remote: SimpleNamespac
 
 
 @pytest.mark.parametrize(
+    ("ended", "pod_started_after", "names", "gone"),
+    [
+        (False, 1, [], True),
+        (True, 1, [], True),
+        (False, 0, [], False),
+        (True, -1, [], False),
+        (False, 1, None, False),
+        (False, 1, ["member"], False),
+    ],
+)
+@pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
+def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_ceiling(
+    remote: SimpleNamespace, ended: bool, pod_started_after: int, names: list[str] | None, gone: bool
+) -> None:
+    from scripts.swarm import capacity
+    from scripts.swarm.pane import PaneObservation
+    from scripts.tick.steps import agents as agent_steps
+
+    agent = replace(remote.agent, pane_id="")
+    remote.store.put_agent("fixture", agent)
+    _publish(remote, state="unknown")
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    listed = [agent.name] if names == ["member"] else names
+    report.update(names=listed, started_at=LAUNCHED + pod_started_after)
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    rows = {"task": {"state": "done" if ended else "claimed", "claimed_by": agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.observe = Mock(return_value=PaneObservation("unknown"))
+    remote.runtime.retire = Mock(return_value=False)
+    remote.runtime.refusal = Mock(return_value={"process": 0, "refusal": "unsent"})
+    assert capacity._busy(remote.store.agents("fixture"))[agent.lane] == 1
+
+    agent_steps._reap("fixture", remote.store, ledger, remote.runtime, rows, LAUNCHED + remote.reports.STARTUP_MS)
+
+    busy = capacity._busy(remote.store.agents("fixture"))[agent.lane]
+    assert (remote.store.agents("fixture") == [], busy) == (gone, int(not gone))
+    assert remote.runtime.retire.called is (ended and not gone)
+    assert (remote.store.claimant("fixture", "task") is None) is gone
+
+
+@pytest.mark.parametrize(
     ("hive", "names", "since", "vanished"),
     [
         (HIVE, ["someone-else"], 0, True),

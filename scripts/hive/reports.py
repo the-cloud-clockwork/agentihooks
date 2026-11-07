@@ -73,14 +73,18 @@ class Reports:
         return bool(agent.pane_id) and agent.pane_id not in panes
 
     def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
-        """True when the beating hive ``agent`` was admitted to lists other members but not it past startup."""
+        """True when the beating hive ``agent`` was admitted to does not list it past startup, while it lists others
+        or its pod started after the launch."""
         raw = self.redis.get(key(agent.hive)) if agent.hive else None
         launched = agent.launched_at or agent.started_at
         if not raw or not launched or now_ms - launched < STARTUP_MS:
             return False
-        found: object = json.loads(cast(str, raw)).get("names")
-        names = cast("list[object]", found) if isinstance(found, list) else []
-        return bool(names) and agent.name not in names
+        report = json.loads(cast(str, raw))
+        found: object = report.get("names")
+        if not isinstance(found, list):
+            return False
+        names = cast("list[object]", found)
+        return agent.name not in names and (bool(names) or report.get("started_at", 0) > launched)
 
     def lost(self, agent: "AgentRecord", now_ms: int, after_ms: int) -> bool:
         hive = host(agent)
