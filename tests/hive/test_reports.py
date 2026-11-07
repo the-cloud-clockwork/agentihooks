@@ -823,6 +823,20 @@ def test_a_hive_report_names_the_executions_it_runs_under_a_name(remote):
     assert remote.runtime.hive.executions_of(HIVE, agent.name) == [f"{agent.execution_id}:{agent.generation}"]
 
 
+def test_a_name_reap_keys_its_order_on_every_execution_the_hive_reports_under_the_name(remote):
+    from scripts.hive.orders import Orders
+
+    _publish(remote)
+    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
+    agent = remote.agent
+    report["executions"]["execution-zero"] = {**report["executions"][agent.execution_id], "generation": 4}
+    remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
+    assert remote.runtime.reap_name(agent.name) is False
+    ((_, fields),) = remote.redis.xrange(Orders(remote.redis).commands(HIVE))
+    expected = ",".join(sorted([f"{agent.execution_id}:{agent.generation}", "execution-zero:4"]))
+    assert json.loads(fields["order"])["id"] == f"reap:{agent.name}:{expected}"
+
+
 def test_a_hive_refuses_a_command_for_an_execution_it_does_not_run(remote):
     from scripts.hive.orders import Ack, CommandOrder, Consumer, Orders
 

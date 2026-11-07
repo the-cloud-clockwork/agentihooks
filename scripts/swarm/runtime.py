@@ -1357,15 +1357,16 @@ class HerdrRuntime:
         from scripts.terminate_agent import sessions
 
         held = [s.process.pid for s in sessions() if s.name == name]
-        host = "" if held or self.hive is None else self.hive.holder(name)
-        if host in ("", hive_id()):
+        hive = self.hive
+        host = "" if held or hive is None else hive.holder(name)
+        if hive is None or host in ("", hive_id()):
             carrying = [pid for pid in held if _carries(pid, name)]
             return not self.reap(carrying).refusal and len(carrying) == len(held)
-        identity = ",".join(self.hive.executions_of(host, name)) if self.hive is not None else ""
+        identity = ",".join(hive.executions_of(host, name))
         order = CommandOrder(f"reap:{name}:{identity}" if identity else f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:
-            Orders(self.hive.redis).forget(host, order.id)
+            Orders(hive.redis).forget(host, order.id)
         return reaped
 
     def pane_tail(self, pane_id, lines):
