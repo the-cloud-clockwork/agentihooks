@@ -3,6 +3,7 @@
 import sys
 import urllib.error
 import uuid
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,11 @@ UNREACHABLE = (
     "ledger talk queued while the server was down",
     "the local inbox outbox is full",
 )
+
+
+OFFLINE: ContextVar[bool] = ContextVar("tick_ledger_offline", default=False)
+OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
+SNAPSHOT_TIMEOUT_S = 3.0
 
 
 def _accepted(slug, state):
@@ -71,7 +77,13 @@ class LedgerClient:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
+        if OFFLINE.get() and not ops:
+            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         try:
+            if OFFLINE.get() and ops:
+                from scripts.tick import view
+
+                return {**view.queued(ops), **ledger.queue(slug, ops, service)}
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
@@ -90,6 +102,8 @@ class LedgerClient:
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
+        if OFFLINE.get():
+            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
         return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 

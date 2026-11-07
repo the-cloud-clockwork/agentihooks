@@ -33,7 +33,9 @@ __all__ = [
     "document",
     "freeze",
     "frozen_views",
+    "hold_stored",
     "holding",
+    "queued",
     "refreshed",
     "start",
     "view_file",
@@ -171,7 +173,7 @@ def reads(ledger: object) -> bool:
     return type(ledger) is LedgerClient
 
 
-def start(slug: str, service: bool) -> LedgerView | None:
+def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView | None:
     """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
     hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
@@ -179,7 +181,7 @@ def start(slug: str, service: bool) -> LedgerView | None:
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    client = ResourceClient(base, ledger.credentials(slug, service), timeout or ledger.REQUEST_TIMEOUT)
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:
@@ -193,10 +195,43 @@ def start(slug: str, service: bool) -> LedgerView | None:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
-    CURRENT.set(view)
-    HELD.set(None if view is None else Held(view, refresh))
-    REFRESH.set(None if view is None else (slug, refresh))
+    _hold(slug, view, refresh)
     return view
+
+
+def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:
+    """Hold ``view`` of ledger ``slug`` for the rest of the pass, read again through ``renew``."""
+    CURRENT.set(view)
+    HELD.set(None if view is None else Held(view, renew))
+    REFRESH.set(None if view is None else (slug, renew))
+
+
+def hold_stored(slug: str, service: bool) -> LedgerView | None:
+    """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
+    the host stores none."""
+    from scripts.scheduler import service as scheduler
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+
+    stored = read_export_file(view_file(_ledger().base(slug), slug, scheduler.runtime_dir()))
+    if stored is None:
+        return None
+    view = LedgerView(stored[0], stored[1])
+    _hold(slug, view, lambda: cast(Held, HELD.get()).view)
+    return view
+
+
+def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """The held document with the task fields of queued ``ops`` applied, held as the view the rest of the pass
+    reads, or an empty document when the pass holds no view."""
+    held = HELD.get()
+    if held is None:
+        return {}
+    fields = {op["item"].removeprefix("tasks/"): op["fields"] for op in ops if op.get("op") == "task_update"}
+    document = dict(held.view.document)
+    document["tasks"] = [{**task, **fields.get(task.get("id"), {})} for task in held.view.tasks]
+    held.view = LedgerView(held.view.generation, document)
+    CURRENT.set(held.view)
+    return document
 
 
 def document(slug: str) -> dict[str, Any] | None:
