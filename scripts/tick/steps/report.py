@@ -105,7 +105,7 @@ def _stall_watch(cli: Any, get: Get) -> Any:
             lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
-            released=release_wait.checker(get("config").repo),  # pyright: ignore[reportUnknownMemberType]
+            released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
             reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
         ),
         get("doc"),
@@ -267,7 +267,9 @@ STEPS = (
     CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found"), lane=SLOW),
     CallStep("metrics record", "wrapper metrics", held(_metrics), FOUND, pass_domains("found", "view"), lane=SLOW),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
-    CallStep("inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents")),
+    CallStep(
+        "inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents"), lane=SLOW
+    ),
     CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=frozenset()),
     CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
     CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),

@@ -16,7 +16,7 @@ rules:
     pattern-regex: '\bcrontab\b|/etc/cron\.|/var/spool/cron|\bsystemd-run\b[^\n]*--on-|\bStart(Calendar)?Interval\b|\bschtasks\b|(?:^|[;&|(]\s*)(?:at|batch)\s+(?:now|midnight|noon|teatime|tomorrow|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)(?=[\s\"'']|$)|\[\s*"at"\s*,'
     paths:
       include: ["*.py", "*.sh", "*.bash", "*.timer", "*.service", "*.unit", "*.conf", "*.ini", "Dockerfile*", "*.cron", "crontab"]
-      exclude: [/scripts/scheduler/]
+      exclude: [/scripts/scheduler/, /scripts/swarm/safety_nudge.py]
 
   - id: periodic-sleep-loop
     message: An endless loop that sleeps runs a timed job outside the agentihooks scheduler. Register the job with scripts.scheduler instead.

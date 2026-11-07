@@ -148,6 +148,7 @@ def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> 
         "findings pass",
         "metrics record",
         "bottleneck status",
+        "inbox wake",
     }
     assert {lane for lane in lanes.values() if lane != engine.SLOW} == {CallStep.lane, report.CLOSING}
 
@@ -199,7 +200,7 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
     assert name == "stall watch"
     assert args[:5] == (STORE, "sw", "ledger", "view", frozenset({"a", "b"}))
     assert args[6:] == (("lanes", "sw", STORE, "ledger", DOC, 7), 7)
-    assert kwargs == {"released": ("checker", "/repo"), "reread": ledger_events.view}
+    assert kwargs == {"released": ("checker", CONFIG), "reread": ledger_events.view}
     assert (overrun_call[0], overrun_call[1], overrun_call[3]) == ("skip", overrun.overrun_pass, DOC)
     watch = overrun_call[2]
     assert watch[:5] == ("overrun watch", STORE, "sw", "ledger", frozenset({"a", "b"}))

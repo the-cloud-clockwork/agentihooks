@@ -8,11 +8,13 @@ reopen the task for the next engineer, who continues from the stored handoff.
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
+from scripts.gates import intent
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import (
     claim_order,
@@ -201,8 +203,9 @@ class Pass:
     journal: Callable = queue_record.Journal
 
 
-def merge_pass(run, rows):
-    actions = []
+def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
+    actions: list[str] = []
+    closed: set[str] = set()
     for task_id, row in rows.items():
         row = dict(row)
         if row.get("awaiting") != AWAITING:
@@ -211,6 +214,8 @@ def merge_pass(run, rows):
                 if pull is not None and pull.state == "OPEN" and pull.merge_problem:
                     found = {"url": row["pr_url"], "agent": row.get("claimed_by")}
                     actions += _unmergeable(run, row, found, pull)
+                if pull is not None and pull.state == "MERGED" and task_id not in closed:
+                    actions += _close_merged(run, rows, row, closed)
             continue
         found = record(run.store, run.slug, task_id)
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
@@ -218,6 +223,37 @@ def merge_pass(run, rows):
             continue
         actions += _advance(run, rows, row, found)
     return actions
+
+
+def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
+    """Close an unsplit code or ci task whose recorded pull request merged outside the merge pass.
+
+    The ledger write releases tasks parked on it at the next placement read; its worktree stays with the owner
+    that kept the seat, which removes it when it leaves.
+    """
+    task_id, url = row["id"], row["pr_url"]
+    if row.get("awaiting") or ledger_kinds.kind(row) not in GATED:
+        return []
+    if ledger_kinds.after(row) and ledger_kinds.unmet(row):
+        return []
+    if row.get("split"):
+        return []
+    if (intent.Verdicts(run.slug, intent.NAME).read(task_id) or {}).get("verdict") == intent.FAIL:
+        return []
+    fields = {"state": "done", "pr_url": url, "awaiting": ""}
+    live = run.ledger.update_task(run.slug, task_id, fields, if_state=("pr",), if_match={"pr_url": url})
+    if live.get("state") != "done":
+        return []
+    finished = [task_id]
+    for member in row.get("group_members") or []:
+        if member in rows and rows[member].get("state") != "done":
+            run.ledger.update_task(run.slug, member, fields)
+            finished.append(member)
+    closed.update(finished)
+    run.store.clear_handoff(run.slug, task_id)
+    forget(run.store, run.slug, task_id)
+    view = {**rows, **{done: {**rows[done], **fields} for done in finished}}
+    return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, view)]
 
 
 def _leave(run, task_id, row):

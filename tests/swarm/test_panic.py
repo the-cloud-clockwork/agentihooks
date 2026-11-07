@@ -286,11 +286,39 @@ def test_level_is_one_with_no_passes_and_ignores_old_ones(store):
     assert panic.level(store, HOUR) == 1.0
 
 
-def test_engage_keeps_the_first_panic_and_adds_fixes(store):
+def test_engage_keeps_the_first_panic_and_adds_fixes(store: RedisStore) -> None:
     panic.engage(store, "auto", True, [], 100)
     found = panic.engage(store, "pressed", False, [FIX, FIX], 200)
-    assert found == panic.Panic(100, "auto", False, (FIX,))
+    assert found == panic.Panic(100, "auto", True, (FIX,))
     assert panic.state(store) == found
+
+
+def test_a_fix_added_to_an_automatic_panic_still_releases_once_stable(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    now = 2 * HOUR
+    _errors(store, panic.THRESHOLD, now)
+    panic.alarm(store, now)
+    panic.engage(store, "pressed", False, (fix for fix in [FIX]), now + 1)
+    assert panic.state(store) == panic.Panic(now, f"{panic.THRESHOLD} errors in the last hour", True, (FIX,))
+    later = now + WINDOW + 1
+    _passes(store, 9, 1, later)
+    assert panic.alarm(store, later) == "panic released: the fleet is back at business as usual"
+    assert panic.state(store) is None
+
+
+def test_pressing_on_without_a_fix_makes_an_automatic_panic_manual(store: RedisStore) -> None:
+    panic.engage(store, "auto", True, [], 100)
+    assert panic.engage(store, "pressed", False, [], 200) == panic.Panic(100, "auto", False, ())
+
+
+def test_a_panic_a_person_turns_on_without_a_fix_stays_manual(
+    store: RedisStore, counted: list[tuple[str, float, dict[str, str]]]
+) -> None:
+    panic.engage(store, "pressed", False, [], 0)
+    _passes(store, 10, 0, WINDOW + 1)
+    assert panic.alarm(store, WINDOW + 1) == ""
+    assert panic.state(store) == panic.Panic(0, "pressed", False, ())
 
 
 def test_engage_on_an_automatic_panic_stays_automatic(store):
@@ -337,6 +365,22 @@ def test_every_active_status_is_cancelled():
     for status in ("queued", "in_progress", "waiting", "pending", "requested"):
         runs = Runs({"o/a": [_row(1, "x", status=status)]})
         assert panic.cancel_runs([], ["o/a"], runs) == ["o/a run 1 on x"]
+
+
+def test_cancel_runs_spares_release_tag_runs() -> None:
+    runs = Runs(
+        {
+            "o/a": [
+                _row(1, "v2.17.652", event="release"),
+                _row(2, "v2.17.653", event="push"),
+                _row(3, "v2-feature"),
+                _row(4, "release", event="push"),
+                _row(5, "main", event="release"),
+            ],
+        },
+    )
+    assert panic.cancel_runs([], ["o/a"], runs) == ["o/a run 3 on v2-feature", "o/a run 4 on release"]
+    assert runs.cancelled() == ["o/a:3", "o/a:4"]
 
 
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
@@ -512,6 +556,7 @@ def master(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_opens_the_master_hotfix_window(store, master):
     panic.engage(store, "60 errors in the last hour", True, [], blocker_window._now_ms(store))
     notice, block = blocker_window.pretool("Write", {"file_path": "/etc/x"}, SID)
@@ -519,7 +564,7 @@ def test_panic_opens_the_master_hotfix_window(store, master):
     assert notice is not None
     assert "panic for 0 minutes" in notice
     assert f"agentihooks swarm {SLUG} panic on --fix <pr url>" in notice
-    assert block is not None
+    assert block is None
 
 
 def test_the_master_may_press_the_panic_button(store, master):
@@ -542,6 +587,7 @@ def test_the_master_may_press_the_panic_button(store, master):
         "argocd app sync x",
     ],
 )
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions(store, command):
     panic.engage(store, "60 errors in the last hour", True, [], 0)
     notice, block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")
@@ -584,3 +630,64 @@ def test_panic_found_fails_open_on_a_redis_error(store, monkeypatch):
 
     monkeypatch.setattr(panic, "state", broken)
     assert blocker_window._panic_found(store, 0) == {}
+
+
+def _quiet_watch(monkeypatch: pytest.MonkeyPatch, seen: list[bool]) -> None:
+    monkeypatch.setattr(spawn_stall, "observe", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "deliver", lambda *args: None)
+    monkeypatch.setattr(spawn_stall, "findings", lambda *args: [])
+    monkeypatch.setattr(panic, "tick_pass", lambda store, ok, now: seen.append(ok) or [])
+
+
+def test_a_pending_hive_launch_and_a_full_reservation_fail_no_step(
+    store: RedisStore, counted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.tick import SpawnError
+
+    seen: list[bool] = []
+    _quiet_watch(monkeypatch, seen)
+    full = "account reservation is full: account=claude:a sessions=1 cap=1"
+    pending = SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
+    recorded: dict[str, Any] = {}
+    with timing.tick(SLUG, store), timing.pass_record(store, SLUG):
+        with spawn_stall.watch(store, SLUG, None, lambda: 9_000, None):
+            for error in (pending, SpawnError(full, "unavailable")):
+                with pytest.raises(SpawnError), timing.step("scripts.swarm.controller.FencedRuntime.spawn"):
+                    raise error
+            recorded = timing.PASS.get() or {}
+    assert recorded["failed_steps"] == []
+    assert seen == [True]
+    assert panic.errors_since(store, 0) == 0
+    assert [call for call in counted if call[0] == panic.METRIC] == []
+
+
+def test_a_real_launch_failure_still_fails_its_step(
+    store: RedisStore, counted: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import timing
+    from scripts.swarm.tick import SpawnError
+
+    seen: list[bool] = []
+    _quiet_watch(monkeypatch, seen)
+    with timing.tick(SLUG, store), spawn_stall.watch(store, SLUG, None, lambda: 9_000, None):
+        with pytest.raises(SpawnError), timing.step("scripts.swarm.controller.FencedRuntime.spawn"):
+            raise SpawnError("herdr refused the pane", "refused")
+    assert seen == [False]
+    assert panic.errors_since(store, 0) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "waits"),
+    [
+        ("pending", "hive launch ordered, waiting for its acknowledgement", True),
+        ("unavailable", "account reservation is full: account=claude:a sessions=1 cap=1", True),
+        ("unavailable", "no hive has room for the lane", False),
+        ("refused", "account reservation is full: account=claude:a sessions=1 cap=1", False),
+        ("refused", "herdr refused the pane", False),
+    ],
+)
+def test_only_a_pending_launch_or_a_full_reservation_waits(status: str, detail: str, waits: bool) -> None:
+    from scripts.swarm.tick import SpawnError
+
+    assert SpawnError(detail, status).waiting() is waits

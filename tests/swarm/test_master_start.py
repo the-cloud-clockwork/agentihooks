@@ -96,6 +96,46 @@ def test_first_hook_confirms_startup_and_prevents_retry(store):  # noqa: F811
     assert len(runtime.masters) == 1
 
 
+@pytest.mark.feature("starting-master-hooks-beat-kept")
+def test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches(store):  # noqa: F811
+    from scripts.swarm import idle
+
+    runtime, ledger = StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    master = masters(store)[0]
+    idle.beat(store.redis, "sw", master.name, "working", master.launched_at or master.started_at)
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    assert masters(store)[0].state == "working"
+    assert master.name not in runtime.killed
+    assert store.redis.get(store.key("sw", "master-start")) is None
+    tick("sw", store, ledger, runtime, 3 * DEADLINE)
+    assert len(runtime.masters) == 1
+
+
+@pytest.mark.feature("starting-master-hooks-beat-kept")
+def test_a_hook_beat_from_before_the_launch_does_not_keep_the_master(store):  # noqa: F811
+    from scripts.swarm import idle
+
+    runtime, ledger = StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    master = masters(store)[0]
+    idle.beat(store.redis, "sw", master.name, "working", (master.launched_at or master.started_at) - 1)
+    tick("sw", store, ledger, runtime, DEADLINE + 1)
+    assert master.name in runtime.killed
+
+
+@pytest.mark.feature("starting-master-hooks-beat-kept")
+def test_a_master_with_no_launch_time_counts_its_beat_from_its_start(store):  # noqa: F811
+    from scripts.swarm import idle, master_start
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("master@sw-1", MASTER, MASTER, started_at=1000, launched_at=0)
+    idle.beat(store.redis, "sw", agent.name, "working", 999)
+    assert master_start.hooked(store, "sw", agent) is False
+    idle.beat(store.redis, "sw", agent.name, "working", 1000)
+    assert master_start.hooked(store, "sw", agent) is True
+
+
 def test_dead_launch_retries_without_waiting_for_worker_grace(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     store.put_handoff("sw", MASTER, "Retain this handoff")

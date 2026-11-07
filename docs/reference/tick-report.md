@@ -44,7 +44,7 @@ CPU share uses summed own and reaped child CPU of retained steps, excluding the 
 | Pass p95 | The 95th percentile of pass wall time over the window. |
 | Gap p95, largest gap | The idle time between the end of one pass and the start of the next. A gap well above the cadence means the scheduler fired late or a pass was refused. |
 | Passes without retained steps | Passes in the window whose step records were already trimmed from `tick:steps`. |
-| Step rows | One per step name, sorted by name: how many times it ran in the window, its median and p95 wall time, and its share of the CPU all retained steps used. Registered engine steps appear under their registered name, such as `spawn`; other rows name the function they time. Each fenced launch adds `scripts.swarm.controller.FencedRuntime._refusal` and `scripts.swarm.controller.FencedRuntime.runtime_spawn`, which split a slow `spawn` row into its placement refusal and its runtime launch; see [Timed rows inside a fenced spawn](tick-adapters.md#timed-rows-inside-a-fenced-spawn). Spawn order adds `scripts.swarm.tick._spawn_order` and, once per lane inside it, `scripts.swarm.tick._running` and `scripts.swarm.focus_budget.place`, which name the running agent filter and focus budget placement; see [Timed rows inside spawn order](tick-adapters.md#timed-rows-inside-spawn-order). The whole pass measurement, `run_tick`, is left out. |
+| Step rows | One per step name, sorted by name: how many times it ran in the window, its median and p95 wall time, and its share of the CPU all retained steps used. Registered engine steps appear under their registered name, such as `spawn`; other rows name the function they time. Each fenced launch adds `scripts.swarm.controller.FencedRuntime._refusal` and `scripts.swarm.controller.FencedRuntime.runtime_spawn`, which split a slow `spawn` row into its placement refusal and its runtime launch; see [Timed rows inside a fenced spawn](tick-adapters.md#timed-rows-inside-a-fenced-spawn). Spawn order adds `scripts.tick.steps.place._spawn_order` and, once per lane inside it, `scripts.swarm.tick._running` and `scripts.swarm.focus_budget.place`, which name the running agent filter and focus budget placement; see [Timed rows inside spawn order](tick-adapters.md#timed-rows-inside-spawn-order). The whole pass measurement, `run_tick`, is left out. |
 
 Times print with three decimals and CPU share with two; `n/a` means the window held no value. CPU share sums each step's own thread CPU
 and the CPU of child processes it reaped. Step measurements can nest, so their shares can overlap.
@@ -93,7 +93,7 @@ the `tick:records` stream of the same passes:
 | Late share | Percent of those records whose outcome is `late`: the step ran past its budget or was left running. Held and skipped records are not late. |
 | Abandoned | Runs still going at their budget or lane deadline; the engine left them running and dropped their result. |
 | Held | Runs refused because the step's earlier run for the same swarm was still alive. |
-| Skipped | Steps dropped before they started, because their lane deadline had passed or a step they need was dropped. |
+| Skipped | Steps dropped before they started, because their lane deadline had passed or a step they need was dropped, and steps rested because their interval had not elapsed since their last ended run (the `rested` field). A rested step starts no thread and counts as ended for the steps that need it. |
 | Dropped | Writes that never applied. A finished run counts each write refused by compare and set; an abandoned run, whose result is unknown, counts each write domain it declares, its own actions domain included. |
 
 Only steps the tick engine runs write these records; a window without them prints the header alone and
@@ -105,7 +105,7 @@ Each `tick:records` row carries one `outcome`, checked in this order:
 
 | Outcome | When | Counts as |
 |---|---|---|
-| `skipped` | The step never started: its lane deadline had passed, a step it needs was dropped, or a handed off step was dropped before the pass workers ran it. | Skipped |
+| `skipped` | The step never started: its lane deadline had passed, a step it needs was dropped, a handed off step was dropped before the pass workers ran it, or its interval had not elapsed since its last ended run (`rested` true; see [Interval enforcement](tick-engine-steps.md#interval-enforcement)). | Skipped |
 | `failed` | The step raised. | Neither late nor dropped |
 | `held` | The step's earlier run for the same swarm was still alive, so no thread started. | Held |
 | `late` | The step was still running at its budget, or it finished with a wall time above its budget. | Late share; Abandoned too when it was left running |
@@ -132,7 +132,8 @@ CPU share uses summed own and reaped child CPU of retained steps, excluding the 
 
 The figures are illustrative. Here the fleet red notice step was left running at its budget in 5 of 60 passes, and
 those runs lost 15 declared write domains between them. `spawn` finished in budget on every pass. A step with Held
-above zero overlapped its own earlier run; with Skipped above zero, its lane ran out or a step it needs was dropped.
+above zero overlapped its own earlier run; with Skipped above zero, its lane ran out, a step it needs was dropped, or
+its interval had not elapsed.
 Critical lane end p95 shows how late in a pass the critical lane steps finish, apart from the slow lane steps that
 the pass wall time includes.
 
@@ -142,7 +143,7 @@ the pass wall time includes.
 |---|---|---|---|
 | `tick:passes` | Tick pass | `pass_id`, `start_ms`, `end_ms`, `wall_s`, `critical_end_s` | Newest 50,000 |
 | `tick:steps` | Finished step | `pass_id`, `step`, `wall_s`, `own_cpu_s`, `reaped_child_cpu_s` | Newest 50,000 |
-| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `start_s`, `abandoned`, `held`, `skipped`, `dropped` | Newest 50,000 |
+| `tick:records` | Engine step record | `pass_id`, `step`, `lane`, `outcome`, `wall_s`, `start_s`, `abandoned`, `held`, `skipped`, `rested`, `dropped` | Newest 50,000 |
 
 An engine step record also stores its `budget_s` and its count of compare and set `conflicts`. All three streams sit
 under the swarm's own Redis key prefix. A pass record also carries its `critical_end_s`, the active agent count, the
@@ -152,8 +153,8 @@ orphan and left out of every row.
 
 ## What reads the same records
 
-- **Step budgets.** Each budget in `scripts.tick.steps.budgets.MEASURED` is a step's p95 from a 60 pass report with
-  fifty percent headroom; see [Tick engine steps](tick-engine-steps.md#measured-budgets-and-declared-intervals).
+- **Step budgets.** Each pass raises a step's floor in `scripts.tick.steps.budgets.FLOORS` to the p95 of its last 60
+  walls with fifty percent headroom; see [Tick engine steps](tick-engine-steps.md#live-budgets-floors-and-declared-intervals).
 - **Pass budget hold.** Every pass computes the p95 of its last 10 pass records. Above the target of the stage
   `AGENTIHOOKS_TICK_STAGE` names (`S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, default `S1`), the tick holds new
   spawns and sends the master one notice; the hold clears when the p95 is back under the target. With fewer than
@@ -215,7 +216,7 @@ pass reads yet, the scheduler cron stays every minute, and every pass still runs
 | A step's Late share climbs | Its wall time is past its budget on those passes. Compare the step row's p95 with its budget in the timing table; a run still going at its budget is abandoned and its result dropped. |
 | Abandoned and Dropped rise together | Runs are left going at their budget and their writes never apply. Raise the step's measured budget or make the step faster; until then its effects land only on passes where it finishes in time. |
 | Held above zero | An earlier run of the same step is still alive in its daemon thread. A held record never counts as abandoned; the run that holds it was abandoned on an earlier pass, so read that step's Abandoned count over a window that includes the passes before the held ones. |
-| Skipped above zero | The lane deadline passed before the step started, or a step it needs was dropped. Read the rows of the steps it needs and the lane's heaviest rows. |
+| Skipped above zero | For a step declared above 60 seconds, or in the slow lane at a cadence above one minute, most skipped rows are rests inside its interval: a 120 second step skips about every other pass. Otherwise the lane deadline passed before the step started, or a step it needs was dropped; read the rows of the steps it needs and the lane's heaviest rows. |
 | One step dominates p95 | Compare it with its budget in the timing table; a step past its budget is recorded late and the pass continues. See [Tick engine steps](tick-engine-steps.md#when-a-step-exceeds-its-budget). |
 | Spawns stop and the master got a pass budget notice | The pass p95 is above the stage target. Read the report over 10 passes to find the slow steps; the hold clears by itself once the passes recover. |
 

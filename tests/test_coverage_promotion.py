@@ -1,11 +1,14 @@
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 from coverage import CoverageData
 
 from tests import coverage_baseline as baseline
 from tests import coverage_ratchet as ratchet
+
+pytestmark = pytest.mark.timeout(30, method="signal")
 
 
 def _git(repo, *args):
@@ -35,6 +38,7 @@ def _publish(job, result):
 
 def test_a_coverage_loss_stays_red_on_the_next_promotion_head(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    monkeypatch.setattr(ratchet, "_cpus", lambda: 1)
     workflow = Path(__file__).parents[1] / ".github/workflows/test.yml"
     publisher = yaml.safe_load(workflow.read_text())["jobs"]["coverage-baseline"]
     repo = tmp_path / "repo"

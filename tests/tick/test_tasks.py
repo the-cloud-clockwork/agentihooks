@@ -99,7 +99,8 @@ def test_the_task_steps_sit_at_their_sites_in_legacy_order() -> None:
     registered = [step for wave in registry.waves() for step in wave]
     for step in tasks.STEPS:
         assert step in registered
-        lane = engine.SLOW if step.name == "fleet red notice" else CallStep.lane
+        slow = {"fleet red notice", "promotion refresh", "release alert"}
+        lane = engine.SLOW if step.name in slow else CallStep.lane
         assert (step.lane, step.budget_s) == (lane, budgets.timing_of(step.name)[0])
 
 
@@ -232,3 +233,23 @@ def test_a_held_step_gets_the_tick_and_lookup_it_was_called_with() -> None:
 def test_an_empty_box_raises_nothing() -> None:
     assert tasks.raise_held({}) is None
     assert tasks.RAISED == "raised"
+
+
+def test_a_placing_step_gets_the_tick_and_lookup_inside_the_host_placement_lock() -> None:
+    seen: list[Any] = []
+
+    class Lock:
+        def __enter__(self) -> None:
+            seen.append("locked")
+
+        def __exit__(self, *args: object) -> None:
+            seen.append("unlocked")
+
+    tick = SimpleNamespace(PLACING=Lock())
+
+    def call(found: Any, get: Any) -> list[str]:
+        seen.append((found, get("slug")))
+        return ["placed"]
+
+    assert tasks.placing(call)(tick, {"slug": "sw"}.get) == ["placed"]
+    assert seen == ["locked", (tick, "sw"), "unlocked"]

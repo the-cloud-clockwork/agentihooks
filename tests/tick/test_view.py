@@ -329,3 +329,17 @@ def test_document_serves_the_held_view_and_reads_again_only_after_a_write() -> N
     assert third is not None and fourth is not None
     assert (third["overview"], fourth["overview"]) == ("read 1", "read 1")
     assert reads == [0]
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_hold_entered_on_another_thread_closes_on_this_one_without_raising() -> None:
+    from contextlib import ExitStack
+    from threading import Thread
+
+    stack = ExitStack()
+    entered = Thread(target=lambda: stack.enter_context(view.holding()))
+    entered.start()
+    entered.join()
+    stack.close()
+    assert view.HELD.get() is None
+    assert view.REFRESH.get() is None
