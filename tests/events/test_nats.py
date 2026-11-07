@@ -510,7 +510,7 @@ def test_any_other_client_error_is_logged_in_one_line(caplog):
     ] == [("scripts.events.nats", "ERROR", "%s", (error,), "nats: authorization failed", None)]
 
 
-def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
+def test_an_unreachable_bus_raises_and_logs_no_connect_attempt(caplog):
     caplog.set_level("DEBUG")
     with pytest.raises(nats.nats_client.errors.NoServersError):
         nats.open_bus(BusConfig(backend="nats", url=nats_server.closed_url()))

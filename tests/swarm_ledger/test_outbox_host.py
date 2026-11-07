@@ -1,5 +1,6 @@
 import threading
 from contextlib import nullcontext
+from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
@@ -347,7 +348,7 @@ def test_the_host_prune_caps_unsent_rows_at_the_outbox_limit_and_reports_a_drop(
     assert capsys.readouterr().err == ("ledger outbox prune: dropped 3 unsent rows past 7\n" if dropped else "")
 
 
-def test_a_failed_prune_logs_one_line_and_leaves_the_interval_running(monkeypatch, capsys):
+def test_a_failed_prune_logs_one_line_and_skips_the_cap(monkeypatch, capsys):
     from scripts.swarm_ledger import outbox_host
 
     monkeypatch.setattr(outbox_host.outbox, "prune", Mock(side_effect=OSError("disk full")))
@@ -393,7 +394,7 @@ def test_the_outbox_limit_and_prune_interval_defaults():
     assert outbox_host.INTERVAL == 1.0
 
 
-def _unsent(repository) -> int:
+def _unsent(repository: sqlite.SQLiteLedgerRepository) -> int:
     with repository.connect() as connection:
         return connection.execute("SELECT COUNT(*) FROM outbox").fetchone()[0]
 
@@ -419,7 +420,9 @@ def test_the_outbox_stays_bounded_with_no_bus(tmp_path, monkeypatch, backend):
         assert _unsent(repository) == 1
 
 
-def _reload_with_nats_unreachable(tmp_path, monkeypatch) -> tuple:
+def _reload_with_nats_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[sqlite.SQLiteLedgerRepository, float]:
     import time
 
     from scripts.swarm_ledger import outbox_host
