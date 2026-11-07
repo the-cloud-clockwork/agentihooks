@@ -25,6 +25,10 @@ written pass.
 | --- | --- | --- |
 | Registry | `scripts.tick.registry` | Holds every registered step. `waves()` orders them in dependency waves by `needs` and refuses duplicate names, unknown dependencies, dependency cycles, a budget that is not a finite positive number, a negative interval, and two steps that write the same domain, or where one reads a domain the other writes, with no dependency between them, in one lane or across lanes |
 | Group run | `scripts.tick.engine.run_group` | Runs the steps of one group in dependency order: a sequential pass one at a time, a parallel pass each step once its needs have ended. Each step runs in a daemon thread under a copied context and a child deadline of its own budget; the engine waits at most that budget. A step that raises is recorded `failed`, one that runs past its budget is recorded `late`, and neither stops the next step |
+| Graph run | `scripts.tick.engine.run_graph` | Runs a whole step list, across groups, in the schedule `run_group` uses for one group. Steps are ordered by `registry.ordered`: each after the steps among them it needs, otherwise in the order given. An optional `gate` can shut a step as it becomes ready. See [The flat pass graph](#the-flat-pass-graph) |
+| Site edges | `scripts.tick.registry.site_edges` | Returns the steps with each step of a group site also needing every step of the nearest earlier site that holds steps, so a graph run keeps the site order |
+| Site gate | `scripts.tick.engine.SiteGate` | The `gate` of a graph run: runs a site's hook once, when the site's first step is ready, and shuts single steps through its `shut` check |
+| Pass sites | `scripts.tick.sites.run_sites` | Runs every registered step of a site table as one graph with site edges, a `SiteGate` and the appliers it is given. `run_tick` and `tick` both run their pass through it |
 | Tick site | `scripts.swarm.tick.run_group` | Runs one group with the pass state as keyword arguments, hands the engine the task appliers (`tasks.appliers(state)`) and returns, per step in order, its own actions, then the action lines its appliers returned, then a line for each of its writes the engine dropped. A group gets a 600 second deadline (`GROUP_BUDGET_S`) |
 | Write applier | `run_group(..., apply=...)` | A map of domain to a function that applies one `Write`. As each step ends, the engine passes every write of a mapped domain to its applier; an applier that raises `RevisionConflict` drops that write. See [Steps that return writes](#steps-that-return-writes) |
 | Call step | `scripts.tick.steps.CallStep` | A step that runs one call of the tick module. It reads the pass state through the view and writes the actions it returned to its own domain, `actions:<step name>` |
@@ -411,7 +415,7 @@ and shared by every group and every fan out of that pass:
 `workers` defaults to `scripts.tick.pool.WORKERS`, 8; `pool.running(workers=...)`
 sets it for one pass and refuses a value below one. No setting or environment
 variable changes it. Handed off slow lane work still runs from one daemon thread
-per detached group, named `tick-slow-lane`, which submits its steps to the same
+per `run_group` or `run_graph` call that hands work off, named `tick-slow-lane`, which submits its steps to the same
 step executor. A pass of three groups of eight steps, each step fanning out over
 four items, therefore uses at most `2 × workers` pool threads plus one
 `tick-slow-lane` thread for each group that hands work off. Before this change
@@ -540,11 +544,138 @@ spawn can start once execution follows prerequisites and each prerequisite
 finishes or is left behind by its budget; it does not bound spawn completion.
 Spawn itself has a 33 second budget.
 
-The current group runner retains the group and step order shown below.
-Unrelated earlier groups can still add waiting time, so forty seconds is a
-prerequisite graph bound, not a measured wall time guarantee for the legacy
-pass. The eager executor is required to realize that bound across groups.
+The flat pass graph keeps a barrier between each site and the next (see
+[The flat pass graph](#the-flat-pass-graph)), so unrelated earlier sites can
+still add waiting time. Forty seconds is a prerequisite graph bound, not a
+measured wall time guarantee for the pass.
 The existing spawn conditions and placing lock continue to apply.
+
+### The flat pass graph
+
+`engine.run_graph(steps, ctx, apply=None, finished=None, gate=None)` runs
+every step of `steps` as one graph. It takes the same `apply` and `finished`
+arguments as `run_group` and returns one `StepRecord` per step in graph order:
+
+- Outside a parallel pass, and in sequential mode, the steps run one at a time
+  in graph order, each in its own daemon thread the caller waits on up to its
+  budget.
+- In a parallel pass each step is submitted the moment every step it needs
+  among them has ended. Slow lane steps, and every step that needs one of them,
+  are handed off as `run_group` hands them off and their records go to
+  `finished`.
+
+Graph order comes from `registry.ordered(steps)`: each step after the steps
+among them it needs, otherwise in the order given. A need on a step outside
+the list is ignored for ordering. A cycle raises
+`ValueError: Dependency cycle: <names>`.
+
+#### Site edges
+
+A group site in the pass is a barrier: no step of a site starts before every
+step of the previous site ended. `registry.site_edges(steps, sites, joins=None)`
+turns that order into edges. `sites` is the group names in pass order. The
+returned steps keep their order, name, group, lane, budget and action; only
+`needs` changes:
+
+- Each step of a site gains a need on every step of the nearest earlier site
+  that holds steps. An empty site is skipped.
+- A step drops any need on a step of a later site, so a later site never holds
+  an earlier one.
+- A slow lane step, and every step that needs one directly or through another,
+  is no barrier for a later site: later sites do not wait for it.
+- A site that `joins` maps to a later site is no barrier for the sites between
+  them. Only the steps of the site it names need it.
+- A step whose group is not in `sites` keeps its own needs.
+
+With steps `a1` and `a2` in group `a`, `b1` in `b` needing `a1`, and `c1` in
+`c`, `site_edges(steps, ("a", "b", "c"))` gives `b1` the needs `a1` and `a2`
+and `c1` the need `b1`. With sites `("a", "empty", "b")`, `b1` still needs `a1` and `a2`: the
+empty site changes nothing, and `c1`, outside the sites, keeps no needs.
+
+#### Site gates
+
+The `gate` argument is called with each step as it becomes ready and the
+records of the steps that ended so far. A step it shuts is recorded rested: it
+starts no thread and ends at once for the steps that need it, as a step resting
+inside its interval does. `engine.SiteGate(hooks, shut)` is the gate the tick
+uses:
+
+- `hooks` maps a site to a check run once, when the first step of that site is
+  ready. A check that returns false shuts every step of the site.
+- `shut(step)` is asked before and after the hook and shuts single steps.
+- `seen` collects the records of every step that ended before the latest step
+  became ready.
+
+A site's hook runs when the site's first step is ready. A site whose steps all
+run in the slow lane is no barrier, so later sites can start before its hook
+runs. A hook that sets pass state later steps read, such as the runtime fence,
+belongs on a site that holds a critical step; `run_tick` fences the runtime at
+`wrapper probes` for that reason.
+
+```python
+from scripts.tick import engine, registry
+
+gate = engine.SiteGate({"observe": lambda: config_loaded()}, lambda step: stopped())
+edged = registry.site_edges(steps, ("start", "pass setup", "observe"))
+records = engine.run_graph(edged, ctx, apply=appliers, finished=print_later, gate=gate)
+```
+
+#### How the tick runs its pass
+
+`scripts.tick.sites.run_sites(sites, state, box, gate, apply, joins=None)`
+takes every registered step whose group is in `sites`, sorts it by site, adds
+the site edges and runs the result through `run_graph` under one deadline of
+`GROUP_BUDGET_S` (600 seconds). Handed off steps print their actions through
+the tick's `_print_actions`. Steps read the pass state through a view that
+answers `box`, then `sleeping` (from the box), then a box value, then the pass
+state.
+
+| Caller | Sites | Gate |
+| --- | --- | --- |
+| `scripts.swarm.tick.tick` | `scripts.tick.sites.TICK_SITES`, the seventeen sites of the [table of groups](#groups-and-their-sites) | `TickSites` hooks and `shut` |
+| `scripts.swarm.cli.run_tick` | `PASS_SITES`: the wrapper sites `wrapper probes` through `wrapper reboot`, then `TICK_SITES`, then `wrapper relay`, `wrapper view`, `wrapper events` and `wrapper metrics`, with `INTENT_JOINS` joining `wrapper intent` to `wrapper relay` | The wrapper's and the tick's hooks, the wrapper's `shut` |
+
+`run_tick` still runs the `before` group and the `closing` group through
+`run_group`, before and after the graph. The checks the hand written pass ran
+between groups are now site hooks and `shut` rules. The table lists every site
+of `run_tick` in pass order; `tick` runs only the tick sites and their hooks.
+Tick sites not listed have no hook.
+
+| Order in `run_tick` | Site | Hook |
+| --- | --- | --- |
+| 1 | `wrapper probes` | Fences the runtime the rest of the pass uses |
+| 2 | `wrapper health` | Holds the pass's ledger view |
+| 3 | `wrapper commands` | Starts the spawn stall watch, closed when the graph returns |
+| 4 | `wrapper phases` | Ends the pass when the ledger is binned or gone, else reads its pass state and clears the halt marks |
+| 5 | `wrapper refresh` | None |
+| 6 | `wrapper intent` | Reads the pass state and config the intent check judges against |
+| 7 | `wrapper reboot` | None |
+| 8 | `start` (tick) | Loads the master move modules, starts the pass process scan in `run_tick`, sets `now_ms` and `due`, adds the task appliers |
+| 11 | `agents` (tick) | Shuts the site and every later tick site when observation left `config`, `doc` or `rows` out of the box |
+| 14 | `tasks` (tick) | Shuts the site and every later tick site when the drained resume left `config` out of the box |
+| 25 | `wrapper relay` | Ends the tick's process scan, raises what the intent check held and keeps its view and checked actions |
+| 26 | `wrapper view` | Reads the pass state, config and task rows again for the view, events and metrics sites |
+| 27 | `wrapper events` | None |
+| 28 | `wrapper metrics` | Hands metrics the number of actions the pass counted so far |
+
+`wrapper intent` joins `wrapper relay`: the sites from `wrapper reboot` through
+the tick sites do not wait for it, and only `wrapper relay` does.
+
+`TickSites.shut` shuts every step once a step held an exception in the box,
+every tick site after `start` once the stopped branch finished the pass or a
+value the tick reads was left out, and
+the `master seats` and `placement` sites while the swarm sleeps. The wrapper's
+`shut` also shuts every site after `wrapper probes` once the ledger health probe
+stored `stop`, and every site once the pass ended because the ledger was
+binned or gone. After the graph, the held exception is raised as before, and
+`tick` returns no actions when a value it reads was left out.
+
+The `masters.run_site` runner and its per site box are gone; the master sites
+share the pass box. Placement no longer holds the host placement lock around
+its sites: each step of `placement notices` (quota notice), `placement acks`,
+`master seats`, `placement` (every step but `bottleneck remedy`) and
+`dispatch seat` takes `tick.PLACING` in its own
+body through `scripts.tick.steps.tasks.placing`.
 
 ## Pass state
 
@@ -557,8 +688,8 @@ ledger values after the `observe` group reads them. Every group site receives it
 | `rows` | The ledger tasks keyed by id, from the `observe` group |
 | `doc` | The ledger state, from the `observe` group |
 | `now_ms` | The pass time |
-| `due` | The Redis key of the swarm's `spawn-due` marker, added after the `observe` group |
-| `box` | The exception holder described under [Exceptions](#exceptions). The master groups (`masters`, `master seats`, `dispatch seat`, `master watch`) run through `masters.run_site`, which gives each site a fresh holder of its own |
+| `due` | The Redis key of the swarm's `spawn-due` marker, added by the `start` site hook |
+| `box` | The exception holder described under [Exceptions](#exceptions), shared by every site of the pass graph |
 | `config` | The swarm config, passed at each site because a pass can change it |
 | `sleeping` | Passed only at the acks site |
 
@@ -646,7 +777,9 @@ change is
 
 ## Groups and their sites
 
-The groups run in this order in one pass. Groups that hold the task, planning
+The groups run in this order in one pass, each as a site of the
+[flat pass graph](#the-flat-pass-graph). `run_tick` adds the wrapper sites
+around them. Groups that hold the task, planning
 and placement steps are in bold; the others hold steps from other changes.
 
 | Order | Group | Site in the pass | Steps |
@@ -842,8 +975,10 @@ yields each unsized open task's fields (at most `PER_TICK`, five, per pass);
 `grouping.releases(slug, store, doc)` returns each stopped lead with the reason
 and its members; `fleet_red.holds` returns new holds, lifted marks and listing
 saves; `dispatcher.rank_decision` returns one `Ranking`;
-`phases.phase_changes` returns `PhaseChange` items, or one skip line when the
-hierarchy read fails; `master_stall.stalls` returns `Stall` items.
+`phases.phase_changes(doc)` returns `PhaseChange` items projected from the pass
+document with no ledger read (see
+[One ledger read per pass](tick-ledger-view.md#one-ledger-read-per-pass));
+`master_stall.stalls` returns `Stall` items.
 
 ### How the engine applies writes
 
@@ -1130,7 +1265,7 @@ The delivered proof and limitations are recorded in
 | --- | --- |
 | `Undeclared step timing` at import | Declare that exact step name in `FLOORS` before constructing its `CallStep` |
 | A step is `late` while its call remains active | The waiting budget expired; the worker keeps running and its result is discarded. Check the live report and the call before changing the measured declaration |
-| Spawn takes longer than forty seconds to start | Check legacy group order first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
+| Spawn takes longer than forty seconds to start | Check the site barriers of the [flat pass graph](#the-flat-pass-graph) first; the forty second assertion grades the prerequisite path, not the sequential pass wall time |
 | Changing `interval_s` or `AGENTIHOOKS_TICK_CADENCE` does not reduce call frequency | Only intervals above 60 seconds rest a step, and only while the pass records to the swarm store. Read the stored ends with `timing.step_ends`; a step that ends `late` or `held` stores no end and stays due every pass. See [Interval enforcement](#interval-enforcement) |
 | `Interval of <step> above 60s writes pass:<key>` at registration | The step writes the pass state, which every later step of the pass reads; declare it at `CRITICAL_S` |
 | A wide or slow step runs on every pass | Its last run never ended `ok` or `failed`, the store or swarm is missing from the pass, or reading `tick:step-ran` fails. Read `timing.step_ends` for the swarm and the step's outcome rows in `tick-report` |
