@@ -62,6 +62,7 @@
   "step inbox relay: no writes",
   "step intent check: no effects",
   "step intent check: no feature",
+  "step intent check: no lane",
   "step intent check: no needs",
   "step intent check: no reads",
   "step launch slots: no effects",

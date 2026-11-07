@@ -10,7 +10,7 @@ import pytest
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import host, masters
+from scripts.tick.steps import masters
 
 pytestmark = pytest.mark.unit
 
@@ -55,11 +55,6 @@ def _sleeping(seconds: float) -> Callable[[Context], Result]:
     return action
 
 
-def test_the_intent_check_runs_on_the_slow_lane() -> None:
-    found = next(step for step in host.STEPS if step.name == "intent check")
-    assert found.lane == engine.SLOW
-
-
 def test_master_down_and_tick_master_are_kept_steps() -> None:
     kept = {step.name for step in masters.STEPS if getattr(step, "kept", False)}
     assert kept == {"master down", "tick master"}
@@ -93,9 +88,8 @@ def test_an_overrunning_intent_check_still_lets_the_master_steps_run() -> None:
 
         return action
 
-    intent = next(step for step in host.STEPS if step.name == "intent check")
     steps = (
-        Step("intent check", "wrapper intent", _blocking(release), lane=intent.lane, budget_s=60.0),
+        Step("intent check", "wrapper intent", _blocking(release), budget_s=60.0),
         Step("reboot pass", "wrapper reboot", _sleeping(0.5)),
         Step("master down", masters.SEATS, seat("master down"), kept=True),
         Step("tick master", masters.SEATS, seat("tick master"), kept=True),
@@ -111,4 +105,5 @@ def test_an_overrunning_intent_check_still_lets_the_master_steps_run() -> None:
         release.set()
     assert records["master down"].outcome == engine.OK
     assert records["tick master"].outcome == engine.OK
-    assert "intent check" not in records
+    assert records["intent check"].abandoned
+    assert records["page relay"].skipped

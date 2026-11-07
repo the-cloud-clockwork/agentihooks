@@ -55,7 +55,7 @@ def test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full(
 
 
 @pytest.mark.feature("swarm-tick-early-end-stamp")
-def test_an_intent_check_past_its_budget_ends_the_pass_early_naming_judged(
+def test_an_intent_check_past_its_budget_leaves_the_pass_to_end_full(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -72,8 +72,8 @@ def test_an_intent_check_past_its_budget_ends_the_pass_early_naming_judged(
     monkeypatch.setattr(check, "run", slow_check)
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
-        assert actions[0].startswith("pass ended early: no step stored judged, the pass left ")
-        assert "intent check" in actions[0]
+        assert not any(action.startswith("pass ended early") for action in actions)
+        assert early_ends.read(swarm, "sw") == {}
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
     finally:
         release.set()
