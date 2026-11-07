@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.700 · 2026-11-07
+
+### 2026-11-07 · fc1e8bd4a01c · #10003 · @agenticore-app
+
+**Bound the hub runner's first NATS connect; reconnect forever only after one success**
+
+Previously the hub runner's NatsBus enabled reconnect with max_reconnect_attempts=-1, which nats-py also applied to the initial connect, so with NATS down `agentihooks hub run` would retry its first connection forever instead of failing clearly. Now the first connect is bounded to 5 attempts and raises a clear ConnectionError if no server answers; only after a successful first connect does the client's reconnect limit switch to unlimited, preserving the old forever-reconnect behavior for later disconnects. This gives operators a prompt, legible failure when NATS is unreachable at startup instead of a silent hang.
+
 ## v2.17.699 · 2026-11-07
 
 ### 2026-11-07 · c19e2e56473d · #9962 · @agenticore-app
