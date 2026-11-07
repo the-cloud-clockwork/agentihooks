@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -154,31 +155,67 @@ def test_drop_retries_a_changed_projection_without_partial_history(store):
     assert json.loads(history[0])["pane_id"] == "new-pane"
 
 
-def test_drop_refuses_persistent_contention_without_partial_changes(store):
+def test_drop_refuses_persistent_contention_without_partial_changes(store: RedisStore) -> None:
     from redis.exceptions import WatchError
 
     from scripts.swarm.store import SwarmError
 
     agent = started(store)
-    before = store.redis.hgetall(store.key("fixture", "agents"))
+    key = store.key("fixture", "agents")
     pipe_type = type(store.redis.pipeline())
     execute = pipe_type.execute
-    calls = []
+    script = store.redis.eval
+    calls: list[str] = []
 
-    def commit(pipe, *args, **kwargs):
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
         if any(command[0][0] == "HDEL" for command in pipe.command_stack):
-            calls.append(True)
+            calls.append("watched")
             raise WatchError
         return execute(pipe, *args, **kwargs)
 
-    with patch.object(pipe_type, "execute", commit):
+    def changed(*args: Any) -> Any:
+        calls.append("row")
+        row = json.loads(store.redis.hget(key, agent.name))
+        store.redis.hset(key, agent.name, json.dumps({**row, "pane_id": f"pane-{len(calls)}"}))
+        return script(*args)
+
+    with patch.object(pipe_type, "execute", commit), patch.object(store.redis, "eval", changed):
         with pytest.raises(SwarmError, match="^agent registry kept changing; retirement was not committed$"):
             store.drop_agent("fixture", agent.name, at=20)
-    assert len(calls) == 5
-    assert store.redis.hgetall(store.key("fixture", "agents")) == before
+    assert calls == ["watched"] * 5 + ["row"] * 5
+    assert json.loads(store.redis.hget(key, agent.name))["pane_id"] == "pane-10"
     assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
     assert not store.names.entry(agent.name).get("retired_at")
+
+
+def test_drop_commits_while_other_agents_registry_writes_interleave(store: RedisStore) -> None:
+    from scripts.swarm import lease
+
+    agent, other = started(store), started(store)
+    fenced = lease.fenced
+    writing: list[bool] = []
+    writes: list[bool] = []
+
+    def churn(*args: Any, **kwargs: Any) -> Any:
+        result = fenced(*args, **kwargs)
+        if not writing:
+            writing.append(True)
+            store.put_agent("fixture", replace(other, pane_id=f"pane-{len(writes)}"))
+            writing.pop()
+            writes.append(True)
+        return result
+
+    with patch("scripts.swarm.lease.fenced", churn):
+        assert store.drop_agent("fixture", agent.name, at=30) is True
+    assert len(writes) >= 6
+    assert [a.name for a in store.agents("fixture")] == [other.name]
+    assert store.agents("fixture")[0].pane_id == f"pane-{len(writes) - 1}"
+    assert store.execution("fixture", agent.execution_id).state == "ended"
+    history = [json.loads(row) for row in store.redis.lrange(store.key("fixture", "history"), 0, -1)]
+    assert [(row["name"], row["reason"], row["ended_at"]) for row in history] == [(agent.name, "retired", 30)]
+    assert history[0]["execution_id"] == agent.execution_id
+    assert store.names.entry(agent.name)["retired_at"] == 30
 
 
 def test_dropping_a_missing_legacy_agent_does_not_end_someone_elses_execution(store):
