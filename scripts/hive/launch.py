@@ -418,7 +418,7 @@ class HiveLaunch:
         self.end(previous, "hive launch order expired without an acknowledgement")
 
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
-        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
+        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}:{order.execution_id}", "reap", name=agent.name))
 
     def reap_execution(self, order: LaunchOrder) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)

@@ -628,7 +628,7 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
     assert [json.loads(fields["order"]) for _, fields in commands] == [
         {
-            "id": f"reap:{request.name}",
+            "id": f"reap:{request.name}:{order.execution_id}",
             "action": "reap",
             "slug": "",
             "name": request.name,
@@ -794,7 +794,7 @@ def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_
     reaped = (
         f"reap:fixture:{stale.execution_id}:{stale.generation}"
         if ack is not None and ack[0] == "live"
-        else f"reap:{request.name}"
+        else f"reap:{request.name}:{stale.execution_id}"
     )
     assert [json.loads(fields["order"])["id"] for _, fields in commands] == [reaped]
 
