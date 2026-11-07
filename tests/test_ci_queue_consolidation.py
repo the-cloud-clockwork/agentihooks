@@ -66,19 +66,20 @@ exit "$status"
         "  public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine\n",
     ]
     assert sum(step.get("uses") == "actions/checkout@v4" for step in steps) == 1
+    named = {
+        "Keep the swarm smoke layers": "steps.layers.outputs.cache-hit != 'true'",
+        "Load the saved runtime images": None,
+        "Keep the runtime images": "steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'",
+    }
     for step in steps:
-        if "hive-launch-attestation-proof.sh" in step.get("run", ""):
+        if step.get("name") in named:
+            assert step.get("if") == named[step["name"]]
+        elif "hive-launch-attestation-proof.sh" in step.get("run", ""):
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
         elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
         elif step.get("id") == "build":
             assert "if" not in step
-        elif step.get("name") == "Keep the swarm smoke layers":
-            assert step["if"] == "steps.layers.outputs.cache-hit != 'true'"
-        elif step.get("name") == "Load the saved runtime images":
-            assert "if" not in step
-        elif step.get("name") == "Keep the runtime images":
-            assert step["if"] == "steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'"
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
