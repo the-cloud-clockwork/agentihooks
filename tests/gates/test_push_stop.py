@@ -172,6 +172,26 @@ def test_dirty_work_still_pushes_the_commits_it_holds(rig):
     assert rig.remote_head() == head
 
 
+def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(rig, tmp_path):
+    from hooks.lifecycle import helpers
+
+    home = tmp_path / "home"
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.gate._helpers = lambda session: helpers.live(session, home)
+    head = rig.commit()
+    (rig.tree / "readme").write_text("reviewed\n")
+    helpers.start("main", "reader", home)
+    rig.gate.started = time.monotonic()
+    assert rig.gate.decide(Call("", session="main"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path)).allowed
+    assert rig.remote_head() == head
+    assert rig.inbox() == []
+    assert rig.gate.decide(Call("", session="other"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path)).reason == TEMPLATE
+    helpers.stop("main", "reader", home)
+    rig.gate.started = time.monotonic()
+    decision = rig.gate.decide(Call("", session="main"), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+
+
 def test_a_closed_template_item_is_sent_again(rig):
     rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
     (rig.tree / "new").write_text("new\n")

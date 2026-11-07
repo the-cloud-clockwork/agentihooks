@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -205,9 +206,18 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None, github=None):
+    def __init__(
+        self,
+        connect: Any = None,
+        ledger: Any = None,
+        root: Any = None,
+        now: Any = None,
+        clock: Any = None,
+        github: Any = None,
+        helpers: Callable[[str], bool] | None = None,
+    ) -> None:
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
-        self._github = github
+        self._github, self._helpers = github, helpers
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
@@ -223,7 +233,7 @@ class PushStop:
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
         store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
-        frozen = self.frozen(store)
+        frozen, reviewing = self.frozen(store), self.reviewing(call.session)
         for tree in found:
             if tree.unpushed and frozen:
                 failed.append(PANIC_HELD.format(path=tree.path))
@@ -231,7 +241,7 @@ class PushStop:
                 failed.append(refused)
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
-            owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
+            owed = owed or (tree.dirty and not reviewing) or (tree.unpushed and not self.on_origin(tree))
             progress = progress or (
                 doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, found)
             )
@@ -263,6 +273,15 @@ class PushStop:
             return panic.state(store) is not None
         except RedisError:
             return False
+
+    def reviewing(self, session: str) -> bool:
+        """Whether a live review helper of the stopping session still edits the worktree, so its changes are not
+        owed as a commit until it ends."""
+        if self._helpers:
+            return self._helpers(session)
+        from hooks.lifecycle import helpers
+
+        return helpers.live(session)
 
     def waiting(self, store: Any, who: Any, doc: Any, task: Any, dirty: bool, frozen: bool) -> bool:
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: any declared wait while
