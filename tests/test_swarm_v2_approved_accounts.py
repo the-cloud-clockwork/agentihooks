@@ -218,7 +218,7 @@ def test_the_fleet_rows_are_one_claude_row_per_approved_key_with_its_fleet_held_
     ]
 
 
-def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_windows():
+def test_an_observed_key_offers_its_quota_band_past_the_launch_cap_with_its_windows():
     store, route = _route({"akey"})
     _observe(store, "akey", five_used=93.0, week_used=40.0)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
@@ -226,7 +226,7 @@ def test_an_observed_key_offers_its_quota_band_under_the_launch_cap_with_its_win
         "claude", "akey", "OPEN", 0, 7.0, 60.0, 2, NOW_MS // 1000 + 48 * HOUR, five_resets_at=NOW_MS // 1000 + HOUR
     )
     _observe(store, "akey", five_used=10.0)
-    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == 4
+    assert approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)[0].cap == session_bands.TOP_BAND
 
 
 def test_an_exhausted_key_is_a_closed_row():
@@ -304,7 +304,7 @@ def test_a_hive_reading_with_no_five_hour_window_opens_the_key_by_its_week() -> 
     store, route = _route({"nestor-coltatgmail-com"})
     _hive_reading(store, "nestor_coltatgmail_com", five_used=None)
     [row] = approved.FleetAccounts(route, 4)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, 4)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 60.0, session_bands.TOP_BAND)
 
 
 def _hive_observed(five_used: float, observed_ms: int = NOW_MS) -> quota.Observation:
@@ -412,11 +412,25 @@ def test_a_closed_account_a_hive_advertises_gets_no_placement() -> None:
     assert route.choose(1, planned=CLOSED_KEY) == OPEN_KEY
 
 
-def test_a_hive_reading_with_room_in_its_week_keeps_the_launch_cap() -> None:
+def test_a_hive_reading_with_room_in_its_week_takes_the_week_band() -> None:
     store, route = _route({CLOSED_KEY})
     _spent_week(store, 89.0)
     [row] = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
-    assert (row.state, row.cap, row.five_left, row.week_left) == ("OPEN", 2, None, 11.0)
+    assert (row.state, row.cap, row.five_left, row.week_left) == ("OPEN", session_bands.TOP_BAND, None, 11.0)
+
+
+def test_a_claude_account_with_no_five_hour_reading_is_not_held_to_one_session() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    [row] = approved.FleetAccounts(route, 1)({}, NOW_MS / 1000, refresh=False)
+    assert (row.state, row.five_left, row.week_left, row.cap) == ("OPEN", None, 51.0, session_bands.TOP_BAND)
+    assert capacity.free_seats(row) == session_bands.TOP_BAND - 1
+
+
+def test_the_launch_cap_still_bounds_the_kubernetes_worker_route() -> None:
+    store, route = _route({CLOSED_KEY}, {CLOSED_KEY: 1})
+    _spent_week(store, 49.0)
+    assert route.choose(1) is None
 
 
 DRAINING = {
