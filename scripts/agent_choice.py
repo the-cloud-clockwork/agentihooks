@@ -1,6 +1,13 @@
 import time
+from typing import TYPE_CHECKING, cast
 
 from scripts import session_bands
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from scripts.claude_quota_balancer import ProbeResult
+    from scripts.swarm.capacity import Account
 
 AGENTS = ("claude", "codex")
 ALL_FULL = "every account is at its session cap"
@@ -23,7 +30,7 @@ def account_has_quota(agent: str, account: str, environ: dict[str, str]) -> bool
     return None if cap is None else bool(cap)
 
 
-def _account(result) -> str:
+def _account(result: "ProbeResult") -> str:
     return result.account
 
 
@@ -33,12 +40,13 @@ def choose(requested: str, environ: dict[str, str]) -> tuple[str, str]:
         return requested, "requested"
     from scripts.swarm import capacity
 
-    rows = capacity.accounts(dict(environ), time.time())
+    accounts_fn = cast("Callable[[dict[str, str], float], list[capacity.Account]]", capacity.accounts)
+    rows = accounts_fn(dict(environ), time.time())
     seat = capacity.pick(capacity.offered(rows))
     return (seat.harness, "rotation") if seat else (fallback(rows), ALL_FULL)
 
 
-def fallback(rows: list) -> str:
+def fallback(rows: "list[Account]") -> str:
     """The harness holding one of ``rows``; empty when no harness holds an account."""
     held = {row.harness for row in rows}
     return next((agent for agent in AGENTS if agent in held), "")
