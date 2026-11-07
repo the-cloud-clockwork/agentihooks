@@ -130,7 +130,7 @@ def test_a_failed_launch_records_its_detail_and_status(capsys: pytest.CaptureFix
     with pytest.raises(SpawnError), timing.tick("sw"), timing.step("launch"):
         raise SpawnError("hive acknowledgement pending", "pending")
     finished = json.loads(capsys.readouterr().err.splitlines()[-1])
-    assert finished["error"] == "scripts.swarm.tick.SpawnError"
+    assert finished["error"] == "scripts.tick.steps.claims.SpawnError"
     assert finished["detail"] == "hive acknowledgement pending"
     assert finished["status"] == "pending"
 
