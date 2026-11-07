@@ -497,6 +497,30 @@ def test_a_failed_receipt_other_than_expiry_sends_no_reap(setup):
     assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
 
 
+def test_a_stale_launch_finishing_after_its_name_was_reaped_is_reaped_by_its_execution(setup: SimpleNamespace) -> None:
+    from unittest.mock import call
+
+    from scripts.hive.orders import Ack, Consumer
+
+    request = request_for(setup)
+    first = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.launcher.orders.finish("remote", "0-0", first, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(first).ok
+    hive = Mock()
+    hive.herdr.reap_name.return_value = True
+    consumer = Consumer(setup.store.redis, "remote", hive)
+    assert consumer.poll_commands() == 1
+    stale = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    assert stale.execution_id != first.execution_id
+    setup.launcher.orders.finish("remote", "0-1", stale, Ack("failed", {}, "expired"))
+    assert not setup.launcher.wait(stale).ok
+    assert consumer.poll_commands() == 1
+    assert hive.herdr.reap_name.call_args_list == [call(request.name), call(request.name)]
+    sent = [f"reap:{request.name}:{order.execution_id}" for order in (first, stale)]
+    receipts = [setup.launcher.orders.command_receipt("remote", order_id) for order_id in sent]
+    assert [setup.store.redis.hexists(receipt, "ack") for receipt in receipts] == [True, True]
+
+
 def test_expired_unknown_order_remains_ambiguous(setup):
     from scripts.swarm_v2.runtime.base import Status
 
@@ -604,7 +628,7 @@ def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
     commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
     assert [json.loads(fields["order"]) for _, fields in commands] == [
         {
-            "id": f"reap:{request.name}",
+            "id": f"reap:{request.name}:{order.execution_id}",
             "action": "reap",
             "slug": "",
             "name": request.name,
@@ -770,7 +794,7 @@ def test_an_order_refused_for_a_stale_epoch_is_reissued_under_the_live_epoch_in_
     reaped = (
         f"reap:fixture:{stale.execution_id}:{stale.generation}"
         if ack is not None and ack[0] == "live"
-        else f"reap:{request.name}"
+        else f"reap:{request.name}:{stale.execution_id}"
     )
     assert [json.loads(fields["order"])["id"] for _, fields in commands] == [reaped]
 
