@@ -34,21 +34,21 @@ def _address(slug: str, seat: str) -> str:
 def culture_text(store: Any, slug: str) -> str:
     """The swarm culture with every line under a confirmed correction withheld, as the opening prompt carries it."""
     text = store.culture.get(slug) or ""
-    return _withhold(slug, {"seat": "", "culture": text, "learned": []})["culture"]
+    return _withhold(slug, {"seat": "", "culture": text})["culture"]
 
 
 def seat_text(store: Any, slug: str, seat: str) -> str:
     """The seat's latest recap and its learned notes, canon first, data counted and not shown."""
     address = _address(slug, seat)
     recaps = store.memory.recaps(address)
-    learned = _withhold(slug, {"seat": address, "culture": "", "learned": store.memory.learned(address)})["learned"]
+    learned = _withhold(slug, {"seat": address, "learned": store.memory.learned(address)})["learned"]
     lines = [f"Seat {address}."]
     if recaps:
         lines += [f"Latest recap, by {recaps[0]['occupant']} on task {recaps[0]['task']}:", recaps[0]["text"]]
     else:
         lines.append("Latest recap: none, no occupant of this seat left one.")
     notes: list[str] = _module("scripts.swarm.prompt").learned_lines(learned)
-    return "\n".join([*lines, re.sub(r"^\d+\. ", "", notes[0]), *notes[1:]]) + "\n"
+    return "\n".join([*lines, re.sub(r"^\d+\. ", "", notes[0]), *notes[1:]])
 
 
 def reread_line(engine: str, slug: str, label: str) -> str:
@@ -75,7 +75,7 @@ def resolve(store: Any, engine: str, swarm: str, seat: str) -> tuple[str, str, s
 
     if env_fallback_allowed():
         engine = engine or current_target()
-        swarm = swarm or os.getenv("AGENTIHOOKS_SWARM", "")
+        swarm = swarm or os.environ.get("AGENTIHOOKS_SWARM") or ""
         seat = seat or (_caller_seat(store, swarm) if swarm else "")
     missing = [name for name, value in (("engine", engine), ("swarm", swarm), ("seat", seat)) if not value]
     if missing:
@@ -92,9 +92,9 @@ def priming(store: Any, engine: str, swarm: str, seat: str) -> str:
             f"Swarm culture of {swarm}, shared by every seat:",
             culture,
             "",
-            seat_text(store, swarm, address).rstrip("\n"),
+            seat_text(store, swarm, address),
             "",
-            reread_line(engine, swarm, address.rsplit("@", 1)[0]),
+            reread_line(engine, swarm, address.partition("@")[0]),
         ]
     )
 

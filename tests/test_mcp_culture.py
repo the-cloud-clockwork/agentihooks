@@ -157,8 +157,8 @@ def test_the_server_serves_the_templates_and_the_prompt(monkeypatch: pytest.Monk
     _correct(f"culture:{SLUG}#2", f"- {BAD}", {"swarm": SLUG, "line": 2})
     server = build_server(["culture"])
 
-    async def served() -> tuple[list[str], list[tuple[str, list[str]]], object, object, object]:
-        templates = [t.uriTemplate for t in await server.list_resource_templates()]
+    async def served() -> tuple[list[tuple[str, str, str | None]], list[tuple[str, list[str]]], object, object, object]:
+        templates = [(t.name, t.uriTemplate, t.mimeType) for t in await server.list_resource_templates()]
         prompts = [(p.name, [a.name for a in p.arguments or []]) for p in await server.list_prompts()]
         culture_read = list(await server.read_resource("swarm://sw/culture"))
         seat_read = list(await server.read_resource("swarm://sw/seats/eng-2"))
@@ -172,9 +172,87 @@ def test_the_server_serves_the_templates_and_the_prompt(monkeypatch: pytest.Monk
     assert isinstance(content, TextContent)
     message = content.text
 
-    assert sorted(templates) == ["swarm://{slug}/culture", "swarm://{slug}/seats/{seat}"]
+    assert sorted(templates) == [
+        ("swarm_culture", "swarm://{slug}/culture", "text/markdown"),
+        ("swarm_seat", "swarm://{slug}/seats/{seat}", "text/markdown"),
+    ]
     assert prompts == [("swarm_culture", ["engine", "swarm", "seat"])]
     assert BAD not in culture_body
     assert culture_body == culture.culture_text(_store(), SLUG)
     assert seat_body.startswith(f"Seat {SEAT}.")
     assert message == culture.priming(_store(), "claude", SLUG, "eng-2")
+
+
+def _session_is(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    from scripts import gates
+
+    monkeypatch.setattr(gates.Who, "from_env", classmethod(lambda cls: SimpleNamespace(name=name)))
+
+
+def test_the_whole_prompt_reads_culture_seat_and_reread_line_in_order() -> None:
+    store = _store(text="- One line\n", recaps=[], learned=[])
+
+    assert culture.priming(store, "claude", SLUG, "eng-2") == (
+        f"Swarm culture of {SLUG}, shared by every seat:\n- One line\n\n"
+        f"Seat {SEAT}.\nLatest recap: none, no occupant of this seat left one.\n"
+        "Learned notes: none recorded on this seat yet.\n\n"
+        "Reread them after compaction by mentioning @agentihooks:swarm://sw/culture and "
+        "@agentihooks:swarm://sw/seats/eng-2."
+    )
+
+
+def test_a_swarm_without_culture_says_so_in_the_prompt() -> None:
+    text = culture.priming(_store(text=""), "claude", SLUG, "eng-2")
+
+    assert text.startswith(f"Swarm culture of {SLUG}, shared by every seat:\nnone written for this swarm yet.\n\n")
+
+
+def test_under_stdio_without_a_swarm_the_seat_stays_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    _session_is(monkeypatch, "engineer@sw-3")
+
+    with pytest.raises(ValueError, match=r"swarm_culture needs swarm, seat$"):
+        culture.resolve(_store(), "", "", "")
+
+
+def test_under_stdio_an_unregistered_caller_has_no_seat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    _session_is(monkeypatch, "engineer@sw-9")
+
+    with pytest.raises(ValueError, match=r"swarm_culture needs seat$"):
+        culture.resolve(_store(), "", "", "")
+
+
+def test_the_prompt_with_no_arguments_primes_the_calling_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp.types import TextContent
+
+    from hooks.mcp import build_server
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    _session_is(monkeypatch, "engineer@sw-3")
+    monkeypatch.setattr(culture, "_store", _store)
+    prompt = asyncio.run(build_server(["culture"]).get_prompt("swarm_culture", {}))
+    content = prompt.messages[0].content
+
+    assert isinstance(content, TextContent)
+    assert content.text == culture.priming(_store(), "codex", SLUG, "eng-2")
+
+
+def test_the_store_is_the_swarm_redis_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import store
+
+    sentinel = object()
+    monkeypatch.setattr(store, "connect", lambda: sentinel)
+
+    assert culture._store() is sentinel
+
+
+def test_the_stdio_listing_skips_an_unknown_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    from hooks.mcp import _stdio
+
+    monkeypatch.setenv("MCP_CATEGORIES", "culture,unknown")
+    monkeypatch.setattr(
+        _stdio, "get_catalog", lambda: {"prompts": {"culture": [{"name": "swarm_culture"}], "channels": []}}
+    )
+
+    assert _stdio.list_served("prompts") == [{"name": "swarm_culture"}]
