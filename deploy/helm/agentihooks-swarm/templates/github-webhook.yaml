@@ -7,6 +7,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-github-webhook
+  annotations:
+    secret.reloader.stakater.com/reload: {{ $receiver.secretName | quote }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: github-webhook

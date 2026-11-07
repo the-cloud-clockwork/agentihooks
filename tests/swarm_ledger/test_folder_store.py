@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -131,7 +132,7 @@ def test_the_outbox_host_runs_a_relay_for_a_repository_flagged_remote(monkeypatc
     with outbox_host.running(repository):
         pass
 
-    assert (built, closed) == ([outbox_host.INTERVAL], [repository])
+    assert (built, closed) == ([outbox_host.PRUNE_EVERY, outbox_host.INTERVAL], [repository])
 
 
 def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list[dict], list[float]]:
@@ -180,6 +181,7 @@ def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[list[dict],
 
     monkeypatch.setenv(API_URL, "http://api:8770")
     monkeypatch.setattr(server.threading, "Thread", Thread)
+    monkeypatch.setattr(outbox_host, "running", lambda repository: nullcontext())
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: server.threading.Event())

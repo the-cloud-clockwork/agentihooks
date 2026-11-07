@@ -473,6 +473,19 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
     return record
 
 
+def _kept(step: Step) -> bool:
+    """Return whether ``step`` is kept: it runs under its own budget and the pass deadline even after its lane
+    expired or a step it needs was dropped."""
+    return bool(getattr(step, "kept", False))
+
+
+def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
+    """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
+    own budget for them, and run it even when one of them was dropped."""
+    found.ended(earlier, step.budget_s)
+    return run_step(step, ctx)
+
+
 def _expire(
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
     lost: tuple[set[str], set[str]],
@@ -503,7 +516,8 @@ def _eager(
     """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
-    A step in ``rest`` starts no thread and ends at once for its dependents.
+    A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
+    expired or a step it needs was dropped, bounded by its own budget and the pass deadline.
     """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
@@ -526,11 +540,16 @@ def _eager(
                 offsets[step.name] = _offset()
                 if step.name in rest | _shut(gate, step, records):
                     records[step.name] = _ended(found, _rested(step))
-                elif (cut_by := _cut_off(step, lane, (dropped, cut), found, held_back)) is not None:
+                elif not _kept(step) and (cut_by := _cut_off(step, lane, (dropped, cut), found, held_back)) is not None:
                     cut_by.add(step.name)
                     records[step.name] = _ended(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
+                elif _kept(step):
+                    earlier = found.handed_of(step.needs - names)
+                    future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found)
+                    submitted.append(future)
+                    running[future] = (step, clock(), ctx.deadline)
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(lane, ctx)

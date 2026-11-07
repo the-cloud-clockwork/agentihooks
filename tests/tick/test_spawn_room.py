@@ -171,3 +171,33 @@ def test_a_shorter_critical_lane_reserves_the_same_share_for_spawn() -> None:
     with pool.running(critical_s=3.0) as found:
         assert dict(found.reserves) == {"spawn": 1.0}
     assert dict(pool.reserved(0.6)) == {"spawn": pytest.approx(0.2)}
+
+
+class Lanes:
+    def __init__(self, lane: Deadline) -> None:
+        self.held = lane
+
+    def lane(self, name: str) -> Deadline:
+        return self.held
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_a_lane_less_its_reserve_keeps_the_lane_clock() -> None:
+    lane = engine._lane_of(Step("a", "g"), Lanes(Deadline(100.0, lambda: 90.0)), {"a": 4.0})
+    assert lane.expires_at == 96.0
+    assert lane.remaining == 6.0
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_a_step_whose_whole_lane_ran_out_drops_its_dependents_with_its_needs_intact() -> None:
+    assert engine._drops(Step("a", "g"), set(), Lanes(Deadline(100.0, lambda: 100.0)))
+    assert not engine._drops(Step("a", "g"), set(), Lanes(Deadline(100.0, lambda: 90.0)))
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_a_need_shared_by_two_reserved_steps_holds_back_the_larger_reserve() -> None:
+    need = Step("a", "g")
+    small = Step("small", "g", needs=frozenset({"a"}))
+    large = Step("large", "g", needs=frozenset({"a"}))
+    held = engine._held_back((need, small, large), {"small": 2.0, "large": 5.0})
+    assert held == {"a": 5.0}
