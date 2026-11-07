@@ -2,7 +2,7 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
@@ -156,7 +156,8 @@ class Workers:
         return {"memory_mib": profile["limits"]["memory_mib"], "cpu_millis": cpu}
 
     def launch(self, request: SpawnRequest) -> dict:
-        task, shape = request.task, self.requested
+        task: dict[str, Any] = request.task
+        shape = self.requested
         return {
             "task_id": task["id"],
             "swarm_id": request.config.slug,

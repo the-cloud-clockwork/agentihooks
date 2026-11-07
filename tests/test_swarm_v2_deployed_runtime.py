@@ -3,6 +3,7 @@ import socket
 from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -1190,8 +1191,9 @@ def test_the_tick_runtime_routes_claude_and_codex_and_reads_the_planned_harness(
     store = _store()
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof"))
     service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    assert service is not None
     try:
-        runtime = service.runtime
+        runtime: Any = service.runtime
         launcher = runtime.launch.func.__self__
         route = runtime.herdr_runtime.quota_accounts.route
         runtime.herdr_runtime._quota_tasks = {"t1": "codex"}
@@ -1660,6 +1662,7 @@ def test_a_launch_record_names_the_harness_its_task_was_planned_on(
     tmp_path: Path, registry: object, task: dict[str, str], harness: str
 ) -> None:
     workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    assert workers is not None
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
 
     record = workers.launch(SpawnRequest(config, "eng", "engineer-1", {**_task(), **task}))
