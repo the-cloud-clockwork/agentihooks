@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -463,9 +464,11 @@ def test_github_open_changes_stops_after_two_hundred_pull_requests_in_pages_of_t
     assert "pullRequests(states: OPEN, first: 25, after: $after)" in github._OPEN
 
 
-def _refused(errors: object) -> object:
-    """Return a rest stand in that exits one with a partial open listing body carrying the errors."""
-    shown = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": []}}}}]}}
+def _refused(errors: object) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return a rest stand in that raises a CalledProcessError carrying a partial open listing body and the errors."""
+    tests = {"__typename": "CheckRun", "name": "Tests", "conclusion": "FAILURE", "startedAt": "s", "completedAt": "c"}
+    rollup = {"contexts": {"nodes": [tests]}}
+    shown = {"url": "u0", "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]}}
     hidden = {"url": "u1", "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}}
     info = {"hasNextPage": False, "endCursor": None}
     data = {"repository": {"pullRequests": {"pageInfo": info, "nodes": [shown, hidden]}}}
@@ -487,7 +490,8 @@ def test_github_open_changes_reads_a_pull_request_whose_rollup_the_app_cannot_re
     monkeypatch.setattr(github.github_reads, "rest", _refused(forbidden))
     provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
-    assert provider.open_changes(deadline=_deadline()) == (port.OpenChange("u0", ()), port.OpenChange("u1", ()))
+    shown = port.OpenChange("u0", (port.RollupCheck("Tests", "FAILURE", "c"),))
+    assert provider.open_changes(deadline=_deadline()) == (shown, port.OpenChange("u1", ()))
 
 
 def test_github_open_changes_pages_on_after_a_page_with_hidden_rollups(
