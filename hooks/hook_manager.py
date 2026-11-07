@@ -27,7 +27,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from hooks.classifier.child import skip_classifier_child
 from hooks.observability import otel
@@ -2381,7 +2381,7 @@ def on_stop(payload: dict) -> None:
         log("handed-off session close failed", {"error": str(e)})
 
 
-def on_subagent_start(payload: dict) -> None:
+def on_subagent_start(payload: dict[str, Any]) -> None:
     """Handle SubagentStart event — wire the brain through to subagents.
 
     Mirrors on_session_start brain logic so dispatched subagents get:
@@ -2400,7 +2400,7 @@ def on_subagent_start(payload: dict) -> None:
     try:
         from hooks.lifecycle import helpers
 
-        helpers.track(cast("dict[str, Any]", payload), started=True)
+        helpers.track(payload, started=True)
     except OSError as e:
         log("helper record failed", {"error": str(e)})
     log(
@@ -2460,7 +2460,7 @@ def on_subagent_start(payload: dict) -> None:
         log("broadcast subagent_start failed", {"error": str(e)})
 
 
-def on_subagent_stop(payload: dict) -> None:
+def on_subagent_stop(payload: dict[str, Any]) -> None:
     """Handle SubagentStop event — capture brain markers from subagent output."""
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
@@ -2469,7 +2469,7 @@ def on_subagent_stop(payload: dict) -> None:
     try:
         from hooks.lifecycle import helpers
 
-        helpers.track(cast("dict[str, Any]", payload), started=False)
+        helpers.track(payload, started=False)
     except OSError as e:
         log("helper clear failed", {"error": str(e)})
 

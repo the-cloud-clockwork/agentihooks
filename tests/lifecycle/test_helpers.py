@@ -36,18 +36,21 @@ def test_a_session_is_never_its_own_helper_and_blank_ids_record_nothing(tmp_path
 
 
 def test_ids_cannot_escape_the_helpers_folder(tmp_path):
-    home = tmp_path / "home"
+    root = tmp_path / "root"
+    home = root / "home"
     helpers.start("../up", "../../out", home)
     assert helpers.live("../up", home)
-    assert sorted(path.name for path in tmp_path.iterdir() if path.name != "_home") == ["home"]
+    assert sorted(path.name for path in root.iterdir()) == ["home"]
     assert sorted(path.name for path in home.iterdir()) == ["helpers"]
 
 
 def test_dot_ids_stay_inside_the_helpers_folder(tmp_path):
-    home = tmp_path / "home"
+    root = tmp_path / "root"
+    home = root / "home"
     helpers.start("..", "reader", home)
     helpers.start(".", "..", home)
     assert helpers.live("..", home)
+    assert sorted(path.name for path in root.iterdir()) == ["home"]
     assert sorted(path.name for path in home.iterdir()) == ["helpers"]
     assert [path.name for path in (home / "helpers").iterdir()] == ["_"]
     assert sorted(path.name for path in (home / "helpers" / "_").iterdir()) == ["_", "reader"]
