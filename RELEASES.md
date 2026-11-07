@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.713 · 2026-11-07
+
+### 2026-11-07 · b65c0635ce60 · #10011 · @agenticore-app
+
+**Read app forbidden check rollups as unchecked in the open listing**
+
+This change fixes the fleet red hold, which was silently skipping every pass because GitHub's App token can't read statusCheckRollup on most open antoncore pull requests, causing GraphQL to return FORBIDDEN errors that crashed the listing entirely. Now, GitHub_SourceControl.open_changes treats FORBIDDEN-only rollup errors as "no checks" for that pull request (failing open, by design, since missing checks already means unseen) while still raising on any other error type. The skip line also now includes gh's stderr for easier debugging. Granting the App proper read access remains a separate follow-up.
+
 ## v2.17.712 · 2026-11-07
 
 ### 2026-11-07 · 347f23ec112a · #10048 · @agenticore-app
