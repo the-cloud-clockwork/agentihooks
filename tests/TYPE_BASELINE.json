@@ -619,7 +619,7 @@
   "scripts/swarm/launch_evidence.py": 30,
   "scripts/swarm/launch_job.py": 188,
   "scripts/swarm/launch_model.py": 53,
-  "scripts/swarm/lease.py": 47,
+  "scripts/swarm/lease.py": 44,
   "scripts/swarm/ledger_client.py": 428,
   "scripts/swarm/ledger_cutover.py": 66,
   "scripts/swarm/ledger_events.py": 1122,
