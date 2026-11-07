@@ -9,9 +9,11 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
+from typing import Any, cast
 
 from hooks.context import profile_chain, quarantine
 from scripts.claude_config import claude_home, claude_json
@@ -45,7 +47,7 @@ FEATURES = (("skills", Path.is_dir), ("agents", _is_doc), ("commands", _is_doc))
 
 
 def rendered_root() -> Path:
-    return _install_module().AGENTIHOOKS_STATE_DIR / "profiles"
+    return cast(ModuleType, _install_module()).AGENTIHOOKS_STATE_DIR / "profiles"
 
 
 def live_root() -> Path:
@@ -53,7 +55,7 @@ def live_root() -> Path:
 
 
 def _refuse_live_render_from_another_checkout(name: str) -> None:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
     if running == installed or not rendered_root().resolve().is_relative_to(live_root().resolve()):
         return
@@ -69,7 +71,7 @@ def _global_env() -> dict[str, str]:
 
 
 def _resolve(name: str) -> Path | None:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     copy = bundle_copy.current()
     if copy is None or name.startswith(profile_chain.PACKAGE_PREFIX):
         return _i._resolve_profile_dir(name)
@@ -84,7 +86,7 @@ def _resolve(name: str) -> Path | None:
 
 def _resolve_chain(names: list[str]) -> list[tuple[str, Path]]:
     if bundle_copy.current() is None:
-        return _install_module()._resolve_profile_chain(",".join(names))
+        return cast(ModuleType, _install_module())._resolve_profile_chain(",".join(names))
     return [(name, _resolve(name)) for name in profile_chain.expand_profiles(names, _resolve)]
 
 
@@ -105,7 +107,7 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
 
 
 def _bundle() -> Path | None:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     bundle = bundle_copy.current() or _i._get_bundle_path()
     linked = (_i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
@@ -118,7 +120,7 @@ def _bundle() -> Path | None:
 def _user() -> Path | None:
     if bundle_copy.is_pinned():
         return bundle_copy.current_user()
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     user = _i._get_user_bundle_path()
     linked = (_i._load_state().get("user_bundle") or {}).get("path")
     if user is None and linked:
@@ -131,7 +133,7 @@ def _user() -> Path | None:
 def _shared() -> Path | None:
     if bundle_copy.is_pinned():
         return bundle_copy.current_shared()
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     shared = _i._get_shared_bundle_path()
     linked = (_i._load_state().get("shared_bundle") or {}).get("path")
     if shared is None and linked:
@@ -143,7 +145,7 @@ def _shared() -> Path | None:
 
 
 def _base_digest() -> str:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     digest = hashlib.sha256()
     for name in sorted(_i._NATIVE_BASE_NAME.values()):
         digest.update((_i.PROFILES_DIR / "_base" / name).read_bytes())
@@ -157,7 +159,7 @@ def _overlays(dirs: list[tuple[str, Path]]) -> list[str]:
 
 def _profiles_digest(dirs: list[tuple[str, Path]]) -> str:
     digest = hashlib.sha256()
-    for root in [_install_module().PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
+    for root in [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR, *(d for _, d in dirs)]:
         for path in sorted(p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
             digest.update(f"{bundle_copy.identity(path)}\0".encode())
             digest.update(path.read_bytes())
@@ -171,7 +173,7 @@ def _commit(root: Path | None) -> str:
     return head.stdout.strip()
 
 
-def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
+def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
     commit = _commit(bundle)
     user = _user()
     shared = _shared()
@@ -194,7 +196,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
     }
 
 
-def stamp(name: str) -> dict:
+def stamp(name: str) -> dict[str, Any]:
     return _stamp(_bundle(), _chain(name))
 
 
@@ -208,8 +210,8 @@ def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
     )
 
 
-def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
-    sources = [_install_module().PACKAGE_FEATURES_DIR / subdir] + [r / ".claude" / subdir for r in _roots(bundle, dirs)]
+def _features(subdir: str, keep: Callable[[Path], bool], bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
+    sources = [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR / subdir] + [r / ".claude" / subdir for r in _roots(bundle, dirs)]
     found: dict[str, Path] = {}
     for src in sources:
         if src.is_dir():
@@ -217,8 +219,8 @@ def _features(subdir: str, keep, bundle: Path | None, dirs: list[tuple[str, Path
     return found
 
 
-def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
-    _i = _install_module()
+def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
+    _i = cast(ModuleType, _install_module())
     base = _i._load_native_layer(_i.PROFILES_DIR / "_base" / _i._NATIVE_BASE_NAME[target])
     doc = _i.substitute_paths(base, dst=str(_i.install_root()))
     doc = _i.substitute_paths(doc, "__PYTHON__", str(_i._detect_venv() or sys.executable))
@@ -232,7 +234,7 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
     return doc
 
 
-def claude_environment(doc: dict, dirs: list[tuple[str, Path]]) -> dict:
+def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dict[str, Any]:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     env = doc["env"]
@@ -246,8 +248,8 @@ def claude_environment(doc: dict, dirs: list[tuple[str, Path]]) -> dict:
     return doc
 
 
-def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict:
-    _i = _install_module()
+def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Sequence[str] = ()) -> dict[str, Any]:
+    _i = cast(ModuleType, _install_module())
     doc = claude_environment(_settings("claude", bundle, dirs), dirs)
     default_home = claude_home(_global_env())
     global_settings = default_home / "settings.json"
@@ -267,7 +269,7 @@ def _claude_settings(bundle: Path | None, dirs: list[tuple[str, Path]], kept: Se
     }
 
 
-def _plugins(chain: list[str], layered: dict, kept: Sequence[str] = ()) -> dict[str, bool]:
+def _plugins(chain: list[str], layered: dict[str, Any], kept: Sequence[str] = ()) -> dict[str, bool]:
     operator = _read_json(claude_home(_global_env()) / "settings.json") or {}
     return plugins.allowed(plugins.carried(chain, operator.get("enabledPlugins") or {}), layered, kept)
 
@@ -292,8 +294,8 @@ def channels(name: str) -> str:
     return _channels(_settings("claude", _bundle(), dirs)["env"].get(CHANNELS, ""), dirs)
 
 
-def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
-    _i = _install_module()
+def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
+    _i = cast(ModuleType, _install_module())
     documentation = profile_chain.role(dirs) == "documentation"
     servers = {} if documentation else dict(_i._build_mcp_config("all")["mcpServers"])
     roots = [root for _, root in dirs] if documentation else _roots(bundle, dirs)
@@ -321,7 +323,7 @@ def _mcp_servers(target: str, bundle: Path | None, dirs: list[tuple[str, Path]])
     return brain_binding.apply(browser.configure(servers, [name for name, _ in dirs]), os.environ)
 
 
-def _seed(src: Path) -> dict:
+def _seed(src: Path) -> dict[str, Any]:
     operator = _read_json(src) or {}
     doc = {key: operator[key] for key in SEED_KEYS if key in operator}
     doc["hasCompletedOnboarding"] = True
@@ -334,7 +336,7 @@ def _seed(src: Path) -> dict:
 
 
 def _claude_json(out: Path, servers: dict) -> None:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     dst = out / ".claude.json"
     doc = _i.load_json(dst) if dst.exists() else _seed(claude_json(_global_env()))
     doc.setdefault("hasCompletedOnboarding", True)
@@ -382,7 +384,7 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     return text
 
 
-def _read_json(path: Path) -> dict | None:
+def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text())
     except (OSError, ValueError):
@@ -420,7 +422,7 @@ def has_codex_rollout(name: str, overlays: Sequence[str], conversation_id: str) 
     return homes.has_codex_rollout(rendered_root(), home_key(name, overlays), conversation_id)
 
 
-def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
+def _claude_fresh(root: Path, stamp: dict[str, Any], required: set[str]) -> bool:
     out = root / "claude"
     mounts = connectors.path(root.name, "claude", root.parent)
     claude_json = _read_json(out / ".claude.json") or {}
@@ -439,7 +441,7 @@ def _claude_fresh(root: Path, stamp: dict, required: set[str]) -> bool:
 
 def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) -> Path | None:
     _refuse_live_render_from_another_checkout(name)
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     _i._load_claude_runtime_env()
     bundle, dirs = _bundle(), _chain(name, overlays)
     key = home_key(name, overlays)
@@ -484,7 +486,7 @@ def render_claude(name: str, force: bool = False, overlays: Sequence[str] = ()) 
     return out
 
 
-def _codex_stamp(path: Path) -> dict | None:
+def _codex_stamp(path: Path) -> dict[str, Any] | None:
     try:
         return tomllib.loads(path.read_text()).get("agentihooks", {}).get("render")
     except (OSError, ValueError):
@@ -505,7 +507,7 @@ def _link(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
-def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) -> dict:
+def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings: dict) -> dict[str, Any]:
     doc = {k: v for k, v in settings.items() if k != "mcp_servers"}
     doc |= {key: installed[key] for key in CODEX_INHERITED if key in installed and key not in doc}
     doc["sqlite_home"] = str(operator)
@@ -520,7 +522,7 @@ def _codex_config(installed: dict, operator: Path, out: Path, settings: dict) ->
     return doc
 
 
-def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict) -> tuple[dict, dict]:
+def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict) -> tuple[dict[str, Any], dict[str, Any]]:
     enabled = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
     below = plugins.plugin_skills(enabled, claude_home(_global_env()) / "plugins")
     return below, plugins.layer_skills(_roots(bundle, dirs))
@@ -544,7 +546,7 @@ def render_codex(
 
     from scripts.profiles import codex_master
 
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     # render_claude binds the recorded bundle copy inside the home; resolve the chain only after it.
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     bundle, dirs = _bundle(), _chain(name, overlays)
@@ -649,7 +651,7 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     # Copilot sends header values literally, so this file holds the resolved gateway credential.
     with os.fdopen(os.open(out / "mcp-config.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
         f.write(json.dumps(config, indent=2) + "\n")
-    _install_module().save_json(out / STAMP, current)
+    cast(ModuleType, _install_module()).save_json(out / STAMP, current)
     return out
 
 
@@ -732,7 +734,7 @@ def rendered_profiles(target: str) -> list[str]:
 
 
 def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     done = []
     for key in rendered_profiles(target):
         if key in skip:
@@ -749,7 +751,7 @@ def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
 
 
 def _seed_linked_profiles(out: Path) -> None:
-    _i = _install_module()
+    _i = cast(ModuleType, _install_module())
     state_file = out / "state.json"
     state = _i.load_json(state_file) if state_file.exists() else {}
     state["linked_profiles"] = _i._get_linked_profiles()
