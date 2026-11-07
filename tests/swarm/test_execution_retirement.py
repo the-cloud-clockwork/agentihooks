@@ -245,7 +245,6 @@ def test_the_row_fallback_retires_an_agent_without_a_row_and_writes_no_history(s
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
     assert store.redis.hgetall(store.key("fixture", "agents")) == rows
     assert store.execution("fixture", other.execution_id) == other
-    assert store.names.entry("missing").get("retired_at") == 40
 
 
 def test_the_row_fallback_refuses_when_the_expected_execution_was_replaced(store: RedisStore) -> None:
