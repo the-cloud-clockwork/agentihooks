@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -144,6 +145,7 @@ def test_a_local_cap_refusal_is_recorded_for_the_spawn_stall_alarm(setup, monkey
     else:
         fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8)
     since = lease.now_ms(setup.store)
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
@@ -194,11 +196,11 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     assert fenced.placement_refusal("eng", {"id": "task"}) == capped(2, 2, 2, cpus=3)
 
 
-def test_the_local_machine_cap_defaults_to_eight(setup):
+def test_the_local_machine_cap_defaults_to_fifteen(setup: SimpleNamespace) -> None:
     from scripts.swarm.store import SwarmConfig
 
-    assert setup.store.config(setup.config.slug).local_max_agents == 8
-    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 8
+    assert setup.store.config(setup.config.slug).local_max_agents == 15
+    assert SwarmConfig("s", "r", 1, 1).local_max_agents == 15
 
 
 def test_the_swarm_setting_refuses_local_launches_even_with_spare_cpu(setup, monkeypatch):
@@ -227,13 +229,16 @@ def test_the_workstation_hive_limit_counts_another_swarm(setup, monkeypatch):
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci"])
-def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch, lane):
+def test_codex_local_fallback_refuses_at_the_eight_agent_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
     from scripts.swarm.store import SwarmConfig
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": f"{lane}-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal(lane, task)
@@ -243,7 +248,9 @@ def test_codex_local_fallback_refuses_at_the_eight_agent_cap(setup, monkeypatch,
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
-def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(setup, monkeypatch):
+def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from types import SimpleNamespace
 
     from scripts import terminate_agent
@@ -254,6 +261,7 @@ def test_the_module_fixture_keeps_agents_live_on_the_host_out_of_the_cap_count(s
     fill_anton(setup)
     workstation(monkeypatch, 40)
     setup.store.create(SwarmConfig("other-swarm", "agentihooks", 1, 1))
+    setup.store.update(setup.config.slug, local_max_agents=8)
     local_agents(setup, 8, slug="other-swarm", harness="codex")
     task = {"id": "task", "seat": "eng-1@fixture", "launch_assignment": {"harness": "codex"}}
     assert "local machine runs 8 of its 8 agents" in fenced.placement_refusal("eng", task)

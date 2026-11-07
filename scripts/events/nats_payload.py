@@ -12,6 +12,8 @@ from nats.js import JetStreamContext
 from nats.js.api import PubAck
 from nats.js.errors import NotFoundError
 
+from scripts.events.bus import PayloadTooLarge
+
 COMPRESSED = b"\x00agentihooks-state-zlib:"
 PAGED = b"\x00agentihooks-state-pages:"
 KV_HEADER_BUDGET = 1024
@@ -24,7 +26,7 @@ def validate(client: Client, subject: str, data: bytes, headers: dict[str, str] 
     overhead += sum(len(f"{key}: {value}\r\n".encode()) for key, value in (headers or {}).items())
     size = len(data) + overhead
     if size > client.max_payload:
-        raise ValueError(f"{subject}: payload {size} exceeds server limit {client.max_payload}")
+        raise PayloadTooLarge(f"{subject}: payload {size} exceeds server limit {client.max_payload}")
 
 
 async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: str, headers: dict[str, str]) -> PubAck:

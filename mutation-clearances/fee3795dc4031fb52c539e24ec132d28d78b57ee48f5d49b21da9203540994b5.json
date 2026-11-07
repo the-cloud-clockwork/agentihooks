@@ -1,0 +1,1 @@
+{"scripts/hive/scope.py:scripts.hive.scope.x_host:dc24958e4f49964dee73c54f489220956345b0562570e1f79e76792ff815a833": {"reader": "standards-reader", "reason": "the default only reaches the comparison when the variable is unset, and the mutated default is outside the off set, so host reads stay enabled exactly as for true"}}

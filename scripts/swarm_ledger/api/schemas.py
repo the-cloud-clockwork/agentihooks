@@ -51,6 +51,8 @@ def validate(schema: dict, body: object) -> None:
         raise APIError(400, "schema_invalid", "Request does not match the resource schema")
 
 
+LEDGER_PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+
 PAGINATION = {
     "type": "object",
     "additionalProperties": False,
@@ -89,7 +91,7 @@ FIELDS = {
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
-    "task_ungroup": "by item",
+    "task_ungroup": "by item if_match",
     "task_split": "by item halves",
     "title_set": "text",
     "overview_set": "text",
@@ -116,7 +118,7 @@ FIELDS = {
     "alert_close": "by target item outcome",
     "alert_raise": "by source text item",
     "time_left": "by slots ci_minutes fix_phase watched",
-    "freeze_set": "by verb target reason quote",
+    "freeze_set": "by verb target reason quote position only",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
     "blocker_attempt": "by item text command output",
@@ -155,6 +157,7 @@ TYPES = {
 }
 KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
+    "freeze_set": {"only": {"type": "boolean"}, "position": {"enum": ["top", "bottom"]}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }

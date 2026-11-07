@@ -536,7 +536,9 @@ def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots
     assert "hosted ledger CA" not in placed
     assert placed.endswith(pem.strip() + "\n")
     assert placed.startswith(Path(ssl.get_default_verify_paths().cafile).read_text())
-    assert ledger_link.transport({"AGENTIHOOKS_HOME": str(home)})["context"].cert_store_stats()["x509_ca"] > 1
+    context = ledger_link.transport({"AGENTIHOOKS_HOME": str(home)}).get("context")
+    assert context is not None
+    assert context.cert_store_stats()["x509_ca"] > 1
 
 
 def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path, monkeypatch):

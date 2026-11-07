@@ -59,6 +59,10 @@ never in harness project memory.
 
 ## Slice
 
+When `steering.md` lists slice names, the phase plan is already published:
+skip steps 1 and 2 and add one task per listed slice with `--plan-slice <name>`
+in step 3. Never publish that plan again.
+
 1. Write the slice as a markdown plan in the work folder. Put each phase under a
    heading with its exact title, each task section under a heading one level
    deeper, and one unique `<!-- slice: <id> -->` anchor immediately before each

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/reports.py:scripts.hive.reports.xǁReportsǁvanished:5a2d14ee4ad5e9bca42a1da190dd8c26cec1ef89629c9158251b5a9a39457015": {
+    "reader": "standards_reader",
+    "reason": "Changes only the type argument of typing.cast for the member names to None; cast returns its value argument unchanged at runtime, so names is identical."
+  }
+}

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -159,6 +160,9 @@ def test_start_reads_through_the_ledger_client_and_holds_the_view(
     assert held is not None
     assert sent == [("http://ledger/sw", {"X-Ledger-Token": "sw True"}, 4, "sw", 0, view.PARTS)]
     assert view.CURRENT.get() is held
+    kept = view.HELD.get()
+    assert kept is not None and kept.view is held and not kept.stale
+    view.HELD.set(None)
     assert held.generation == 11
     assert api.read_export_file(view.view_file("http://ledger/sw", "sw", tmp_path)) == (11, STATE)
     pair = view.REFRESH.get()
@@ -194,6 +198,7 @@ def test_a_server_that_predates_parts_leaves_the_pass_without_a_view(
     view.CURRENT.set(view.LedgerView(1, STATE))
     assert view.start("sw", False) is None
     assert view.CURRENT.get() is None
+    assert view.HELD.get() is None
     assert not view.view_file("http://ledger", "sw", tmp_path).exists()
     assert capsys.readouterr().err == "ledger view of sw skipped: the ledger server refused named parts\n"
 
@@ -212,7 +217,6 @@ def test_any_other_refusal_fails_the_pass(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.feature("swarm-tick-delta-reads")
 def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> None:
-    assert view.PARTS == ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
     state = {
         **STATE,
         "freezes": [{"verb": "focus", "target": "p1"}],
@@ -224,6 +228,25 @@ def test_the_view_holds_every_top_level_part_the_pass_reads(tmp_path: Path) -> N
     held = view.refreshed(tmp_path / "sw.json", Reader({"generation": 3, "data": state}))
     assert held.document == state
     assert (held.tasks, held.meta, held.phases) == (state["tasks"], state["_meta"], state["phases"])
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_the_view_and_the_export_schema_read_one_ledger_part_list() -> None:
+    from scripts.swarm_ledger.api import routes, schemas
+
+    assert schemas.LEDGER_PARTS == (
+        "tasks",
+        "_meta",
+        "phases",
+        "freezes",
+        "priorities",
+        "followups",
+        "alerts",
+        "overview",
+    )
+    assert view.PARTS is schemas.LEDGER_PARTS
+    schema = cast("dict[str, dict[str, dict[str, dict[str, list[str]]]]]", routes.SINCE_SCHEMA)
+    assert schema["properties"]["parts"]["items"]["enum"] == list(schemas.LEDGER_PARTS)
 
 
 class Whole:
@@ -289,3 +312,53 @@ def test_holding_drops_the_view_the_block_started() -> None:
     assert (view.CURRENT.get(), view.REFRESH.get()) == (outer, outer_refresh)
     view.CURRENT.set(None)
     view.REFRESH.set(None)
+
+
+def test_document_refreshes_a_stale_held_record_and_clears_its_stale_flag() -> None:
+    fresh = view.LedgerView(9, {**STATE, "overview": "fresh"})
+
+    def refresh() -> view.LedgerView:
+        return fresh
+
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        kept = view.Held(view.LedgerView(7, STATE), lambda: pytest.fail("renew should not run"), stale=True)
+        view.HELD.set(kept)
+        doc = view.document("sw")
+    assert doc == fresh.document
+    assert kept.view is fresh
+    assert kept.stale is False
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_document_serves_the_held_view_and_reads_again_only_after_a_write() -> None:
+    reads: list[int] = []
+
+    def refresh() -> view.LedgerView:
+        reads.append(len(reads))
+        return view.LedgerView(8 + len(reads), {**STATE, "overview": f"read {len(reads)}"})
+
+    with view.holding():
+        view.REFRESH.set(("sw", refresh))
+        view.HELD.set(view.Held(view.LedgerView(7, STATE), refresh))
+        first, second = view.document("sw"), view.document("sw")
+        view.wrote()
+        third, fourth = view.document("sw"), view.document("sw")
+    assert (first, second) == (STATE, STATE)
+    assert third is not None and fourth is not None
+    assert (third["overview"], fourth["overview"]) == ("read 1", "read 1")
+    assert reads == [0]
+
+
+@pytest.mark.feature("swarm-tick-delta-reads")
+def test_a_hold_entered_on_another_thread_closes_on_this_one_without_raising() -> None:
+    from contextlib import ExitStack
+    from threading import Thread
+
+    stack = ExitStack()
+    entered = Thread(target=lambda: stack.enter_context(view.holding()))
+    entered.start()
+    entered.join()
+    stack.close()
+    assert view.HELD.get() is None
+    assert view.REFRESH.get() is None

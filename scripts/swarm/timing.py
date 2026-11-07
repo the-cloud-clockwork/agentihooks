@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from scripts.swarm import tick_stop
+from scripts.tick import metrics as tick_metrics
 
 HISTORY_LIMIT = 50000
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
@@ -71,6 +72,55 @@ def append_record(store: Any, slug: str, stream: str, record: dict[str, Any]) ->
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": stream}))
 
 
+WALLS = "tick:walls:"
+WINDOW = 60
+
+
+def append_step(store: Any, slug: str, record: dict[str, Any]) -> None:
+    """Append a step ``record`` to the steps stream and, for a budgeted step, push its wall to the step's window of
+    the last ``WINDOW`` walls in the same pipeline."""
+    if "budget_s" not in record or "wall_s" not in record:
+        append_record(store, slug, "tick:steps", record)
+        return
+    from redis.exceptions import RedisError
+
+    walls = store.key(slug, WALLS + record["step"])
+    try:
+        pipe = store.redis.pipeline(transaction=False)
+        pipe.xadd(
+            store.key(slug, "tick:steps"), {"record": json.dumps(record)}, maxlen=HISTORY_LIMIT, approximate=False
+        )
+        pipe.lpush(walls, repr(record["wall_s"]))
+        pipe.ltrim(walls, 0, WINDOW - 1)
+        pipe.execute()
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": "tick:steps"}))
+
+
+STEP_RAN = "tick:step-ran"
+
+
+def step_ends(store: Any, slug: str) -> dict[str, float]:
+    """Return the end time of each step's last ok or failed run for swarm ``slug``, empty when Redis fails."""
+    from redis.exceptions import RedisError
+
+    try:
+        found = store.redis.hgetall(store.key(slug, STEP_RAN))
+    except RedisError:
+        return {}
+    return {name: float(ended) for name, ended in found.items()}
+
+
+def step_ended(store: Any, slug: str, name: str, ended: float) -> None:
+    """Record ``ended`` as the end time of step ``name``'s last run for swarm ``slug``."""
+    from redis.exceptions import RedisError
+
+    try:
+        store.redis.hset(store.key(slug, STEP_RAN), name, repr(ended))
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": STEP_RAN}))
+
+
 @contextmanager
 def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     if store is None:
@@ -95,6 +145,7 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     finally:
         try:
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
+            tick_metrics.pass_finished(slug, record)
             finish_pass(store, slug, record)
         finally:
             PASS.reset(token)
@@ -139,9 +190,11 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         outcome = "stopped"
         raise
     except BaseException as exc:
-        outcome = "error"
+        waits = getattr(exc, "waiting", None)
+        outcome = "waiting" if callable(waits) and waits() else "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
-        if report and (record_failure := ON_FAILURE.get()):
+        record.update(getattr(exc, "step_fields", dict)())
+        if outcome == "error" and report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
     finally:
@@ -156,10 +209,11 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
             reaped_child_cpu_s=(child_end.ru_utime - child.ru_utime) + (child_end.ru_stime - child.ru_stime),
         )
         emit(sys.stderr, json.dumps(record))
-        if outcome != "success" and (current := PASS.get()) is not None:
+        tick_metrics.step_finished(slug, record)
+        if outcome not in ("success", "waiting") and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
-            append_record(store, slug, "tick:steps", record)
+            append_step(store, slug, record)
 
 
 def keep() -> None:
@@ -178,12 +232,17 @@ def call(function: Callable, *args, **kwargs) -> Any:
         return function(*args, **kwargs)
 
 
-def within(budget_s: float, function: Callable[..., Any], *args: Any) -> Any:
-    """Run ``function`` as a timed step whose record carries ``budget_s`` and reads late when it overruns."""
+def within(
+    budget_s: float, function: Callable[..., Any], *args: Any, lane: str | None = None, name: str | None = None
+) -> Any:
+    """Run ``function`` as a timed step recorded as ``name``, else as the function's own name, whose record carries
+    ``budget_s``, its ``lane`` when given, and reads late when it overruns."""
     keep()
-    with step(named(function)) as record:
+    with step(name or named(function)) as record:
         if record is not None:
             record["budget_s"] = budget_s
+            if lane is not None:
+                record["lane"] = lane
         started = time.monotonic()
         result = function(*args)
         if record is not None:

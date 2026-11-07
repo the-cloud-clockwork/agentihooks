@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x__phase_plan:b748270b33fc909fd60807692712cf707dcc7eda61b1d0cd4ef686f59f437057": {
+    "reader": "standards_reader",
+    "reason": "Replaces the typing.cast type argument for plan_ranges.stored_text with None; cast returns its value unchanged at runtime and the type argument only feeds the type checker, so the mutant is equivalent."
+  }
+}

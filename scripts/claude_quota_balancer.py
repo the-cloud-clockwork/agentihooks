@@ -128,7 +128,8 @@ def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
 
 
 def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
-    target = f"{TOKEN_PREFIX}{slug}"
+    """The credential for a slug, read with - as _ so a controller Secret key finds the hive's token slot."""
+    target = f"{TOKEN_PREFIX}{slug.replace('-', '_')}"
     for credential in credentials:
         if credential.env_name == target:
             return credential
@@ -717,7 +718,11 @@ def account_cap(
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
     left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
-    week = None if None in left else min(left)
+    week = None if None in left else min(value for value in left if value is not None)
+    from scripts.routing import reservation
+
+    if reservation.primary_reserved(result.account, week, os.environ):
+        return 0
     return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
 
 

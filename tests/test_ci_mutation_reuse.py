@@ -511,7 +511,7 @@ def test_a_head_that_edits_the_preflight_producer_never_reuses_its_report(pair, 
     archive = _scoped(GREEN, {"base": base, "head": head})
     written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive})
     assert written == "reused=false\n"
-    assert calls == []
+    assert calls == [f"{EXACT}{head}&branch=a%26b", "actions/runs/7/artifacts?per_page=100"]
 
 
 def test_an_unknown_base_never_reuses(pair, monkeypatch):
@@ -520,7 +520,7 @@ def test_an_unknown_base_never_reuses(pair, monkeypatch):
     archive = _scoped(GREEN, {"base": base, "head": head})
     written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive})
     assert written == "reused=false\n"
-    assert calls == []
+    assert calls == [f"{EXACT}{head}&branch=a%26b", "actions/runs/7/artifacts?per_page=100"]
 
 
 @pytest.mark.parametrize("red", REDS)
@@ -545,11 +545,13 @@ def test_a_run_answered_for_another_head_is_never_reused(pair, monkeypatch):
     assert written == "reused=false\n"
 
 
-def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(pair, monkeypatch):
+def test_the_exact_mode_reads_only_the_runs_of_its_head_on_its_branch(pair, monkeypatch, capsys):
     root, _, base, head = pair
     written, calls = _exact(monkeypatch, root, base, head, [], {})
     assert written == "reused=false\n"
-    assert calls == [f"{EXACT}{head}&branch=a%26b"]
+    assert calls == [f"{EXACT}{head}&branch=a%26b", f"{EXACT}{head}&branch=a%26b"]
+    assert not (root / ".mutation-killers-restored").exists()
+    assert capsys.readouterr().out.endswith("Restored 0 kill memory records from this head's branch preflight\n")
 
 
 def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monkeypatch):
@@ -558,6 +560,112 @@ def test_a_newer_red_preflight_on_the_same_head_blocks_an_older_green(pair, monk
     runs = [_run(8, head, "failure"), _run(7, head)]
     written, _ = _exact(monkeypatch, root, base, head, runs, {8: _scoped(RED, scope), 7: _scoped(GREEN, scope)})
     assert written == "reused=false\n"
+
+
+def _killers(files: dict[str, str]) -> bytes:
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as zipped:
+        zipped.writestr(zipfile.ZipInfo("nested/"), "")
+        for name, text in files.items():
+            zipped.writestr(zipfile.ZipInfo(name), text)
+    return data.getvalue()
+
+
+@pytest.mark.parametrize("existing", [True, False])
+def test_a_pull_request_that_mutates_restores_the_kill_memory_of_its_head_preflight(
+    pair, monkeypatch, capsys, existing
+):
+    root, _, base, head = pair
+    first, second = "a" * 64, "0123456789abcdef" * 4
+    calls = []
+    artifacts = [
+        {"id": 70, "name": "mutation-killers-0", "expired": False},
+        {"id": 71, "name": "mutation-killers-1", "expired": True},
+        {"id": 72, "name": "mutation-killers-2", "expired": False},
+        {"id": 73, "name": "mutation-stats-0", "expired": False},
+    ]
+    answers = {
+        f"{EXACT}{head}&branch=a%26b": {
+            "workflow_runs": [
+                _run(99, head, "failure"),
+                _run(9, head, "failure"),
+                _run(8, head, "failure"),
+                _run(7, head),
+            ]
+        },
+        "actions/runs/99/artifacts?per_page=100": {"artifacts": artifacts},
+        "actions/runs/9/artifacts?per_page=100": {
+            "artifacts": [{"id": 90, "name": "mutation-killers-0", "expired": True}]
+        },
+        "actions/runs/8/artifacts?per_page=100": {"artifacts": artifacts},
+        "actions/artifacts/70/zip": _killers(
+            {first: "tests/test_a.py::test_one", f"nested/{first}.cost": "{}", f"{first[:63]}g": "x"}
+        ),
+        "actions/artifacts/72/zip": _killers({f"nested/{second}": "tests/test_b.py::test_two", "A" * 64: "x"}),
+    }
+
+    def api(path, binary=False):
+        assert binary is path.endswith("/zip")
+        calls.append(path)
+        return answers[path]
+
+    monkeypatch.setattr(reuse, "api", api)
+    output = root.parent / f"{root.name}-output"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, "--base", base, "--grader", base])
+    folder = root / ".mutation-killers-restored/killers"
+    if existing:
+        folder.mkdir(parents=True)
+    assert reuse.main() == 0
+    assert output.read_text() == "reused=false\n"
+    assert "actions/runs/99/artifacts?per_page=100" not in calls
+    assert {path.name: path.read_text() for path in folder.iterdir()} == {
+        first: "tests/test_a.py::test_one",
+        second: "tests/test_b.py::test_two",
+    }
+    assert "actions/artifacts/71/zip" not in calls
+    assert "actions/artifacts/73/zip" not in calls
+    assert "actions/artifacts/90/zip" not in calls
+    assert "actions/runs/7/artifacts?per_page=100" not in calls[calls.index("actions/artifacts/70/zip") :]
+    assert capsys.readouterr().out.endswith(
+        "No green mutation report covers this head; mutating\n"
+        "Restored 2 kill memory records from this head's branch preflight\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        subprocess.CalledProcessError(1, ["gh"]),
+        OSError("gh missing"),
+        ValueError("bad json"),
+        KeyError("artifacts"),
+        zipfile.BadZipFile("bad zip"),
+    ],
+)
+def test_an_unreadable_kill_memory_mutates_without_it(pair, monkeypatch, capsys, error):
+    root, _, base, head = pair
+    monkeypatch.setattr(reuse, "exact", lambda *args: None)
+    monkeypatch.setattr(reuse, "restore_killers", lambda *args: (_ for _ in ()).throw(error))
+    output = root.parent / f"{root.name}-output"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["reuse", "a&b", "99", "--head", head, "--base", base, "--grader", base])
+    assert reuse.main() == 0
+    assert output.read_text() == "reused=false\n"
+    assert capsys.readouterr().out == (
+        "No green mutation report covers this head; mutating\n"
+        f"Kill memory restore failed, mutating without it: {error}\n"
+    )
+
+
+def test_a_branch_preflight_without_head_never_restores_kill_memory(repo, monkeypatch):
+    root, commit, _ = repo
+    commit(SOURCE)
+    monkeypatch.setattr(reuse, "source", lambda *args: None)
+    monkeypatch.setattr(reuse, "restore_killers", lambda *args: pytest.fail("restored without a pull request head"))
+    assert _main(monkeypatch, root) == "reused=false\n"
 
 
 def test_a_producer_the_protected_grader_changed_after_the_branch_point_blocks_reuse(pair, repo, monkeypatch):
@@ -569,7 +677,7 @@ def test_a_producer_the_protected_grader_changed_after_the_branch_point_blocks_r
     archive = _scoped(GREEN, {"base": base, "head": head})
     written, calls = _exact(monkeypatch, root, base, head, [_run(7, head)], {7: archive}, grader=grader)
     assert written == "reused=false\n"
-    assert calls == []
+    assert calls == [f"{EXACT}{head}&branch=a%26b", "actions/runs/7/artifacts?per_page=100"]
 
 
 def test_a_grader_that_moved_only_outside_the_producers_still_reuses(pair, repo, monkeypatch):

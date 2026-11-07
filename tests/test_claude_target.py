@@ -99,6 +99,380 @@ def test_write_settings_keeps_operator_plugins_and_enables_fleet_plugins(tmp_pat
     }
 
 
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_keeps_unmanaged_user_keys_on_first_init():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    settings_path = install.CLAUDE_HOME / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "customTopLevelKey": "operator value",
+                "env": {"OPERATOR_VAR": "kept"},
+                "permissions": {"allow": ["Bash(ls:*)"]},
+                "statusLine": {"type": "command", "command": "operator-status"},
+            }
+        )
+    )
+
+    path = ClaudeAdapter().write_settings({"env": {"NEW_VAR": "1"}, "permissions": {"allow": ["Bash(git:*)"]}})
+
+    written = json.loads(path.read_text())
+    assert written["customTopLevelKey"] == "operator value"
+    assert written["statusLine"] == {"type": "command", "command": "operator-status"}
+    assert written["env"] == {"OPERATOR_VAR": "kept", "NEW_VAR": "1"}
+    assert written["permissions"]["allow"] == ["Bash(ls:*)", "Bash(git:*)"]
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_second_run_keeps_a_key_added_between_runs():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    adapter = ClaudeAdapter()
+    path = adapter.write_settings({"env": {"A": "1"}})
+
+    doc = json.loads(path.read_text())
+    doc["operatorAddedLater"] = "mine"
+    path.write_text(json.dumps(doc))
+
+    adapter.write_settings({"env": {"A": "1"}})
+
+    assert json.loads(path.read_text())["operatorAddedLater"] == "mine"
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_merges_siblings_without_dropping_either_side():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    install.CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    settings_path = install.CLAUDE_HOME / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE,
+                "env": {"OPERATOR_VAR": "kept"},
+                "permissions": {"allow": ["Bash(ls:*)"]},
+            }
+        )
+    )
+
+    path = ClaudeAdapter().write_settings(
+        {"env": {"BUNDLE_VAR": "2"}, "permissions": {"allow": ["Bash(git:*)", "Bash(ls:*)"]}}
+    )
+
+    written = json.loads(path.read_text())
+    assert written["env"] == {"OPERATOR_VAR": "kept", "BUNDLE_VAR": "2"}
+    assert written["permissions"]["allow"] == ["Bash(ls:*)", "Bash(git:*)"]
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_removes_a_key_no_longer_rendered():
+    from scripts.targets.claude_target import ClaudeAdapter
+
+    adapter = ClaudeAdapter()
+    path = adapter.write_settings({"env": {"FEATURE_FLAG": "on", "KEPT": "1"}})
+    assert json.loads(path.read_text())["env"] == {"FEATURE_FLAG": "on", "KEPT": "1"}
+
+    adapter.write_settings({"env": {"KEPT": "1"}})
+
+    assert json.loads(path.read_text())["env"] == {"KEPT": "1"}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_removes_a_three_level_leaf_no_longer_rendered():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"a": {"b": {"c": 1, "d": 2}}}
+    prior_record = {"leaves": ["a.b.c"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"a": {"b": {"d": 2}}}
+    assert record == {"leaves": [], "lists": {}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"env": {"KEPT": "1"}}
+    prior_record = {"leaves": ["env.GONE"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"env": {"KEPT": "1"}}
+    assert record == {"leaves": [], "lists": {}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"env": {"AGENTIHOOKS_VAR": "1"}, "operatorKey": "kept"}
+    prior_record = {"leaves": ["env.AGENTIHOOKS_VAR"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"operatorKey": "kept"}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_keeps_a_container_that_still_holds_an_operator_key():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"env": {"AGENTIHOOKS_VAR": "1", "OPERATOR_VAR": "kept"}}
+    prior_record = {"leaves": ["env.AGENTIHOOKS_VAR"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"env": {"OPERATOR_VAR": "kept"}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_prunes_every_ancestor_left_empty_by_a_four_level_leaf():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"a": {"b": {"c": {"d": 1}}}}
+    prior_record = {"leaves": ["a.b.c.d"], "lists": {}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_processes_every_rendered_key_after_a_list_value():
+    from scripts.targets.claude_target import _additive_merge
+
+    rendered = {"permissions": {"allow": ["Bash(git:*)"], "defaultMode": "bypassPermissions"}}
+
+    merged, record = _additive_merge({}, rendered, {})
+
+    assert merged == {"permissions": {"allow": ["Bash(git:*)"], "defaultMode": "bypassPermissions"}}
+    assert record == {"leaves": ["permissions.defaultMode"], "lists": {"permissions.allow": ["Bash(git:*)"]}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_drops_a_stale_rendered_list_item_using_the_prior_record():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"permissions": {"allow": ["Bash(ls:*)", "Bash(git:*)"]}}
+    rendered = {"permissions": {"allow": ["Bash(npm:*)"]}}
+    prior_record = {"leaves": [], "lists": {"permissions.allow": ["Bash(git:*)"]}}
+
+    merged, record = _additive_merge(existing, rendered, prior_record)
+
+    assert merged == {"permissions": {"allow": ["Bash(ls:*)", "Bash(npm:*)"]}}
+    assert record == {"leaves": [], "lists": {"permissions.allow": ["Bash(npm:*)"]}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_additive_merge_discards_a_stale_list_entry_when_the_list_stops_rendering():
+    from scripts.targets.claude_target import _additive_merge
+
+    existing = {"permissions": {"allow": ["Bash(ls:*)", "Bash(git:*)"]}}
+    prior_record = {"leaves": [], "lists": {"permissions.allow": ["Bash(git:*)"]}}
+
+    merged, record = _additive_merge(existing, {}, prior_record)
+
+    assert merged == {"permissions": {"allow": ["Bash(ls:*)"]}}
+    assert record == {"leaves": [], "lists": {}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_recorded_settings_tolerates_a_record_without_leaves_or_lists():
+    from scripts.targets.claude_target import _remove_recorded_settings
+
+    doc = {"env": {"KEPT": "1"}}
+
+    _remove_recorded_settings(doc, {})
+
+    assert doc == {"env": {"KEPT": "1"}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_recorded_settings_skips_a_list_entry_whose_doc_value_is_not_a_list():
+    from scripts.targets.claude_target import _remove_recorded_settings
+
+    doc = {"a": {"b": "not-a-list"}}
+
+    _remove_recorded_settings(doc, {"leaves": [], "lists": {"a.b": ["x"]}})
+
+    assert doc == {"a": {"b": "not-a-list"}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_recorded_settings_removes_listed_entries_from_a_three_level_list():
+    from scripts.targets.claude_target import _remove_recorded_settings
+
+    doc = {"a": {"b": {"allow": ["keep", "drop"]}}}
+
+    _remove_recorded_settings(doc, {"leaves": [], "lists": {"a.b.allow": ["drop"]}})
+
+    assert doc == {"a": {"b": {"allow": ["keep"]}}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_owned_hooks_tolerates_a_group_without_a_hooks_list():
+    from scripts.targets.claude_target import _remove_owned_hooks
+
+    doc = {"hooks": {"PreToolUse": [{"notHooks": []}]}}
+
+    _remove_owned_hooks(doc, {"python -m hooks"})
+
+    assert doc == {"hooks": {"PreToolUse": [{"notHooks": []}]}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_owned_hooks_drops_the_hooks_key_when_every_group_was_ours():
+    from scripts.targets.claude_target import _remove_owned_hooks
+
+    doc = {"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m hooks"}]}]}, "other": 1}
+
+    _remove_owned_hooks(doc, {"python -m hooks"})
+
+    assert doc == {"other": 1}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_owned_hooks_keeps_checking_events_after_a_malformed_one():
+    from scripts.targets.claude_target import _remove_owned_hooks
+
+    doc = {
+        "hooks": {
+            "EventA": "not-a-list",
+            "EventB": [{"hooks": [{"command": "python -m hooks"}]}],
+        }
+    }
+
+    _remove_owned_hooks(doc, {"python -m hooks"})
+
+    assert doc == {"hooks": {"EventA": "not-a-list"}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_owned_plugins_tolerates_a_name_the_operator_already_removed():
+    from scripts.targets.claude_target import _remove_owned_plugins
+
+    doc = {"enabledPlugins": {"mine@m": True}}
+
+    _remove_owned_plugins(doc, {"gone@m"})
+
+    assert doc == {"enabledPlugins": {"mine@m": True}}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_returns_false_for_a_missing_or_unmanaged_or_invalid_file(tmp_path):
+    from scripts.targets.claude_target import remove_managed_keys
+
+    missing = tmp_path / "missing.json"
+    assert remove_managed_keys(missing) is False
+
+    unmanaged = tmp_path / "unmanaged.json"
+    unmanaged.write_text(json.dumps({"model": "opus"}))
+    assert remove_managed_keys(unmanaged) is False
+
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("not json")
+    assert remove_managed_keys(invalid) is False
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_returns_true_when_operator_content_remains():
+    from scripts.targets.claude_target import ClaudeAdapter, remove_managed_keys
+
+    path = ClaudeAdapter().write_settings({"env": {"AGENTIHOOKS_VAR": "1"}})
+    doc = json.loads(path.read_text())
+    doc["operatorKey"] = "kept"
+    path.write_text(json.dumps(doc))
+
+    assert remove_managed_keys(path) is True
+    assert json.loads(path.read_text()) == {"operatorKey": "kept"}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_tolerates_state_with_no_recorded_keys_at_all():
+    from scripts.targets.claude_target import ClaudeAdapter, remove_managed_keys
+
+    path = ClaudeAdapter().write_settings({"env": {"AGENTIHOOKS_VAR": "1"}})
+    doc = json.loads(path.read_text())
+    doc["operatorKey"] = "kept"
+    path.write_text(json.dumps(doc))
+    install._save_state({})
+
+    assert remove_managed_keys(path) is True
+    assert json.loads(path.read_text()) == {"env": {"AGENTIHOOKS_VAR": "1"}, "operatorKey": "kept"}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_operator_owned_remains():
+    from scripts.targets.claude_target import ClaudeAdapter, remove_managed_keys
+
+    path = ClaudeAdapter().write_settings({"env": {"AGENTIHOOKS_VAR": "1"}})
+
+    assert remove_managed_keys(path) is False
+    assert not path.exists()
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed():
+    from scripts.targets.claude_target import SETTINGS_RECORD_KEY, ClaudeAdapter, remove_managed_keys
+
+    path = ClaudeAdapter().write_settings({install.MANAGED_BY_KEY: install.MANAGED_BY_VALUE})
+    assert install.MANAGED_BY_KEY in install._load_state()[SETTINGS_RECORD_KEY]["leaves"]
+
+    assert remove_managed_keys(path) is False
+    assert not path.exists()
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_enabled_plugins_reads_bundle_user_and_shared_separately(tmp_path):
+    from scripts.targets.claude_target import enabled_plugins
+
+    plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
+    bundle, user, shared = tmp_path / "bundle", tmp_path / "user", tmp_path / "shared"
+    for root, name in ((bundle, "bundle@m"), (user, "user@m"), (shared, "shared@m")):
+        root.mkdir()
+        (root / "deps.json").write_text(json.dumps({"deps": [{**plugin, "id": name}]}))
+
+    result = enabled_plugins({}, {}, bundle, user, shared)
+
+    assert result == {"bundle@m": True, "user@m": True, "shared@m": True}
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_enabled_plugins_records_the_union_of_owned_and_layered_names(tmp_path):
+    from scripts.targets.claude_target import PLUGIN_RECORD_KEY, enabled_plugins
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
+    (bundle / "deps.json").write_text(json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
+
+    enabled_plugins({}, {"layer@m": True}, bundle)
+
+    assert install._load_state()[PLUGIN_RECORD_KEY] == ["fleet@m", "layer@m"]
+
+
+@pytest.mark.feature("claude-settings-additive-merge")
+def test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge():
+    from scripts.targets.claude_target import SETTINGS_RECORD_KEY, ClaudeAdapter
+
+    rendered = {
+        "hooks": {"PreToolUse": [{"hooks": [{"command": "python -m hooks"}]}]},
+        "enabledPlugins": {"fleet@m": True},
+    }
+    path = ClaudeAdapter().write_settings(rendered)
+    written = json.loads(path.read_text())
+
+    assert written["hooks"] == rendered["hooks"]
+    assert written["enabledPlugins"] == {"fleet@m": True}
+    record = install._load_state()[SETTINGS_RECORD_KEY]
+    assert not any(leaf.startswith(("hooks.", "enabledPlugins.")) for leaf in record["leaves"])
+    assert not any(key.startswith(("hooks.", "enabledPlugins.")) for key in record["lists"])
+
+
 def test_installed_claude_rules_stay_inside_global_home(tmp_path):
     from scripts.targets.claude_target import ClaudeAdapter
 

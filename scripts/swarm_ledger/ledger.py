@@ -142,7 +142,7 @@ TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("ta
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
 AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
-LEDGER_ITEM = re.compile(r"(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
+LEDGER_ITEM = re.compile(r"tasks|freezes|(?:tasks|phases|followups|priorities)/[A-Za-z0-9][A-Za-z0-9._-]*")
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
     "contract": (
@@ -216,11 +216,23 @@ def launch_token(slug, name):
         raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
 
 
-def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
+def client(
+    slug: str, service: bool = False, timeout: float = REQUEST_TIMEOUT, headers: dict[str, str] | None = None
+) -> Any:
+    """The ledger API client for slug: in process over the shared database inside a database pass, else HTTP."""
     from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.tick.adapters import database_ledger
 
-    client = ResourceClient(base(slug), credentials(slug, service), timeout)
-    return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
+    if database_ledger.serving():
+        return database_ledger.client(base(slug), timeout)
+    return ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
+
+
+def request(
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+) -> dict[str, Any]:
+    found = client(slug, service, timeout)
+    return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 
 
 def resource(
@@ -232,11 +244,9 @@ def resource(
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
-    from scripts.swarm_ledger.api.client import ResourceClient
-
-    def read():
-        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
-        return client.collection(slug, path) if collection else client.request(slug, path)["data"]
+    def read() -> Any:
+        found = client(slug, service, timeout, headers)
+        return found.collection(slug, path) if collection else found.request(slug, path)["data"]
 
     return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
@@ -270,6 +280,13 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
+    """One ledger read or write: in process over the shared database inside a database pass, else to the server."""
+    from scripts.tick.adapters import database_ledger
+
+    return (database_call if database_ledger.serving() else server_call)(slug, ops, service)
+
+
+def server_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
@@ -301,6 +318,14 @@ def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = Fal
         if talking or joining:
             return queue(slug, ops, service)
         sys.exit(f"ledger server not answering on {base()}: {exc}")
+
+
+def database_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
+    """One ledger read or write in process over the shared database, a refusal exiting as the server's."""
+    try:
+        return request(slug, ops, service)
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"server refused: {exc.code} {refusal_text(exc)}")
 
 
 def talk(ops: list[dict[str, Any]] | None) -> bool:
@@ -414,8 +439,12 @@ def mine(state, name):
     return gate.unhandled_for(state["_meta"], name, state.get("tasks", []))
 
 
-def cmd_join(args):
+def cmd_join(args: Any) -> None:
     send(args, "join", role=args.role)
+    if args.role == "orchestrator":
+        from scripts.swarm_ledger.adapters.safety_nudge import record_master
+
+        record_master(os.environ)
     print(json.dumps({"joined": args.name, "slug": args.slug, "role": args.role}))
 
 
@@ -438,8 +467,8 @@ def cmd_tree(args):
         print(f"{'  ' * row['depth']}{row['node']}  {row['state']}")
 
 
-def cmd_get(args):
-    print(SHOW_JSON(resource(args.slug, args.item)))
+def cmd_get(args: argparse.Namespace) -> None:
+    print(SHOW_JSON(resource(args.slug, args.item, collection="/" not in args.item)))
 
 
 def cmd_tasks(args):
@@ -791,9 +820,11 @@ def _duration(value):
     return minutes
 
 
-def _ledger_item(value):
+def _ledger_item(value: str) -> str:
     if not LEDGER_ITEM.fullmatch(value):
-        raise argparse.ArgumentTypeError("name tasks/<id>, phases/<id>, followups/<id> or priorities/<id>")
+        raise argparse.ArgumentTypeError(
+            "name tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
+        )
     return value
 
 
@@ -1071,8 +1102,10 @@ def build_parser():
     sub.add_parser("tree", help="print a plan, phase, slice or task and everything under it, with states").add_argument(
         "node", nargs="?", help="plans/<id>, phases/<id>, slices/<id> or tasks/<id>; default the whole ledger"
     )
-    sub.add_parser("get", help="print one task, phase, follow up or priority through the ledger API").add_argument(
-        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id> or priorities/<id>"
+    sub.add_parser(
+        "get", help="print one task, phase, follow up or priority, or every task or freeze, through the ledger API"
+    ).add_argument(
+        "item", type=_ledger_item, help="tasks/<id>, phases/<id>, followups/<id>, priorities/<id>, tasks or freezes"
     )
     tasks = sub.add_parser("tasks", help="list open tasks, one line each, filtered by state, lane or title text")
     for flag in ("--state", "--lane", "--text"):

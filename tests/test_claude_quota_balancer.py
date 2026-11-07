@@ -112,6 +112,16 @@ def test_an_email_named_account_is_discovered_routed_and_shown():
     assert " 2/" in row and "80%" in row
 
 
+def test_a_dashed_controller_key_routes_to_the_hive_underscore_slot() -> None:
+    environ = {"AH_CC_TOKEN_nestorcoltathotmail_com": "tok-a", "AH_CC_TOKEN_other": "tok-b"}
+
+    decision = balancer.forced(environ, "nestorcoltathotmail-com")
+
+    assert decision.credential is not None
+    assert decision.credential.env_name == "AH_CC_TOKEN_nestorcoltathotmail_com"
+    assert decision.credential.account == "nestorcoltathotmail_com"
+
+
 def test_probe_passes_only_selected_oauth_token(monkeypatch):
     observed = {}
 
@@ -785,6 +795,28 @@ def test_a_reset_window_counts_as_full_and_a_rejected_account_takes_no_session()
     rejected = balancer.ProbeResult("x", "rejected", "BLOCKED", 0.0, TODAY[0].five_hour, TODAY[0].seven_day)
     assert balancer.account_cap(rejected, NOW) == 0
     assert balancer.account_cap(balancer._error_result("x", "failed"), NOW) is None
+
+
+def test_the_primary_login_is_capped_to_zero_at_its_reserve(monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, "main")
+    above = balancer.ProbeResult(
+        "main", "allowed", "NORMAL", 79.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(79.0)
+    )
+    at = balancer.ProbeResult("main", "allowed", "NORMAL", 20.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(80.0))
+    assert balancer.account_cap(above, 1000) == 6
+    assert balancer.account_cap(at, 1000) == 0
+
+
+def test_a_non_primary_login_at_the_same_usage_is_unaffected(monkeypatch):
+    from scripts import master_claude_login as login
+
+    monkeypatch.setenv(login.ORDER_ENV, "main")
+    other = balancer.ProbeResult(
+        "other", "allowed", "NORMAL", 20.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(80.0)
+    )
+    assert balancer.account_cap(other, 1000) == 6
 
 
 def test_a_ceiling_scales_the_cap_with_the_tighter_window():

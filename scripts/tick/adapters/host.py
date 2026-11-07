@@ -4,7 +4,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from scripts.tick.adapters.inbox import check
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Unsupported
 
@@ -20,12 +19,12 @@ class JobHost:
     jobs: Mapping[str, Callable[[Mapping[str, object]], object]]
 
     def read(self, name: str, *, deadline: Deadline) -> object:
-        check(deadline)
+        deadline.live()
         reader = self.readers.get(name)
         return Unsupported(name) if reader is None else reader()
 
     def run(self, request: Mapping[str, object], *, deadline: Deadline) -> object:
-        check(deadline)
+        deadline.live()
         name = str(request.get("job", ""))
         job = self.jobs.get(name)
         return Unsupported(name) if job is None else job(request)

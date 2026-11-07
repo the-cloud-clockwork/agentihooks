@@ -7,7 +7,7 @@ from typing import NoReturn
 
 import pytest
 
-from scripts.gates import Call, Gate, Who, push_stop
+from scripts.gates import Call, Decision, Gate, Who, push_stop
 from scripts.gates.progress import Progress
 from scripts.gates.push_stop import (
     FLOOR_S,
@@ -172,6 +172,31 @@ def test_dirty_work_still_pushes_the_commits_it_holds(rig):
     (rig.tree / "new").write_text("new\n")
     assert rig.stop().reason == TEMPLATE
     assert rig.remote_head() == head
+
+
+def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(monkeypatch, rig, tmp_path):
+    from hooks import config, hook_manager
+
+    for flag in ("CI_MANIFESTO_ENABLED", "BRAIN_ENABLED", "BROADCAST_ENABLED", "BRAIN_WRITER_ENABLED"):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    helper = {"session_id": "main", "agent_id": "reader", "agent_type": "code-reviewer"}
+
+    def stop(session: str) -> Decision:
+        rig.gate.started = time.monotonic()
+        return rig.gate.decide(Call("", session=session), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    head = rig.commit()
+    (rig.tree / "readme").write_text("reviewed\n")
+    hook_manager.on_subagent_start(helper)
+    assert stop("main").allowed
+    assert rig.remote_head() == head
+    assert rig.inbox() == []
+    assert stop("other").reason == TEMPLATE
+    hook_manager.on_subagent_stop(helper)
+    decision = stop("main")
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
 
 
 def test_a_closed_template_item_is_sent_again(rig):

@@ -6,6 +6,7 @@ THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures 
 
 import json
 import math
+import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
@@ -27,6 +28,8 @@ RELEASE_ERRORS = THRESHOLD // 4
 CANCEL_EVERY_MS = 60 * 1000
 METRIC = "agentihooks.swarm.errors"
 MERGE_QUEUE = "merge_group"
+RELEASE_EVENT = "release"
+RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 REPOS = (
     "the-cloud-clockwork/agentihooks",
     "the-cloud-clockwork/agentihooks-bundle",
@@ -107,13 +110,14 @@ def state(store: RedisStore) -> Panic | None:
 
 
 def engage(store: RedisStore, reason: str, auto: bool, fixes: Iterable[str], now_ms: int) -> Panic:
-    """Turns panic on, or adds fixes to the panic already on and makes it manual when a person engaged it."""
+    """Turns panic on, or adds fixes to the panic already on; a person pressing on with no fix makes it manual."""
     current = state(store)
+    added = tuple(fixes)
     found = Panic(
         current.since if current else now_ms,
         current.reason if current else reason,
-        auto and (current.auto if current else True),
-        tuple(sorted({*(current.fixes if current else ()), *fixes})),
+        (current.auto and (auto or bool(added))) if current else auto,
+        tuple(sorted({*(current.fixes if current else ()), *added})),
     )
     _client(store).set(_key("panic"), json.dumps(found.__dict__))
     return found
@@ -148,7 +152,7 @@ def port(repository: str) -> SourceControl:
     return GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
-def _branch(url: str) -> str:
+def fix_branch(url: str) -> str:
     """Return the head branch of a fix pull request, read through the source control port."""
     from scripts.swarm import stack
 
@@ -156,12 +160,18 @@ def _branch(url: str) -> str:
 
 
 def _spared(row: RepositoryRun, branches: set[str]) -> bool:
-    return row.status not in ACTIVE or row.event == MERGE_QUEUE or row.branch in branches
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix or a release tag."""
+    return (
+        row.status not in ACTIVE
+        or row.event in (MERGE_QUEUE, RELEASE_EVENT)
+        or row.branch in branches
+        or RELEASE_TAG.fullmatch(str(row.branch)) is not None
+    )
 
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue and the named fix pull requests."""
-    branches = {_branch(url) for url in fixes}
+    """Cancels every queued or running Actions run except the merge queue, release tags and the named fixes."""
+    branches = {fix_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
         provider = ports(repo)

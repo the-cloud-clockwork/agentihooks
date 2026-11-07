@@ -28,6 +28,7 @@ DIRECT = {
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
     "writer-lock.yml": ("Writer lock", "writer-lock"),
+    "tick-equivalence.yml": ("Tick equivalence", "tick-equivalence"),
     "feature-suite.yml": ("Feature suite", "feature-suite"),
     "worker-resources.yml": ("Worker resources", "worker-resources"),
     "startup-stages.yml": ("Startup stages", "startup-stages"),
@@ -45,7 +46,6 @@ LANE_USERS = {
     "chart-release.yml",
     "changelog.yml",
     "changelog-seed.yml",
-    "tick-equivalence.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}

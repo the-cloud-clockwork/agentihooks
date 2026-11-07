@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import time
 
 import pytest
@@ -521,3 +522,13 @@ def test_rest_strips_slurped_page_headers_into_one_json_array(monkeypatch, tmp_p
 
     result = github_reads.rest("jobs", ["api", "repos/o/r/actions/runs/1/jobs", "--paginate", "--slurp"], run)
     assert json.loads(result.stdout) == [{"jobs": [1]}, {"jobs": [2]}]
+
+
+def test_location_runs_a_checkout_path_in_place_and_a_repository_name_through_gh_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LOCATION_PROBE", "kept")
+    assert github_reads.location("/home/someone/agentihooks") == {"cwd": "/home/someone/agentihooks"}
+    named = github_reads.location("o/r")
+    assert named == {"env": {**os.environ, "GH_REPO": "o/r"}}
+    assert named["env"]["AGENTIHOOKS_LOCATION_PROBE"] == "kept"

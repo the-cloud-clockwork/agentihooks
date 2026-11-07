@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import retire_watch
@@ -96,6 +98,126 @@ def test_retry_of_an_ended_agent_without_process_or_pane_releases_its_seat(store
     assert successor.seat == agent.seat and successor.generation > agent.generation
     assert retire_watch.rows(store, "sw") == []
     assert ["pane", "close", "w1:p1"] not in calls
+
+
+@pytest.mark.parametrize(
+    ("placed", "listed", "observed", "expected"),
+    [
+        ({"runtime_target": {"host_id": "workstation"}, "pane_id": "w5M:p1KX"}, False, 10, "retired"),
+        ({"hive": "workstation"}, False, 10, "retired"),
+        ({"hive": "workstation"}, False, 1, "retired"),
+        ({"hive": "workstation"}, False, 0, "could not retire"),
+        ({"hive": "workstation"}, True, 10, "could not retire"),
+        ({"hive": "workstation"}, False, None, "could not retire"),
+        ({"hive": "absent"}, False, 10, "could not retire"),
+    ],
+)
+def test_an_ended_master_its_fresh_hive_report_shows_gone_or_unlisted_is_retired_in_one_pass_without_a_runtime_call(
+    store: RedisStore,
+    monkeypatch: pytest.MonkeyPatch,
+    placed: dict[str, Any],
+    listed: bool,
+    observed: int | None,
+    expected: str,
+) -> None:
+    import json
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive import reports
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _retire_ended
+    from tests.swarm.test_tick import FakeLedger
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    name = store.next_name("sw", "master")
+    seed = AgentRecord(name, "master", "master", seat="master@sw", started_at=1, **placed)
+    agent = replace(store.start_execution("sw", seed), state="finished")
+    store.put_agent("sw", agent)
+    now = reports.STARTUP_MS + 10
+    names = ["other", name] if listed else ["other"]
+    report = {"names": names, "pane_ids": [], "observed_at": observed, "started_at": 0, "executions": {}}
+    if observed is None:
+        del report["observed_at"]
+    store.redis.set(reports.key("workstation"), json.dumps(report))
+    refusal = {"process": 1, "refusal": "no herdr server is running"}
+    retire_watch.failed(store, "sw", name, refusal, 1)
+    retired: list[str] = []
+    runtime = SimpleNamespace(
+        retire=lambda agent, homes: retired.append(agent.name) or False, refusal=lambda agent: refusal
+    )
+    ledger = FakeLedger([])
+
+    actions = _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, now)
+
+    if expected == "retired":
+        assert actions == [f"retired {name}"]
+        assert retired == [] and store.agents("sw") == [] and retire_watch.rows(store, "sw") == []
+    else:
+        assert actions == [f"could not retire {name}, retrying next tick"]
+        assert retired == [name] and [a.name for a in store.agents("sw")] == [name]
+
+
+def test_an_ended_master_whose_drop_was_refused_is_dropped_next_pass_without_a_second_runtime_retire(
+    store: RedisStore,
+) -> None:
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from scripts.swarm.store import AgentRecord, SwarmError
+    from scripts.swarm.tick import _retire_ended
+    from tests.swarm.test_tick import FakeLedger
+
+    name = store.next_name("sw", "master")
+    seed = AgentRecord(name, "master", "master", seat="master@sw", started_at=1)
+    agent = replace(store.start_execution("sw", seed), state="finished")
+    store.put_agent("sw", agent)
+    retired: list[str] = []
+    runtime = SimpleNamespace(
+        retire=lambda agent, homes: retired.append(agent.name) or len(retired) == 1, refusal=lambda agent: {}
+    )
+    ledger = FakeLedger([])
+    refused = SwarmError("agent registry kept changing; retirement was not committed")
+
+    with patch.object(store, "drop_agent", side_effect=refused), pytest.raises(SwarmError):
+        _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, 10)
+
+    assert _retire_ended("sw", store, ledger, runtime, ledger.rows, agent, 20) == [f"retired {name}"]
+    assert retired == [name] and store.agents("sw") == []
+    assert not store.redis.hexists(store.key("sw", "retired-process"), name)
+
+
+@pytest.mark.parametrize(("listed", "expected"), [(False, "retired"), (True, "could not retire")])
+def test_a_stopping_swarm_retires_a_master_its_hive_no_longer_lists_without_a_runtime_call(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, listed: bool, expected: str
+) -> None:
+    import json
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive import reports
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.tick import _retire_master
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    name = store.next_name("sw", "master")
+    started = store.start_execution("sw", AgentRecord(name, "master", "master", seat="master@sw", started_at=1))
+    master = replace(started, hive="workstation")
+    store.put_agent("sw", master)
+    now = reports.STARTUP_MS + 10
+    report = {"names": ["other", name] if listed else ["other"], "observed_at": now, "executions": {}}
+    store.redis.set(reports.key("workstation"), json.dumps(report))
+    retired: list[str] = []
+    runtime = SimpleNamespace(live_names=lambda: set(), retire=lambda agent, homes: retired.append(agent.name) or False)
+
+    outcome = _retire_master("sw", store, runtime, master, now)
+
+    if expected == "retired":
+        assert outcome == f"retired {name}" and retired == [] and store.agents("sw") == []
+    else:
+        assert outcome == f"could not retire {name}, retrying next tick" and retired == [name]
 
 
 def test_failures_are_kept_per_swarm(store):

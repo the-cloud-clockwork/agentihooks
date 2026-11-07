@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1empty:736b77ff5b461f45b53a042d1d06cb14a6f751e5b4b4a40fe5eabf63c02d6e92": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime and never reads typ, so cast(None, store).agents(slug) behaves identically to cast(Any, store).agents(slug)."
+  }
+}
