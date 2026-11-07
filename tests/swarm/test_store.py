@@ -753,6 +753,13 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
     assert store.config("smoke").api_url == ""
 
 
+def test_the_controller_address_round_trips_and_an_old_config_reads_it_empty(store):
+    store.create(config(control_url="https://swarm-internal.example.test:8780"))
+    assert store.config("smoke").control_url == "https://swarm-internal.example.test:8780"
+    store.redis.hdel(store.key("smoke", "config"), "control_url")
+    assert store.config("smoke").control_url == ""
+
+
 @pytest.mark.parametrize(
     "changes",
     [

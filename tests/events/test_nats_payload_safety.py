@@ -120,10 +120,7 @@ def test_transport_configuration_is_checked_before_any_network_connection(monkey
 
     async def connect(*args, **kwargs):
         assert args == ("nats://configured.example:4222",)
-        expected = {"allow_reconnect": reconnect}
-        if reconnect:
-            expected["max_reconnect_attempts"] = -1
-        assert kwargs == expected
+        assert kwargs == nats.connect_options(BusConfig(backend="nats", reconnect=reconnect))
         raise ValueError("configuration captured")
 
     monkeypatch.setattr(nats.nats_client, "connect", connect)

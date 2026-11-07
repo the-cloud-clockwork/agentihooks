@@ -1,0 +1,1 @@
+A hive ranked first for a role is now refused on its host or pod CPU load as well as its memory line, so a CPU saturated preferred hive spills placement to the next hive instead of taking every launch.

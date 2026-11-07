@@ -523,3 +523,24 @@ def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store,
     assert marks == ["controller-hive"]
     assert 0 < store.redis.pttl(store.key("proof", "controller-host")) <= lease.ttl_ms()
     assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
+
+
+def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unreachable(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import ledger_route
+    from scripts.swarm_ledger.api import client
+
+    def unreachable(*args: object) -> None:
+        raise OSError("timed out")
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
+    monkeypatch.setattr(client.ResourceClient, "request", unreachable)
+    with ledger_route.scoped("sw", "https://ledger.example"):
+        held = lease.acquire(store, "sw", "home")
+        assert held is not None
+        assert lease.current(store, "sw") == held
+        assert lease.renew(store, "sw", held).epoch == held.epoch
+        assert lease.fenced(store, "sw", held, lambda doc: "written") == "written"
+        assert lease.release(store, "sw", held) is True
+        assert lease.current(store, "sw") is None

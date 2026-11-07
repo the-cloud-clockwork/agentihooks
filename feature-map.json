@@ -423,6 +423,26 @@
       ]
     },
     {
+      "id": "swarm-tick-spawn-reserve",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-room",
+      "behaviour": "A parallel pass holds back the end of a lane for each reserved step: every step a reserved step needs, directly or through another, runs against its lane less the reserve, and one cut there is abandoned without dropping the reserved step, so spawn still starts with its reserve when the steps before it are slow; steps spawn does not need keep the whole lane, and one of them that needs a cut step is dropped.",
+      "seam": "scripts.tick.pool.Pass reserves, scripts.tick.engine.run_graph",
+      "tests": [
+        "tests/tick/test_spawn_room.py::test_spawn_still_runs_with_its_reserve_when_the_steps_it_needs_are_slow",
+        "tests/tick/test_spawn_room.py::test_without_a_reserve_slow_needs_spend_the_lane_and_spawn_is_skipped",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_keeps_the_whole_lane",
+        "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
+        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
+        "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
+        "tests/tick/test_spawn_room.py::test_a_shorter_critical_lane_reserves_the_same_share_for_spawn",
+        "tests/tick/test_spawn_room.py::test_a_lane_less_its_reserve_keeps_the_lane_clock",
+        "tests/tick/test_spawn_room.py::test_a_step_whose_whole_lane_ran_out_drops_its_dependents_with_its_needs_intact",
+        "tests/tick/test_spawn_room.py::test_a_need_shared_by_two_reserved_steps_holds_back_the_larger_reserve"
+      ]
+    },
+    {
       "id": "swarm-tick-territory",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13b",
@@ -524,10 +544,11 @@
       "id": "swarm-tick-early-end-stamp",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
-      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick; an intent check that overran its budget leaves the pass to end full.",
       "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
       "tests": [
-        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full",
+        "tests/tick/test_early_end.py::test_an_intent_check_past_its_budget_leaves_the_pass_to_end_full",
         "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
         "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
       ]
@@ -545,7 +566,8 @@
         "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
         "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
         "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
-        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value",
+        "tests/tick/test_early_end_streak.py::test_a_pass_whose_lane_dropped_the_page_relay_still_lists_its_agents_and_ends_full"
       ]
     },
     {
@@ -625,7 +647,8 @@
       "seam": "The tick lock in scripts.swarm.lease",
       "tests": [
         "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
-        "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock"
+        "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock",
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock"
       ]
     },
     {
@@ -1028,7 +1051,13 @@
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
-        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
+        "tests/swarm/test_focus_budget.py::test_focus_record_order_breaks_ties_within_one_rank_band",
+        "tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task",
+        "tests/swarm/test_focus_budget.py::test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank"
       ]
     },
     {
@@ -1731,6 +1760,7 @@
         "tests/swarm/test_tick_view_start.py::test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read",
         "tests/swarm_ledger/test_export_parts.py::test_the_tick_view_parts_are_accepted",
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
+        "tests/tick/test_view.py::test_the_view_and_the_export_schema_read_one_ledger_part_list",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
         "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view",
@@ -1834,6 +1864,30 @@
       ]
     },
     {
+      "id": "panic-fix-branch-pushes",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-push",
+      "behaviour": "While fleet panic is on, a push, rerun or dispatch from a session whose branch is the head branch of a registered fix pull request goes through, and the same command from any other branch stays frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix",
+        "tests/swarm/test_panic.py::test_panic_still_refuses_a_push_from_any_other_branch",
+        "tests/swarm/test_panic.py::test_the_hook_payload_cwd_decides_the_fix_branch_push",
+        "tests/swarm/test_panic.py::test_a_same_named_branch_in_another_repository_stays_frozen",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_when_the_fix_cannot_be_read",
+        "tests/swarm/test_panic.py::test_panic_refuses_a_push_outside_a_git_checkout",
+        "tests/swarm/test_panic.py::test_a_git_read_runs_in_the_session_directory_within_five_seconds",
+        "tests/swarm/test_panic.py::test_a_git_read_that_cannot_run_reads_empty",
+        "tests/swarm/test_panic.py::test_a_failed_git_read_reads_empty",
+        "tests/swarm/test_panic.py::test_an_unreadable_fix_reads_as_no_branch",
+        "tests/swarm/test_panic.py::test_no_directory_or_no_fix_reads_no_git",
+        "tests/swarm/test_panic.py::test_a_detached_checkout_reads_no_origin_and_stays_frozen",
+        "tests/swarm/test_panic.py::test_a_checkout_without_an_origin_stays_frozen",
+        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
@@ -1879,6 +1933,60 @@
       "tests": [
         "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
+    },
+    {
+      "id": "controller-survives-ledger-timeout",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-timeout",
+      "behaviour": "When a controller pass raises LedgerUnreachable, such as a ledger read timeout, the run loop logs it, ends that pass, waits one tick as backoff and starts the next pass without exiting the process; a single pass run reports it as exit code 1. The startup proof swarm run and control service host before the loop are outside this seam.",
+      "seam": "scripts.swarm.controller.main run loop",
+      "tests": [
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass",
+        "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_once_reports_a_ledger_timeout_as_a_failed_pass"
+      ]
+    },
+    {
+      "id": "swarm-tick-database-ledger",
+      "origin": "operator",
+      "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-db-ledger",
+      "behaviour": "While the database URL setting names the shared ledger database, a tick pass serves its ledger export, resource reads and operations in process through the ledger server's own route code over the shared ledger repository, every write keeping the controller epoch stamp and every refusal surfacing as the same HTTP error, so passes complete with the ledger server down; without the setting the tick calls the ledger server.",
+      "seam": "scripts.tick.adapters.database_ledger.client, chosen by scripts.swarm_ledger.ledger_route.tick for the tick ledger port adapter and the pass LedgerClient",
+      "semgrep_rule": "feature-tick-database-ledger",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.install",
+        "swarm",
+        "rig-grade-swarm",
+        "tick-report"
+      ],
+      "tests": [
+        "tests/tick/test_database_ledger.py::test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set",
+        "tests/tick/test_database_ledger.py::test_the_port_exports_the_ledger_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_a_stale_controller_write_is_refused_as_the_server_refuses_it",
+        "tests/tick/test_database_ledger.py::test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down",
+        "tests/tick/test_database_ledger.py::test_outside_a_database_pass_the_port_still_calls_the_ledger_server",
+        "tests/tick/test_database_ledger_routes.py::test_a_missing_ledger_answers_the_server_404_body",
+        "tests/tick/test_database_ledger_routes.py::test_a_storage_failure_answers_the_server_500_body_and_logs_it",
+        "tests/tick/test_database_ledger_routes.py::test_a_read_is_bounded_and_encoded_as_ascii_json",
+        "tests/tick/test_database_ledger_routes.py::test_an_export_reply_is_not_bounded",
+        "tests/tick/test_database_ledger_routes.py::test_a_write_runs_as_the_service_principal",
+        "tests/tick/test_database_ledger_routes.py::test_a_streamed_reply_and_a_task_page_answer_as_the_server_sends_them",
+        "tests/tick/test_database_ledger_routes.py::test_an_exchange_keeps_what_the_route_code_sends",
+        "tests/tick/test_database_ledger_routes.py::test_a_read_request_hands_the_route_code_a_bodiless_get",
+        "tests/tick/test_database_ledger_routes.py::test_an_operations_request_posts_its_body_with_the_writer_header",
+        "tests/tick/test_database_ledger_routes.py::test_an_empty_path_reads_the_metadata",
+        "tests/tick/test_database_ledger_routes.py::test_a_refused_request_raises_the_server_http_error",
+        "tests/tick/test_database_ledger_routes.py::test_a_reply_below_400_is_returned",
+        "tests/tick/test_database_ledger_routes.py::test_the_database_client_carries_the_base_timeout_and_in_process_transport",
+        "tests/tick/test_database_ledger_routes.py::test_the_ledger_client_is_the_database_client_inside_a_database_pass",
+        "tests/tick/test_database_ledger_routes.py::test_a_database_call_sends_its_service_flag_and_exits_as_the_server_refusal",
+        "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
+        "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
       ]
     }
   ],

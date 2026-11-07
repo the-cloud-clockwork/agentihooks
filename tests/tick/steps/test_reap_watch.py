@@ -44,9 +44,9 @@ def _agent(**fields: Any) -> AgentRecord:
 
 def _store(calls: Calls) -> Any:
     """Return a store whose writes are recorded."""
-    redis = SimpleNamespace(set=calls.fn("redis.set"))
+    redis = SimpleNamespace(set=calls.fn("redis.set"), hexists=lambda key, field: False)
     return SimpleNamespace(
-        redis=redis, key=lambda slug, kind, name: f"{slug}/{kind}/{name}", put_agent=calls.fn("put_agent")
+        redis=redis, key=lambda slug, *parts: "/".join((slug, *parts)), put_agent=calls.fn("put_agent")
     )
 
 

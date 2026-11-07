@@ -1,0 +1,98 @@
+from dataclasses import replace
+from typing import Any, cast
+
+import pytest
+
+from scripts.swarm_v2.kubernetes import replacement
+from tests import sv2_kub05_cases as cases
+from tests.test_swarm_v2_kubernetes_failures import _Ledger, _Relaunch
+from tests.test_swarm_v2_kubernetes_failures import world as world
+
+pytestmark = pytest.mark.unit
+
+
+def test_a_node_lost_retry_reopens_for_hive_placement_without_relaunching(world: Any) -> None:
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
+    replacements = replacement.Replacements(recovery, cast(Any, relaunch), ledger, placed=True)
+    world.show(world.old, "node_lost")
+    world.reconcile(recovery)
+
+    assert replacements() == {world.old.execution_id: "placed"}
+    assert relaunch.calls == []
+    assert ledger.rows[0]["state"] == "open"
+    assert ledger.rows[0]["claimed_by"] == ""
+    successor = recovery.decision(world.old.execution_id).replacement
+    assert world.store.execution(cases.SLUG, successor).state == "ended"
+    assert replacements() == {}
+
+
+@pytest.mark.parametrize("state,claimant", [("claimed", "another-worker"), ("done", ""), ("pr", "another-worker")])
+def test_an_unschedulable_attempt_never_reopens_reassigned_or_finished_work(
+    world: Any, state: str, claimant: str
+) -> None:
+    from scripts.swarm_v2.kubernetes.unschedulable import Unschedulable
+    from tests.test_swarm_v2_kubernetes_failures import _unschedulable
+
+    row = {"id": "task", "state": state, "claimed_by": claimant}
+    ledger = _Ledger(rows=[dict(row)])
+    ending = Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1)
+    _unschedulable(world, world.old)
+    pods = list(world.api.objects.values())
+    ending(pods)
+    world.clock[0] += 1
+
+    assert ending(pods) == {world.old.execution_id: "ended"}
+    assert ledger.rows == [row]
+    assert ledger.calls == []
+
+
+@pytest.mark.parametrize("change", ["unchanged", "scheduled", "deleted", "seat_moved"])
+def test_unschedulable_finalization_resumes_after_the_agent_was_ended(
+    world: Any, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from scripts.swarm_v2 import retention
+    from scripts.swarm_v2.kubernetes.unschedulable import Unschedulable
+    from tests.test_swarm_v2_kubernetes_failures import _unschedulable
+
+    ledger = _Ledger()
+    ending = Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1)
+    _unschedulable(world, world.old)
+    pods = list(world.api.objects.values())
+    ending(pods)
+    world.clock[0] += 1
+    finalize = retention.finalize
+
+    def interrupted(*args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("interrupted finalization")
+
+    monkeypatch.setattr(retention, "finalize", interrupted)
+    with pytest.raises(ConnectionError, match="interrupted finalization"):
+        ending(pods)
+    assert world.store.execution(cases.SLUG, world.old.execution_id).state == "ended"
+    monkeypatch.setattr(retention, "finalize", finalize)
+    if change == "scheduled":
+        pods[0]["status"] = {"phase": "Running"}
+    elif change == "deleted":
+        pods = []
+    elif change == "seat_moved":
+        successor = replace(world.old, execution_id="", generation=0, state="working")
+        world.live.admit(successor, world.old.execution_id)
+
+    assert ending(pods) == {world.old.execution_id: "ended"}
+    final = retention.final(world.store, cases.SLUG, world.old.execution_id)
+    assert final is not None
+    assert final.state == "cancelled"
+    from types import SimpleNamespace
+
+    from scripts.swarm_v2 import deployed
+    from tests.test_swarm_v2_kubernetes_failures import _Cleaning, _Grants
+
+    recover = deployed.recovery_pass(
+        cast(Any, SimpleNamespace(controller=world.live, grants=_Grants())),
+        cast(Any, SimpleNamespace(image_tag="dev")),
+        cast(Any, _Cleaning(world)),
+    )
+    assert recover.completion is not None
+    recover.completion(list(world.api.objects.values()))
+    assert f"swarm-{world.old.execution_id}" not in world.api.objects

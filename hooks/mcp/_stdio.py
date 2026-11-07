@@ -2,20 +2,21 @@ import json
 import os
 import sys
 from importlib.metadata import version
+from typing import Any
 
 from hooks.mcp import _resolve_categories
 from hooks.mcp._catalog import CAPABILITIES, PROTOCOL_VERSIONS, get_catalog
 
 _SERVER_INFO = {"name": "agentihooks", "version": version("mcp")}
-_EMPTY_LISTS = {
+_LISTINGS = {
     "resources/list": "resources",
     "resources/templates/list": "resourceTemplates",
     "prompts/list": "prompts",
 }
 
 
-def list_tools() -> list[dict]:
-    catalog = get_catalog()
+def list_tools() -> list[dict[str, Any]]:
+    catalog = get_catalog()["tools"]
     categories = _resolve_categories()
     unknown = [category for category in categories if category not in catalog]
     if unknown:
@@ -38,6 +39,12 @@ def list_tools() -> list[dict]:
             file=sys.stderr,
         )
     return list(tools.values())
+
+
+def list_served(kind: str) -> list[dict[str, Any]]:
+    """The resources, resource templates or prompts the requested categories serve, from the startup catalog."""
+    catalog = get_catalog()[kind]
+    return [item for category in dict.fromkeys(_resolve_categories()) for item in catalog.get(category, [])]
 
 
 class _Output:
@@ -123,8 +130,8 @@ def run() -> None:
             continue
         elif method == "ping":
             result = {}
-        elif method in _EMPTY_LISTS and initialize_id is not None:
-            result = {_EMPTY_LISTS[method]: []}
+        elif method in _LISTINGS and initialize_id is not None:
+            result = {_LISTINGS[method]: list_served(_LISTINGS[method])}
         elif method == "tools/list" and initialize_id is not None:
             result = {"tools": tools}
         else:

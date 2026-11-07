@@ -1,0 +1,6 @@
+{
+  "hooks/mcp/culture.py:hooks.mcp.culture.x_culture_text:91e28cb2d27016f9a7375f8f1768424916a5ca4203df26cd9ddf581b7d422808": {
+    "reader": "standards_reader",
+    "reason": "withhold reads the task seat only to key learned notes; culture_text passes no learned notes and returns only the culture field, so the seat value never reaches output."
+  }
+}

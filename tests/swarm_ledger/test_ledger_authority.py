@@ -433,7 +433,11 @@ def test_controller_lifecycle_actions_carry_the_epoch_of_their_ledger(monkeypatc
     held = lease.acquire(saved, SLUG, "home")
     assert held is not None
     sent = []
-    transport = SimpleNamespace(base=lambda slug: f"http://ledger/{slug}", credentials=lambda slug, service: {})
+    transport = SimpleNamespace(
+        base=lambda slug: f"http://ledger/{slug}",
+        credentials=lambda slug, service: {},
+        client=lambda slug, service: api_client.ResourceClient(f"http://ledger/{slug}", {}),
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: transport)
     monkeypatch.setattr(ledger_link, "remote", lambda slug: slug == SLUG)
     monkeypatch.setattr(

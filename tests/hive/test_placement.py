@@ -225,11 +225,13 @@ def test_a_master_compares_a_full_one_slot_hive_with_a_partly_filled_hive():
 
 
 @pytest.mark.parametrize(("used_percent", "expected"), [(79, "worker-one"), (81, "oracle")])
-def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(used_percent, expected):
+def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_percent(
+    used_percent: int, expected: str
+) -> None:
     from scripts.hive import admission, placement
 
     total = 92_000
-    reading = {"cpus": 16, "load5": 14.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
+    reading = {"cpus": 16, "load5": 4.0, "total_mb": total, "available_mb": total * (100 - used_percent) // 100}
     records = [
         hive("oracle", ui="no", max_agents=24),
         hive("worker-one", ui="no", max_agents=28, agents=20, prefer={"eng": 1, "ci": 1, "plan": 1}),
@@ -242,6 +244,25 @@ def test_the_preferred_hive_takes_agents_until_its_node_memory_crosses_eighty_pe
     refused = "ram: 17480 of 92000 MB available, 81 percent used, at or above the 80 percent line"
     spill = None if expected == "worker-one" else {"preferred": "worker-one", "refusal": refused}
     assert (chosen.spill and chosen.spill.record()) == spill
+
+
+def test_a_cpu_saturated_preferred_hive_spills_to_an_idle_unranked_hive() -> None:
+    from scripts.hive import admission, placement
+
+    total = 64_000
+    reading = {"cpus": 16, "load5": 28.7, "total_mb": total, "available_mb": total * 30 // 100}
+    records = [
+        hive("workstation", ui="no", max_agents=24, room=18),
+        hive("hive-three", ui="no", max_agents=28, agents=4, prefer={"eng": 1, "ci": 1}),
+    ]
+    found = admission.capped(admission.room(reading, first=True), 4, 28)
+    records[1].update(room=0, first_room=found.room, first_refusal=admission.refusal(found))
+
+    chosen = placement.choose("eng", "claude", "acct", "subscription", REPO, records, NOW)
+    assert isinstance(chosen, placement.Choice)
+    assert chosen.hive == "workstation"
+    refused = "cpu: five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"
+    assert chosen.spill and chosen.spill.record() == {"preferred": "hive-three", "refusal": refused}
 
 
 def test_round_robin_keeps_at_most_the_node_limit_of_live_hives_listing_the_repo_by_id():
