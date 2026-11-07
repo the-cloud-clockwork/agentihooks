@@ -1,8 +1,10 @@
+import hashlib
 import json
 import os
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -205,12 +207,18 @@ def test_an_agent_that_already_exited_needs_no_second_signal():
     kill.assert_called_once()
 
 
-def test_session_end_does_not_reenter_claim_termination(monkeypatch):
+def test_session_end_does_not_reenter_claim_termination(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", "revoked")
-    with patch.object(claim_fence, "open_bus", side_effect=AssertionError("already ending")):
+    with (
+        patch.object(claim_fence, "fresh", return_value=False),
+        patch.object(claim_fence, "bounded", return_value=False) as read,
+        patch.object(claim_fence, "terminate") as kill,
+    ):
         assert claim_fence.check({"hook_event_name": "SessionEnd"}) is None
+    read.assert_not_called()
+    kill.assert_not_called()
 
 
 def test_an_initial_launching_claim_is_owned_at_its_pinned_revision(monkeypatch):
@@ -309,8 +317,9 @@ def test_a_fresh_held_answer_skips_the_read_for_its_own_claim_generation_only(
     bus = _held_claim(monkeypatch)
     with patch.object(claim_fence, "open_bus", return_value=bus):
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
-    with patch.object(claim_fence, "open_bus", side_effect=AssertionError("cached")):
+    with patch.object(claim_fence, "open_bus") as cached:
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    cached.assert_not_called()
     current = json.loads(os.environ["AGENTIHOOKS_CLAIM_FENCE"])
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({**current, "revision": current["revision"] + 1}))
     with (
@@ -321,3 +330,80 @@ def test_a_fresh_held_answer_skips_the_read_for_its_own_claim_generation_only(
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
     connect.assert_called_once()
     kill.assert_called_once_with(4321)
+
+
+def test_a_read_at_its_deadline_does_not_reach_the_bus() -> None:
+    from hooks.context import claim_fence
+
+    answers: list[bool] = []
+    with (
+        patch.object(claim_fence, "monotonic", return_value=5.0),
+        patch.object(claim_fence, "owned", return_value=True) as owned,
+    ):
+        claim_fence.read("raw", 5.0, answers)
+    owned.assert_not_called()
+    assert answers == []
+
+
+def test_the_bounded_read_runs_in_a_daemon_thread_joined_for_the_bound() -> None:
+    from hooks.context import claim_fence
+
+    with (
+        patch.object(claim_fence, "Thread") as thread,
+        patch.object(claim_fence, "monotonic", return_value=10.0),
+    ):
+        assert claim_fence.bounded("raw") is None
+    thread.assert_called_once_with(target=claim_fence.read, args=("raw", 10.0 + claim_fence.BOUND, []), daemon=True)
+    thread.return_value.start.assert_called_once_with()
+    thread.return_value.join.assert_called_once_with(claim_fence.BOUND)
+
+
+def test_the_cache_marker_lives_under_the_agentihooks_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from hooks.context import claim_fence
+
+    digest = hashlib.sha256(b"raw").hexdigest()
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "state"))
+    assert claim_fence.marker("raw") == tmp_path / "state" / "claim-fence" / digest
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    with patch.object(claim_fence.Path, "home", return_value=tmp_path):
+        assert claim_fence.marker("raw") == tmp_path / ".agentihooks" / "claim-fence" / digest
+
+
+@pytest.mark.parametrize(("age", "expected"), [(-1.0, False), (0.0, True), (4.0, True), (5.0, False)])
+def test_a_held_answer_is_fresh_only_inside_the_cache_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, age: float, expected: bool
+) -> None:
+    from hooks.context import claim_fence
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    path = claim_fence.marker("raw")
+    path.parent.mkdir(parents=True)
+    path.touch()
+    os.utime(path, (1000.0, 1000.0))
+    with patch.object(claim_fence, "time", return_value=1000.0 + age):
+        assert claim_fence.fresh("raw") is expected
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_remembering_a_held_answer_creates_its_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, existing: bool
+) -> None:
+    from hooks.context import claim_fence
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "a" / "b"))
+    if existing:
+        claim_fence.marker("raw").parent.mkdir(parents=True)
+    claim_fence.remember("raw")
+    assert claim_fence.marker("raw").is_file()
+
+
+def test_remembering_on_an_unwritable_home_does_not_fail_the_hook(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from hooks.context import claim_fence
+
+    home = tmp_path / "home"
+    home.write_text("")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    claim_fence.remember("raw")
+    assert home.is_file()
