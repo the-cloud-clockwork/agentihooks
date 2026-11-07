@@ -528,6 +528,39 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     ]
 
 
+def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_quota_rows(tmp_path, monkeypatch):
+    from scripts.hive import registry as hives
+
+    store = _store()
+    other = "codex-fixtureatexample-com"
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof", keys=(ACCOUNT, other)))
+    beat = lease.now_ms(store)
+    hives.update(store.redis, "hive-a", ["max-agents=8"])
+    hives.beat(
+        store.redis,
+        "hive-a",
+        {
+            "heartbeat_at": beat,
+            "beat_at": beat,
+            "slots": [
+                {"harness": "claude", "account": ACCOUNT.replace("-", "_"), "kind": "subscription", "cap": 6},
+                {"harness": "codex", "account": other, "kind": "subscription", "cap": 6},
+            ],
+        },
+    )
+    sessions = {f"claude:{ACCOUNT.replace('-', '_')}": 2, f"codex:{other}": 1}
+    store.redis.set(f"{hives.key('hive-a')}:sessions", json.dumps(sessions))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    try:
+        config = replace(store.config(SLUG), max_eng=2, max_ci=0)
+        service.runtime.herdr_runtime.host = lambda: None
+        decision = service.runtime.quota_capacity(config, [], 1_800_000_000, {"eng": 2, "ci": 0, "plan": 0})
+    finally:
+        service.stop()
+
+    assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [(ACCOUNT, 2), (other, 1)]
+
+
 class PoolPods(Pods):
     def __init__(self, namespace, pods):
         super().__init__(namespace)
