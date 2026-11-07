@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.699 · 2026-11-07
+
+### 2026-11-07 · c19e2e56473d · #9962 · @agenticore-app
+
+**Admit the dispatcher seat ahead of lane launches**
+
+This change fixes a bug where a freed hive slot was always claimed by a waiting lane task instead of a pending dispatcher spawn, because the dispatch seat check ran after lane placement in the tick pass. Moving the dispatch seat site earlier, alongside the master seats, ensures a pending dispatcher trigger gets priority for the next free slot ahead of lane launches. This matters because dispatcher spawns were silently being starved whenever a lane task was also competing for the same freed slot, delaying dispatch work indefinitely.
+
 ## v2.17.697 · 2026-11-07
 
 ### 2026-11-07 · 7f3751e66f2b · #9971 · @agenticore-app
