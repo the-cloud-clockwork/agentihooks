@@ -645,9 +645,9 @@ def run_tick(
             try:
                 beating.close()
             finally:
+                controller.release_tick_lock(store, slug, token, "pass")
                 timing.BEFORE_STEP.reset(keeping)
                 tick_stop.drop(token)
-                controller.release_tick_lock(store, slug, token, "pass")
 
 
 def cmd_list(store, args):
