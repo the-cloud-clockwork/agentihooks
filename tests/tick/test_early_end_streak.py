@@ -152,3 +152,24 @@ def test_each_early_end_of_the_report_step_counts_the_missing_value(store: Any) 
     report.early_end(store, "sw", Left("agents"), [])
     report.early_end(store, "sw", Left("agents"), [])
     assert early_ends.read(store, "sw") == {"value": "agents", "count": 2}
+
+
+@pytest.mark.feature("swarm-tick-early-end-streak")
+def test_a_pass_whose_lane_dropped_the_page_relay_still_lists_its_agents_and_ends_full(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    real = cli._Wrapper.shut
+    boxes: list[Any] = []
+
+    def shut(wrapper: Any, step: Any) -> bool:
+        boxes.append(wrapper.box)
+        return step.name == "page relay" or real(wrapper, step)
+
+    monkeypatch.setattr(cli._Wrapper, "shut", shut)
+    [actions] = _passes(swarm, ledger, runtime, 1)
+    assert not any(action.startswith("pass ended early") for action in actions)
+    assert boxes[-1]["agents"] == []
+    assert swarm.redis.get(swarm.key("sw", "early-end-streak")) is None
