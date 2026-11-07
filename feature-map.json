@@ -67,6 +67,16 @@
       ]
     },
     {
+      "id": "swarm-tick-cached-ledger",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped claims and launches a ready task from the last good ledger view inside the pass deadline, and its claim lands on the ledger once the server answers again.",
+      "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
+      "tests": [
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
