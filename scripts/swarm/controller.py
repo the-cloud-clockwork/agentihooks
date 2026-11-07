@@ -582,9 +582,7 @@ def _reached(outage: redis_grace.Outage) -> RedisStore:
         except Unreachable as exc:
             if not outage.tolerated():
                 raise
-            print(
-                f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr, flush=True
-            )
+            print(f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr)
             scheduled_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
@@ -615,7 +613,6 @@ def _passes(
             print(
                 f"controller: pass ended inside the Redis grace window, next pass after one tick: {exc}",
                 file=sys.stderr,
-                flush=True,
             )
             if once:
                 return 1
@@ -662,7 +659,7 @@ def main(argv: list[str]) -> int:
 
     operator_env.fill(os.environ)
     operator_env.classifier(os.environ)
-    outage = redis_grace.Outage(redis_grace.grace_seconds(os.environ))
+    outage = redis_grace.Outage.from_environ()
     store = _reached(outage)
     service = None
     bus = open_controller_bus(os.environ)

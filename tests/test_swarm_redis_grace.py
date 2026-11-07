@@ -51,8 +51,14 @@ def test_the_marker_lives_under_the_controller_home():
     assert redis_grace.marker({}) == Path.home() / ".agentihooks" / "controller" / "redis-outage"
 
 
+def test_the_outage_window_comes_from_the_grace_setting(monkeypatch):
+    monkeypatch.setenv(redis_grace.GRACE_ENV, "45")
+
+    assert redis_grace.Outage.from_environ().grace_s == 45
+
+
 def test_down_for_records_the_first_failure_and_counts_from_it(tmp_path):
-    path = tmp_path / "controller" / "redis-outage"
+    path = tmp_path / "home" / "controller" / "redis-outage"
 
     assert redis_grace.down_for(path, 100.0) == 0
     assert redis_grace.down_for(path, 130.0) == 30
@@ -197,7 +203,7 @@ def test_live_fails_at_once_on_a_swarm_error_other_than_redis(home, monkeypatch,
     assert not (home / "controller" / "redis-outage").exists()
 
 
-def test_startup_retries_a_refused_connect_inside_the_window(monkeypatch):
+def test_startup_retries_a_refused_connect_inside_the_window(monkeypatch, capsys):
     attempts = []
 
     def connect():
@@ -213,6 +219,11 @@ def test_startup_retries_a_refused_connect_inside_the_window(monkeypatch):
     assert controller._reached(outage) == "store"
     assert len(attempts) == 3
     assert outage.since is None
+    assert capsys.readouterr() == (
+        "",
+        "controller: Redis is unreachable (connection refused); retrying after one tick inside the Redis grace window\n"
+        * 2,
+    )
 
 
 def test_startup_gives_up_once_the_refusal_outlasts_the_window(monkeypatch):

@@ -1,5 +1,6 @@
 """Grace window that keeps the controller alive through a Redis outage shorter than it."""
 
+import os
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -42,6 +43,11 @@ class Outage:
         self.grace_s = grace_s
         self.clock = clock
         self.since: float | None = None
+
+    @classmethod
+    def from_environ(cls) -> "Outage":
+        """Outage whose window is the grace setting of the process environment."""
+        return cls(grace_seconds(os.environ))
 
     def tolerated(self) -> bool:
         """Record a Redis failure and answer whether the outage is still inside the window."""
