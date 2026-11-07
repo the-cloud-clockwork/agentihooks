@@ -97,11 +97,25 @@ class AccountRoute:
         return None if seat is None else seat.account
 
 
+class HarnessRoutes:
+    """One account route per harness: capacity rows from every harness, a launch account from its own harness."""
+
+    def __init__(self, routes: Mapping[str, AccountRoute]) -> None:
+        self.routes = routes
+
+    def rows(self, cap: int, now: float) -> list[Account]:
+        return [row for route in self.routes.values() for row in route.rows(cap, now)]
+
+    def choose(self, cap: int, planned: str | None, predecessor: tuple[str, str] | None, harness: str) -> str | None:
+        route = self.routes.get(harness)
+        return None if route is None else route.choose(cap, planned, predecessor)
+
+
 class FleetAccounts:
     """The deployed controller's quota capacity rows, read like ``capacity.accounts`` but from the approved keys, the
     fleet quota observations and the fleet reservations, never from local tokens or the local process table."""
 
-    def __init__(self, route: AccountRoute, cap: int) -> None:
+    def __init__(self, route: AccountRoute | HarnessRoutes, cap: int) -> None:
         self.route, self.cap = route, cap
 
     def __call__(self, environ: Mapping[str, str], now: float, refresh: bool) -> list[Account]:
