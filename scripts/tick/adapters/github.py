@@ -186,6 +186,7 @@ class GitHubSourceControl:
             body["body"] or "",
             body["draft"],
             fork["full_name"] if fork else "",
+            body.get("merge_commit_sha") or "",
         )
 
     def checks(self, reference: ChangeRef, *, deadline: Deadline) -> tuple[CheckState, ...]:
@@ -280,7 +281,10 @@ class GitHubSourceControl:
         """Read the newest workflow runs of the repository, one page."""
         deadline.live()
         rows = self._api([f"repos/{self.repository}/actions/runs?per_page={_PAGE}"], deadline)["workflow_runs"]
-        return tuple(RepositoryRun(row["id"], row["head_branch"], row["event"], row["status"]) for row in rows)
+        return tuple(
+            RepositoryRun(row["id"], row["head_branch"], row["event"], row["status"], row.get("head_sha") or "")
+            for row in rows
+        )
 
     def cancel_run(self, run_id: int, *, deadline: Deadline) -> None:
         """Ask GitHub to cancel one workflow run of the repository; its answer carries no body to read."""

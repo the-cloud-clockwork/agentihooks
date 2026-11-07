@@ -189,6 +189,18 @@ def test_github_change_reads_an_empty_body_as_no_text(monkeypatch: pytest.Monkey
     assert (change.body, change.draft) == ("", False)
 
 
+@pytest.mark.feature("panic-merged-fix-dev-run")
+def test_github_change_reads_its_merge_commit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider, _ = _provider(
+        monkeypatch,
+        tmp_path,
+        [{**PULL, "merged": True, "merge_commit_sha": "m"}, {**PULL, "merge_commit_sha": None}, PULL],
+    )
+
+    merged, unset, absent = (provider.change(REFERENCE, deadline=_deadline()) for _ in range(3))
+    assert (merged.merge_commit, unset.merge_commit, absent.merge_commit) == ("m", "", "")
+
+
 @pytest.mark.feature("swarm-tick-source-control-port")
 def test_a_change_record_defaults_to_no_body_and_not_a_draft() -> None:
     change = port.ChangeState(REFERENCE, "open", "head", "dev", False, "https://x/7")
@@ -477,14 +489,21 @@ def test_github_latest_runs_read_the_newest_runs_of_the_repository(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     rows = [
-        {"id": 5, "head_branch": "feature", "event": "pull_request", "status": "queued", "name": "Tests"},
-        {"id": 6, "head_branch": "dev", "event": "push", "status": "completed", "name": "Lint"},
+        {
+            "id": 5,
+            "head_branch": "feature",
+            "event": "pull_request",
+            "status": "queued",
+            "name": "Tests",
+            "head_sha": "a",
+        },
+        {"id": 6, "head_branch": "dev", "event": "push", "status": "completed", "name": "Lint", "head_sha": None},
         {"id": 7, "head_branch": None, "event": "schedule", "status": "in_progress", "name": "Nightly"},
     ]
     provider, recorder = _provider(monkeypatch, tmp_path, [{"total_count": 3, "workflow_runs": rows}])
 
     assert provider.latest_runs(deadline=_deadline()) == (
-        port.RepositoryRun(5, "feature", "pull_request", "queued"),
+        port.RepositoryRun(5, "feature", "pull_request", "queued", "a"),
         port.RepositoryRun(6, "dev", "push", "completed"),
         port.RepositoryRun(7, None, "schedule", "in_progress"),
     )

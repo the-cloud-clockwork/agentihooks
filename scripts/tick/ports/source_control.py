@@ -38,6 +38,7 @@ class ChangeState:
     body: str = ""
     draft: bool = False
     head_repository: str = ""
+    merge_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ class RepositoryRun:
     branch: str | None
     event: str
     status: str
+    head_sha: str = ""
 
 
 @dataclass(frozen=True)
