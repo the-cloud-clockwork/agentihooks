@@ -7,6 +7,7 @@ import pytest
 
 from scripts.hub import reconciler
 from scripts.swarm import dead_resume, held_elsewhere, launch_check, live_binding, master_retire, reaper, tick
+from scripts.swarm.store import AgentRecord
 from scripts.tick.steps import observe
 
 pytestmark = pytest.mark.unit
@@ -32,7 +33,7 @@ def _agent(name: str, state: str = "working") -> SimpleNamespace:
     return SimpleNamespace(name=name, task=f"task-{name}", lane="eng", state=state, profile="p")
 
 
-def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]) -> list[tuple[Any, ...]]:
+def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[Any]) -> list[tuple[Any, ...]]:
     seen: list[tuple[Any, ...]] = []
     monkeypatch.setattr(launch_check, "judged", lambda store, slug: {"judged"})
     monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: agents)
@@ -61,6 +62,9 @@ def _verify_seams(monkeypatch: pytest.MonkeyPatch, agents: list[SimpleNamespace]
     )
     monkeypatch.setattr(live_binding, "relaunch_assignment", lambda agent, task, config: {"task": agent.task})
     monkeypatch.setattr(master_retire, "hold", lambda *args: "")
+    monkeypatch.setattr(
+        observe.retire_watch, "reported_gone", lambda store, agent, now_ms: isinstance(store, _Recorder) and now_ms < 0
+    )
     monkeypatch.setattr(reaper, "scratch_homes", lambda slug, task: [])
     monkeypatch.setattr(
         tick,
@@ -104,6 +108,33 @@ def test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_
     assert [entry for entry in seen if entry[0] == "drop"] == [("drop", "sw", store, "ledger", rows, "drifted", True)]
     assert calls[0][0] == "bindings" and [agent.name for agent in calls[0][1][0]] == [a.name for a in agents[1:]]
     assert ("redis.hset", ("sw:launch-assignments", "task-drifted", '{"task": "task-drifted"}'), {}) in calls
+
+
+@pytest.mark.feature("swarm-tick-launch-cluster")
+def test_verification_retires_a_master_its_hive_reports_gone_in_one_pass_without_a_runtime_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dead, alive = (AgentRecord(name, "master", f"task-{name}", profile="p") for name in ("dead", "alive"))
+    seen = _verify_seams(monkeypatch, [dead, alive])
+    monkeypatch.setattr(live_binding, "record", lambda store, slug, agent, facts, now_ms: ["process"])
+    monkeypatch.setattr(
+        observe.retire_watch,
+        "reported_gone",
+        lambda held, agent, now_ms: held is store and now_ms == 5 and agent.name == "dead",
+    )
+    calls: list[tuple[Any, ...]] = []
+    store = _Recorder(calls, {"key": "sw:launch-assignments"})
+    store.redis = _Recorder(calls, {}, "redis.")
+    runtime = _Recorder(calls, {"bindings": {}, "live_names": set(), "retire": False})
+    actions = observe._verify("sw", store, "ledger", runtime, {}, 5)
+    assert actions == [
+        "followed dead",
+        "retired dead after mismatched process and dropped",
+        "followed alive",
+        "could not retire alive after mismatched process, retrying next tick",
+    ]
+    assert [entry[1][0].name for entry in calls if entry[0] == "retire"] == ["alive"]
+    assert [entry[5] for entry in seen if entry[0] == "drop"] == ["dead"]
 
 
 def _check_seams(monkeypatch: pytest.MonkeyPatch, waiting: dict[str, Any]) -> list[tuple[Any, ...]]:
