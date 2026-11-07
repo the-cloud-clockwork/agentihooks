@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import github_reads
 from scripts.tick.deadline import Deadline
@@ -104,31 +104,34 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
 def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
     """Return the data of a refused open listing whose only errors hide check rollups from the App, else re-raise."""
     try:
-        body = json.loads(refused.stdout or "")
-    except ValueError:
+        body: Any = json.loads(refused.stdout)
+    except (TypeError, ValueError):
         raise refused from None
-    errors = body.get("errors") if isinstance(body, dict) else None
-    hidden = (
-        isinstance(errors, list)
-        and bool(errors)
-        and all(isinstance(error, dict) and _rollup_refusal(error) for error in errors)
-    )
-    data = body.get("data") if hidden else None
-    repository = data.get("repository") if isinstance(data, dict) else None
-    if not isinstance(repository, dict) or not isinstance(repository.get("pullRequests"), dict):
+    if not isinstance(body, dict):
         raise refused
-    return data
+    reply = cast(dict[str, Any], body)
+    errors: Any = reply.get("errors")
+    found = cast(list[Any], errors) if isinstance(errors, list) else []
+    hidden = bool(found) and all(
+        isinstance(error, dict) and _rollup_refusal(cast(dict[str, Any], error)) for error in found
+    )
+    data: Any = reply.get("data") if hidden else None
+    if not isinstance(data, dict):
+        raise refused
+    listing = cast(dict[str, Any], data)
+    repository: Any = listing.get("repository")
+    if not isinstance(repository, dict) or not isinstance(cast(dict[str, Any], repository).get("pullRequests"), dict):
+        raise refused
+    return listing
 
 
 def _rollup_refusal(error: dict[str, Any]) -> bool:
     """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
-    path = error.get("path")
-    return (
-        error.get("type") == "FORBIDDEN"
-        and isinstance(path, list)
-        and path[:2] == ["repository", "pullRequests"]
-        and path[-1] == "statusCheckRollup"
-    )
+    path: Any = error.get("path")
+    if error.get("type") != "FORBIDDEN" or not isinstance(path, list):
+        return False
+    steps = cast(list[Any], path)
+    return steps[:2] == ["repository", "pullRequests"] and steps[-1] == "statusCheckRollup"
 
 
 def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
