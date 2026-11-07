@@ -28,6 +28,7 @@ PENDING = "hive launch ordered, waiting for its acknowledgement"
 GONE = "the hive launch order ended before its acknowledgement"
 EXPIRED = "hive launch acknowledgement expired"
 LATE = "hive launch reservation expired"
+ACCOUNT_FULL = "account reservation is full"
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,15 @@ def _first_choice(
     return fallen or reason
 
 
+def _account_full(outcome: object) -> bool:
+    """Whether a launch answer is the refusal of an account whose reservation is full."""
+    return (
+        isinstance(outcome, Outcome)
+        and outcome.status is Status.UNAVAILABLE
+        and outcome.detail.startswith(ACCOUNT_FULL)
+    )
+
+
 def _match(check: str, expected: object, actual: object) -> None:
     if expected != actual:
         raise SwarmError(
@@ -287,7 +297,12 @@ class HiveLaunch:
         return waited
 
     def _select(
-        self, config: SwarmConfig, lane: str, task: dict, excluded: set[str] | None = None
+        self,
+        config: SwarmConfig,
+        lane: str,
+        task: dict[str, Any],
+        excluded: set[str] | None = None,
+        accounts: frozenset[str] = frozenset(),
     ) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
@@ -311,6 +326,7 @@ class HiveLaunch:
             if self._quota_accounts is None:
                 self._quota_accounts = capacity.accounts(dict(os.environ), now / 1000, refresh=False)
             rows = self._quota_accounts
+        rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         if lane == "master" and not task.get("route_kind"):
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)
@@ -435,8 +451,12 @@ class HiveLaunch:
             ),
         )
 
-    def _admitted_selection(self, request: SpawnRequest) -> Selection | placement.Wait:
-        selected = self.select(request.config, request.lane, request.task)
+    def _admitted_selection(
+        self, request: SpawnRequest, accounts: frozenset[str] = frozenset()
+    ) -> Selection | placement.Wait:
+        selected = (
+            self._reselect(request, accounts) if accounts else self.select(request.config, request.lane, request.task)
+        )
         excluded = set()
         while isinstance(selected, Selection):
             if self.user_bundle_refusal(selected):
@@ -462,7 +482,7 @@ class HiveLaunch:
             waited = self._withdraw(request, selected, refused)
             excluded.add(selected.hive)
             previous = selected
-            selected = self._select(request.config, request.lane, request.task, excluded)
+            selected = self._select(request.config, request.lane, request.task, excluded, accounts)
             if isinstance(selected, placement.Wait):
                 return self._record_wait(request.lane, request.task, waited)
             refusal = placement.Spill(previous.hive, refused) if previous.first else None
@@ -511,11 +531,47 @@ class HiveLaunch:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
                 return self.answer(request, order)
+        return self._placed(request)
+
+    def _placed(self, request: SpawnRequest) -> Outcome:
+        """Orders the launch on the selected account, moving to the next account while reservations are full."""
+        accounts: frozenset[str] = frozenset()
         selected = self._admitted_selection(request)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
-        if refused := self.user_bundle_refusal(selected):
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
+        while True:
+            if refused := self.user_bundle_refusal(selected):
+                return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
+            outcome = self._ordered(request, selected)
+            if not _account_full(outcome):
+                return outcome
+            self._release_room(request, selected)
+            accounts = accounts | {f"{selected.account.harness}:{selected.account.name}"}
+            selected = self._admitted_selection(request, accounts)
+            if isinstance(selected, placement.Wait):
+                return outcome
+
+    def _reselect(self, request: SpawnRequest, accounts: frozenset[str]) -> Selection | placement.Wait:
+        """Selects again without the accounts whose reservation refused this launch, charging a newly chosen hive."""
+        task: dict[str, Any] = request.task
+        selected = self._select(request.config, request.lane, task, accounts=accounts)
+        if self.placement_cache is not None:
+            key = (request.lane, task["id"])
+            charged = self.placement_cache.get(key)
+            if not (
+                isinstance(charged, Selection) and isinstance(selected, Selection) and charged.hive == selected.hive
+            ):
+                self._spend(selected)
+            self.placement_cache[key] = selected
+        return selected
+
+    def _release_room(self, request: SpawnRequest, selected: Selection) -> None:
+        from scripts.swarm import local_slots
+
+        admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
+        local_slots.release(self.store, selected.hive, self.slug, request.name)
+
+    def _ordered(self, request: SpawnRequest, selected: Selection) -> Outcome:
         try:
             named = replace(
                 request,
@@ -533,10 +589,7 @@ class HiveLaunch:
             )
             return self.send_order(request, selected, task)
         except BaseException:
-            from scripts.swarm import local_slots
-
-            admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
-            local_slots.release(self.store, selected.hive, self.slug, request.name)
+            self._release_room(request, selected)
             raise
 
     def user_bundle_refusal(self, selected: Selection) -> str:
@@ -573,7 +626,7 @@ class HiveLaunch:
             )
             if not reading.accepted:
                 refused = (
-                    f"account reservation is full: account={account.harness}:{account.name} "
+                    f"{ACCOUNT_FULL}: account={account.harness}:{account.name} "
                     f"sessions={reading.sessions} cap={account.cap} "
                     f"five_left={account.five_left} week_left={account.week_left}"
                 )
