@@ -31,8 +31,8 @@ ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
-AccountChooser = Callable[[int, str | None, tuple[str, str] | None], str | None]
-PlannedAccount = Callable[[str], str | None]
+AccountChooser = Callable[[int, str | None, tuple[str, str] | None, str], str | None]
+PlannedAccount = Callable[[str, str], str | None]
 Ending = Callable[[AgentRecord, str], AgentRecord]
 
 
@@ -235,9 +235,10 @@ class DistributedLaunch:
             return Outcome(
                 "spawn", Status.REFUSED, backend, detail=f"profile {profile} is not shipped in the worker image"
             )
+        harness = request.task.get("harness", "claude")
         if self.accounts is not None:
-            planned = None if self.planned is None else self.planned(request.task["id"])
-            account = self.accounts(terms.cap, planned, quota_predecessor(request.task))
+            planned = None if self.planned is None else self.planned(request.task["id"], harness)
+            account = self.accounts(terms.cap, planned, quota_predecessor(request.task), harness)
             if account is None:
                 return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
             terms = replace(terms, account=account)
@@ -249,7 +250,7 @@ class DistributedLaunch:
             runtime_backend=backend,
             runtime_target=target(request),
             profile=profile,
-            harness=request.task.get("harness", "claude"),
+            harness=harness,
         )
         store = self.controller.store
         occupant = store.execution_occupants(self.slug).get(agent.seat)
