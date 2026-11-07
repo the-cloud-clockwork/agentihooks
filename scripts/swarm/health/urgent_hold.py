@@ -11,6 +11,8 @@ from scripts.swarm_ledger.repository import hierarchy
 HOLD_MS = 600_000
 KEY = "urgent-hold"
 RELEASE = "it waits on a release newer than {after_release}"
+BLOCKED = "blocked"
+BLOCKED_WHY = "its claimant blocked it"
 
 
 def read(store, slug: str) -> dict:
@@ -25,9 +27,13 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
-        if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
+        if task.get("rank") != "urgent" or task.get("state") not in ("open", BLOCKED) or task.get("out_of_scope"):
             continue
-        why = claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
+        why = (
+            BLOCKED_WHY
+            if task["state"] == BLOCKED
+            else claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
+        )
         if task.get("merged_into"):
             continue
         previous = before.get(task["id"], {})
