@@ -5,10 +5,11 @@ import logging
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
+from typing import Any
 
 import nats as nats_client
 from nats.aio.msg import Msg
-from nats.errors import NoRespondersError
+from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
@@ -63,11 +64,11 @@ def auth_options(credentials: str | None) -> dict:
 
 async def _unreported(error: Exception) -> None:
     """Drop a connection error, which the open or the next call raises; log any other error in one line."""
-    if not isinstance(error, (OSError, asyncio.TimeoutError, nats_client.errors.NoServersError)):
+    if not isinstance(error, (OSError, asyncio.TimeoutError, NoServersError)):
         _log.error("%s", error)
 
 
-def connect_options(config: BusConfig) -> dict:
+def connect_options(config: BusConfig) -> dict[str, Any]:
     """Retry forever for a reconnecting client; otherwise try twice within seconds and log no attempt."""
     if config.reconnect:
         return {"allow_reconnect": True, "max_reconnect_attempts": -1}

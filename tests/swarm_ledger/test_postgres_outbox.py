@@ -101,7 +101,9 @@ def test_the_postgres_cap_deletes_the_oldest_unsent_row_past_its_limit(ledger):
             (f"{slug}-oldest", slug, f"{slug}-older", slug),
         )
         cursor.execute("SELECT count(*) FROM outbox WHERE id NOT IN (SELECT id FROM outbox_sent)")
-        unsent = cursor.fetchone()[0]
+        row = cursor.fetchone()
+    assert row is not None
+    unsent = row[0]
     assert outbox.cap(repository, 10**9) == 0
     assert outbox.cap(repository, unsent - 1) == 1
     assert subjects(slug) == [("older", -1), *before]
