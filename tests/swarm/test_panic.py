@@ -406,6 +406,21 @@ def test_cancel_runs_spares_the_dev_run_of_a_merged_fix(monkeypatch: pytest.Monk
     assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 2 on dev", "o/a run 3 on feature"]
 
 
+@pytest.mark.feature("panic-merged-fix-dev-run")
+def test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    commit = "m" * 40
+
+    def change(url: str, refused: str) -> ChangeState:
+        return ChangeState(ChangeRef("o/r", 1), "open", "a" * 40, "dev", False, url, "fix-branch", merge_commit=commit)
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs({"o/a": [RepositoryRun(1, "dev", "push", "in_progress", head_sha=commit)]})
+    assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 1 on dev"]
+
+
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     assert panic.REPOS == (
         "the-cloud-clockwork/agentihooks",
@@ -673,6 +688,17 @@ def test_a_push_after_cd_into_the_fix_worktree_is_spared(
     spared = blocker_window.pretool("Bash", {"command": f"cd {fix} && git push -u origin HEAD"}, "s", primary)
     refused = blocker_window.pretool("Bash", {"command": f"cd {other} && git push"}, "s", fix)
     assert spared == (None, None)
+    assert refused[1] is not None
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_push_without_a_session_directory_stays_frozen(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX], 0)
+    fix = _checkout(tmp_path / "fix", "fix-branch")
+    refused = blocker_window.pretool("Bash", {"command": f"cd {fix} && git push"}, "s", "")
     assert refused[1] is not None
 
 
