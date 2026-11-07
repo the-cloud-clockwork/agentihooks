@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundles.py:scripts.profiles.bundles.x__sweep_generated:6a94874478e61960719f9516d629d0ad799d1b784d35d1ab5b540a4ddeb4666c": {
+    "reader": "standards_reader",
+    "reason": "In `x__sweep_generated`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

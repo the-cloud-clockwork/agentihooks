@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_copilot:32167edd0b50a980339367385bee843c3ebeb61e9733681f73005ca4577b15e2": {
+    "reader": "standards_reader",
+    "reason": "In `x_render_copilot`, the mutation changes only the static type argument of `typing.cast` on cast target `render_claude(name, force=True, overlays=overlays)`, from Path to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

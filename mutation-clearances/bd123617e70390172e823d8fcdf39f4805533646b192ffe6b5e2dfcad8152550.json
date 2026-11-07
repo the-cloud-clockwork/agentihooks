@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/binding.py:scripts.profiles.binding.x_continuation:8efe236671d2ffcc086ad5fb82d12996ec8f69fd771b5142463d2e44611ff5b5": {
+    "reader": "standards_reader",
+    "reason": "In `x_continuation`, the mutation changes only the static type argument of `typing.cast` on cast target `effort_range.launch_args`, from Callable[[str, list[str], dict[str, str]], list[str]] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

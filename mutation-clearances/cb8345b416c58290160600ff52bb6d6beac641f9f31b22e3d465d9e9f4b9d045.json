@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/measure.py:scripts.profiles.measure.x_first_turn:42379535c3d62c1563c326036ccbb1360d67cee7c241b806f577e59b3e5f2179": {
+    "reader": "standards_reader",
+    "reason": "In `x_first_turn`, the mutation changes only the static type argument of `typing.cast` on cast target `event`, from dict[str, Any] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}
