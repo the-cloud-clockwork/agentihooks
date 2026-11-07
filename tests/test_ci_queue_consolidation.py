@@ -44,6 +44,10 @@ exit "$status"
         elif "run" in step:
             commands.append(step["run"])
     assert commands == [
+        'archive="$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar"\n'
+        'if [[ -f "$archive" ]] && ! docker load -i "$archive"; then\n'
+        '  echo "::warning::The saved runtime images did not load; pulling them instead"\n'
+        "fi\n",
         "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm",
         "docker build -t local/agentihooks-swarm:clients-check .",
         "bash scripts/packaging/swarm-smoke-parallel.sh scripts/packaging/hive-launch-smoke.sh"
@@ -54,6 +58,12 @@ exit "$status"
         "bash scripts/packaging/swarm-image-clients.sh local/agentihooks-swarm:clients-check",
         'rm -rf "$RUNNER_TEMP/swarm-smoke-layers"\n'
         'mv "$RUNNER_TEMP/swarm-smoke-layers-next" "$RUNNER_TEMP/swarm-smoke-layers"\n',
+        'mkdir -p "$RUNNER_TEMP/swarm-smoke-runtime-images"\n'
+        'docker save -o "$RUNNER_TEMP/swarm-smoke-runtime-images/images.tar" \\\n'
+        "  mirror.gcr.io/library/python:3.12-slim-bookworm \\\n"
+        "  public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 \\\n"
+        "  public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine \\\n"
+        "  public.ecr.aws/docker/library/nats:2.15.1-alpine mirror.gcr.io/library/nats:2.15.1-alpine\n",
     ]
     assert sum(step.get("uses") == "actions/checkout@v4" for step in steps) == 1
     for step in steps:
