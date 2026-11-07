@@ -249,6 +249,7 @@ def _held_claim(monkeypatch: pytest.MonkeyPatch) -> MemoryBus:
     bus = open_bus(BusConfig())
     revision = bus.state("spoke-work").create("claim-a", b'{"state":"started"}')
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": revision}))
+    monkeypatch.setattr(bus, "close", lambda: None)
     return bus
 
 
@@ -260,6 +261,7 @@ def _stalled_bus(release: threading.Event) -> Callable[[BusConfig], None]:
     return stall
 
 
+@pytest.mark.wall_clock
 def test_slow_nats_costs_at_most_the_bound_and_lets_the_action_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
@@ -292,6 +294,7 @@ def test_a_moved_claim_still_blocks_once_the_cached_answer_expires(monkeypatch: 
     ):
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
         current = bus.state("spoke-work").get("claim-a")
+        assert current is not None
         bus.state("spoke-work").update("claim-a", b'{"state":"claimed"}', current.revision)
         with patch.object(claim_fence, "CACHE_SECONDS", 0):
             assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
