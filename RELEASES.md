@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.682 · 2026-11-07
+
+### 2026-11-07 · a325a76a3d95 · #9938 · @agenticore-app
+
+**Ask the master whether a quiet urgent claim is a panic mode call**
+
+This change extends the degradation panic check so it also catches urgent tasks that are claimed but stuck: if a claimant shows no progress past the stale window (default 30 minutes), the master seat now gets a single panic question naming the task, claimant, and quiet minutes, repeated hourly. It reuses one shared quiet-minutes measure across the stale claim check, quiet gate, and panic call, keeping all three consistent. Existing panic signals are unaffected since their hourly timing is unchanged; five new seam tests confirm the behavior end to end.
+
 ## v2.17.680 · 2026-11-07
 
 ### 2026-11-07 · 42a19a8f0d15 · #9920 · @agenticore-app
