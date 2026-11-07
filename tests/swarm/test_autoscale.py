@@ -268,3 +268,24 @@ def test_a_pending_raise_older_code_stored_keeps_its_counted_passes():
     decision = calculate({"eng": 2}, {"claude": 8}, 20, {"eng": 100}, previous, now_ms=10 * MINUTE)
     assert decision["pending_raise"] == {"target": 10, "ticks": 2, "since": 9 * MINUTE}
     assert decision["reason"].endswith("raise held at tick 2 of 3.")
+
+
+@pytest.mark.feature("swarm-autoscale")
+def test_a_target_that_drifts_down_and_up_keeps_counting_and_raises_on_the_third_tick():
+    live = {"plan": 0, "ci": 0, "eng": 12}
+    previous = {
+        "ceilings": {"plan": 0, "ci": 0, "eng": 14},
+        "pending_raise": {"target": None, "ticks": 0},
+        "reason": "",
+    }
+    decisions = []
+    for n, seats in enumerate((28, 26, 27, 26)):
+        previous = calculate(live, {"claude": seats}, 30, {"eng": 8}, previous, now_ms=n * MINUTE)
+        decisions.append(previous)
+    assert [d["pending_raise"] for d in decisions] == [
+        {"target": 40, "ticks": 1, "since": 0},
+        {"target": 38, "ticks": 2, "since": 0},
+        {"target": 39, "ticks": 3, "since": 0},
+        {"target": 38, "ticks": 3, "since": 0},
+    ]
+    assert [d["ceilings"]["eng"] for d in decisions] == [14, 14, 16, 18]

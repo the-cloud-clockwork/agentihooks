@@ -181,3 +181,18 @@ def test_the_autoscale_command_on_a_deployed_controller_names_the_off_reason(no_
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
     cli.cmd_autoscale(store, argparse.Namespace(slug="sw", fixture=None, json=False))
     assert f"host room None: {WORKERS_OFF}" in capsys.readouterr().out.splitlines()
+
+
+def test_the_autoscale_preview_reads_the_host_room_the_tick_granted(monkeypatch, capsys):
+    def local_host(*args, **kwargs):
+        raise AssertionError("the preview read the local host")
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    host = {"room": 6, "reason": "worker quota leaves 6 Pods", "limit": "quota pods", "held": False, "granted_at": 1}
+    store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": host}))
+    monkeypatch.setattr(host_budget, "read_host", local_host)
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
+    monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
+    cli.cmd_autoscale(store, argparse.Namespace(slug="sw", fixture=None, json=False))
+    assert "host room 6: worker quota leaves 6 Pods" in capsys.readouterr().out.splitlines()
