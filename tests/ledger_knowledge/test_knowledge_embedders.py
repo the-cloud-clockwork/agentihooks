@@ -53,7 +53,7 @@ class ConceptServer(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, *args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return None
 
 
