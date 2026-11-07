@@ -149,6 +149,7 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
             ("GET", f"/api/v1/ledgers/{SLUG}/swarm/models"),
             ("GET", f"/api/v1/ledgers/{SLUG}/architecture"),
             ("GET", "/api/v1/tips"),
+            ("POST", f"/api/{SLUG}/session"),
         ]
         * 2
     )
