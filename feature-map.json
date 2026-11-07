@@ -990,7 +990,8 @@
       "tests": [
         "tests/swarm/test_autoscale.py::test_more_accounts_raise_the_ceiling_only_on_the_third_tick",
         "tests/swarm/test_autoscale.py::test_total_ceiling_is_at_most_fifty",
-        "tests/swarm/test_autoscale.py::test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once"
+        "tests/swarm/test_autoscale.py::test_host_room_caps_the_target_and_applies_a_lower_ceiling_at_once",
+        "tests/swarm/test_autoscale.py::test_a_target_that_drifts_down_and_up_keeps_counting_and_raises_on_the_third_tick"
       ]
     },
     {
