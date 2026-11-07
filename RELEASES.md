@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.710 · 2026-11-07
+
+### 2026-11-07 · 07d40ab0fa3e · #9995 · @nestorcolt
+
+**Serve the tick ledger in process from the shared database when its URL is set**
+
+When the shared database URL is set, a tick pass now reads and writes the ledger directly in process through the shared ledger repository instead of calling the ledger server over HTTP, so a slow or unreachable ledger server no longer raises LedgerUnreachable and kills the controller. The new DatabaseResourceClient runs the server's own route handlers locally as the trusted service caller, keeping epoch fencing, author refusal, worker write checks and the write gate intact. HTTP remains the fallback when the database URL is absent; the controller pod still needs that URL wired in before this takes effect there.
+
+### 2026-11-07 · bd94265c2d6f · #10041 · @agenticore-app
+
+**Release the tick pass lock even when closing the pass raises**
+
+This change fixes a bug where the tick pass lock could leak if an error occurred while closing a pass, leaving later passes permanently refused with "another tick is running." The lock release is now guaranteed to run even when the close logic raises, so a failing shutdown no longer strands the lock behind a dead holder. A regression test confirms the lock is cleared after a pass whose closing stack throws, directly addressing the 7 November incident where a stuck lock blocked ticks for about 13 minutes until the pod was deleted.
+
 ## v2.17.708 · 2026-11-07
 
 ### 2026-11-07 · 8c6a18ef976b · #9984 · @nestorcolt
