@@ -68,6 +68,7 @@ def service(monkeypatch: pytest.MonkeyPatch) -> Service:
     return running
 
 
+@pytest.mark.feature("controller-survives-ledger-timeout")
 def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
     monkeypatch: pytest.MonkeyPatch, service: Service
 ) -> None:
