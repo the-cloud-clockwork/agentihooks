@@ -25,7 +25,7 @@ rules:
                   def build(remaining: float) -> ResourceClient:
                     ...
                     if database_ledger.serving():
-                      return database_ledger.DatabaseResourceClient(...)
+                      return database_ledger.client(...)
                     ...
     paths:
       include:

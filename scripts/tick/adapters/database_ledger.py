@@ -23,7 +23,7 @@ from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.repository import postgres
 
-__all__ = ["DatabaseResourceClient", "scoped", "serving"]
+__all__ = ["client", "request", "scoped", "serving"]
 
 SERVING: ContextVar[bool] = ContextVar("ledger_in_process", default=False)
 SERVICE = ""
@@ -103,22 +103,24 @@ def answer(found: Services, exchange: Exchange, slug: str, path: str) -> tuple[i
     return status, encoded.encode()
 
 
-class DatabaseResourceClient(ResourceClient):
-    """A ledger API client whose requests run the ledger server's route code in this process."""
+def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
+    encoded = b"" if payload is None else json.dumps(payload).encode()
+    headers = Message()
+    headers["Content-Type"] = "application/json"
+    headers["Content-Length"] = str(len(encoded))
+    extra: dict[str, str] = writer_header() if path == "operations" else {}
+    for name, value in extra.items():
+        headers[name] = value
+    url = f"/api/v1/ledgers/{quote(slug, safe='')}/{path}"
+    exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
+    status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
+    if status >= 400:
+        raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
+    reply: dict[str, Any] = json.loads(body)
+    return reply
 
-    def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Answer one ledger API request in process, a refusal raised as the server's HTTP error."""
-        encoded = b"" if payload is None else json.dumps(payload).encode()
-        headers = Message()
-        headers["Content-Type"] = "application/json"
-        headers["Content-Length"] = str(len(encoded))
-        extra: dict[str, str] = writer_header() if path == "operations" else {}
-        for name, value in extra.items():
-            headers[name] = value
-        url = f"/api/v1/ledgers/{quote(slug, safe='')}/{path}"
-        exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
-        status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
-        if status >= 400:
-            raise urllib.error.HTTPError(url, status, "ledger refused", headers, io.BytesIO(body))
-        reply: dict[str, Any] = json.loads(body)
-        return reply
+
+def client(base: str, timeout: float) -> ResourceClient:
+    """A ledger API client whose requests run the ledger server's route code in this process."""
+    return ResourceClient(base, {}, timeout, transport=request)

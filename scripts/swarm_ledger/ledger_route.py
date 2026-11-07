@@ -65,7 +65,7 @@ def command(store: object, slug: str, who: Who) -> Iterator[None]:
 
 def tick(function: Callable) -> Callable:
     @wraps(function)
-    def routed(store, slug, *args, **kwargs):
+    def routed(store: object, slug: str, *args: object, **kwargs: object) -> object:
         from scripts.tick.adapters import database_ledger
 
         with scoped(slug, configured(store, slug)), database_ledger.scoped():

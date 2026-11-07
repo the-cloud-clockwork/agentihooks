@@ -216,17 +216,21 @@ def launch_token(slug, name):
         raise unauthenticated(f"the ledger server refused the hive credential: {exc.code}") from None
 
 
-def client(slug: str, service: bool = False, timeout: float = REQUEST_TIMEOUT, headers: dict | None = None) -> Any:
+def client(
+    slug: str, service: bool = False, timeout: float = REQUEST_TIMEOUT, headers: dict[str, str] | None = None
+) -> Any:
     """The ledger API client for slug: in process over the shared database inside a database pass, else HTTP."""
     from scripts.swarm_ledger.api.client import ResourceClient
     from scripts.tick.adapters import database_ledger
 
     if database_ledger.serving():
-        return database_ledger.DatabaseResourceClient(base(slug), {}, timeout)
+        return database_ledger.client(base(slug), timeout)
     return ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
 
 
-def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
+def request(
+    slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False, timeout: float = REQUEST_TIMEOUT
+) -> dict[str, Any]:
     found = client(slug, service, timeout)
     return found.snapshot(slug) if ops is None else found.mutate(slug, ops)
 
@@ -240,7 +244,7 @@ def resource(
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
-    def read():
+    def read() -> Any:
         found = client(slug, service, timeout, headers)
         return found.collection(slug, path) if collection else found.request(slug, path)["data"]
 

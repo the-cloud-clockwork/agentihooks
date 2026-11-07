@@ -24,5 +24,5 @@ def build(remaining: float) -> ResourceClient:
     base: str = ledger.base(slug)
     timeout: float = min(ledger.REQUEST_TIMEOUT, remaining)
     if database_ledger.serving():
-        return database_ledger.DatabaseResourceClient(base, {}, timeout)
+        return database_ledger.client(base, timeout)
     return ResourceClient(base, ledger.credentials(slug, service), timeout)

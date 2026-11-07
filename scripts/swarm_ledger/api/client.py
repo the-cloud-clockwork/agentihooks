@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from ..repository.entry import thawed
 from ..repository.rows import children, encode
 from . import resources, schemas
 
+Transport = Callable[[str, str, dict[str, Any] | None], dict[str, Any]]
 RETRIES = 5
 BACKOFF = 0.25
 KEPT = None
@@ -80,12 +81,15 @@ def located(state: object, path: list) -> object:
 
 
 class ResourceClient:
-    def __init__(self, base: str, credentials: dict, timeout: float = 10) -> None:
+    def __init__(self, base: str, credentials: dict, timeout: float = 10, transport: Transport | None = None) -> None:
         self.base = base
         self.credentials = credentials
         self.timeout = timeout
+        self.transport = transport
 
     def request(self, slug: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.transport is not None:
+            return self.transport(slug, path, payload)
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
