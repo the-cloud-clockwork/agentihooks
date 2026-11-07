@@ -159,7 +159,7 @@ def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier(
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
-def test_spawn_keeps_the_lane_after_its_start_bound() -> None:
-    assert pool.RESERVES == {"spawn": pool.CRITICAL_S - budgets.SPAWN_START_S}
+def test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn() -> None:
     with pool.running() as found:
-        assert found.reserves == pool.RESERVES
+        assert dict(found.reserves) == {"spawn": budgets.CRITICAL_S - budgets.SPAWN_START_S}
+    assert budgets.SPAWN_START_S == 40.0
