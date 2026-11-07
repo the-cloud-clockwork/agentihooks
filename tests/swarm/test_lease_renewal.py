@@ -1,5 +1,6 @@
 import time
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -272,7 +273,10 @@ def test_keep_tick_refuses_a_tick_lock_it_no_longer_holds(store, clock):
     store.redis.set(store.key("sw", "tick-lock"), "another tick", px=1000)
     with pytest.raises(SwarmError) as error:
         controller.keep_tick(store, "sw", held, "this tick", 600000)
-    assert str(error.value) == "the tick lock is stale"
+    assert str(error.value) == (
+        "the tick lock is stale: unnamed expected token this tic, held by epoch unknown host unknown"
+        " pid unknown start unknown token another "
+    )
     assert store.redis.pttl(store.key("sw", "tick-lock")) <= 1000
 
 
@@ -383,12 +387,14 @@ def test_a_one_second_tick_is_the_shortest_allowed(monkeypatch):
     assert lease.ttl_ms() == 3000
 
 
-def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeypatch):
+def test_the_controller_sleeps_one_configured_tick_between_passes(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import scripts.operator_env
 
-    slept = []
+    slept: list[float] = []
 
-    def sleep(seconds):
+    def sleep(seconds: float) -> None:
         slept.append(seconds)
         raise SwarmError("stopped after one pass")
 
@@ -397,6 +403,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {})
+    monkeypatch.setattr(controller, "monotonic", lambda: 7.0)
     monkeypatch.setattr(controller, "scheduled_wait", sleep)
     assert controller.main(["run"]) == 1
     assert slept == [4.0]
@@ -473,6 +480,61 @@ def test_beat_keeps_beating_through_a_redis_error(store, clock, monkeypatch):
     monkeypatch.setattr(lease, "renew", renew)
     assert lease.beat(store, "sw", held, Stop(clock, 0, 2)) is None
     assert renewals == [(store, "sw", held)] * 2
+
+
+def test_beat_keeps_beating_through_a_hosted_lease_outage(
+    store: RedisStore, clock: list[int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    held, renewals = lease.acquire(store, "sw", "home"), []
+
+    def renew(*args: object) -> None:
+        renewals.append(args)
+        if len(renewals) == 1:
+            raise lease.LeaseUnavailable("hosted controller lease is unavailable: timed out")
+
+    monkeypatch.setattr(lease, "renew", renew)
+    assert held is not None
+    stop: Any = Stop(clock, 0, 2)
+    assert lease.beat(store, "sw", held, stop) is None
+    assert renewals == [(store, "sw", held)] * 2
+
+
+@pytest.mark.parametrize(
+    ("raised", "unavailable"),
+    [
+        (OSError("timed out"), True),
+        ("503", True),
+        ("500", True),
+        ("409", False),
+    ],
+)
+def test_hosted_lease_failures_name_an_outage_apart_from_a_stale_refusal(
+    monkeypatch: pytest.MonkeyPatch, raised: OSError | str, unavailable: bool
+) -> None:
+    import io
+    import json
+    import urllib.error
+    from email.message import Message
+
+    from scripts.swarm import ledger_client
+    from scripts.swarm_ledger.api import client
+
+    class Ledger:
+        def credentials(self, slug: str, service: bool = False) -> dict[str, str]:
+            return {}
+
+    def request(self: object, slug: str, path: str, payload: object) -> dict[str, object]:
+        if isinstance(raised, OSError):
+            raise raised
+        body = json.dumps({"error": {"code": "stale_controller", "message": "stale"}}).encode()
+        raise urllib.error.HTTPError("https://ledger.example", int(raised), "failed", Message(), io.BytesIO(body))
+
+    monkeypatch.setattr(lease, "_address", lambda slug: "https://ledger.example")
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: Ledger())
+    monkeypatch.setattr(client.ResourceClient, "request", request)
+    with pytest.raises(SwarmError) as error:
+        lease._remote("sw", "renew", {"owner": "home", "epoch": 1})
+    assert isinstance(error.value, lease.LeaseUnavailable) is unavailable
 
 
 def test_a_fenced_launch_slower_than_the_lease_keeps_it(store, clock, monkeypatch):
@@ -644,3 +706,9 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
     assert entry.record["due"] > due
     assert scheduler.run_due(now=due) == 0
     callback.assert_called_once()
+
+
+@pytest.mark.parametrize("seconds", ["1", "5", "60"])
+def test_the_lease_ttl_outlasts_two_controller_ticks(seconds: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", seconds)
+    assert lease.ttl_ms() >= 2 * lease.tick_ms()

@@ -685,25 +685,25 @@ def test_fake_issue_and_rate_limit_tools_record_and_answer(
     assert provider.calls == [fakes.Call(operation, args, deadline)]
 
 
-def test_github_tags_read_the_git_remote(tmp_path: Path) -> None:
-    seen: list[tuple[list[str], dict[str, object]]] = []
-
-    def git(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
-        seen.append((command, options))
-        output = "a1\trefs/tags/v1.0.0\nb2\trefs/tags/v1.0.0^{}\n\nc3\trefs/tags/v1.1.0\n"
-        return subprocess.CompletedProcess(command, 0, output, "")
-
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=git)
+def test_github_tags_read_the_matching_refs_api(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    refs = [{"ref": "refs/tags/v1.0.0", "object": {"sha": "a1"}}, {"ref": "refs/tags/v1.1.0", "object": {"sha": "c3"}}]
+    provider, recorder = _provider(monkeypatch, tmp_path, [refs])
 
     assert provider.tags(deadline=_deadline()) == (port.Tag("v1.0.0", "a1"), port.Tag("v1.1.0", "c3"))
-    assert seen == [(["git", "ls-remote", "--tags", "origin"], {"cwd": tmp_path, "timeout": 9, **OPTIONS})]
+    assert recorder.calls == [
+        (
+            github.CALLER,
+            ["api", "repos/owner/project/git/matching-refs/tags"],
+            {"cwd": tmp_path, "timeout": 9, **REST},
+        )
+    ]
 
 
 def test_github_defaults() -> None:
     provider = github.GitHubSourceControl("owner/project", Path("."), "main")
 
     assert provider.base == "main"
-    assert provider.git is subprocess.run
+    assert provider.gh is None
     assert github.CALLER == "tick.source_control"
 
 
@@ -736,7 +736,7 @@ def test_github_expired_deadline_prevents_external_reads(
         pytest.fail("expired deadline reached the provider")
 
     monkeypatch.setattr(github.github_reads, "rest", refuse)
-    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev", git=refuse)
+    provider = github.GitHubSourceControl("owner/project", tmp_path, "dev")
 
     with pytest.raises(TimeoutError, match="^tool deadline expired$"):
         getattr(provider, operation)(*args, deadline=Deadline(0, clock=lambda: 0.0))

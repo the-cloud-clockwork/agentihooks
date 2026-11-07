@@ -10,6 +10,10 @@ class StateConflict(Exception):
     pass
 
 
+class PayloadTooLarge(ValueError):
+    """The bus refused a message larger than its server limit; sending it again can never succeed."""
+
+
 @dataclass(frozen=True)
 class StateEntry:
     key: str

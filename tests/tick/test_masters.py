@@ -1,8 +1,8 @@
 """The master and dispatcher seat steps run the tick's hand written seat calls at their sites in today's order."""
 
-from time import monotonic
+from contextlib import nullcontext
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -19,8 +19,8 @@ from scripts.swarm import (
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
-from scripts.tick.step import Context, Domain, Result, Write
-from scripts.tick.steps import PASS, actions, actions_of, masters
+from scripts.tick.step import Context, Domain
+from scripts.tick.steps import PASS, actions, masters, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -54,6 +54,8 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
         return [f"ran {len(calls)}"]
 
     return SimpleNamespace(
+        PLACING=nullcontext(),
+        panic=SimpleNamespace(state=lambda store: None),
         skip_refused=skip_refused,
         _master_down="master down",
         _night_watch="night watch",
@@ -76,19 +78,19 @@ def _call(name: str, state: dict[str, Any]) -> tuple[list[tuple[Any, ...]], Any]
 
 
 def test_the_steps_sit_at_their_sites_in_todays_order() -> None:
-    sites = [(step.name, step.group, step.order) for step in masters.STEPS]
+    sites = [(step.name, step.group) for step in masters.STEPS]
     assert sites == [
-        ("master wake", "masters", 10),
-        ("retire idle master", "masters", 20),
-        ("master stall", "masters", 30),
-        ("prompt stall", "masters", 40),
-        ("master down", "master seats", 10),
-        ("tick master", "master seats", 20),
-        ("master scale", "master seats", 30),
-        ("seat alarm", "master seats", 40),
-        ("dispatch seat", "dispatch seat", 10),
-        ("night watch", "master watch", 10),
-        ("master alarm", "master watch", 20),
+        ("master wake", "masters"),
+        ("retire idle master", "masters"),
+        ("master stall", "masters"),
+        ("prompt stall", "masters"),
+        ("master down", "master seats"),
+        ("tick master", "master seats"),
+        ("master scale", "master seats"),
+        ("seat alarm", "master seats"),
+        ("dispatch seat", "dispatch seat"),
+        ("night watch", "master watch"),
+        ("master alarm", "master watch"),
     ]
     registered = [step.name for wave in registry.waves() for step in wave]
     assert all(step.name in registered for step in masters.STEPS)
@@ -99,7 +101,7 @@ def test_the_steps_sit_at_their_sites_in_todays_order() -> None:
     [
         ("master wake", (master_wake.run, "sw", "store", "runtime", "doc", 7)),
         ("retire idle master", (lifetime.retire_idle_master, "sw", "store", "ledger", "runtime", "rows", 7)),
-        ("master stall", (master_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
+        ("master stall", (master_stall.stalls, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("prompt stall", (master_prompt_stall.run, "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("master down", ("master down", "sw", "CONFIG", "store", "ledger", "runtime", 7)),
         ("master scale", (master_scale.run, "sw", "CONFIG", "store", "runtime", "doc", 7)),
@@ -154,11 +156,7 @@ def test_a_raising_step_is_held_and_the_rest_of_its_group_skips(monkeypatch: pyt
     assert ran == []
     assert isinstance(state["box"][masters.RAISED], RuntimeError)
     with pytest.raises(RuntimeError, match="down"):
-        masters.raise_held(state["box"])
-
-
-def test_raise_held_passes_when_nothing_was_held() -> None:
-    masters.raise_held({})
+        tasks.raise_held(state["box"])
 
 
 def test_a_system_exit_is_held_too() -> None:
@@ -184,54 +182,29 @@ def test_a_held_step_hands_its_call_the_tick_and_the_reader() -> None:
     assert seen == [("tick", get)]
 
 
-def test_the_site_view_reads_the_locals_and_the_box_for_the_pass_domain() -> None:
-    box: dict[str, Any] = {}
-    view = masters._SiteView({"slug": "sw", "box": "shadowed"}, box)
-    assert view.read(PASS, "slug") == "sw"
-    assert view.read(PASS, "box") is box
-    assert view.read(Domain("tasks"), "slug") is None
-    with pytest.raises(KeyError, match="doc"):
-        view.read(PASS, "doc")
+def test_seat_steps_hold_the_host_placement_lock_and_master_steps_do_not() -> None:
+    held: list[bool] = []
 
+    class Lock:
+        def __enter__(self) -> None:
+            held.append(True)
 
-def test_a_site_runs_its_group_against_the_locals_under_the_step_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[str, Context]] = []
+        def __exit__(self, *args: object) -> None:
+            held.append(False)
 
-    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
-        seen.append((name, ctx))
-        result = Result((Write(actions_of("one"), "one", ["ran"]),))
-        return (engine.StepRecord("one", 0.0, 1.0, result=result),)
+    def run(name: str) -> list[bool]:
+        held.clear()
+        tick = _tick([])
+        tick.PLACING = Lock()
+        state = _pass()
+        _step(name).call(tick, state.get)
+        assert masters.RAISED not in state["box"]
+        return list(held)
 
-    monkeypatch.setattr(engine, "run_group", run_group)
-    assert masters.run_site("master watch", {"slug": "sw"}) == ["ran"]
-    ((name, ctx),) = seen
-    assert name == "master watch"
-    assert ctx.view.read(PASS, "slug") == "sw"
-    assert ctx.view.read(PASS, "box") == {}
-    assert ctx.deadline.expires_at - monotonic() == pytest.approx(600.0, abs=5.0)
-
-
-def test_a_site_raises_what_its_steps_held(monkeypatch: pytest.MonkeyPatch) -> None:
-    def run_group(name: str, ctx: Context) -> tuple[engine.StepRecord, ...]:
-        cast(dict[str, Any], ctx.view.read(PASS, "box"))[masters.RAISED] = KeyError("held")
-        return ()
-
-    monkeypatch.setattr(engine, "run_group", run_group)
-    with pytest.raises(KeyError, match="held"):
-        masters.run_site("masters", {})
-
-
-@pytest.mark.parametrize(
-    ("site", "group"),
-    [
-        (masters.run_masters, "masters"),
-        (masters.run_seats, "master seats"),
-        (masters.run_dispatch, "dispatch seat"),
-        (masters.run_watch, "master watch"),
-    ],
-)
-def test_each_site_names_its_group(site: Any, group: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[str] = []
-    monkeypatch.setattr(engine, "run_group", lambda name, ctx: seen.append(name) or ())
-    assert site({}) == []
-    assert seen == [group]
+    assert {name: run(name) for name in ("master down", "tick master", "seat alarm", "dispatch seat")} == {
+        "master down": [True, False],
+        "tick master": [True, False],
+        "seat alarm": [True, False],
+        "dispatch seat": [True, False],
+    }
+    assert run("prompt stall") == []

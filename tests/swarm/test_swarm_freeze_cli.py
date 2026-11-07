@@ -1,10 +1,11 @@
 import json
+from typing import Any
 
 import pytest
 
 from scripts.gates import Who
 from scripts.swarm import clearance, cli, naming
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeLedger
@@ -28,10 +29,16 @@ def swarm(monkeypatch):
     store.put_agent("demo", AgentRecord(PLANNER, "plan", "t3"))
     ledger = FakeLedger([])
     ledger.freezes = []
-    ledger.freeze = lambda slug, verb, target, **fields: ledger.freezes.append((slug, verb, target, fields))
+    ledger.freeze = lambda slug, verb, target, by, words: ledger.freezes.append((slug, verb, target, flat(by, words)))
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     return store, ledger
+
+
+def flat(by: str | None, words: FreezeWords) -> dict[str, Any]:
+    """Return the author and words of one freeze write as the fields a test compares."""
+    queue = {key: value for key, value in (("position", words.position), ("only", words.only)) if value}
+    return {"by": by, "reason": words.reason, "quote": words.quote, **queue}
 
 
 def acting(monkeypatch, name="", swarm=""):
@@ -199,7 +206,7 @@ def test_every_lane_agent_at_full_autonomy_is_still_refused(swarm, monkeypatch, 
 def test_the_client_sends_one_freeze_op(monkeypatch, verb, by, fields, op):
     sent = []
     monkeypatch.setattr(LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)))
-    LedgerClient().freeze("demo", verb, "plans/a", by=by, **fields)
+    LedgerClient().freeze("demo", verb, "plans/a", by=by, words=FreezeWords(**fields))
     [(slug, [written])] = sent
     assert slug == "demo"
     assert written.pop("id").startswith(op["op"] + "-")

@@ -186,6 +186,28 @@ def test_controller_keeps_only_the_workstation_login_master_off_hive_placement(s
     assert fenced.runtime.router.placed_backend("master", {"id": "master-4"}) == "local"
 
 
+@pytest.mark.feature("pod-controller-master-on-hive")
+def test_a_controller_in_a_pod_places_the_login_front_door_on_a_hive(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.swarm import controller
+    from scripts.swarm_v2 import masters
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setenv(controller.POD_NAME, "agentihooks-swarm-controller-0")
+    assert controller.POD_NAME == "AGENTIHOOKS_POD_NAME"
+    masters.MasterSeats(setup.store.redis).set_count(setup.config.slug, 2)
+    task = master(setup)
+    assert controller._master_seats(setup.store, setup.config.slug) == frozenset({"master", "master-2"})
+    fenced = controller.FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.runtime.router.placed_backend("master", task) == "hive"
+    monkeypatch.setenv(controller.POD_NAME, "")
+    assert controller._master_seats(setup.store, setup.config.slug) == frozenset({"master-2"})
+
+
 @pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
 def test_master_order_preserves_placement_health_through_the_consumer(setup, route):
     from types import SimpleNamespace

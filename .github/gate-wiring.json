@@ -4,6 +4,26 @@
       "reason": "Reports current run test counts after the test producers settle without grading required results.",
       "owner": "ci-1@rig-grade-swarm-doctor",
       "expires": "2027-04-20"
+    },
+    "test.yml/mutation-refine": {
+      "reason": "Writes the measured mutation plan the shards run; its result reaches Gate Required through the mutation job, which fails when refinement or any shard does not succeed.",
+      "owner": "ci-5@rig-grade-swarm",
+      "expires": "2027-05-01"
+    },
+    "test.yml/mutation-probe": {
+      "reason": "Runs each split mutant's head tests once so the shards skip them; its results reach Gate Required through the mutation job, which fails when the early stage, the replan or any shard does not succeed.",
+      "owner": "ci-3@rig-grade-swarm",
+      "expires": "2027-05-01"
+    },
+    "test.yml/mutation-replan": {
+      "reason": "Sizes the shards from the mutants the early stage left; its result reaches Gate Required through the mutation job, which fails when the replan or any shard does not succeed.",
+      "owner": "ci-3@rig-grade-swarm",
+      "expires": "2027-05-01"
+    },
+    "test.yml/mutation-shard": {
+      "reason": "Grades one share of the changed line mutants; the mutation job merges every shard report, grades split units and fails when any shard does not succeed.",
+      "owner": "ci-5@rig-grade-swarm",
+      "expires": "2027-05-01"
     }
   },
   "outside_gate": {

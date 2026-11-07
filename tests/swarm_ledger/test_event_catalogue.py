@@ -102,12 +102,11 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
     ]
     assert [catalogue.refusal(item) for item in events] == [None, None, None, None]
     assert [item.data for item in events] == [
-        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": False},
+        {"id": "p1", "title": "One", "description": "", "done": False},
         {
             "id": "t1",
             "title": "first",
             "state": "claimed",
-            "kind": "ops",
             "description": "",
             "phase": "",
             "lane": "eng",
@@ -117,8 +116,15 @@ def test_import_fills_every_missing_catalogue_field_so_each_outbox_event_passes_
             "done": False,
         },
         {"id": "t2", **catalogue.TASK_DEFAULTS},
-        {"id": "p1", "title": "One", "planning": "auto", "description": "", "done": True},
+        {"id": "p1", "title": "One", "description": "", "done": True},
     ]
+
+
+def test_filled_leaves_out_every_field_outside_the_catalogue_so_a_large_phase_makes_a_small_event():
+    phase = {"id": "p2", "title": "Two", "description": "d", "done": False, "comments": ["x" * 2_000_000]}
+    assert catalogue.filled("phase", phase) == {"id": "p2", "title": "Two", "description": "d", "done": False}
+    task = {"id": "t1", "pr_url": "u", "history": [{"at": 1}] * 1000, "workspace": "w"}
+    assert catalogue.filled("task", task) == {"id": "t1", **catalogue.TASK_DEFAULTS, "pr_url": "u"}
 
 
 def test_filled_sets_each_missing_catalogue_field_to_its_default_and_keeps_present_values():
@@ -134,7 +140,6 @@ def test_filled_sets_each_missing_catalogue_field_to_its_default_and_keeps_prese
         "issue_url": "",
         "pr_url": "u",
         "done": True,
-        "kind": "ops",
     }
     assert catalogue.filled("phase", {"id": "p1"}) == {"id": "p1", "title": "", "description": "", "done": False}
     assert task == {

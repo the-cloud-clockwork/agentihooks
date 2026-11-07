@@ -1,0 +1,6 @@
+{
+  "scripts/tick/pool.py:scripts.tick.pool.x_fan_out:a52fb5a0207640ce74eddd93ccd9bc0ee7882fef77d8f93b1617842e97cd7e93": {
+    "reader": "standards_reader",
+    "reason": "None passed as the shutdown wait flag is falsy, so the executor shutdown returns without joining exactly as with False."
+  }
+}

@@ -12,6 +12,7 @@ from scripts.swarm import (
     slice_screen,
     trace_plan,
 )
+from scripts.tick import engine
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,13 @@ def below_the_blocker_gate(monkeypatch, request):
         monkeypatch.setattr(cli, "_block_refusal", lambda store, slug, task: "")
 
 
+@pytest.fixture(autouse=True)
+def every_step_due(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    """Run every step on each pass of a frozen clock, except where the characterisation scenarios test intervals."""
+    if request.module.__name__.rpartition(".")[2] != "test_characterisation":
+        monkeypatch.setattr(engine, "resting", lambda ordered, cadence: frozenset())
+
+
 @pytest.fixture
 def scratch(tmp_path, monkeypatch):
     """Task scratch folders for swarm sw under a stand-in scratchpad: each task id maps to its resolved folder."""
@@ -79,3 +87,17 @@ def confirmed_required_checks(monkeypatch):
     from scripts.swarm import waits
 
     monkeypatch.setattr(waits, "required_green", lambda target, head: True)
+
+
+@pytest.fixture(autouse=True)
+def bounded_fencing_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+
+    original = fencing.uniform
+
+    def bounded_uniform(low: float, high: float) -> float:
+        assert low == 0.001
+        assert high == 0.032
+        return original(low, high)
+
+    monkeypatch.setattr(fencing, "uniform", bounded_uniform)

@@ -120,12 +120,14 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     assert job["needs"] in (
         ["unit", "unit-rerun", "select", "reuse", "admission"],
         ["split", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission", "unit", "unit-lost", "unit-rerun"],
     )
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') && (needs.unit-lost.result == 'success' || needs.unit-lost.result == 'skipped') && (needs.unit-rerun.result == 'success' || needs.unit-rerun.result == 'skipped') }}",
     )
     assert (
         job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"] == ["3.12"]

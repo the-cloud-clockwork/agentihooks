@@ -311,6 +311,16 @@ def test_every_pin_and_allowlist_names_a_real_literal_in_this_repository(committ
         assert (committed / (module.replace(".", "/") + ".py")).is_file(), module
 
 
+def test_a_size_allowlist_entry_moved_with_its_unit_is_left_to_the_size_gate(committed: Path, tmp_path: Path) -> None:
+    allowlist = json.loads((committed / "tests/SIZE_ALLOWLIST.json").read_text())
+    key = next(iter(allowlist))
+    moved = {f"moved/{key}": allowlist.pop(key), **allowlist}
+    head = _tree(tmp_path / "head", {"tests/SIZE_ALLOWLIST.json": json.dumps(moved)})
+    errors, _ = threshold_pins.allowlist_errors(committed, head)
+    assert [error for error in errors if "SIZE_ALLOWLIST" in error] == []
+    assert ("tests/SIZE_ALLOWLIST.json", "scripts.size_limits") in threshold_pins.GRADED_BY
+
+
 def test_the_size_plant_turns_the_check_red(committed, tmp_path, capsys):
     planted = (committed / "scripts/size_limits.py").read_text().replace("FUNCTION_LINES = 300", "FUNCTION_LINES = 400")
     head = _tree(tmp_path / "head", {"scripts/size_limits.py": planted})

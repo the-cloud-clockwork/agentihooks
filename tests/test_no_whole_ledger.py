@@ -85,7 +85,13 @@ def test_a_pull_request_cannot_allowlist_its_own_read(tmp_path: Path, capsys: py
 
 
 def test_an_allowlisted_read_kept_or_removed_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    base = _recorded(tmp_path / "base", {"scripts/swarm/job.py": WHOLE + WHOLE.replace("step", "other")})
+    both = WHOLE + WHOLE.replace("step", "other")
+    base = _recorded(tmp_path / "base", {"scripts/swarm/job.py": both})
+    same = _recorded(tmp_path / "same", {"scripts/swarm/job.py": both})
+    assert _grade(base, same, capsys) == (
+        0,
+        "1 files read the whole ledger state, 1 on the base allowlist, 0 errors\n",
+    )
     kept = _recorded(tmp_path / "kept", {"scripts/swarm/job.py": WHOLE})
     assert _grade(base, kept, capsys) == (
         0,
@@ -115,10 +121,13 @@ def test_a_file_past_its_allowance_names_the_allowance(
     )
 
 
-def test_a_base_without_an_allowlist_takes_the_heads_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("source", [CLEAN, WHOLE])
+def test_a_base_without_an_allowlist_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str], source: str) -> None:
     base = _tree(tmp_path / "base", {"scripts/swarm/job.py": CLEAN})
-    head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": WHOLE})
-    assert _grade(base, head, capsys) == (0, "1 files read the whole ledger state, 0 on the base allowlist, 0 errors\n")
+    head = _recorded(tmp_path / "head", {"scripts/swarm/job.py": source})
+    code, output = _grade(base, head, capsys)
+    assert code == 1
+    assert f"::error::{no_whole_ledger.ALLOWLIST} is missing from the base\n" in output
 
 
 def test_a_file_that_does_not_parse_is_an_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

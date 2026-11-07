@@ -4,10 +4,13 @@ import re
 import subprocess
 import unicodedata
 from collections import Counter
+from collections.abc import Generator
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 
 INTEGRATION = "refs/remotes/origin/dev"
+HELD: dict[Path, tuple[dict[Path, str], dict[tuple[Path, bool], list[str]]]] = {}
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
 SHARDS = (
@@ -282,12 +285,44 @@ def mentioned(text: str, words: list[frozenset[str]]) -> bool:
 
 
 def select_tests(root: Path, source: Path, helpers: bool = True) -> list[str]:
+    """Name the test modules reaching source, read from the tests folder a plan holds or freshly otherwise."""
+    if (held := HELD.get(root)) is None:
+        return reaching_tests(root, source, helpers, read_tests(root))
+    texts, chosen = held
+    if (source, helpers) not in chosen:
+        chosen[source, helpers] = reaching_tests(root, source, helpers, texts)
+    return list(chosen[source, helpers])
+
+
+def read_tests(root: Path) -> dict[Path, str]:
+    """Return the text of every Python file under root's tests folder in path order."""
+    return {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
+
+
+@contextmanager
+def held_tests(root: Path) -> Generator[None]:
+    """Read root's tests folder once and reuse it, and each selection made from it, until the block ends."""
+    HELD[root] = (read_tests(root), {})
+    try:
+        yield
+    finally:
+        del HELD[root]
+
+
+def held_text(path: Path) -> str:
+    """Return a test file's text from the folder a plan holds, reading it when no plan holds it."""
+    for texts, _ in HELD.values():
+        if path in texts:
+            return texts[path]
+    return path.read_text()
+
+
+def reaching_tests(root: Path, source: Path, helpers: bool, texts: dict[Path, str]) -> list[str]:
+    """Name the test modules among texts that name or import source, through helper modules when helpers is set."""
     module = module_name(source)
     named = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
-    texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
 
     def importing(modules: set[str]) -> set[Path]:
-        # Every import of a module names each of its parts or is relative, so other files are never parsed.
         words = [frozenset(name.split(".")) for name in modules]
         return {
             path

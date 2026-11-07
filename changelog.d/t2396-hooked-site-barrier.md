@@ -1,0 +1,1 @@
+Tick site barriers hold every step of the earlier site again, whatever a step declares: the quiet pass and site hooks read pass values no declaration names, and the pruned barrier let them run before those values existed.

@@ -1,5 +1,5 @@
 name: Retried artifact upload
-description: Upload an artifact of this run, retried in place up to two more times. A path that matches no files is never attempted, and a watchdog ends any attempt that outlives its bound. Every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
+description: Upload an artifact of this run, retried in place up to two more times. A path that matches no files is never attempted, and a watchdog ends any attempt that outlives its bound. Before a retry it frees, within settle-seconds, a name an attempt cut mid finalize still holds by finalizing it as empty and deleting it, and every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
 inputs:
   name:
     description: Artifact name
@@ -20,6 +20,10 @@ inputs:
     default: warn
   attempt-seconds:
     description: Seconds one attempt may run before its upload process is ended
+    required: false
+    default: "120"
+  settle-seconds:
+    description: Seconds a retry may spend freeing a name an earlier attempt still holds
     required: false
     default: "120"
   after-cancel:
@@ -69,6 +73,18 @@ runs:
         ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
         UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
       run: bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm
+    - name: Settle attempt 1
+      if: steps.first.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
+      continue-on-error: true
+      uses: actions/github-script@v7
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        SETTLE_SECONDS: ${{ inputs.settle-seconds }}
+        SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
+      with:
+        github-token: none
+        script: |
+          require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 2
       if: steps.first.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       shell: bash
@@ -102,6 +118,18 @@ runs:
         ATTEMPT_SECONDS: ${{ inputs.attempt-seconds }}
         UPLOAD_PROCESS: upload-artifact/[^ ]*/dist/upload/index\.js
       run: bash "$GITHUB_ACTION_PATH/watchdog.sh" disarm
+    - name: Settle attempt 2
+      if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
+      continue-on-error: true
+      uses: actions/github-script@v7
+      env:
+        ARTIFACT: ${{ inputs.name }}
+        SETTLE_SECONDS: ${{ inputs.settle-seconds }}
+        SETTLE_SCRIPT: ${{ github.action_path }}/settle.py
+      with:
+        github-token: none
+        script: |
+          require('child_process').execFileSync('python3', [process.env.SETTLE_SCRIPT], {stdio: 'inherit'})
     - name: Wait before attempt 3
       if: steps.second.outcome == 'failure' && (inputs.after-cancel == 'true' || !cancelled())
       shell: bash

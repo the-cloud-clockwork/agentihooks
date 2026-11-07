@@ -737,20 +737,45 @@ def test_queue_reports_rest_transport_failure(error):
     assert str(exc.value) == f"GitHub API: {error}"
 
 
-def test_a_job_log_read_allows_escape_sequences_and_returns_text():
-    calls = []
+def test_a_rest_read_runs_the_adapter_download_tool_from_the_working_folder() -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def run(command, **kwargs):
-        calls.append(command)
-        log = command[2].endswith("/logs")
-        return subprocess.CompletedProcess(command, 0, "\x1b[31mFAILED\x1b[0m\n" if log else "{}", "")
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, b'{"id": 5}', b"")
 
-    assert merge_queue.rest("repos/o/r/actions/jobs/5/logs", run) == "\x1b[31mFAILED\x1b[0m\n"
-    assert merge_queue.rest("repos/o/r/actions/runs/5", run) == {}
-    assert calls == [
-        ["gh", "api", "repos/o/r/actions/jobs/5/logs", "--allow-escape-sequences"],
-        ["gh", "api", "repos/o/r/actions/runs/5"],
-    ]
+    assert merge_queue.rest("repos/o/r/actions/runs/5", run) == {"id": 5}
+    assert calls == [(["gh", "api", "repos/o/r/actions/runs/5"], {"capture_output": True, "text": True, "timeout": 20})]
+
+
+def test_a_failed_rest_read_reports_its_byte_error_text() -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 1, b"", b" HTTP 404: Not Found \n")
+
+    with pytest.raises(SwarmError) as exc:
+        merge_queue.rest("repos/o/r/actions/runs/5", run)
+    assert str(exc.value) == "HTTP 404: Not Found"
+    cause = exc.value.__cause__
+    assert isinstance(cause, subprocess.CalledProcessError)
+    assert cause.cmd == ["gh", "api", "repos/o/r/actions/runs/5"]
+
+
+def test_a_failed_rest_read_without_error_text_reports_a_failed_api() -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 1, b"", b"")
+
+    with pytest.raises(SwarmError) as exc:
+        merge_queue.rest("repos/o/r/actions/runs/5", run)
+    assert str(exc.value) == "GitHub API failed"
+
+
+def test_a_failed_graph_read_without_error_text_reports_a_failed_api() -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 1, "", None)
+
+    with pytest.raises(SwarmError) as exc:
+        merge_queue.graphql(merge_queue.STATE, {"url": URL}, run)
+    assert str(exc.value) == "GitHub API failed"
 
 
 def test_dequeue_removes_the_pull_request_then_reports_its_state():

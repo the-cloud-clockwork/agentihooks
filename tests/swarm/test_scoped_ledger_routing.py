@@ -1,6 +1,8 @@
 import json
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 
 import pytest
@@ -56,8 +58,11 @@ def test_only_the_selected_tick_uses_the_hosted_ledger(store, monkeypatch):
     monkeypatch.setattr(controller, "keep_tick", lambda *_: None)
     monkeypatch.setattr(controller, "release_tick_lock", lambda *_: None)
 
-    def probe(slug, _now, _check):
+    both = Barrier(2)
+
+    def probe(slug: str, _now: int, _check: Callable[[], bool] | None) -> bool:
         seen[slug] = (ledger.base(), ledger_link.remote())
+        both.wait(30)
         return False
 
     monkeypatch.setattr(cli.outage, "ledger_health", probe)
@@ -151,7 +156,7 @@ def test_pending_destination_stages_private_authority_without_routing_the_tick(s
     monkeypatch.setattr(hosted, "server_secret", lambda: "private-staging-fixture")
     monkeypatch.setattr(cli, "_reconcile_services", lambda: None)
 
-    def run(slugs, callback, settled, elapsed):
+    def run(slugs, callback, elapsed):
         seen.append((authority_context.secret(), ledger_link.remote()))
         return True
 
@@ -187,7 +192,7 @@ def test_the_wait_command_skips_a_remote_swarm_and_finishes_the_local_one(store,
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append(slug))
     with authority_context.bound(None):
         cli.cmd_waits(store, Namespace())
-    assert acquired == ["other"]
+    assert acquired == ["other", "other"]
     assert capsys.readouterr() == ("", "")
 
 

@@ -22,9 +22,11 @@ ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 # Only keys a traced worker command writes; an entry with no writer widens every member's login.
 WORKER_KEYS = (
     "swarm:*:agents",
+    "swarm:*:hosts",
     "swarm:*:executions",
     "swarm:*:lease-cache",
     "swarm:state:fencing:*",
+    "swarm:*:fence:*",
     "swarm:state:counters:*",
     "swarm:*:execution-publishing",
     "swarm:*:codex-transport",

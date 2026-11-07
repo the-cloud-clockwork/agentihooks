@@ -31,7 +31,11 @@ _SDK_LOCK = threading.Lock()
 
 
 def _try_init_sdk():
-    """Initialise the OTel SDK tracer lazily. Safe to call repeatedly."""
+    """Initialise the OTel SDK tracer lazily. Safe to call repeatedly.
+
+    Spans export through SimpleSpanProcessor, because short lived hook processes exit before a batch
+    processor would flush.
+    """
     global _SDK_TRACER, _SDK_INIT_ATTEMPTED
     if _SDK_INIT_ATTEMPTED:
         return _SDK_TRACER
@@ -69,10 +73,6 @@ def _try_init_sdk():
 
             resource = Resource.create({"service.name": OTEL_HOOKS_SERVICE_NAME})
             provider = TracerProvider(resource=resource)
-            # SimpleSpanProcessor — blocking export per span. Required for
-            # short-lived hook subprocesses that exit before BatchSpanProcessor
-            # would flush. Trade-off: higher per-span latency, but spans never
-            # get dropped on subprocess exit.
             provider.add_span_processor(SimpleSpanProcessor(exporter))
             trace.set_tracer_provider(provider)
             _SDK_TRACER = trace.get_tracer("agentihooks.brain")
@@ -173,14 +173,16 @@ def span_ctx(name: str, attrs: dict[str, Any]) -> Iterator[_Span]:
 
 
 def _http_fallback(name: str, attrs: dict[str, Any], duration_ms: float | None) -> None:
-    """Minimal OTLP HTTP JSON trace export. No SDK required."""
+    """Minimal OTLP HTTP JSON trace export. No SDK required.
+
+    A gRPC endpoint on port 4317 is moved to the sibling HTTP port 4318, so spans are not dropped when the
+    gRPC SDK is missing.
+    """
     from hooks.config import hook_collector
 
     endpoint, _ = hook_collector(os.environ)
     if not endpoint:
         return
-    # If configured endpoint is gRPC port (4317), swap to the sibling HTTP port
-    # (4318) for the fallback. Prevents silent drops when gRPC SDK isn't available.
     endpoint = re.sub(r":4317(?=[/?#]|$)", ":4318", endpoint)
     url = endpoint.rstrip("/") + "/v1/traces"
     try:

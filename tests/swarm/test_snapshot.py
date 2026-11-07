@@ -108,6 +108,16 @@ def test_snapshot_remove_restore_gives_back_the_same_swarm_state(store):
     assert {slug: store.names.export(slug) for slug in ("sw", "other")} == names
 
 
+def test_a_restore_over_a_listed_swarm_lists_its_old_style_names_again(store: RedisStore) -> None:
+    seed(store, "sw")
+    store.seats.occupy("eng-2@sw", "sw-eng-7", 11)
+    state = store.export("sw")
+    store.redis.flushall()
+    assert store.seats.agent_names("sw") == []
+    store.restore("sw", json.loads(json.dumps(state)))
+    assert ("sw-eng-7", "eng-2@sw") in store.seats.agent_seats("sw")
+
+
 def test_export_leaves_out_another_swarms_seats_and_inbox(store):
     seed(store, "sw")
     seed(store, "sw-b")

@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/tasks.py:scripts.tick.steps.tasks.x__write_task:428a32bb257ad3d52cbf60ac5dc0383b59b294ecff53cafe5f13881e2d399958": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged and ignores the type argument at runtime, so cast(None, write.value) and cast(dict[str, Any], write.value) pass the same mapping to update_task; the mutant changes only a type annotation and cannot change any output."
+  }
+}

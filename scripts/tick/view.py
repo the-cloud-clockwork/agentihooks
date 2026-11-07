@@ -6,13 +6,15 @@ window no longer covers the gap.
 """
 
 import hashlib
+import os
 import sys
 import urllib.error
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn, cast
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
@@ -20,15 +22,70 @@ from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export
 __all__ = [
     "CURRENT",
     "PARTS",
+    "READ_ONLY",
+    "FrozenDict",
+    "FrozenList",
+    "Held",
     "REFRESH",
     "LedgerView",
     "Reader",
+    "current",
     "document",
+    "freeze",
+    "frozen_views",
     "holding",
     "refreshed",
     "start",
     "view_file",
+    "wrote",
 ]
+
+READ_ONLY = "the ledger view is read only: write through the ledger adapter and read the next view"
+
+
+def _refuse(*_args: object, **_kwargs: object) -> NoReturn:
+    """Refuse a change to a frozen part of the view."""
+    raise TypeError(READ_ONLY)
+
+
+class FrozenDict(dict[str, Any]):
+    """A mapping of the view that refuses every change and copies to a plain dict."""
+
+    def __reduce__(self) -> tuple[type[dict[str, Any]], tuple[dict[str, Any]]]:
+        """Copy and pickle as a plain dict."""
+        return dict, (dict(self),)
+
+
+class FrozenList(list[Any]):
+    """A list of the view that refuses every change and copies to a plain list."""
+
+    def __reduce__(self) -> tuple[type[list[Any]], tuple[list[Any]]]:
+        """Copy and pickle as a plain list."""
+        return list, (list(self),)
+
+
+for _name in ("__setitem__", "__delitem__", "__ior__", "clear", "pop", "popitem", "setdefault", "update"):
+    setattr(FrozenDict, _name, staticmethod(_refuse))
+for _name in (
+    *("__setitem__", "__delitem__", "__iadd__", "__imul__", "append", "extend", "insert", "pop", "remove", "clear"),
+    *("sort", "reverse"),
+):
+    setattr(FrozenList, _name, staticmethod(_refuse))
+
+
+def freeze(value: object) -> object:
+    """Return ``value`` with every dict and list in it, at any depth, replaced by one that refuses changes."""
+    if isinstance(value, dict):
+        return FrozenDict({key: freeze(item) for key, item in cast(dict[str, object], value).items()})
+    if isinstance(value, list):
+        return FrozenList(freeze(item) for item in cast(list[object], value))
+    return value
+
+
+def frozen_views() -> bool:
+    """True under CI, where every view is deep frozen so a step changing it fails its test."""
+    return os.environ.get("CI", "").lower() in ("1", "true", "yes")
+
 
 PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
 
@@ -39,6 +96,9 @@ class LedgerView:
     """Tasks, metadata and phases of one ledger at one generation."""
 
     def __init__(self, generation: int, state: dict[str, Any]) -> None:
+        """Hold ``state`` at ``generation``, deep frozen under CI."""
+        if frozen_views():
+            state = cast(dict[str, Any], freeze(state))
         self.generation = generation
         self.tasks: list[dict[str, Any]] = state.get("tasks", [])
         self.meta: dict[str, Any] = state.get("_meta", {})
@@ -55,6 +115,34 @@ class LedgerView:
 
 CURRENT: ContextVar[LedgerView | None] = ContextVar("tick_ledger_view", default=None)
 REFRESH: ContextVar[tuple[str, Callable[[], LedgerView]] | None] = ContextVar("tick_ledger_refresh", default=None)
+
+
+@dataclass
+class Held:
+    """The view a pass holds, how to read it again and whether a ledger write left it stale."""
+
+    view: LedgerView
+    renew: Callable[[], LedgerView]
+    stale: bool = False
+
+
+HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
+
+
+def wrote() -> None:
+    """Mark the held view stale after a ledger write, so the next step reads a fresh view."""
+    if (held := HELD.get()) is not None:
+        held.stale = True
+
+
+def current() -> LedgerView | None:
+    """The view the pass holds, patched by a fresh delta read first when a ledger write left it stale."""
+    held = HELD.get()
+    if held is None:
+        return CURRENT.get()
+    if held.stale:
+        held.view, held.stale = held.renew(), False
+    return held.view
 
 
 def view_file(base: str, slug: str, directory: Path) -> Path:
@@ -106,27 +194,43 @@ def start(slug: str, service: bool) -> LedgerView | None:
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
     CURRENT.set(view)
+    HELD.set(None if view is None else Held(view, refresh))
     REFRESH.set(None if view is None else (slug, refresh))
     return view
 
 
 def document(slug: str) -> dict[str, Any] | None:
-    """The whole document of ledger ``slug`` from the pass's held view patched with one delta read, or nothing
-    when the pass holds no view of that ledger."""
+    """The whole document of ledger ``slug`` from the pass's held view, patched by one delta read only when a ledger
+    write left it stale or the pass holds no record of it, or nothing when the pass holds no view of that ledger."""
     held = REFRESH.get()
     if held is None or held[0] != slug:
         return None
+    kept = HELD.get()
+    if kept is not None and not kept.stale:
+        return kept.view.document
     view = held[1]()
     CURRENT.set(view)
+    if kept is not None:
+        kept.view, kept.stale = view, False
     return view.document
 
 
 @contextmanager
 def holding() -> Generator[None]:
-    """Hold no view on entry and drop whatever view the block started on exit."""
-    current_token, refresh_token = CURRENT.set(None), REFRESH.set(None)
+    """Hold no view on entry and drop whatever view the block started on exit, even when the block is left from
+    another thread's context than the one that entered it."""
+    current_token, refresh_token, held_token = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
     try:
         yield
     finally:
-        REFRESH.reset(refresh_token)
-        CURRENT.reset(current_token)
+        _reset(HELD, held_token)
+        _reset(REFRESH, refresh_token)
+        _reset(CURRENT, current_token)
+
+
+def _reset(var: ContextVar[Any], token: Token[Any]) -> None:
+    """Restore ``var`` to its value before ``token``, or to nothing when ``token`` came from another context."""
+    try:
+        var.reset(token)
+    except ValueError:
+        var.set(None)

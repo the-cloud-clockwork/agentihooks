@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner
+from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner, release_wait
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
@@ -102,7 +102,7 @@ def _read(repo_dir: str, endpoint: str, jq: str, run: Callable, pages: tuple = (
         "swarm.promotion_watch",
         ["api", endpoint, *pages, "--jq", jq],
         run,
-        cwd=repo_dir,
+        **github_reads.location(repo_dir),
         capture_output=True,
         text=True,
         check=True,
@@ -192,7 +192,7 @@ def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
         "swarm.promotion_watch",
         ["api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences"],
         run,
-        cwd=repo,
+        **github_reads.location(repo),
         capture_output=True,
         text=True,
         check=True,
@@ -388,19 +388,20 @@ def _refresh(
     if naming.PROOF_RE.fullmatch(slug) or now_ms - int(redis.get(key(slug, "checked")) or 0) < REFRESH_MS:
         return []
     redis.set(key(slug, "checked"), now_ms)
+    repo = release_wait.repository(config) or config.repo
     try:
-        last = dev_red.latest(config.repo, run)
+        last = dev_red.latest(repo, run)
         if last is None or int(redis.get(key(slug, "seen")) or 0) >= last["id"]:
             return []
-        found = jobs(config.repo, last["id"], run)
+        found = jobs(repo, last["id"], run)
         failed = failed_jobs(found)
-        stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
+        stale = bool(failed) and all(superseded(repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
         red = bool(failed) and not stale and last["conclusion"] == "failure"
-        held = repaired(config.repo, last, failed, run) if red else set()
+        held = repaired(repo, last, failed, run) if red else set()
         failed = [job for job in failed if job not in held]
-        causes = [] if stale else outages([(job, cause(config.repo, named[job], run)) for job in failed], named)
-        causes = test_causes(causes, named, config.repo, run)
+        causes = [] if stale else outages([(job, cause(repo, named[job], run)) for job in failed], named)
+        causes = test_causes(causes, named, repo, run)
     except dev_red.READ_ERRORS as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"promotion watch skipped, reading dev push runs failed: {error}", file=sys.stderr)
@@ -437,8 +438,6 @@ def refresh(
         seen = max(int(store.redis.hget(record, "seen") or 0), int(store.redis.get(key(slug, "seen")) or 0))
         if seen:
             store.redis.set(key(slug, "seen"), seen)
-        if slug in store.slugs():
-            doc = pass_state(ledger, slug)
         actions = _refresh(slug, config, store, ledger, doc, now_ms, run)
         if handled := store.redis.get(key(slug, "seen")):
             store.redis.hset(record, "seen", handled)

@@ -1,3 +1,4 @@
+import argparse
 import json
 from types import SimpleNamespace
 
@@ -178,5 +179,5 @@ def test_the_autoscale_command_on_a_deployed_controller_names_the_off_reason(no_
     monkeypatch.delenv(deployed.API_URL_ENV, raising=False)
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
-    cli.cmd_autoscale(store, SimpleNamespace(slug="sw", fixture=None, json=False))
+    cli.cmd_autoscale(store, argparse.Namespace(slug="sw", fixture=None, json=False))
     assert f"host room None: {WORKERS_OFF}" in capsys.readouterr().out.splitlines()

@@ -64,7 +64,7 @@ class Source:
         doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
-        released = release_wait.checker(config.repo)
+        released = release_wait.checker(config)
         applied = apply_wait.checker(config, rows)
         unshared = fleet_red.checker()
         return Snapshot(
@@ -162,6 +162,13 @@ def anywhere(event: Envelope) -> bool:
 def tick_launches(engine: str, task: Mapping[str, Any]) -> bool:
     """Under the events engine hives take every task but a workstation task, which the workstation tick launches."""
     return engine != EVENTS_ENGINE or bool(task.get("workstation"))
+
+
+def launchable(engine: str, decision: Mapping[str, Any], ready: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ready tasks the tick launches under ``engine``, narrowed to the capacity decision's tasks when it names
+    any."""
+    ready = [task for task in ready if tick_launches(engine, task)]
+    return [task for task in ready if task["id"] in decision["tasks"]] if "tasks" in decision else ready
 
 
 def tick_places(engine: str, rows: Mapping[str, Mapping[str, Any]]) -> bool:

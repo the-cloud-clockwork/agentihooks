@@ -30,7 +30,7 @@ from scripts.swarm.status import findings
 from scripts.tick import engine, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, actions, budgets, host, report
+from scripts.tick.steps import PASS, CallStep, actions, actions_of, budgets, host, report
 
 pytestmark = pytest.mark.unit
 
@@ -107,31 +107,56 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
 
 
 def test_the_report_steps_sit_at_their_sites_in_legacy_order() -> None:
-    assert [(step.name, step.group, step.order) for step in report.STEPS] == [
-        ("ledger event pass", "wrapper events", 10),
-        ("done recheck", "wrapper events", 20),
-        ("progress checks", "wrapper events", 30),
-        ("waits end", "wrapper events", 40),
-        ("merge pass", "wrapper events", 50),
-        ("stall watch", "wrapper events", 60),
-        ("overrun pass", "wrapper events", 70),
-        ("quiet pass", "wrapper events", 80),
-        ("doc report", "wrapper events", 90),
-        ("priorities sweep", "wrapper events", 100),
-        ("health findings", "wrapper events", 110),
-        ("findings pass", "wrapper events", 120),
-        ("metrics record", "wrapper metrics", 10),
-        ("bottleneck status", "wrapper metrics", 20),
-        ("inbox wake", "wrapper metrics", 30),
-        ("snapshot job", "wrapper metrics", 40),
-        ("last tick", "wrapper metrics", 50),
-        ("heartbeat", "after", 10),
-        ("status publish", "wrapper status", 10),
+    assert [(step.name, step.group) for step in report.STEPS] == [
+        ("ledger event pass", "wrapper events"),
+        ("done recheck", "wrapper events"),
+        ("progress checks", "wrapper events"),
+        ("waits end", "wrapper events"),
+        ("merge pass", "wrapper events"),
+        ("stall watch", "wrapper events"),
+        ("overrun pass", "wrapper events"),
+        ("quiet pass", "wrapper events"),
+        ("doc report", "wrapper events"),
+        ("priorities sweep", "wrapper events"),
+        ("health findings", "wrapper events"),
+        ("findings pass", "wrapper events"),
+        ("metrics record", "wrapper metrics"),
+        ("bottleneck status", "wrapper metrics"),
+        ("inbox wake", "wrapper metrics"),
+        ("snapshot job", "wrapper metrics"),
+        ("last tick", "closing"),
+        ("heartbeat", "closing"),
+        ("status publish", "closing"),
     ]
     registered = [step for wave in registry.waves() for step in wave]
     for step in report.STEPS:
         assert step in registered
-        assert (step.lane, step.budget_s) == (CallStep.lane, budgets.timing_of(step.name)[0])
+        assert step.budget_s == budgets.timing_of(step.name)[0]
+
+
+def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> None:
+    lanes = {step.name: step.lane for step in report.STEPS}
+    assert {name for name, lane in lanes.items() if lane == engine.SLOW} == {
+        "ledger event pass",
+        "done recheck",
+        "progress checks",
+        "waits end",
+        "merge pass",
+        "doc report",
+        "priorities sweep",
+        "health findings",
+        "findings pass",
+        "metrics record",
+        "bottleneck status",
+        "inbox wake",
+    }
+    assert {lane for lane in lanes.values() if lane != engine.SLOW} == {CallStep.lane, report.CLOSING}
+
+
+def test_a_call_step_keeps_the_lane_it_is_given() -> None:
+    call = host.held(lambda cli, get: None)
+    assert CallStep("heartbeat", "g", call).lane == "tick"
+    assert CallStep("heartbeat", "g", call, lane=engine.SLOW).lane == "slow"
 
 
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -175,7 +200,7 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
     assert name == "stall watch"
     assert args[:5] == (STORE, "sw", "ledger", "view", frozenset({"a", "b"}))
     assert args[6:] == (("lanes", "sw", STORE, "ledger", DOC, 7), 7)
-    assert kwargs == {"released": ("checker", "/repo"), "reread": ledger_events.view}
+    assert kwargs == {"released": ("checker", CONFIG), "reread": ledger_events.view}
     assert (overrun_call[0], overrun_call[1], overrun_call[3]) == ("skip", overrun.overrun_pass, DOC)
     watch = overrun_call[2]
     assert watch[:5] == ("overrun watch", STORE, "sw", "ledger", frozenset({"a", "b"}))
@@ -192,36 +217,102 @@ def test_the_metrics_steps_record_wake_and_start_the_snapshot(monkeypatch: pytes
     redis = SimpleNamespace(set=lambda key, value: calls.append(("set", key, value)))
     store = SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
     found = _run("wrapper metrics", calls, _pass(box, store=store, count=5), monkeypatch)
-    assert found == ["ran 1", "ran 2", "ran 3"]
+    assert found == ["ran 1", "ran 2", "ran 3", "started automatic snapshot"]
     assert calls == [
         ("call", metrics.record_pass, "sw", 7, 5, os.environ, ("input", store, DOC, ["f"], "view", "ledger")),
         ("skip", bottleneck_status.refresh, "sw", store, 7),
         ("skip", wake.maintenance, "inbox", "sw", AGENTS, 7, ("window", True)),
         ("call", snapshot_job.start, store, "sw", 7, os.environ),
-        ("set", "sw/last-tick", 7),
     ]
-    assert box == {"found": ["f"], "started": ["ran 4"]}
+    assert box == {"found": ["f"]}
+
+
+def test_the_snapshot_step_returns_no_line_when_no_job_started(monkeypatch: pytest.MonkeyPatch) -> None:
+    step = next(step for step in report.STEPS if step.name == "snapshot job")
+    store = SimpleNamespace()
+    box: dict[str, Any] = {}
+    cli = SimpleNamespace(now_ms=lambda: 7, snapshot_job=snapshot_job)
+    monkeypatch.setattr(host, "import_module", lambda name: cli)
+    monkeypatch.setattr(timing, "call", lambda function, *args: False)
+    assert step.writes == {actions_of("snapshot job")}
+    assert step.call(None, {"box": box, "store": store, "slug": "sw"}.get) == []
+    assert box == {}
 
 
 def test_the_watches_and_findings_declare_the_steps_they_need() -> None:
     needs = {step.name: step.needs for step in report.STEPS if step.needs}
+    viewed = frozenset({"tick view"})
     assert needs == {
+        "ledger event pass": viewed,
+        "done recheck": viewed,
+        "progress checks": viewed,
+        "waits end": viewed,
+        "merge pass": viewed,
+        "stall watch": viewed | {"page relay"},
         "overrun pass": frozenset({"stall watch"}),
+        "priorities sweep": viewed,
+        "health findings": viewed,
         "findings pass": frozenset({"health findings"}),
         "metrics record": frozenset({"health findings"}),
+        "inbox wake": frozenset({"page relay"}),
+        "status publish": frozenset({"health findings"}),
     }
-    assert {step.needs for step in host.STEPS} == {frozenset()}
-    assert CallStep("heartbeat", "g", 1, host.held(lambda cli, get: None)).needs == frozenset()
+    assert {step.name: step.needs for step in host.STEPS if step.needs} == {
+        "planning after phase": frozenset({"planning and phase pass"})
+    }
+    assert CallStep("heartbeat", "g", host.held(lambda cli, get: None)).needs == frozenset()
 
 
-def test_the_heartbeat_runs_after_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+def _closing_store(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
+    redis = SimpleNamespace(
+        set=lambda key, value: calls.append(("set", key, value)), delete=lambda key: calls.append(("delete", key))
+    )
+    return SimpleNamespace(redis=redis, key=lambda slug, mark: f"{slug}/{mark}")
+
+
+def test_a_full_pass_stamps_last_tick_and_the_heartbeat_and_ends_the_early_end_streak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("after", calls, _pass(), monkeypatch) == []
-    assert calls == [("heartbeat", STORE, "sw", 7, DOC)]
+    store = _closing_store(calls)
+    assert _run("closing", calls, _pass(store=store, ended=report.FULL), monkeypatch) == []
+    assert calls == [
+        ("set", "sw/last-tick", 7),
+        ("heartbeat", store, "sw", 7, DOC),
+        ("delete", "sw/early-end-streak"),
+        ("publish", store, "sw", DOC, "view", None, None),
+    ]
+
+
+def test_an_early_ended_pass_stamps_last_tick_and_the_heartbeat_and_keeps_its_streak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    store = _closing_store(calls)
+    assert _run("closing", calls, _pass(store=store, ended=report.EARLY), monkeypatch) == []
+    assert calls == [
+        ("set", "sw/last-tick", 7),
+        ("heartbeat", store, "sw", 7, DOC),
+        ("publish", store, "sw", DOC, "view", None, None),
+    ]
+
+
+def test_a_pass_that_never_ended_stamps_nothing_and_still_publishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    store = _closing_store(calls)
+    assert _run("closing", calls, _pass(store=store), monkeypatch) == []
+    assert calls == [("publish", store, "sw", DOC, "view", None, None)]
 
 
 def test_the_status_publish_hands_over_the_doc_and_view(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     failure = RuntimeError("tick failed")
-    assert _run("wrapper status", calls, _pass(failure=failure), monkeypatch) == []
-    assert calls == [("publish", STORE, "sw", DOC, "view", failure)]
+    assert _run("closing", calls, _pass(failure=failure), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", failure, None)]
+
+
+def test_the_status_publish_hands_over_the_findings_the_health_step_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    found = [{"kind": "stale"}]
+    assert _run("closing", calls, _pass({"found": found}), monkeypatch) == []
+    assert calls == [("publish", STORE, "sw", DOC, "view", None, found)]

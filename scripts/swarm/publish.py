@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
-from scripts.swarm import continuation, naming, publish_queue, stack
+from scripts.swarm import continuation, git_https, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
@@ -22,7 +22,7 @@ class PublicationRefusal(SwarmError):
 
 
 def execute(argv: list[str], root: Path) -> str:
-    done = subprocess.run(argv, cwd=root, capture_output=True, text=True)
+    done = git_https.run(argv, cwd=root)
     if done.returncode:
         raise SwarmError(f"{shlex.join(argv)} failed: {done.stderr.strip() or done.stdout.strip()}")
     return done.stdout
