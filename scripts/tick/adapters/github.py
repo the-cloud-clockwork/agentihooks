@@ -101,6 +101,36 @@ def _open_change(node: dict[str, Any]) -> OpenChange:
     return OpenChange(node["url"], tuple(_rollup_check(context) for context in contexts))
 
 
+def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
+    """Return the data of a refused open listing whose only errors hide check rollups from the App, else re-raise."""
+    try:
+        body = json.loads(refused.stdout or "")
+    except ValueError:
+        raise refused from None
+    errors = body.get("errors") if isinstance(body, dict) else None
+    hidden = (
+        isinstance(errors, list)
+        and bool(errors)
+        and all(isinstance(error, dict) and _rollup_refusal(error) for error in errors)
+    )
+    data = body.get("data") if hidden else None
+    repository = data.get("repository") if isinstance(data, dict) else None
+    if not isinstance(repository, dict) or not isinstance(repository.get("pullRequests"), dict):
+        raise refused
+    return data
+
+
+def _rollup_refusal(error: dict[str, Any]) -> bool:
+    """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
+    path = error.get("path")
+    return (
+        error.get("type") == "FORBIDDEN"
+        and isinstance(path, list)
+        and path[:2] == ["repository", "pullRequests"]
+        and path[-1] == "statusCheckRollup"
+    )
+
+
 def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
     """Read one workflow run's identity, outcome and timing."""
     return WorkflowRun(
@@ -294,13 +324,20 @@ class GitHubSourceControl:
         return next((row["merged_at"] for row in rows if row["merged_at"]), None)
 
     def open_changes(self, *, deadline: Deadline) -> tuple[OpenChange, ...]:
-        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five."""
+        """List the repository's open pull requests with their check rollups, at most eight pages of twenty five.
+
+        A pull request whose check rollup the App may not read is listed with no checks.
+        """
         deadline.live()
         owner, name = self.repository.split("/")
         variables: dict[str, str | int] = {"owner": owner, "name": name}
         changes: list[OpenChange] = []
         for _ in range(_OPEN_PAGES):
-            pulls = self._graphql(_OPEN, variables, deadline)["repository"]["pullRequests"]
+            try:
+                data = self._graphql(_OPEN, variables, deadline)
+            except subprocess.CalledProcessError as refused:
+                data = _hidden_rollups(refused)
+            pulls = data["repository"]["pullRequests"]
             changes.extend(_open_change(node) for node in pulls["nodes"])
             if not pulls["pageInfo"]["hasNextPage"]:
                 break
