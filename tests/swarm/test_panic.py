@@ -603,7 +603,9 @@ def _checkout(root: Path, branch: str, origin: str = "git@github.com:The-Cloud-C
 
 @pytest.mark.parametrize("command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml"])
 @pytest.mark.feature("panic-fix-branch-pushes")
-def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(store, monkeypatch, tmp_path, command):
+def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
     asked = _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
     cwd = _checkout(tmp_path / "fix", "fix-branch")
@@ -612,7 +614,9 @@ def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(store, mon
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
-def test_panic_still_refuses_a_push_from_any_other_branch(store, monkeypatch, tmp_path):
+def test_panic_still_refuses_a_push_from_any_other_branch(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
     cwd = _checkout(tmp_path / "other", "other-branch")
@@ -621,7 +625,9 @@ def test_panic_still_refuses_a_push_from_any_other_branch(store, monkeypatch, tm
 
 
 @pytest.mark.feature("panic-fix-branch-pushes")
-def test_the_hook_payload_cwd_decides_the_fix_branch_push(store, monkeypatch, tmp_path):
+def test_the_hook_payload_cwd_decides_the_fix_branch_push(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
     payload = {"tool_name": "Bash", "tool_input": {"command": "git push"}, "session_id": "engineer-session"}
@@ -633,14 +639,19 @@ def test_the_hook_payload_cwd_decides_the_fix_branch_push(store, monkeypatch, tm
 
 
 @pytest.mark.parametrize("command", ["kubectl apply -f a.yaml", "git push && helm upgrade x y"])
-def test_a_fix_branch_session_still_waits_to_deploy(store, monkeypatch, tmp_path, command):
+def test_a_fix_branch_session_still_waits_to_deploy(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "reason", False, [FIX], 0)
     cwd = _checkout(tmp_path / "fix", "fix-branch")
     assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd)[1] is not None
 
 
-def test_a_same_named_branch_in_another_repository_stays_frozen(store, monkeypatch, tmp_path):
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_a_same_named_branch_in_another_repository_stays_frozen(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     asked = _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "reason", False, [FIX], 0)
     cwd = _checkout(tmp_path / "fix", "fix-branch", "https://github.com/the-cloud-clockwork/antoncore.git")
@@ -648,7 +659,10 @@ def test_a_same_named_branch_in_another_repository_stays_frozen(store, monkeypat
     assert asked == []
 
 
-def test_panic_refuses_a_push_when_the_fix_cannot_be_read(store, monkeypatch, tmp_path):
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_panic_refuses_a_push_when_the_fix_cannot_be_read(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm import stack
     from scripts.swarm.store import SwarmError
 
@@ -661,7 +675,10 @@ def test_panic_refuses_a_push_when_the_fix_cannot_be_read(store, monkeypatch, tm
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", cwd)[1] is not None
 
 
-def test_panic_refuses_a_push_outside_a_git_checkout(store, monkeypatch, tmp_path):
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_panic_refuses_a_push_outside_a_git_checkout(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _branches(monkeypatch, {FIX: "fix-branch"})
     panic.engage(store, "reason", False, [FIX], 0)
     assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
