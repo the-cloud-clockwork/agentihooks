@@ -34,8 +34,8 @@ TICK_SITES = (
     place.NOTICES,
     place.ACKS,
     master_steps.SEATS,
-    place.PLACEMENT,
     master_steps.DISPATCH,
+    place.PLACEMENT,
     master_steps.WATCH,
     task_steps.CLOSE,
 )
