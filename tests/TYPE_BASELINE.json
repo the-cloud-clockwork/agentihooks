@@ -777,7 +777,7 @@
   "scripts/swarm_ledger/ledger_alerts.py": 250,
   "scripts/swarm_ledger/ledger_answer.py": 39,
   "scripts/swarm_ledger/ledger_artifacts.py": 256,
-  "scripts/swarm_ledger/ledger_authority.py": 45,
+  "scripts/swarm_ledger/ledger_authority.py": 37,
   "scripts/swarm_ledger/ledger_bin.py": 84,
   "scripts/swarm_ledger/ledger_blockers.py": 201,
   "scripts/swarm_ledger/ledger_ca.py": 20,
