@@ -161,7 +161,7 @@ def test_a_claimed_task_carries_its_reclaim_overlaps_group_seat_and_primed_launc
     store, ledger = _Store(log, lives=["life"]), _Ledger(log)
     run = _run(store, ledger)
     taken: set[str] = set()
-    launch, notes = place._prepare(run, "eng", {"id": "t1"}, taken, "failing", {"peer"})
+    launch, notes = place._prepare(run, "eng", dict(run.rows["t1"]), taken, "failing", {"peer"})
     task = run.rows["t1"]
     assert notes == []
     assert launch.task is task
