@@ -5,7 +5,8 @@ from hooks.context import worker_mode
 from hooks.targets import is_codex_memory_thread
 from scripts.inbox.cli import identity
 from scripts.inbox.seen import claim
-from scripts.inbox.store import InboxError, InboxStore, Unreachable, now_ms
+from scripts.inbox.store import InboxError, InboxStore, now_ms
+from scripts.inbox.store import connect as open_inbox
 from scripts.inbox.wake import window_ms
 
 CLOSE_HINT = "done|handoff <address>|blocked <what>|cancel [why]"
@@ -49,18 +50,9 @@ def _receiver(session_id, environ):
 
 def connect(environ: MutableMapping[str, str]) -> InboxStore:
     """Open the inbox on this hook process's shared short timeout Redis client."""
-    import redis
-
-    from scripts.inbox import outbox
-    from scripts.inbox.seen import receiving_session
     from scripts.swarm.hook_redis import client
 
-    try:
-        store = InboxStore(client(environ), session_id=receiving_session(environ))
-    except redis.RedisError as exc:
-        raise Unreachable(f"Redis is unreachable ({exc})") from exc
-    outbox.flush(store)
-    return store
+    return open_inbox(environ, client)
 
 
 def _render(item):

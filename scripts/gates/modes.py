@@ -4,6 +4,7 @@ Inside a swarm the mode is the swarm config's gates entry, set only by the opera
 only outside a swarm.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -79,9 +80,12 @@ def _keep(path: Path, gates: dict[str, str] | None) -> None:
 
 
 def _cache_path(swarm: str, environ: Mapping[str, str]) -> Path:
-    """Return the file that holds the swarm's gates entry between gate shim processes."""
+    """Return the file that holds the swarm's gates entry from one Redis between gate shim processes."""
+    from scripts.swarm.store import redis_url
+
     home = environ.get("AGENTIHOOKS_HOME") or str(Path.home() / ".agentihooks")
-    return Path(home) / "swarm" / swarm / "gate-modes.json"
+    source = hashlib.sha256(redis_url(environ).encode()).hexdigest()[:12]
+    return Path(home) / "swarm" / swarm / f"gate-modes-{source}.json"
 
 
 def _read_gates(swarm: str, environ: MutableMapping[str, str]) -> dict[str, str] | None:

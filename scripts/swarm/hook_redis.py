@@ -13,9 +13,10 @@ _clients: dict[tuple[str, int], Any] = {}
 def client(environ: MutableMapping[str, str] | None = None) -> Any:
     """Return this process's client for the swarm Redis; a ping that failed once raises again without a new try."""
     import hooks.config  # noqa: F401
-    from scripts.swarm.store import redis_url
+    from scripts.swarm.store import _adopt_saved_member, redis_url
 
     env = os.environ if environ is None else environ
+    _adopt_saved_member(env)
     key = (redis_url(env), os.getpid())
     held = _clients.get(key)
     if held is None:
