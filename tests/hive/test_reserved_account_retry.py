@@ -112,3 +112,14 @@ def test_a_retry_within_one_pass_skips_the_refused_account(setup: SimpleNamespac
     request = request_for(setup)
     assert setup.launcher.spawn(request) == "pending"
     assert setup.launcher.placement_cache[("eng", "task")].account.name == "second"
+
+
+def test_only_an_unavailable_full_reservation_counts_as_a_full_account() -> None:
+    from scripts.hive import launch
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    assert launch._account_full(Outcome("spawn", Status.UNAVAILABLE, "hive", detail=FIRST_FULL))
+    assert not launch._account_full(Outcome("spawn", Status.REFUSED, "hive", detail=FIRST_FULL))
+    assert not launch._account_full(Outcome("spawn", Status.UNAVAILABLE, "hive", detail="no hive has room"))
+    assert not launch._account_full(Outcome("spawn", Status.UNAVAILABLE, "hive", detail=f"queued {FIRST_FULL}"))
+    assert not launch._account_full("pending")
