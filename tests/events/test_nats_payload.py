@@ -106,7 +106,8 @@ def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     with nats_server.running(tmp_path / "jetstream") as url:
         opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
-        connect.assert_called_once_with(url, allow_reconnect=True, max_reconnect_attempts=-1)
+        connect.assert_called_once_with(url, allow_reconnect=True, max_reconnect_attempts=5)
+        assert opened._nc.options["max_reconnect_attempts"] == -1
         handler = mock.Mock()
         hosted = runner.HubRunner(
             opened, registry.Registry([registry.Reactor("worker", "swarm.*.task.>", handler)]), "hub"

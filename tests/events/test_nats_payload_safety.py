@@ -122,7 +122,7 @@ def test_transport_configuration_is_checked_before_any_network_connection(monkey
         assert args == ("nats://configured.example:4222",)
         expected = {"allow_reconnect": reconnect}
         if reconnect:
-            expected["max_reconnect_attempts"] = -1
+            expected["max_reconnect_attempts"] = 5
         assert kwargs == expected
         raise ValueError("configuration captured")
 
