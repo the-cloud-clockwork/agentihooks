@@ -335,21 +335,21 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     beating.enter_context(ledger_view.holding())
     if not ledger_view.reads(ledger):
         return
+    beating.callback(ledger_client.OFFLINE.set, False)
     try:
         ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
     except OSError as exc:
         if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
             raise
-        _hold_stored(beating, slug, exc)
+        _hold_stored(slug, exc)
 
 
-def _hold_stored(beating: ExitStack, slug: str, exc: OSError) -> None:
+def _hold_stored(slug: str, exc: OSError) -> None:
     """Hold the last good view of ledger ``slug`` for the pass and run it offline, or raise when none is stored."""
     if ledger_view.hold_stored(slug) is None:
         raise LedgerUnreachable(f"ledger {slug}: no stored view to run from while the server is not answering") from exc
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
     ledger_client.OFFLINE.set(True)
-    beating.callback(ledger_client.OFFLINE.set, False)
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):

@@ -54,21 +54,18 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for op in ops:
         found = held.read("tasks", op["item"].removeprefix("tasks/")) if held and op["op"] == "task_update" else None
         row = cast(dict[str, Any], found) if isinstance(found, dict) else None
-        states: list[str] = op.get("if_state") or []
-        expected: dict[str, Any] = op.get("if_match") or {}
-        moved = row is not None and (
-            bool(states)
-            and row.get("state") not in states
-            or any(row.get(key, "") != value for key, value in expected.items())
-        )
-        if moved:
+        if row is not None and _moved(row, op):
             raise LedgerRefused(f"ledger {slug} refused: {op['item']} moved since the last good view")
     return ops
 
 
-def _ledger_queue(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
-    """The answer of ``ledger`` queueing ``ops`` for ledger ``slug`` in the local outbox."""
-    return ledger.queue(slug, ops, service)
+def _moved(row: dict[str, Any], op: dict[str, Any]) -> bool:
+    """Whether held task ``row`` fails the state or field guard of write ``op``."""
+    states: list[str] = op.get("if_state") or []
+    expected: dict[str, Any] = op.get("if_match") or {}
+    return (bool(states) and row.get("state") not in states) or any(
+        row.get(key, "") != value for key, value in expected.items()
+    )
 
 
 def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
@@ -117,7 +114,7 @@ class LedgerClient:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
             if OFFLINE.get() and ops:
-                return _queued(ops, _ledger_queue(ledger, slug, _guarded(slug, ops), service))
+                return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc

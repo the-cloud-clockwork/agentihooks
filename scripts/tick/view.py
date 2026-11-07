@@ -156,15 +156,15 @@ def view_file(base: str, slug: str, directory: Path) -> Path:
 def refreshed(path: Path, reader: Reader) -> LedgerView:
     """The view stored at path patched with one delta read, stored back when its generation moved or a stored
     view that no longer fits was replaced by a full read."""
-    stored = read_export_file(path)
-    generation, held = stored if stored is not None else (0, {})
+    exported = read_export_file(path)
+    generation, held = exported if exported is not None else (0, {})
     reply = reader(generation, PARTS)
     try:
         state = patched(held, reply["changes"]) if "changes" in reply else reply["data"]
     except (KeyError, IndexError, TypeError, AttributeError):
         reply, generation = reader(0, PARTS), None
         state = reply["data"]
-    if stored is None or reply["generation"] != generation:
+    if exported is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
     return LedgerView(reply["generation"], state)
 
@@ -210,6 +210,9 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
         except urllib.error.HTTPError:
             raise
         except OSError:
+            from scripts.swarm.ledger_client import OFFLINE
+
+            OFFLINE.set(True)
             return HELD.get().view  # pyright: ignore[reportOptionalMemberAccess]
 
     return renew

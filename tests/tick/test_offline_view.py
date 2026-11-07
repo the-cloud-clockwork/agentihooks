@@ -74,8 +74,8 @@ def test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it(sto
         assert current is not None and current.generation == 7
         assert current.read("tasks", "t1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
         assert current.read("tasks", "t2") == {"id": "t2", "state": "claimed"}
-        held = view.document("sw")
-        assert held is not None and held["_meta"] == STATE["_meta"]
+        document = view.document("sw")
+        assert document is not None and document["_meta"] == STATE["_meta"]
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
@@ -240,9 +240,13 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
 ) -> None:
     from scripts.scheduler import service
 
-    replies: list[dict | OSError] = [{"generation": 3, "data": STATE}, TimeoutError("timed out"), refusal(401)]
+    replies: list[dict[str, Any] | OSError] = [
+        {"generation": 3, "data": STATE},
+        TimeoutError("timed out"),
+        refusal(401),
+    ]
 
-    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict:
+    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
         reply = replies.pop(0)
         if isinstance(reply, OSError):
             raise reply
@@ -252,10 +256,13 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(api.ResourceClient, "changes", changes)
-    with view.holding():
+    with view.holding(), ExitStack() as reset:
+        reset.callback(OFFLINE.set, False)
         held = view.start("sw", False)
+        assert OFFLINE.get() is False
         view.wrote()
         assert view.current() is held
+        assert OFFLINE.get() is True
         view.wrote()
         with pytest.raises(urllib.error.HTTPError):
             view.current()

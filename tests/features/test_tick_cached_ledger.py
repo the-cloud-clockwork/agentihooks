@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.hive import headroom
 from scripts.swarm import cli, tick_watch
 from scripts.swarm.ledger_client import LedgerClient, _ledger
 from tests.features.conftest import TASK, Swarm, free_port
@@ -91,6 +92,20 @@ class Proxy:
                 side.shutdown(socket.SHUT_RDWR)
 
 
+def _roomy(
+    pending: int, now_ms: int, proc: Path | None = None, previous: dict[str, object] | None = None
+) -> dict[str, int]:
+    """A fixed roomy machine reading, so the shared runner's own load never refuses the launch under test."""
+    return {
+        "cpus": 1000,
+        "load5": 0.0,
+        "available_mb": 10**7,
+        "total_mb": 10**7,
+        "pending": pending,
+        "measured_at": now_ms,
+    }
+
+
 @pytest.mark.wall_clock
 @pytest.mark.feature("swarm-tick-cached-ledger")
 @pytest.mark.parametrize("fault", ["slow", "stopped"])
@@ -102,6 +117,7 @@ def test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopp
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
+    monkeypatch.setattr(headroom, "measure", _roomy)
     store, slug = swarm.store, swarm.ledger.slug
     store.update(slug, state="paused", repo=str(tmp_path), snapshot_minutes=0)
     proxy = Proxy(int(swarm.ledger.env["LEDGER_PORT"]))
