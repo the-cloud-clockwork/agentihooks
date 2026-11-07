@@ -247,7 +247,7 @@ def test_a_launch_past_an_unhosted_first_ranked_hive_records_why(setup, fields, 
 def test_a_reservation_refused_on_the_first_ranked_hive_names_its_memory_line(setup):  # noqa: F811
     write_hive(setup, prefer={"eng": 1})
     write_hive(setup, id="spare")
-    _load(setup, "remote", cpus=1, load5=2.0, available_mb=20_000 + admission.AGENT_MB)
+    _load(setup, "remote", available_mb=20_000 + admission.AGENT_MB)
     request = request_for(setup)
     selected = setup.launcher.select(setup.config, "eng", request.task)
     assert (selected.hive, selected.first) == ("remote", True)
