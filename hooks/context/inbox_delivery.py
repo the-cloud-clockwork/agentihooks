@@ -58,7 +58,7 @@ def connect(environ: MutableMapping[str, str]) -> InboxStore:
     try:
         store = InboxStore(client(environ), session_id=receiving_session(environ))
     except redis.RedisError as exc:
-        raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
+        raise Unreachable(f"Redis is unreachable ({exc})") from exc
     outbox.flush(store)
     return store
 

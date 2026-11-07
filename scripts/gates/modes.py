@@ -67,16 +67,15 @@ def _held(path: Path) -> tuple[float, dict[str, str] | None] | None:
         return None
 
 
-def _keep(path: Path, gates: dict[str, str] | None) -> bool:
+def _keep(path: Path, gates: dict[str, str] | None) -> None:
     """Write the gates entry for the next gate shims; a write that fails only loses the cache."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         staged = path.with_name(f"{path.name}.{os.getpid()}")
         staged.write_text(json.dumps({"at": time.time(), "gates": gates}))
         staged.replace(path)
-        return True
     except OSError:
-        return False
+        return
 
 
 def _cache_path(swarm: str, environ: Mapping[str, str]) -> Path:

@@ -1,4 +1,4 @@
-"""One Redis client per hook process, with short timeouts and one ping, shared by the heartbeat, the inbox and the gates."""
+"""One Redis client per hook process, short timeouts and one ping, shared by the heartbeat, inbox and gates."""
 
 import os
 from collections.abc import MutableMapping

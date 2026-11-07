@@ -10,9 +10,10 @@ import sys
 import tempfile
 import time
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -49,7 +50,7 @@ def _is_redis(address):
     return isinstance(address, tuple) and address[1:2] == (REDIS_PORT,)
 
 
-def _store_client(environ: object = None) -> object:
+def _store_client(environ: MutableMapping[str, str] | None = None) -> Any:
     """Reach the swarm Redis through the store client that tests patch, in place of the hook process client."""
     from scripts.swarm import store
 

@@ -1,4 +1,4 @@
-"""One hook process reaches Redis through one short timeout client, and gate shims share a few seconds of gate config."""
+"""One hook process reaches Redis through one short timeout client; gate shims share a few seconds of gate config."""
 
 from typing import Any
 
@@ -78,7 +78,9 @@ def fake(monkeypatch: pytest.MonkeyPatch, built: list[dict[str, Any]], pings: li
 
 
 @pytest.mark.feature("hook-redis-reuse")
-def test_one_hook_process_builds_one_redis_client_and_pings_it_once(fake, built, pings):
+def test_one_hook_process_builds_one_redis_client_and_pings_it_once(
+    fake: Any, built: list[dict[str, Any]], pings: list[int]
+) -> None:
     from hooks.context import inbox_delivery, swarm_heartbeat
 
     fake.set("probe", "1")
@@ -94,14 +96,16 @@ def test_one_hook_process_builds_one_redis_client_and_pings_it_once(fake, built,
 
 
 @pytest.mark.feature("hook-redis-reuse")
-def test_the_hook_client_uses_short_timeouts(fake, built):
+def test_the_hook_client_uses_short_timeouts(fake: Any, built: list[dict[str, Any]]) -> None:
     hook_redis.client(dict(ENV))
     assert 0 < built[0]["socket_connect_timeout"] <= 1
     assert 0 < built[0]["socket_timeout"] <= 1
 
 
 @pytest.mark.feature("hook-redis-reuse")
-def test_a_slow_redis_costs_the_short_timeout_once_per_process(monkeypatch, built, pings):
+def test_a_slow_redis_costs_the_short_timeout_once_per_process(
+    monkeypatch: pytest.MonkeyPatch, built: list[dict[str, Any]], pings: list[int]
+) -> None:
     import redis
 
     from hooks.context import inbox_delivery, swarm_heartbeat
@@ -120,7 +124,9 @@ def test_a_slow_redis_costs_the_short_timeout_once_per_process(monkeypatch, buil
 
 
 @pytest.mark.feature("hook-redis-reuse")
-def test_gate_shims_inside_the_cache_window_do_not_reach_redis(fake, built, pings, monkeypatch):
+def test_gate_shims_inside_the_cache_window_do_not_reach_redis(
+    fake: Any, built: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.swarm.store import RedisStore
 
     assert modes.swarm_gates("demo", dict(ENV)) == {"watch": "off"}
