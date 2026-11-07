@@ -595,6 +595,49 @@ def test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions(s
     assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
 
 
+def _checkout(root: Path, branch: str) -> str:
+    subprocess.run(["git", "init", "-q", "-b", branch, str(root)], check=True)
+    return str(root)
+
+
+@pytest.mark.parametrize("command", ["git push origin fix-branch", "gh run rerun 5", "gh workflow run t.yml"])
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix(store, monkeypatch, tmp_path, command):
+    asked = _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": command}, "engineer-session", cwd) == (None, None)
+    assert asked == [FIX]
+
+
+@pytest.mark.feature("panic-fix-branch-pushes")
+def test_panic_still_refuses_a_push_from_any_other_branch(store, monkeypatch, tmp_path):
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "60 errors in the last hour", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "other", "other-branch")
+    block = blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", cwd)[1]
+    assert block == blocker_window.FROZEN.format(reason="60 errors in the last hour")
+
+
+def test_panic_refuses_a_push_when_the_fix_cannot_be_read(store, monkeypatch, tmp_path):
+    from scripts.swarm import stack
+    from scripts.swarm.store import SwarmError
+
+    def change(url: str, refused: str) -> None:
+        raise SwarmError(refused)
+
+    monkeypatch.setattr(stack, "change", change)
+    panic.engage(store, "reason", False, [FIX], 0)
+    cwd = _checkout(tmp_path / "fix", "fix-branch")
+    assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", cwd)[1] is not None
+
+
+def test_panic_refuses_a_push_outside_a_git_checkout(store, monkeypatch, tmp_path):
+    _branches(monkeypatch, {FIX: "fix-branch"})
+    panic.engage(store, "reason", False, [FIX], 0)
+    assert blocker_window.pretool("Bash", {"command": "git push"}, "engineer-session", str(tmp_path))[1] is not None
+
+
 @pytest.mark.parametrize("command", ["git status", "gh run list", "kubectl get pods", "echo push", ""])
 def test_panic_lets_other_commands_through(store, command):
     panic.engage(store, "reason", True, [], 0)

@@ -1818,6 +1818,18 @@
       ]
     },
     {
+      "id": "panic-fix-branch-pushes",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-push",
+      "behaviour": "While fleet panic is on, a push, rerun or dispatch from a session whose branch is the head branch of a registered fix pull request goes through, and the same command from any other branch stays frozen.",
+      "seam": "The PreToolUse panic freeze in the blocker window hook",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_spares_a_push_from_the_head_branch_of_a_registered_fix",
+        "tests/swarm/test_panic.py::test_panic_still_refuses_a_push_from_any_other_branch"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
