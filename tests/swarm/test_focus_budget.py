@@ -229,3 +229,36 @@ def test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat() ->
 def test_focus_record_order_breaks_ties_within_one_rank_band() -> None:
     tasks = [work("first"), work("second"), work("urgent", rank="urgent")]
     assert _spawned(tasks, ["second", "urgent", "first"]) == ["urgent", "second", "first"]
+
+
+@pytest.mark.feature("swarm-focus")
+def test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band() -> None:
+    from scripts.swarm import focus_budget
+
+    queue = [("eng", work("free", rank="urgent")), ("eng", work("held"))]
+    band = {"urgent": 0, "normal": 1}
+    ordered = focus_budget.ordered(queue, {"free": 2, "held": 0}, lambda task: band[task["rank"]], 2)
+    assert ordered == [queue[1], queue[0]]
+
+
+@pytest.mark.feature("swarm-focus")
+def test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task() -> None:
+    tasks = [
+        {**work("top"), "rank": None, "depends_on": ["dep"]},
+        work("dep", rank="urgent"),
+        {**work("other"), "rank": None},
+    ]
+    assert _spawned(tasks, ["top", "other"]) == ["other", "dep"]
+
+
+@pytest.mark.feature("swarm-focus")
+def test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+    from scripts.tick.steps.place import _ranked
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    queue = [(0, "eng", work("a", rank="urgent")), (1, "eng", work("b"))]
+    ranked = _ranked("sw", store, queue, lambda task: (0 if task["id"] == "b" else 1,))
+    assert [task["id"] for _, task in ranked] == ["b", "a"]
