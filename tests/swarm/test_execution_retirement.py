@@ -166,6 +166,7 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store: Redis
     execute = pipe_type.execute
     script = store.redis.eval
     calls: list[str] = []
+    churned: list[dict[str, str]] = []
 
     def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
         if any(command[0][0] == "HDEL" for command in pipe.command_stack):
@@ -177,6 +178,7 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store: Redis
         calls.append("row")
         row = json.loads(store.redis.hget(key, agent.name))
         store.redis.hset(key, agent.name, json.dumps({**row, "pane_id": f"pane-{len(calls)}"}))
+        churned.append(store.redis.hgetall(key))
         return script(*args)
 
     with patch.object(pipe_type, "execute", commit), patch.object(store.redis, "eval", changed):
@@ -184,9 +186,35 @@ def test_drop_refuses_persistent_contention_without_partial_changes(store: Redis
             store.drop_agent("fixture", agent.name, at=20)
     assert calls == ["watched"] * 5 + ["row"] * 5
     assert json.loads(store.redis.hget(key, agent.name))["pane_id"] == "pane-10"
+    assert store.redis.hgetall(key) == churned[-1]
     assert store.execution("fixture", agent.execution_id) == replace(agent, state="ended")
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
     assert not store.names.entry(agent.name).get("retired_at")
+
+
+def test_a_drop_with_a_before_write_never_commits_through_the_row_fallback(store: RedisStore) -> None:
+    from redis.exceptions import WatchError
+
+    from scripts.swarm.store import SwarmError
+
+    agent = started(store)
+    key = store.key("fixture", "agents")
+    before = store.redis.hgetall(key)
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+    written: list[Any] = []
+
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
+        if any(command[0][0] == "HDEL" for command in pipe.command_stack):
+            raise WatchError
+        return execute(pipe, *args, **kwargs)
+
+    with patch.object(pipe_type, "execute", commit), patch.object(store.redis, "eval") as script:
+        with pytest.raises(SwarmError, match="^agent registry kept changing; retirement was not committed$"):
+            store.drop_agent("fixture", agent.name, at=20, before=written.append)
+    script.assert_not_called()
+    assert len(written) == 5
+    assert store.redis.hgetall(key) == before
 
 
 def test_drop_commits_while_other_agents_registry_writes_interleave(store: RedisStore) -> None:

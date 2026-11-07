@@ -594,7 +594,8 @@ class RedisStore:
         """Retires the agent: ends its executions and removes its projection with one history row.
 
         A watched transaction runs first; when other registry writes keep aborting it, a compare and delete on the
-        agent's own row commits instead, so only changes to this agent's row refuse the retirement."""
+        agent's own row commits instead, so only changes to this agent's row refuse the retirement. A drop carrying a
+        `before` write never takes that fallback. A refused retirement leaves the agent's executions ended."""
         from redis.exceptions import WatchError
 
         from scripts.swarm import fencing
@@ -623,7 +624,7 @@ class RedisStore:
                     return True
                 except WatchError:
                     continue
-        for _ in range(PROJECTION_ATTEMPTS):
+        for _ in range(0 if before is not None else PROJECTION_ATTEMPTS):
             previous = self.redis.hget(self.key(slug, "agents"), name)
             lives = self._end_named(slug, name, expected, previous)
             if lives is None or not self._occupants_kept(slug, name, lives[0]):
