@@ -1,0 +1,28 @@
+rules:
+  - id: feature-master-safety-nudge
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-06, every live master gets the hourly safety nudge only when its pane sits idle at its prompt:
+      nudge must read the pane status against READY and its typed input before it types TEXT through the messenger.
+    patterns:
+      - pattern: |
+          def nudge(...):
+            ...
+      - pattern-not: |
+          def nudge(...):
+            ...
+            try:
+              $STATUS = $HERDR.agent_status($PANE)
+              if $STATUS not in READY:
+                return ...
+              if $HERDR.typed_input($PANE):
+                return ...
+              $HERDR.prompt($PANE, TEXT)
+            except Exception as $E:
+              return ...
+            return "sent"
+    paths:
+      include:
+        - /scripts/swarm/safety_nudge.py
+        - '*.test.py'
