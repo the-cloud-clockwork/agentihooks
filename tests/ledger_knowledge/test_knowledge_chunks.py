@@ -83,3 +83,8 @@ def test_a_long_body_becomes_several_small_chunks_of_one_item() -> None:
 def test_a_title_falls_back_to_the_item_text() -> None:
     chunk = chunk_ledger({"followups": [{"id": "f", "text": "only text"}]})[1]
     assert (chunk.title, chunk.text) == ("only text", "only text")
+
+
+def test_an_item_text_follows_its_title_in_the_chunk() -> None:
+    chunk = chunk_ledger({"notes": [{"id": "n", "title": "Head", "text": "body"}]})[1]
+    assert (chunk.title, chunk.text) == ("Head", "Head\n\nbody")

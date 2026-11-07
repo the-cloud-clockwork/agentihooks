@@ -58,6 +58,18 @@ def test_the_index_file_and_its_folder_are_created(tmp_path: Path) -> None:
     assert index(tmp_path).get(ROOT.key) == ROOT
 
 
+class ShortEmbedder(HashEmbedder):
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return super().embed(texts)[:-1]
+
+
+def test_a_refresh_refuses_an_embedder_that_drops_a_vector(tmp_path: Path) -> None:
+    built = index(tmp_path, ShortEmbedder())
+    with pytest.raises(ValueError, match="zip"):
+        built.refresh([ROOT, PHASE], 5)
+    assert built.get(ROOT.key) is None
+
+
 def test_refresh_embeds_only_new_and_changed_chunks(tmp_path: Path) -> None:
     embedder = CountingEmbedder()
     built = index(tmp_path, embedder)
