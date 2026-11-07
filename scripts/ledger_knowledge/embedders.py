@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from hooks.memory.embedding_process import Provider, checked_url
 from hooks.memory.embeddings import EmbeddingModel, require
 
-from .index import HASH, Embedder, HashEmbedder
+from .index import HASH, Embedder, HashEmbedder, unit
 
 PREFIX = "AGENTIHOOKS_KNOWLEDGE_"
 SEMANTIC = "semantic"
@@ -17,17 +17,17 @@ BATCH = 32
 
 @dataclass(frozen=True)
 class Batched:
-    """Sends texts to an inner embedder in batches of at most size texts."""
+    """Sends texts to an inner embedder in batches of at most size texts and returns unit length vectors."""
 
     inner: Embedder
-    size: int
+    size: int = BATCH
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """One vector per text in order, one inner call per batch."""
+        """One unit length vector per text in order, one inner call per batch."""
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self.size):
             vectors.extend(self.inner.embed(texts[start : start + self.size]))
-        return vectors
+        return [unit(vector) for vector in vectors]
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,9 @@ def _semantic(environ: Mapping[str, str]) -> Choice:
     if any(not environ.get(PREFIX + key) for key in REQUIRED):
         raise ValueError("semantic embedder needs " + ", ".join(PREFIX + key for key in REQUIRED))
     model = require(EmbeddingModel(environ[PREFIX + "EMBED_MODEL"], int(environ[PREFIX + "EMBED_DIMENSION"])))
-    size = int(environ.get(PREFIX + "EMBED_BATCH", str(BATCH)))
-    if size < 1:
-        raise ValueError("semantic embedder batch must be positive")
     provider = Provider(model, checked_url(environ[PREFIX + "EMBED_URL"]), environ[PREFIX + "EMBED_TOKEN"])
     identity = hashlib.sha256(f"{model.model}\n{model.dimension}".encode()).hexdigest()[:12]
-    return Choice(f"{SEMANTIC}-{identity}", Batched(provider, size))
+    return Choice(f"{SEMANTIC}-{identity}", Batched(provider))
 
 
 def choose(environ: Mapping[str, str]) -> Choice:

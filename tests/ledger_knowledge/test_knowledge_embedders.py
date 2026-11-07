@@ -57,7 +57,9 @@ class ConceptServer(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def server() -> Iterator[str]:
+def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    for name in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
     ConceptServer.batches = []
     ConceptServer.authorizations = []
     httpd = HTTPServer(("127.0.0.1", 0), ConceptServer)
@@ -98,16 +100,34 @@ def test_a_differently_worded_question_misses_with_hash_and_finds_with_semantic(
 
 
 def test_semantic_choice_wraps_the_memory_provider_in_bounded_batches(server: str) -> None:
-    choice = embedders.choose(semantic_environ(server, AGENTIHOOKS_KNOWLEDGE_EMBED_BATCH="2"))
+    choice = embedders.choose(semantic_environ(server))
     assert isinstance(choice.embedder, embedders.Batched)
     assert isinstance(choice.embedder.inner, Provider)
+    assert choice.embedder.size == embedders.BATCH == 32
     assert "secret-value" not in repr(choice)
-    vectors = choice.embedder.embed(["reboot", "stuck", "daemon", "billing", "hung"])
+    batched = embedders.Batched(choice.embedder.inner, 2)
+    vectors = batched.embed(["reboot", "stuck", "daemon", "billing", "hung"])
     assert ConceptServer.batches == [2, 2, 1]
     assert ConceptServer.authorizations == ["Bearer secret-value"] * 3
     assert [vector.index(1.0) for vector in vectors] == [0, 1, 2, 3, 1]
-    assert choice.embedder.embed([]) == []
+    assert batched.embed([]) == []
     assert ConceptServer.batches == [2, 2, 1]
+
+
+def test_semantic_vectors_are_unit_length_so_ranking_is_cosine(server: str) -> None:
+    (long, short, empty) = embedders.choose(semantic_environ(server)).embedder.embed(
+        ["reboot restart reboot stuck", "daemon", "none"]
+    )
+    assert long == pytest.approx([3 / 10**0.5, 1 / 10**0.5, 0.0, 0.0])
+    assert short == [0.0, 0.0, 1.0, 0.0]
+    assert empty == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_cli_reports_a_provider_outage_without_a_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    environ = semantic_environ("http://127.0.0.1:9/v1/embeddings", AGENTIHOOKS_HOME=str(tmp_path))
+    assert cli.main(["refresh", "--ledger", "rig"], environ, lambda slug: {"title": "t"}, lambda: 1.0) == 1
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "knowledge: embedding provider unavailable\n")
 
 
 def test_each_embedder_names_its_own_index_file(server: str) -> None:
@@ -131,7 +151,6 @@ def test_each_embedder_names_its_own_index_file(server: str) -> None:
         (semantic_environ("http://example.com/v1/embeddings"), "embedding URL requires HTTPS or loopback HTTP"),
         (semantic_environ("https://user:pw@example.com/v1"), "embedding URL must not carry credentials"),
         (semantic_environ("https://example.com/v1?key=1"), "embedding URL must not carry credentials"),
-        (semantic_environ("https://example.com/v1", AGENTIHOOKS_KNOWLEDGE_EMBED_BATCH="0"), "batch must be positive"),
     ],
 )
 def test_a_bad_embedder_setting_is_refused(environ: dict[str, str], message: str) -> None:
