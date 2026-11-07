@@ -794,7 +794,7 @@
   "scripts/swarm_ledger/ledger_gate.py": 173,
   "scripts/swarm_ledger/ledger_groups.py": 92,
   "scripts/swarm_ledger/ledger_health.py": 9,
-  "scripts/swarm_ledger/ledger_hook.py": 267,
+  "scripts/swarm_ledger/ledger_hook.py": 266,
   "scripts/swarm_ledger/ledger_kinds.py": 58,
   "scripts/swarm_ledger/ledger_layout.py": 55,
   "scripts/swarm_ledger/ledger_link.py": 116,
