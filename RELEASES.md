@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.716 · 2026-11-07
+
+### 2026-11-07 · 89100789a438 · #10013 · @nestorcolt
+
+**Announce the reuse gate blob that carries its strict type annotations (Refs #9457)**
+
+This change registers the exact blob hash of scripts/ci_reuse.py from PR #9987 in the frozen gate registry, allowing the strict typing PR for the top-level scripts (Refs #9457) to pass the protected reuse gate. The registered blob only adds type annotations and casts; stripping those out leaves its syntax tree identical to the current dev version, so the gate can safely recognize it as an allowed variant without altering behavior or requiring changes to #9987 itself.
+
+### 2026-11-07 · 7349a524f3e2 · #9966 · @agenticore-app
+
+**Grade the feature map only through the protected validator**
+
+This change closes a gap where the Semgrep feature-tests job graded the feature map using its own head copy of the validator, letting a pull request that loosened that validator pass its own check. Since the Tests lint job already grades the feature map correctly using the protected validator checked out from the base branch, the redundant and insecure head step is removed from Semgrep. A new test confirms no Semgrep job runs the validator directly, and a both-ways proof verifies that a pull request tampering with the validator or planting a duplicate feature map entry is still caught.
+
 ## v2.17.713 · 2026-11-07
 
 ### 2026-11-07 · b65c0635ce60 · #10011 · @agenticore-app
