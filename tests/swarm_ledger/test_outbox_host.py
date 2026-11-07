@@ -358,6 +358,33 @@ def test_a_failed_prune_logs_one_line_and_leaves_the_interval_running(monkeypatc
     assert capsys.readouterr().err == "ledger outbox prune: disk full\n"
 
 
+def test_scheduled_runs_its_callback_on_its_own_interval_until_the_block_ends():
+    from scripts.swarm_ledger import outbox_host
+
+    ran = threading.Event()
+    with outbox_host.scheduled(ran.set, 0.001):
+        assert ran.wait(1)
+
+
+def test_running_prunes_the_given_repository_with_the_bus_config_on_the_memory_bus(monkeypatch):
+    from scripts.swarm_ledger import outbox_host
+
+    repository = object()
+    calls = []
+    pruned = threading.Event()
+
+    def recording(*arguments: object) -> None:
+        calls.append(arguments)
+        pruned.set()
+
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "memory")
+    monkeypatch.setattr(outbox_host, "prune", recording)
+    with outbox_host.running(repository, prune_every=0.001):
+        assert pruned.wait(1)
+    assert calls[0][0] is repository
+    assert isinstance(calls[0][1], BusConfig)
+
+
 def test_the_outbox_limit_and_prune_interval_defaults():
     from scripts.swarm_ledger import outbox_host
 

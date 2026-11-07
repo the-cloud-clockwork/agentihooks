@@ -501,12 +501,13 @@ def test_a_connection_error_is_left_to_the_caller(caplog, error):
 
 def test_any_other_client_error_is_logged_in_one_line(caplog):
     caplog.set_level("DEBUG")
-    asyncio.run(nats._unreported(nats.nats_client.errors.AuthorizationError()))
+    error = nats.nats_client.errors.AuthorizationError()
+    asyncio.run(nats._unreported(error))
     assert [
-        (record.name, record.levelname, record.getMessage(), record.exc_info)
+        (record.name, record.levelname, record.msg, record.args, record.getMessage(), record.exc_info)
         for record in caplog.records
         if record.name != "asyncio"
-    ] == [("scripts.events.nats", "ERROR", "nats: authorization failed", None)]
+    ] == [("scripts.events.nats", "ERROR", "%s", (error,), "nats: authorization failed", None)]
 
 
 def test_an_unreachable_bus_raises_once_and_logs_no_connect_attempt(caplog):
