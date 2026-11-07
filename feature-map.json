@@ -524,7 +524,7 @@
       "id": "swarm-tick-early-end-stamp",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
-      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick; an intent check that overran its budget leaves the pass to end full.",
       "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
       "tests": [
         "tests/tick/test_early_end.py::test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full",

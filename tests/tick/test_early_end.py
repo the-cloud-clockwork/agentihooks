@@ -1,5 +1,6 @@
 """A pass that ends early on a value no step stored still stamps its finish and names the value and the step left."""
 
+from collections.abc import Callable
 from threading import Event
 from typing import Any
 
@@ -10,7 +11,7 @@ from scripts.swarm.health import early_ends
 from scripts.swarm.store import RedisStore
 from scripts.tick import engine
 from scripts.tick.step import Context, Result
-from scripts.tick.steps import Left, PassBox, host, report
+from scripts.tick.steps import Left, PassBox, host, masters, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -67,11 +68,23 @@ def test_an_intent_check_past_its_budget_leaves_the_pass_to_end_full(
         release.wait(30.0)
         return Result()
 
+    ran: list[str] = []
+
+    def seat(name: str) -> Callable[[Context], Result]:
+        def action(ctx: Context) -> Result:
+            ran.append(name)
+            return Result()
+
+        return action
+
     check = next(step for step in host.STEPS if step.name == "intent check")
     monkeypatch.setattr(check, "floor_s", 0.01)
     monkeypatch.setattr(check, "run", slow_check)
+    for kept in (step for step in masters.STEPS if step.name in {"master down", "tick master"}):
+        monkeypatch.setattr(kept, "run", seat(kept.name))
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+        assert sorted(ran) == ["master down", "tick master"]
         assert not any(action.startswith("pass ended early") for action in actions)
         assert early_ends.read(swarm, "sw") == {}
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None

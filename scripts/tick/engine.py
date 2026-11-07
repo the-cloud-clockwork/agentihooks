@@ -440,6 +440,13 @@ def _kept(step: Step) -> bool:
     return bool(getattr(step, "kept", False))
 
 
+def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
+    """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
+    own budget for them, and run it even when one of them was dropped."""
+    found.ended(earlier, step.budget_s)
+    return run_step(step, ctx)
+
+
 def _expire(
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
     dropped: set[str],
@@ -496,9 +503,10 @@ def _eager(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
                 elif _kept(step):
-                    future = found.steps.submit(copy_context().run, run_step, step, ctx)
+                    earlier = found.handed_of(step.needs - names)
+                    future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found)
                     submitted.append(future)
-                    running[future] = (step, clock(), Deadline.after(step.budget_s + SETTLE_S, clock=clock))
+                    running[future] = (step, clock(), Deadline.after(2 * step.budget_s + SETTLE_S, clock=clock))
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(step, ctx, found)
