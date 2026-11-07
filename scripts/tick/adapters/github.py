@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from scripts.swarm import github_reads
 from scripts.tick.deadline import Deadline
@@ -107,31 +107,45 @@ def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
         body: Any = json.loads(refused.stdout)
     except (TypeError, ValueError):
         raise refused from None
-    if not isinstance(body, dict):
-        raise refused
-    reply = cast(dict[str, Any], body)
-    errors: Any = reply.get("errors")
-    found = cast(list[Any], errors) if isinstance(errors, list) else []
-    hidden = bool(found) and all(
-        isinstance(error, dict) and _rollup_refusal(cast(dict[str, Any], error)) for error in found
-    )
-    data: Any = reply.get("data") if hidden else None
-    if not isinstance(data, dict):
-        raise refused
-    listing = cast(dict[str, Any], data)
-    repository: Any = listing.get("repository")
-    if not isinstance(repository, dict) or not isinstance(cast(dict[str, Any], repository).get("pullRequests"), dict):
+    reply = _object(body)
+    found = _items(reply.get("errors"))
+    hidden = bool(found) and all(_rollup_refusal(error) for error in found)
+    listing = _object(reply.get("data") if hidden else None)
+    repository = _object(listing.get("repository"))
+    if not isinstance(repository.get("pullRequests"), dict):
         raise refused
     return listing
 
 
-def _rollup_refusal(error: dict[str, Any]) -> bool:
+def _rollup_refusal(error: Any) -> bool:
     """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
-    path: Any = error.get("path")
-    if error.get("type") != "FORBIDDEN" or not isinstance(path, list):
-        return False
-    steps = cast(list[Any], path)
-    return steps[:2] == ["repository", "pullRequests"] and steps[-1] == "statusCheckRollup"
+    entry = _object(error)
+    steps = _items(entry.get("path"))
+    return (
+        entry.get("type") == "FORBIDDEN"
+        and steps[:2] == ["repository", "pullRequests"]
+        and steps[-1:] == ["statusCheckRollup"]
+    )
+
+
+def _object(value: Any) -> dict[str, Any]:
+    """Return a decoded JSON value when it is an object, else an empty one."""
+    return value if _is_object(value) else {}
+
+
+def _items(value: Any) -> list[Any]:
+    """Return a decoded JSON value when it is an array, else an empty one."""
+    return value if _is_items(value) else []
+
+
+def _is_object(value: Any) -> TypeGuard[dict[str, Any]]:
+    """Say whether a decoded JSON value is an object."""
+    return isinstance(value, dict)
+
+
+def _is_items(value: Any) -> TypeGuard[list[Any]]:
+    """Say whether a decoded JSON value is an array."""
+    return isinstance(value, list)
 
 
 def _workflow_run(row: dict[str, Any]) -> WorkflowRun:
