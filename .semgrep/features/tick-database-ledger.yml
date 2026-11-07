@@ -1,0 +1,34 @@
+rules:
+  - id: feature-tick-database-ledger
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Ordered 2026-11-07, the tick reads and writes the shared database instead of the ledger server: the tick route
+      must run its pass inside database_ledger.scoped(), and the tick ledger port must build the database client
+      while database_ledger.serving().
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  def routed(store, slug, *args, **kwargs):
+                    ...
+              - pattern-not: |
+                  def routed(store, slug, *args, **kwargs):
+                    ...
+                    with $ROUTE, database_ledger.scoped():
+                      ...
+          - patterns:
+              - pattern: |
+                  def build(remaining: float) -> ResourceClient:
+                    ...
+              - pattern-not: |
+                  def build(remaining: float) -> ResourceClient:
+                    ...
+                    if database_ledger.serving():
+                      return database_ledger.DatabaseResourceClient(...)
+                    ...
+    paths:
+      include:
+        - /scripts/swarm_ledger/ledger_route.py
+        - /scripts/tick/adapters/ledger.py
+        - '*.test.py'

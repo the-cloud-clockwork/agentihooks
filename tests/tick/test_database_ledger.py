@@ -1,12 +1,14 @@
 """The tick's ledger traffic served in process by the ledger server's route code over the server's own repository,
 with no ledger server running; which repository the database URL selects is the storage module's seam."""
 
+import importlib
 import sys
 import urllib.error
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -16,17 +18,18 @@ from scripts.swarm import ledger_client as ledger_client_module
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_route, ledger_server
+from scripts.swarm_ledger.api.client import kept_exports
 from scripts.swarm_ledger.repository import postgres
 from scripts.tick.adapters import database_ledger
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
 from scripts.tick.deadline import Deadline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import ledger as cli_ledger  # noqa: E402
-import ledger_core as core  # noqa: E402
-import new_ledger  # noqa: E402
+cli_ledger: Any = importlib.import_module("ledger")
+core: Any = importlib.import_module("ledger_core")
+new_ledger: Any = importlib.import_module("new_ledger")
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("swarm-tick-database-ledger")]
+pytestmark = pytest.mark.unit
 
 SLUG = "database-tick"
 DOWN = "http://127.0.0.1:9"
@@ -71,6 +74,7 @@ def _deadline() -> Deadline:
     return Deadline(30.0, lambda: 0.0)
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,13 +91,16 @@ def test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set
     assert database_ledger.serving() is False
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_the_port_exports_the_ledger_with_the_ledger_server_down(stored: list[tuple[str, int]]) -> None:
-    with _serving():
+    with _serving(), kept_exports():
         exported = _port().export(deadline=_deadline())
+    phases: Any = exported["phases"]
     assert exported["title"] == "Database tick"
-    assert [phase["id"] for phase in exported["phases"]] == ["p1"]
+    assert [phase["id"] for phase in phases] == ["p1"]
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down(
     stored: list[tuple[str, int]],
 ) -> None:
@@ -104,6 +111,7 @@ def test_the_port_writes_with_the_controller_epoch_with_the_ledger_server_down(
     assert [comment["text"] for comment in core.sync(SLUG)[0]["phases"][0]["comments"]] == ["Pass landed"]
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_a_stale_controller_write_is_refused_as_the_server_refuses_it(
     stored: list[tuple[str, int]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -118,6 +126,7 @@ def test_a_stale_controller_write_is_refused_as_the_server_refuses_it(
     assert core.sync(SLUG)[0]["phases"][0]["comments"] == []
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down(stored: list[tuple[str, int]]) -> None:
     client = LedgerClient(service=True)
     with _serving():
@@ -126,9 +135,11 @@ def test_the_pass_ledger_reads_and_writes_with_the_ledger_server_down(stored: li
         state = ledger_client_module.pass_state(client, SLUG)
         task = client.task(SLUG, "t1")
     assert [row["id"] for row in state["tasks"]] == ["t1"]
+    assert task is not None
     assert task["state"] == "claimed"
 
 
+@pytest.mark.feature("swarm-tick-database-ledger")
 def test_outside_a_database_pass_the_port_still_calls_the_ledger_server(stored: list[tuple[str, int]]) -> None:
-    with pytest.raises(OSError):
+    with kept_exports(), pytest.raises(OSError):
         _port().export(deadline=_deadline())
