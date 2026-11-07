@@ -2,6 +2,7 @@ import json
 import os
 import signal
 from time import sleep
+from typing import Any
 
 from hooks.context.account_sessions import agent_pid
 from scripts.events.config import BusConfig
@@ -29,7 +30,7 @@ def owned(raw: str) -> bool | None:
         bus = open_bus(BusConfig.from_environ())
         try:
             entry = bus.state("spoke-work").get(claim["key"])
-            current = json.loads(entry.value) if entry else {}
+            current: dict[str, Any] = json.loads(entry.value) if entry else {}
             revision = current.get("claim_revision", entry.revision if entry else None)
             return current.get("state") in ("launching", "started") and revision == claim["revision"]
         finally:
@@ -38,7 +39,7 @@ def owned(raw: str) -> bool | None:
         return None
 
 
-def check(payload: dict) -> str | None:
+def check(payload: dict[str, Any]) -> str | None:
     raw = os.environ.get(VARIABLE)
     if not raw or payload.get("hook_event_name") == "SessionEnd":
         return None
@@ -56,7 +57,7 @@ def check(payload: dict) -> str | None:
     return REVOKED
 
 
-def enforce(payload: dict) -> None:
+def enforce(payload: dict[str, Any]) -> None:
     from hooks.hook_manager import BlockAction
 
     message = check(payload)

@@ -1,7 +1,9 @@
 import json
 import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from hooks.config import AGENTIHOOKS_HOME
 
@@ -11,7 +13,7 @@ def _snapshot_path(session_id: str) -> Path:
     return AGENTIHOOKS_HOME / "context_usage" / f"{safe_id}.json"
 
 
-def record_context_usage(session_id: str, context_window: dict, cost_usd: float | None = None) -> None:
+def record_context_usage(session_id: str, context_window: Mapping[str, Any], cost_usd: float | None = None) -> None:
     if not session_id or not isinstance(context_window, dict):
         return
     size = context_window.get("context_window_size")

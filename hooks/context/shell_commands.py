@@ -1,6 +1,7 @@
 import re
 import shlex
 from pathlib import Path
+from typing import cast
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z_0-9]*=")
 _SEPARATORS = ";|&(){}\n"
@@ -8,7 +9,7 @@ _ARITHMETIC = {"((": 1, "))": -1}
 _WORD = re.compile(r"""(?:[^\s;|&()<>'"]|'[^']*'|"[^"]*")*""")
 _OPERATORS = ("&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "{", "}", "\n")
 _PREFIXES = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!"})
-_WRAPPERS = {
+_WRAPPERS: dict[str, set[str]] = {
     "sudo": {"-u", "-g", "-h", "-p", "-C", "-T", "-R", "-D", "--user", "--group", "--host", "--prompt"},
     "nice": {"-n", "--adjustment"},
     "env": {"-u", "--unset", "-C", "--chdir"},
@@ -56,7 +57,7 @@ def _env_split(tokens: list[str]) -> list[str]:
 
 
 def _env_folders(tokens: list[str]) -> list[str]:
-    folders = []
+    folders: list[str] = []
     while tokens and tokens[0].startswith("-") and tokens[0] != "--":
         option, tokens = tokens[0], tokens[1:]
         if option in {"-C", "--chdir"}:
@@ -71,7 +72,7 @@ def _env_folders(tokens: list[str]) -> list[str]:
 
 
 def unwrap(tokens: list[str]) -> tuple[list[str], list[str]]:
-    folders = []
+    folders: list[str] = []
     while tokens:
         name = Path(tokens[0]).name
         if _ASSIGNMENT.match(tokens[0]) or name in _PREFIXES:
@@ -137,11 +138,11 @@ def _heredoc_marker(line: str, quote: str | None) -> tuple[int | None, str | Non
 
 
 def _word_end(text: str) -> int:
-    return _WORD.match(text).end()
+    return cast(re.Match[str], _WORD.match(text)).end()
 
 
 def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[tuple[list[str], list[str]]]]:
-    result, kept, quote = [], [], None
+    result, kept, quote = cast(list[tuple[list[str], list[str]]], []), cast(list[str], []), None
     lines = iter(command.splitlines(keepends=True))
     for line in lines:
         start, quote = _heredoc_marker(line, quote)
@@ -159,7 +160,7 @@ def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[t
         rest = tail[end:]
         cut, _ = _heredoc_marker(rest, None)
         rest = rest if cut is None else rest[:cut]
-        body = []
+        body: list[str] = []
         for content in lines:
             if content.rstrip("\r\n").lstrip("\t") == delimiters[0]:
                 break
@@ -178,7 +179,7 @@ def _heredocs(command: str, depth: int, folders: list[str]) -> tuple[str, list[t
 
 
 def _substitutions(command: str) -> list[str]:
-    scripts, quote, end = [], None, 0
+    scripts, quote, end = cast(list[str], []), None, 0
     for index, character in enumerate(command):
         if index < end:
             continue
@@ -199,7 +200,7 @@ def _substitutions(command: str) -> list[str]:
 
 
 def _operators(token: str) -> list[str]:
-    found = []
+    found: list[str] = []
     while token:
         operator = next(operator for operator in _OPERATORS if token.startswith(operator))
         found.append(operator)
@@ -218,7 +219,11 @@ def located(command: str, depth: int = 0, folders: list[str] | None = None) -> l
     lexer.commenters = ""
     tokens = list(lexer)
     current = sequence = pipeline = base
-    piped, frames, words = False, [], []
+    piped, frames, words = (
+        False,
+        cast(list[tuple[str, list[str], list[str], list[str], bool]], []),
+        cast(list[str], []),
+    )
     for position, token in enumerate(tokens):
         redirect = token == "&" and (
             (words and words[-1].endswith((">", "<")))

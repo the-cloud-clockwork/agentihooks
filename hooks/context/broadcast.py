@@ -11,8 +11,10 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 try:
     import fcntl
@@ -21,7 +23,7 @@ except ImportError:
 
 
 @contextlib.contextmanager
-def _file_lock(path):
+def _file_lock(path: Path) -> Iterator[None]:
     """Best-effort exclusive lock via a sidecar ``<path>.lock`` file.
 
     Serializes the read-modify-write on the shared JSON stores (broadcasts,
@@ -86,7 +88,7 @@ _EMPTY_BODY_SENTINELS = frozenset(
 )
 
 
-def _body_is_empty(msg: dict) -> bool:
+def _body_is_empty(msg: dict[str, Any]) -> bool:
     """Return True for messages whose body conveys no signal, a leading title line ignored."""
     body = (msg.get("message") or "").strip()
     if not body:
@@ -122,7 +124,7 @@ def _delivery_state_path() -> Path:
     return Path(BROADCAST_DELIVERY_STATE_FILE).expanduser()
 
 
-def _load_delivery_state() -> dict:
+def _load_delivery_state() -> dict[str, Any]:
     p = _delivery_state_path()
     if not p.exists() or p.stat().st_size == 0:
         return {}
@@ -133,7 +135,7 @@ def _load_delivery_state() -> dict:
         return {}
 
 
-def _save_delivery_state(state: dict) -> None:
+def _save_delivery_state(state: dict[str, Any]) -> None:
     p = _delivery_state_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
@@ -141,7 +143,7 @@ def _save_delivery_state(state: dict) -> None:
     os.replace(str(tmp), str(p))
 
 
-def _msg_hash(msg: dict) -> str:
+def _msg_hash(msg: dict[str, Any]) -> str:
     """Hash channel, severity and message, omitting the regenerated id and expiry.
 
     The second field is always empty and stays as a slot: dropping it would reshape every
@@ -158,7 +160,7 @@ def _msg_hash(msg: dict) -> str:
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
-def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
+def _should_skip(msg: dict[str, Any], sess_state: dict[str, Any], now_ts: float) -> str:
     """Throttle per message id, never per channel, so each entry on a shared channel keeps its own clock."""
     key = msg.get("id") or msg.get("channel") or "_global"
     prev = sess_state.get(key)
@@ -176,7 +178,7 @@ def _should_skip(msg: dict, sess_state: dict, now_ts: float) -> str:
     return ""
 
 
-def _record_delivery(sid: str, msg: dict, now_ts: float) -> None:
+def _record_delivery(sid: str, msg: dict[str, Any], now_ts: float) -> None:
     with _file_lock(_delivery_state_path()):
         state = _load_delivery_state()
         sess = state.setdefault(sid, {})
@@ -205,7 +207,7 @@ def _sessions_path() -> Path:
     return Path(BROADCAST_FILE).parent / "active-sessions.json"
 
 
-def _read_broadcasts() -> list[dict]:
+def _read_broadcasts() -> list[dict[str, Any]]:
     from hooks.context import scheduled_broadcasts
 
     path = _broadcast_path()
@@ -222,7 +224,7 @@ def _read_broadcasts() -> list[dict]:
     return scheduled_broadcasts.merge(path, data)
 
 
-def _load_broadcasts(cleanup: bool = False) -> list[dict]:
+def _load_broadcasts(cleanup: bool = False) -> list[dict[str, Any]]:
     data = _read_broadcasts()
     if not cleanup:
         return data
@@ -242,7 +244,7 @@ def _unique_tmp(path: Path) -> Path:
     return path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
 
 
-def _save_broadcasts(messages: list[dict]) -> None:
+def _save_broadcasts(messages: list[dict[str, Any]]) -> None:
     from hooks.context import scheduled_broadcasts
 
     path = _broadcast_path()
@@ -253,7 +255,7 @@ def _save_broadcasts(messages: list[dict]) -> None:
     os.replace(str(tmp), str(path))
 
 
-def _is_expired(msg: dict, now: datetime | None = None) -> bool:
+def _is_expired(msg: dict[str, Any], now: datetime | None = None) -> bool:
     expires_at = msg.get("expires_at")
     if not expires_at:
         return False
@@ -265,7 +267,7 @@ def _is_expired(msg: dict, now: datetime | None = None) -> bool:
         return False
 
 
-def _save_sessions(sessions: dict) -> None:
+def _save_sessions(sessions: dict[str, Any]) -> None:
     path = _sessions_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp(path)
@@ -273,7 +275,7 @@ def _save_sessions(sessions: dict) -> None:
     os.replace(str(tmp), str(path))
 
 
-def _load_sessions() -> dict:
+def _load_sessions() -> dict[str, Any]:
     path = _sessions_path()
     if not path.exists() or path.stat().st_size == 0:
         return {}
@@ -301,7 +303,7 @@ def _get_session_channels(session_id: str) -> list[str]:
     return channels
 
 
-def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
+def _message_matches_channel(msg: dict[str, Any], session_channels: list[str]) -> bool:
     """Check if a message should be delivered to a session.
 
     A ``target_session`` message is a leftover from the retired directed-delivery
@@ -322,7 +324,7 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
     return msg_channel in session_channels
 
 
-def _message_matches_project(msg: dict, session: dict) -> bool:
+def _message_matches_project(msg: dict[str, Any], session: dict[str, Any]) -> bool:
     if os.getenv("BRAIN_PROJECT_SCOPE", "strict") != "strict" or not session.get("project"):
         return True
     if msg.get("source") != "brain-adapter":
@@ -345,7 +347,7 @@ def _build_broadcast(
     source: str = "operator",
     persistent: bool | None = None,
     channel: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     if not message or not message.strip():
         return None
 
@@ -359,7 +361,7 @@ def _build_broadcast(
         persistent = _DEFAULT_PERSISTENT.get(severity, True)
 
     now = datetime.now(timezone.utc)
-    entry = {
+    entry: dict[str, Any] = {
         "id": str(uuid.uuid4())[:12],
         "message": message.strip(),
         "severity": severity,
@@ -435,8 +437,8 @@ def create_broadcast(
     return entry["id"]
 
 
-def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
-    built = []
+def reconcile_channel_broadcasts(channel: str, desired: list[dict[str, Any]]) -> dict[str, Any]:
+    built: list[dict[str, Any]] = []
     for item in desired:
         entry = _build_broadcast(
             item.get("message", ""),
@@ -458,7 +460,7 @@ def reconcile_channel_broadcasts(channel: str, desired: list[dict]) -> dict:
         outside = [m for m in current if m.get("channel") != channel]
         existing = [m for m in current if m.get("channel") == channel]
         kept_ids: set[str] = set()
-        resolved = []
+        resolved: list[dict[str, Any]] = []
         for entry in built:
             match = next(
                 (
@@ -506,11 +508,11 @@ def retire_channel_source(channel: str, source: str) -> int:
     return len(current) - len(kept)
 
 
-def cache_fleet_broadcasts(entries: list[dict]) -> int:
+def cache_fleet_broadcasts(entries: list[dict[str, Any]]) -> int:
     """Cache fleet revisions claimed for one session each, keeping only the newest revision per session; entries
     without a ``fleet`` tag are local broadcasts and stay untouched. Returns how many new entries the file kept."""
 
-    def name(m: dict) -> tuple[str, str, str]:
+    def name(m: dict[str, Any]) -> tuple[str, str, str]:
         return m["fleet"]["swarm"], m["fleet"]["broadcast_id"], m["fleet"]["session"]
 
     with _file_lock(_broadcast_path()):
@@ -535,7 +537,7 @@ def cache_fleet_broadcasts(entries: list[dict]) -> int:
         return sum(1 for m in saved if m["id"] in fresh)
 
 
-def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict | None:
+def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None) -> dict[str, Any] | None:
     """Return the most recent broadcast matching content_hash + channel, else None."""
     if not content_hash:
         return None
@@ -549,7 +551,7 @@ def find_broadcast_by_content_hash(content_hash: str, channel: str | None = None
     return matches[-1]
 
 
-def list_broadcasts() -> list[dict]:
+def list_broadcasts() -> list[dict[str, Any]]:
     return _load_broadcasts()
 
 
@@ -575,7 +577,7 @@ def clear_broadcasts(message_id: str | None = None, channel: str | None = None) 
         return count
 
 
-def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
+def _admitted(session_id: str, msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     msgs = [m for m in msgs if "fleet" not in m or m["fleet"]["session"] == session_id]
     return quarantine.keep(
         session_id,
@@ -586,7 +588,7 @@ def _admitted(session_id: str, msgs: list[dict]) -> list[dict]:
     )
 
 
-def get_pending_broadcasts(session_id: str) -> list[dict]:
+def get_pending_broadcasts(session_id: str) -> list[dict[str, Any]]:
     """Return broadcasts the session has not yet seen.
 
     Filters out: expired messages, messages already acknowledged by the
@@ -598,7 +600,7 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
     msgs = _load_broadcasts(cleanup=True)
     channels = _get_session_channels(session_id)
     session = _load_sessions().get(session_id, {})
-    pending = []
+    pending: list[dict[str, Any]] = []
     for m in msgs:
         if _is_expired(m):
             continue
@@ -613,7 +615,7 @@ def get_pending_broadcasts(session_id: str) -> list[dict]:
     return _admitted(session_id, pending)
 
 
-def get_critical_broadcasts(session_id: str) -> list[dict]:
+def get_critical_broadcasts(session_id: str) -> list[dict[str, Any]]:
     """Return persistent ``critical`` broadcasts the session hasn't acknowledged.
 
     Channel-filtered against the session's ``AGENTIHOOKS_BASE_CHANNELS``

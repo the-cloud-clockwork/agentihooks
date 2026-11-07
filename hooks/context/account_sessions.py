@@ -126,7 +126,7 @@ def _env_names(pid: int, proc: Path) -> list[str]:
         raw = (proc / str(pid) / "environ").read_bytes()
     except OSError:
         return []
-    names = []
+    names: list[str] = []
     for item in raw.split(b"\0"):
         name, _, value = item.partition(b"=")
         if name and value:
@@ -190,7 +190,7 @@ def live_sessions(
 ) -> dict[int, str]:
     """PID -> account of every interactive Claude process on this host."""
     skip = set(exclude_pids)
-    sessions = {}
+    sessions: dict[int, str] = {}
     try:
         entries = [entry.name for entry in proc.iterdir() if entry.name.isdigit()]
     except OSError:
@@ -382,7 +382,7 @@ def sessions_by_account(
     try:
         skip = handed_off_pids()
     except Exception:
-        skip = set()
+        skip: set[int] = set()
     counts: dict[str, int] = {}
     for account in live_sessions(proc, skip, environ).values():
         counts[account] = counts.get(account, 0) + 1

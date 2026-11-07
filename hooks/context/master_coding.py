@@ -9,6 +9,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any, cast
 
 OPEN = re.compile(r"(?<![\w-])(?:allow-master-coding|troubleshoot(?:ing)?[ -]mode)(?![\w-])", re.IGNORECASE)
 CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])", re.IGNORECASE)
@@ -112,6 +113,6 @@ def asks_operator(tool_name: str, session_id: str | None) -> bool:
     return tool_name in PERMISSION_TOOLS and _heard(session_id)
 
 
-def protection_refusal(payload: dict) -> str:
-    command = str((payload.get("tool_input") or {}).get("command"))
+def protection_refusal(payload: dict[str, Any]) -> str:
+    command = str(cast("dict[str, Any]", payload.get("tool_input") or {}).get("command"))
     return PROTECTION_REFUSAL if is_master(payload.get("session_id")) and PROTECTION.search(command) else ""

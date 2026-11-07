@@ -22,7 +22,7 @@ def _script(tokens: list[str]) -> bool:
 
 
 def _herdr(args: list[str]) -> bool:
-    words = []
+    words: list[str] = []
     while args and len(words) < 2:
         token, args = args[0], args[1:]
         if token in _HERDR_VALUED:
