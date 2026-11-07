@@ -24,8 +24,6 @@ jobs:
       - name: Restore the runtime images saved on dev
         id: runtime-images
         uses: actions/cache/restore@v4
-        continue-on-error: true
-        timeout-minutes: 5
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
         with:
@@ -122,8 +120,6 @@ jobs:
       - name: Save the runtime images for later runs
         if: steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'
         uses: actions/cache/save@v4
-        continue-on-error: true
-        timeout-minutes: 5
         with:
           path: ${{ runner.temp }}/swarm-smoke-runtime-images
           key: swarm-smoke-runtime-images-v1

@@ -75,6 +75,10 @@ exit "$status"
             assert "if" not in step
         elif step.get("name") == "Keep the swarm smoke layers":
             assert step["if"] == "steps.layers.outputs.cache-hit != 'true'"
+        elif step.get("name") == "Load the saved runtime images":
+            assert "if" not in step
+        elif step.get("name") == "Keep the runtime images":
+            assert step["if"] == "steps.runtime-images.outputs.cache-hit != 'true' && steps.build.outcome == 'success'"
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
