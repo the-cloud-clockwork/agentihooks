@@ -1,13 +1,16 @@
 """A swarm worker whose task claim no longer names it ends at its next tool call: it leaves a work note, starts its own
-swarm exit and is denied the call."""
+swarm exit and is denied the call. The claim is the Redis key the tick and hub push, read at most once per window."""
 
+import json
 import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import Any
 
 from hooks.context import worker_mode
-from scripts.swarm.claim_lost import lost
+from scripts.swarm.keyspace import ROOT
 
 WORKERS = frozenset({"eng", "ci"})
 STOP = (
@@ -15,16 +18,48 @@ STOP = (
     "run no other tool and end your turn now."
 )
 NOTE = "{at} {name} ended at its next tool call: the task claim names {owner}\n"
-READ_TIMEOUT = 2
+CACHE_S = 30
+CACHE = "claim-watch.json"
+
+
+def key(slug: str, task: str) -> str:
+    """The Redis key holding the agent the swarm counts as the task's claimant."""
+    return f"{ROOT}:swarm:{slug}:claim:{task}"
+
+
+def _client(environ: Mapping[str, str]) -> Any:
+    from scripts.swarm import redis_budget, store
+
+    return redis_budget.capped(store.redis_client(dict(environ)))
+
+
+def _cached(path: Path, name: str, now: float) -> tuple[bool, str | None]:
+    try:
+        saved = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False, None
+    if saved.get("name") != name or not 0 <= now - saved.get("at", -CACHE_S) < CACHE_S:
+        return False, None
+    return True, saved.get("holder")
+
+
+def _holder(environ: Mapping[str, str], redis: Any, slug: str, task: str) -> str | None:
+    import redis as redis_lib
+
+    try:
+        client = _client(environ) if redis is None else redis
+        return None if client is None else client.get(key(slug, task))
+    except (redis_lib.RedisError, OSError, RuntimeError):
+        return None
 
 
 def check(
     environ: Mapping[str, str] | None = None,
-    ledger=None,
+    redis: Any = None,
     now: float | None = None,
-    spawn: Callable | None = None,
+    spawn: Callable[..., Any] | None = None,
 ) -> str | None:
-    from scripts.hive import scope
+    """The stop message for a worker whose pushed task claim names another agent, else None."""
     from scripts.swarm_ledger import ledger_workspace
 
     env = os.environ if environ is None else environ
@@ -34,17 +69,15 @@ def check(
     now = time.time() if now is None else now
     folder = ledger_workspace.folder(slug, task)
     folder.mkdir(parents=True, exist_ok=True)
-    if ledger is None:
-        from scripts.swarm.ledger_client import LedgerClient
-
-        ledger = LedgerClient(read_timeout=READ_TIMEOUT)
-    row = ledger.task(slug, task)
-    if not lost(name, row, bool(scope.member(env))):
+    fresh, holder = _cached(folder / CACHE, name, now)
+    if not fresh:
+        holder = _holder(env, redis, slug, task)
+        (folder / CACHE).write_text(json.dumps({"name": name, "at": now, "holder": holder}))
+    if not holder or holder == name:
         return None
-    owner = row.get("claimed_by") or "nobody"
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     with (folder / "progress.md").open("a") as progress:
-        progress.write(NOTE.format(at=at, name=name, owner=owner))
+        progress.write(NOTE.format(at=at, name=name, owner=holder))
     (spawn or subprocess.Popen)(
         ["agentihooks", "swarm", slug, "--as", name, "exit"],
         start_new_session=True,
@@ -52,4 +85,4 @@ def check(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return STOP.format(task=task, slug=slug, owner=owner)
+    return STOP.format(task=task, slug=slug, owner=holder)
