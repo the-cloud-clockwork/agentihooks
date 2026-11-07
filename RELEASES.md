@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.689 · 2026-11-07
+
+### 2026-11-07 · 0e4e93d1fcae · #9862 · @agenticore-app
+
+**Document the agentihooks headless run command**
+
+This change adds reference documentation for the `agentihooks headless run` command introduced in #7684, covering usage, flags, live examples for each harness, JSON report format, exit codes, internals (harness selection, run folder layout, `select-profile` launch, worker mode), model tiers with env overrides, and known limitations and troubleshooting steps. It also links the new page from the reference index and CLI commands list, and adds a changelog entry. This closes the documentation gap so operators running full profiles headlessly have an accurate, verified reference instead of relying on source code alone.
+
 ## v2.17.688 · 2026-11-07
 
 ### 2026-11-07 · 7bc0366b1925 · #9869 · @agenticore-app
