@@ -60,12 +60,11 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _moved(row: dict[str, Any], op: dict[str, Any]) -> bool:
-    """Whether held task ``row`` fails the state or field guard of write ``op``."""
-    states: list[str] = op.get("if_state") or []
-    expected: dict[str, Any] = op.get("if_match") or {}
-    return (bool(states) and row.get("state") not in states) or any(
-        row.get(key, "") != value for key, value in expected.items()
-    )
+    """Whether held task ``row`` fails the state or field guard of write ``op``, judged as the server judges it."""
+    _ledger()
+    import ledger_tasks
+
+    return bool(ledger_tasks._guarded(row, op))  # pyright: ignore[reportPrivateUsage]
 
 
 def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:

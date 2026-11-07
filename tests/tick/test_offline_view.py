@@ -193,7 +193,7 @@ def test_an_offline_write_whose_guard_holds_is_queued(stored: Queued) -> None:
         token = OFFLINE.set(True)
         try:
             task = LedgerClient().update_task(
-                "sw", "t1", {"claimed_by": "e1"}, if_state=("open",), if_match={"claimed_by": ""}
+                "sw", "t1", {"claimed_by": "e1"}, if_state=("open",), if_match={"claimed_by": "", "claim_generation": 0}
             )
         finally:
             OFFLINE.reset(token)
