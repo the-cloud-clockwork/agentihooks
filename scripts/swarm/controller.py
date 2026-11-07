@@ -9,6 +9,7 @@ from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from time import monotonic
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
@@ -17,6 +18,7 @@ from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
+from scripts.swarm.ledger_client import LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
@@ -562,6 +564,16 @@ def _cadence_wait(started: float) -> None:
         scheduled_wait(left)
 
 
+def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
+    """Run one controller pass: tick every hosted swarm, then the control service and the proof swarms."""
+    for slug, actions in tick_once(store, service).items():
+        for action in actions:
+            print(f"{slug}: {action}", flush=True)
+    if service is not None:
+        service.tick()
+    proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
     parser.add_argument("action", choices=("run", "live", "ready"))
@@ -591,12 +603,14 @@ def main(argv: list[str]) -> int:
         service = control_service.host(os.environ, store, commands.hive_id())
         while True:
             started = monotonic()
-            for slug, actions in tick_once(store, service).items():
-                for action in actions:
-                    print(f"{slug}: {action}", flush=True)
-            if service is not None:
-                service.tick()
-            proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
+            try:
+                _pass(store, service, proof_swarm)
+            except LedgerUnreachable as exc:
+                print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
+                if args.once:
+                    return 1
+                scheduled_wait(lease.tick_ms() / 1000)
+                continue
             if args.once:
                 return 0
             _cadence_wait(started)
