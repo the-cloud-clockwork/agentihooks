@@ -33,6 +33,24 @@ def test_a_session_is_never_its_own_helper_and_blank_ids_record_nothing(tmp_path
     helpers.start("", "reader", tmp_path)
     helpers.stop("", "reader", tmp_path)
     assert not helpers.live("main", tmp_path)
+    assert not (tmp_path / "helpers").exists()
+
+
+def test_a_blank_stop_leaves_records_where_blank_ids_would_land(tmp_path):
+    stray = tmp_path / "helpers" / "reader"
+    stray.parent.mkdir()
+    stray.touch()
+    helpers.stop("", "reader", tmp_path)
+    assert stray.exists()
+
+
+def test_stopping_a_helper_never_recorded_is_quiet(tmp_path):
+    helpers.stop("main", "never", tmp_path)
+    assert not helpers.live("main", tmp_path)
+
+
+def test_unsafe_characters_become_one_underscore_each():
+    assert helpers.safe("a/b c") == "a_b_c"
 
 
 def test_ids_cannot_escape_the_helpers_folder(tmp_path):
@@ -58,10 +76,24 @@ def test_dot_ids_stay_inside_the_helpers_folder(tmp_path):
 
 def test_a_payload_records_and_clears_its_helper_under_the_parent_session(tmp_path):
     payload = {"session_id": "main", "agent_id": "reader"}
-    helpers.track(payload, started=True, home=tmp_path)
-    assert helpers.live("main", tmp_path)
-    helpers.track(payload, started=False, home=tmp_path)
+    helpers.begin(payload, tmp_path)
+    assert [path.name for path in helpers.folder("main", tmp_path).iterdir()] == ["reader"]
+    helpers.end(payload, tmp_path)
     assert not helpers.live("main", tmp_path)
+
+
+def test_a_payload_names_its_session_and_helper_or_blanks():
+    assert helpers.ids({"session_id": "main", "agent_id": "reader"}) == ("main", "reader")
+    assert helpers.ids({"session_id": None}) == ("", "")
+
+
+def test_a_filesystem_failure_records_and_clears_nothing(tmp_path):
+    home = tmp_path / "file"
+    home.write_text("")
+    payload = {"session_id": "main", "agent_id": "reader"}
+    helpers.begin(payload, home)
+    helpers.end(payload, home)
+    assert home.read_text() == ""
 
 
 def test_the_default_folder_sits_under_the_agentihooks_home(monkeypatch, tmp_path):

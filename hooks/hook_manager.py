@@ -2397,12 +2397,9 @@ def on_subagent_start(payload: dict[str, Any]) -> None:
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
     _KNOWN_SUBAGENT_IDS.add(agent_id)
-    try:
-        from hooks.lifecycle import helpers
+    from hooks.lifecycle import helpers
 
-        helpers.track(payload, started=True)
-    except OSError as e:
-        log("helper record failed", {"error": str(e)})
+    helpers.begin(payload)
     log(
         "Subagent started",
         {
@@ -2466,12 +2463,9 @@ def on_subagent_stop(payload: dict[str, Any]) -> None:
     transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
-    try:
-        from hooks.lifecycle import helpers
+    from hooks.lifecycle import helpers
 
-        helpers.track(payload, started=False)
-    except OSError as e:
-        log("helper clear failed", {"error": str(e)})
+    helpers.end(payload)
 
     try:
         from hooks.config import BRAIN_WRITER_ENABLED

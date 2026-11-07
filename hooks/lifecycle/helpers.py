@@ -3,6 +3,7 @@ its time to live counts as gone, so a helper whose stop never fired cannot hold 
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from collections.abc import Mapping
@@ -36,25 +37,43 @@ def fresh(record: Path, moment: float) -> bool:
         return False
 
 
+def record(session: str, agent: str, home: Path | None = None) -> Path | None:
+    """The helper's record path, or None for a blank id or a session that names itself."""
+    if not (session and agent) or session == agent:
+        return None
+    return folder(session, home) / safe(agent)
+
+
 def start(session: str, agent: str, home: Path | None = None) -> None:
     """Record a helper of the session as live."""
-    if not (session and agent) or session == agent:
-        return
-    path = folder(session, home)
-    path.mkdir(parents=True, exist_ok=True)
-    (path / safe(agent)).touch()
+    path = record(session, agent, home)
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
 
 
 def stop(session: str, agent: str, home: Path | None = None) -> None:
     """Clear the helper's record."""
-    if session and agent:
-        (folder(session, home) / safe(agent)).unlink(missing_ok=True)
+    path = record(session, agent, home)
+    if path:
+        path.unlink(missing_ok=True)
 
 
-def track(payload: Mapping[str, Any], started: bool, home: Path | None = None) -> None:
-    """Record or clear the helper a SubagentStart or SubagentStop payload names under its parent session."""
-    session, agent = str(payload.get("session_id") or ""), str(payload.get("agent_id") or "")
-    (start if started else stop)(session, agent, home)
+def ids(payload: Mapping[str, Any]) -> tuple[str, str]:
+    """The parent session and the helper a SubagentStart or SubagentStop payload names, blank when absent."""
+    return str(payload.get("session_id") or ""), str(payload.get("agent_id") or "")
+
+
+def begin(payload: Mapping[str, Any], home: Path | None = None) -> None:
+    """Record the helper a SubagentStart payload names; a filesystem failure records nothing."""
+    with contextlib.suppress(OSError):
+        start(*ids(payload), home)
+
+
+def end(payload: Mapping[str, Any], home: Path | None = None) -> None:
+    """Clear the helper a SubagentStop payload names; a filesystem failure clears nothing."""
+    with contextlib.suppress(OSError):
+        stop(*ids(payload), home)
 
 
 def live(session: str, home: Path | None = None, now: float | None = None) -> bool:

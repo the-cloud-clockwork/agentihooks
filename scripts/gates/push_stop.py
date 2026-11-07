@@ -9,7 +9,6 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -214,10 +213,9 @@ class PushStop:
         now: Any = None,
         clock: Any = None,
         github: Any = None,
-        helpers: Callable[[str], bool] | None = None,
     ) -> None:
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
-        self._github, self._helpers = github, helpers
+        self._github = github
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
@@ -277,8 +275,6 @@ class PushStop:
     def reviewing(self, session: str) -> bool:
         """Whether a live review helper of the stopping session still edits the worktree, so its changes are not
         owed as a commit until it ends."""
-        if self._helpers:
-            return self._helpers(session)
         from hooks.lifecycle import helpers
 
         return helpers.live(session)
