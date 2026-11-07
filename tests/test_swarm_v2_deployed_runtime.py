@@ -1625,3 +1625,13 @@ def test_a_controller_keeping_no_saved_machines_leaves_kubernetes_command_unsupp
         assert Capability.COMMAND not in kubernetes.capabilities
     finally:
         service.stop()
+
+
+@pytest.mark.parametrize(("task", "harness"), [({"harness": "codex"}, "codex"), ({}, "claude")])
+def test_a_launch_record_names_the_harness_its_task_was_planned_on(tmp_path, registry, task, harness):
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", {**_task(), **task}))
+
+    assert record["harness"] == harness
