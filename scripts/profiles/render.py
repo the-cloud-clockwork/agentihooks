@@ -210,8 +210,12 @@ def _roots(bundle: Path | None, dirs: list[tuple[str, Path]]) -> list[Path]:
     )
 
 
-def _features(subdir: str, keep: Callable[[Path], bool], bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Path]:
-    sources = [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR / subdir] + [r / ".claude" / subdir for r in _roots(bundle, dirs)]
+def _features(
+    subdir: str, keep: Callable[[Path], bool], bundle: Path | None, dirs: list[tuple[str, Path]]
+) -> dict[str, Path]:
+    sources = [cast(ModuleType, _install_module()).PACKAGE_FEATURES_DIR / subdir] + [
+        r / ".claude" / subdir for r in _roots(bundle, dirs)
+    ]
     found: dict[str, Path] = {}
     for src in sources:
         if src.is_dir():
@@ -522,7 +526,9 @@ def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings
     return doc
 
 
-def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict) -> tuple[dict[str, Any], dict[str, Any]]:
+def _codex_skills(
+    bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
+) -> tuple[dict[str, Any], dict[str, Any]]:
     enabled = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
     below = plugins.plugin_skills(enabled, claude_home(_global_env()) / "plugins")
     return below, plugins.layer_skills(_roots(bundle, dirs))
