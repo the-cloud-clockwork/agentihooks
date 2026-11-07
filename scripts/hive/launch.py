@@ -531,6 +531,10 @@ class HiveLaunch:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
                 return self.answer(request, order)
+        return self._placed(request)
+
+    def _placed(self, request: SpawnRequest) -> Outcome:
+        """Orders the launch on the selected account, moving to the next account while reservations are full."""
         accounts: frozenset[str] = frozenset()
         refused_outcome: Outcome | None = None
         while True:
