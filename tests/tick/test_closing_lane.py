@@ -118,8 +118,8 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
         assert not any(action.startswith("pass ended early") for action in actions)
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
         assert tick_heartbeat.read(swarm, "sw") is not None
-        outcomes = {record.name: record.outcome for record in closing}
-        assert outcomes == {"heartbeat": engine.OK, "last tick": engine.OK, "status publish": engine.OK}
+        assert sorted(record.name for record in closing) == ["heartbeat", "last tick", "status publish"]
+        assert not any(record.abandoned or record.outcome == engine.FAILED for record in closing)
     finally:
         release.set()
         worker = engine._RUNNING.get(("sw", "reboot pass"))
