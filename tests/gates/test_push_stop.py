@@ -174,11 +174,10 @@ def test_dirty_work_still_pushes_the_commits_it_holds(rig):
 
 def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_ends(monkeypatch, rig, tmp_path):
     from hooks import config, hook_manager
-    from hooks.lifecycle import helpers
 
     for flag in ("CI_MANIFESTO_ENABLED", "BRAIN_ENABLED", "BROADCAST_ENABLED", "BRAIN_WRITER_ENABLED"):
         monkeypatch.setattr(config, flag, False)
-    monkeypatch.setattr(helpers, "_home", lambda: tmp_path / "home")
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
     helper = {"session_id": "main", "agent_id": "reader", "agent_type": "code-reviewer"}
 
     def stop(session):

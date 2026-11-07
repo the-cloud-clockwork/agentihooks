@@ -27,7 +27,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from hooks.classifier.child import skip_classifier_child
 from hooks.observability import otel
@@ -2400,7 +2400,7 @@ def on_subagent_start(payload: dict) -> None:
     try:
         from hooks.lifecycle import helpers
 
-        helpers.start(str(payload.get("session_id") or ""), str(payload.get("agent_id") or ""))
+        helpers.track(cast("dict[str, Any]", payload), started=True)
     except OSError as e:
         log("helper record failed", {"error": str(e)})
     log(
@@ -2469,7 +2469,7 @@ def on_subagent_stop(payload: dict) -> None:
     try:
         from hooks.lifecycle import helpers
 
-        helpers.stop(str(payload.get("session_id") or ""), str(payload.get("agent_id") or ""))
+        helpers.track(cast("dict[str, Any]", payload), started=False)
     except OSError as e:
         log("helper clear failed", {"error": str(e)})
 

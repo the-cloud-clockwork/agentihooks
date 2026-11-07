@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Mapping
 from pathlib import Path
-
-from hooks.lifecycle.guard import _home
+from typing import Any
 
 TTL_S = 3600
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -21,7 +21,11 @@ def safe(name: str) -> str:
 
 def folder(session: str, home: Path | None = None) -> Path:
     """The folder holding the session's live helper records."""
-    return (home or _home()) / "helpers" / safe(session)
+    if home is None:
+        from hooks.config import AGENTIHOOKS_HOME
+
+        home = Path(AGENTIHOOKS_HOME)
+    return home / "helpers" / safe(session)
 
 
 def fresh(record: Path, moment: float) -> bool:
@@ -45,6 +49,12 @@ def stop(session: str, agent: str, home: Path | None = None) -> None:
     """Clear the helper's record."""
     if session and agent:
         (folder(session, home) / safe(agent)).unlink(missing_ok=True)
+
+
+def track(payload: Mapping[str, Any], started: bool, home: Path | None = None) -> None:
+    """Record or clear the helper a SubagentStart or SubagentStop payload names under its parent session."""
+    session, agent = str(payload.get("session_id") or ""), str(payload.get("agent_id") or "")
+    (start if started else stop)(session, agent, home)
 
 
 def live(session: str, home: Path | None = None, now: float | None = None) -> bool:

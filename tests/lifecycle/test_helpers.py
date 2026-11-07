@@ -36,18 +36,36 @@ def test_a_session_is_never_its_own_helper_and_blank_ids_record_nothing(tmp_path
 
 
 def test_ids_cannot_escape_the_helpers_folder(tmp_path):
-    helpers.start("../up", "../../out", tmp_path)
-    assert helpers.live("../up", tmp_path)
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["helpers"]
+    home = tmp_path / "home"
+    helpers.start("../up", "../../out", home)
+    assert helpers.live("../up", home)
+    assert sorted(path.name for path in tmp_path.iterdir() if path.name != "_home") == ["home"]
+    assert sorted(path.name for path in home.iterdir()) == ["helpers"]
 
 
 def test_dot_ids_stay_inside_the_helpers_folder(tmp_path):
-    helpers.start("..", "reader", tmp_path)
-    helpers.start(".", "..", tmp_path)
-    assert helpers.live("..", tmp_path)
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["helpers"]
-    assert [path.name for path in (tmp_path / "helpers").iterdir()] == ["_"]
-    assert sorted(path.name for path in (tmp_path / "helpers" / "_").iterdir()) == ["_", "reader"]
+    home = tmp_path / "home"
+    helpers.start("..", "reader", home)
+    helpers.start(".", "..", home)
+    assert helpers.live("..", home)
+    assert sorted(path.name for path in home.iterdir()) == ["helpers"]
+    assert [path.name for path in (home / "helpers").iterdir()] == ["_"]
+    assert sorted(path.name for path in (home / "helpers" / "_").iterdir()) == ["_", "reader"]
+
+
+def test_a_payload_records_and_clears_its_helper_under_the_parent_session(tmp_path):
+    payload = {"session_id": "main", "agent_id": "reader"}
+    helpers.track(payload, started=True, home=tmp_path)
+    assert helpers.live("main", tmp_path)
+    helpers.track(payload, started=False, home=tmp_path)
+    assert not helpers.live("main", tmp_path)
+
+
+def test_the_default_folder_sits_under_the_agentihooks_home(monkeypatch, tmp_path):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path))
+    assert helpers.folder("main") == tmp_path / "helpers" / "main"
 
 
 def test_a_record_cleared_while_it_is_read_counts_as_gone(tmp_path):
