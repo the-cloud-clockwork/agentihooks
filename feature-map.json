@@ -1868,7 +1868,22 @@
         "tests/swarm/test_panic.py::test_no_directory_or_no_fix_reads_no_git",
         "tests/swarm/test_panic.py::test_a_detached_checkout_reads_no_origin_and_stays_frozen",
         "tests/swarm/test_panic.py::test_a_checkout_without_an_origin_stays_frozen",
-        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory"
+        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory",
+        "tests/swarm/test_panic.py::test_a_push_after_cd_into_the_fix_worktree_is_spared",
+        "tests/swarm/test_panic.py::test_a_push_without_a_session_directory_stays_frozen"
+      ]
+    },
+    {
+      "id": "panic-merged-fix-dev-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-flow",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the workflow runs whose head commit is the merge commit of a merged registered fix pull request, and still cancels the other dev push runs.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_dev_run_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit",
+        "tests/tick/test_source_control.py::test_github_change_reads_its_merge_commit"
       ]
     },
     {
