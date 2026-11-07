@@ -9,7 +9,7 @@ import pytest
 from scripts.swarm import lease
 from scripts.swarm.store import SwarmError
 from scripts.swarm_v2 import deployed, retention
-from scripts.swarm_v2.kubernetes import client, failures, replacement
+from scripts.swarm_v2.kubernetes import client, failures, replacement, unschedulable
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Decision
 from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1711,6 +1711,123 @@ def test_an_attempt_no_recovery_admitted_has_no_restore(world):
     assert failures.restore_directive(world.store, cases.SLUG, "unknown") is None
     assert world.recovery(world.live).restore(world.old.execution_id) is None
     assert (failures.RESTORES, failures.REQUESTS) == ("attempt-restores", "recovery-requests")
+
+
+REOPENED = {"id": "task", "state": "open", "claimed_by": "", "awaiting": ""}
+
+
+def test_a_placed_fresh_replacement_reopens_its_task_for_hive_placement_and_never_relaunches(world):
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    replacements()
+    decision = recovery.decide(world.old.execution_id, "fresh")
+
+    assert replacements() == {world.old.execution_id: "placed"}
+    assert relaunch.calls == []
+    assert world.store.execution(cases.SLUG, decision.replacement).state == "ended"
+    assert ledger.rows == [REOPENED]
+    assert _hash(world, "attempt-recovery-records") == {world.old.execution_id: "superseded"}
+    assert _hash(world, "recovery-pending-tasks") == {}
+    assert replacements() == {}
+    assert relaunch.calls == []
+
+
+def test_a_placed_fresh_replacement_whose_reopen_is_refused_waits_for_the_next_pass(world):
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    replacements()
+    decision = recovery.decide(world.old.execution_id, "fresh")
+    ledger.refusals = 1
+
+    assert replacements() == {world.old.execution_id: "deferred"}
+    assert world.store.execution(cases.SLUG, decision.replacement).state != "ended"
+    assert replacements() == {world.old.execution_id: "placed"}
+    assert ledger.rows == [REOPENED]
+
+
+def test_a_placed_resume_replacement_still_relaunches_from_its_checkpoint(world):
+    recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
+    relaunch.recovery = recovery
+    replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+
+    assert replacements() == {world.old.execution_id: "ok"}
+    assert len(relaunch.calls) == 1
+
+
+def _unschedulable(world, attempt):
+    pod = world.api.objects[f"swarm-{attempt.execution_id}"]
+    pod["spec"].pop("nodeName", None)
+    pod["status"] = {
+        "phase": "Pending",
+        "conditions": [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable"}],
+    }
+
+
+def test_an_attempt_unschedulable_past_its_window_ends_and_its_task_reopens(world):
+    ledger = _Ledger()
+    ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
+    _unschedulable(world, world.old)
+    pods = list(world.api.objects.values())
+
+    assert ending(pods) == {}
+    world.clock[0] += 999
+    assert ending(pods) == {}
+    assert ledger.calls == []
+    world.clock[0] += 1
+    assert ending(pods) == {world.old.execution_id: "ended"}
+    assert world.store.execution(cases.SLUG, world.old.execution_id).state == "ended"
+    assert retention.final(world.store, cases.SLUG, world.old.execution_id).state == "cancelled"
+    assert ledger.rows == [REOPENED]
+    assert ending(pods) == {}
+    assert world.reconcile(world.recovery(world.live)) == {world.old.execution_id: "cancelled"}
+
+
+def test_an_attempt_that_gets_scheduled_restarts_its_unschedulable_window(world):
+    ledger = _Ledger()
+    ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
+    _unschedulable(world, world.old)
+    ending(list(world.api.objects.values()))
+    world.clock[0] += 600
+    world.show(world.old, "running", world.fx["first"]["node"])
+    assert ending(list(world.api.objects.values())) == {}
+    _unschedulable(world, world.old)
+    ending(list(world.api.objects.values()))
+    world.clock[0] += 600
+
+    assert ending(list(world.api.objects.values())) == {}
+    assert ledger.calls == []
+
+
+def test_an_unschedulable_attempt_whose_reopen_is_refused_stays_live_until_the_ledger_takes_it(world):
+    ledger = _Ledger()
+    ending = unschedulable.Unschedulable(world.store, cases.SLUG, world.live, ledger, window_ms=1000)
+    _unschedulable(world, world.old)
+    pods = list(world.api.objects.values())
+    ending(pods)
+    world.clock[0] += 1000
+    ledger.refusals = 1
+
+    assert ending(pods) == {}
+    assert retention.final(world.store, cases.SLUG, world.old.execution_id) is None
+    assert ending(pods) == {world.old.execution_id: "ended"}
+
+
+def test_the_deployed_pass_places_fresh_replacements_and_ends_unschedulable_attempts(world):
+    recover = deployed.recovery_pass(
+        SimpleNamespace(controller=world.live, grants=_Grants(), runtime=SimpleNamespace(relaunch=None)),
+        SimpleNamespace(image_tag="dev"),
+        _Cleaning(world),
+        _Ledger(),
+    )
+
+    assert recover.replacements.placed
+    assert recover.ending is not None
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

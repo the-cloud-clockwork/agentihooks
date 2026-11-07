@@ -293,7 +293,7 @@ def test_an_undeclared_pool_sizes_the_room_from_the_quota_alone():
 
     found = pool.WorkerPool(listing, None, LAUNCH)()
 
-    assert listing.selectors == []
+    assert listing.selectors == [""]
     assert (found.room, found.limit) == (6, "quota pods")
 
 
@@ -393,3 +393,30 @@ def test_the_pool_reading_names_the_policy_pod_limit_and_the_distinct_nodes_runn
 @pytest.mark.parametrize("error", [ApiRefused(403, "Forbidden"), OSError("reset")])
 def test_an_unlistable_worker_namespace_has_no_pool_reading(error):
     assert pool.reading(Listing(error=error), "swarm-workers", POOL) is None
+
+
+def _unschedulable(cpu="2", memory="4Gi"):
+    found = _pod("Pending", cpu, memory)
+    found["status"]["conditions"] = [{"type": "PodScheduled", "status": "False", "reason": "Unschedulable"}]
+    return found
+
+
+def test_usage_skips_a_pending_pod_the_scheduler_reported_unschedulable():
+    assert pool.usage([_pod(), _pod("Pending"), _unschedulable()]) == pool.Usage(2, 4000, 8192)
+
+
+def test_quota_room_gives_back_what_unschedulable_pods_hold():
+    hard = {"pods": "6", "requests.cpu": "18", "requests.memory": "34Gi"}
+    used = {"pods": "6", "requests.cpu": "12", "requests.memory": "24Gi"}
+    listing = Listing([_unschedulable() for _ in range(6)], quotas=[_quota(hard, used)])
+
+    found = pool.WorkerPool(listing, None, LAUNCH)()
+
+    assert listing.selectors == [""]
+    assert (found.room, found.limit) == (6, "quota pods")
+
+
+def test_a_full_pool_of_unschedulable_pods_leaves_the_whole_pool_as_room():
+    found = pool.WorkerPool(Listing([_unschedulable() for _ in range(8)]), POOL, LAUNCH)()
+
+    assert (found.room, found.limit) == (7, "memory")
