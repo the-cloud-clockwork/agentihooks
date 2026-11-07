@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.inbox.seats import SCAN_PAGE, SeatMemory, SeatRegistry, SwarmCulture
 from scripts.inbox.store import InboxStore
@@ -229,7 +229,7 @@ class RedisStore:
         self.redis.sadd(f"{PREFIX}:index", config.slug)
 
     def config(self, slug: str) -> SwarmConfig:
-        raw = self.redis.hgetall(self.key(slug, "config"))
+        raw = cast(dict[str, str], self.redis.hgetall(self.key(slug, "config")))
         if not raw:
             raise SwarmError(f"no swarm {slug}")
         return SwarmConfig(
