@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -81,7 +82,7 @@ def test_revoked_or_missing_claim_ends_the_old_agent(monkeypatch, state):
     kill.assert_called_once_with(4321)
 
 
-def test_unreachable_authority_lets_actions_pass_without_killing_the_agent(monkeypatch):
+def test_unreachable_authority_lets_actions_pass_without_killing_the_agent(monkeypatch: pytest.MonkeyPatch) -> None:
     from hooks.context import claim_fence
 
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": 1}))
@@ -133,7 +134,7 @@ def test_a_superseded_claim_is_still_refused_after_a_transient_read_failure(monk
 
 
 @pytest.mark.parametrize("recovers", [True, False])
-def test_a_failed_claim_state_read_is_retried_before_passing(monkeypatch, recovers):
+def test_a_failed_claim_state_read_is_retried_before_passing(monkeypatch: pytest.MonkeyPatch, recovers: bool) -> None:
     from hooks.context import claim_fence
 
     bus = Mock()
@@ -307,7 +308,7 @@ def test_a_fresh_held_answer_skips_the_read_for_its_own_claim_generation_only(
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
     with patch.object(claim_fence, "open_bus", side_effect=AssertionError("cached")):
         assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
-    current = json.loads(claim_fence.os.environ["AGENTIHOOKS_CLAIM_FENCE"])
+    current = json.loads(os.environ["AGENTIHOOKS_CLAIM_FENCE"])
     monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({**current, "revision": current["revision"] + 1}))
     with (
         patch.object(claim_fence, "open_bus", return_value=bus) as connect,
