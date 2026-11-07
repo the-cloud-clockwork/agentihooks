@@ -141,10 +141,15 @@ def _outbox_migration(cli: Any, get: Get) -> None:
     timing.call(delivery.migrate_outbox, get("store"), get("slug"), get("inbox"))  # pyright: ignore[reportUnknownMemberType]
 
 
+def listed(store: Any, slug: str) -> list[Any]:
+    """Return the agents of swarm ``slug`` that have not finished, as the page relay stores them for the pass."""
+    return [a for a in timing.call(store.agents, slug) if a.state != "finished"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
 def _page_relay(cli: Any, get: Get) -> None:
-    agents = [a for a in timing.call(get("store").agents, get("slug")) if a.state != "finished"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    agents = listed(get("store"), get("slug"))
     get("box")["agents"] = agents
-    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]
+    cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]  # pyright: ignore[reportUnknownMemberType]
 
 
 def _tick_view(cli: Any, get: Get) -> None:
