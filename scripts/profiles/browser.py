@@ -5,18 +5,16 @@ import json
 import os
 import shutil
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
-
-from pydantic import FileUrl
 
 if TYPE_CHECKING:
     from mcp import ClientSession, types
     from mcp.client.stdio import StdioServerParameters
     from mcp.server.lowlevel import Server
     from mcp.shared.context import RequestContext
+    from pydantic import FileUrl
 
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
@@ -57,9 +55,6 @@ def configure(servers: dict[str, Any], chain: list[str]) -> dict[str, Any]:
 
 
 def output_folder() -> Path:
-    if TYPE_CHECKING:
-        folder: Callable[[str, str], Path]
-
     from scripts.swarm_ledger.ledger_workspace import folder
 
     swarm, task = os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK")
@@ -169,7 +164,7 @@ class Upstream:
         from playwright.async_api import async_playwright
 
         async def roots(context: RequestContext[ClientSession, Any]) -> types.ListRootsResult:
-            return types.ListRootsResult(roots=[types.Root(uri=cast(FileUrl, self.out.as_uri()))])
+            return types.ListRootsResult(roots=[types.Root(uri=cast("FileUrl", self.out.as_uri()))])
 
         async with async_playwright() as playwright:
             params = parameters(self.out, playwright.chromium.executable_path)
