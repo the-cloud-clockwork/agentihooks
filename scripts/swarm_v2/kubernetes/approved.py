@@ -57,12 +57,13 @@ class AccountRoute:
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
-    def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
+    def _row(self, key: str, cap: int, sessions: int, now: float, ceiling: bool = True) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
             return Account(self.harness, key, OPEN, sessions, None, None, cap)
         drained = draining(self.harness, reading.five_left, reading.week_left)
-        banded = 0 if drained else min(cap, self.quota.cap(key, self.harness))
+        band = self.quota.cap(key, self.harness)
+        banded = 0 if drained else min(cap, band) if ceiling else band
         latest = self.quota.latest(key, self.harness)
         return Account(
             self.harness,
@@ -76,9 +77,9 @@ class AccountRoute:
             five_resets_at=session_bands.upcoming(latest.five_reset, now),
         )
 
-    def rows(self, cap: int, now: float) -> list[Account]:
+    def rows(self, cap: int, now: float, ceiling: bool = True) -> list[Account]:
         held = self.held()
-        return [self._row(key, cap, held.get(key, 0), now) for key in sorted(self.keys())]
+        return [self._row(key, cap, held.get(key, 0), now, ceiling) for key in sorted(self.keys())]
 
     def seats(self, cap: int, predecessor: tuple[str, str] | None = None) -> list[session_bands.Seat]:
         rows = self.rows(cap, self.quota.clock() / 1000)
@@ -105,4 +106,5 @@ class FleetAccounts:
         self.route, self.cap = route, cap
 
     def __call__(self, environ: Mapping[str, str], now: float, refresh: bool) -> list[Account]:
-        return self.route.rows(self.cap, now)
+        """An observed account offers its quota band alone; the launch cap bounds only Kubernetes workers."""
+        return self.route.rows(self.cap, now, ceiling=False)
