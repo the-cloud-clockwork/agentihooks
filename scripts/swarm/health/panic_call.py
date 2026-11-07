@@ -1,8 +1,9 @@
 """Degradation held for an hour asks the front door master: is this a panic mode call.
 
 Code measures each signal's start: no agent launch while a lane could take one, no merge into dev while the merge
-queue holds entries, a tick step failure category still recurring, tick passes ending early on one missing value, and
-an urgent task held open or blocked. At the first hour a signal holds and every hour after, the panic-call gate acts by
+queue holds entries, a tick step failure category still recurring, tick passes ending early on one missing value, an
+urgent task held open or blocked, and an urgent claim quiet past the stale claim window, which is asked at that window
+rather than the hour. At the first hour a signal holds and every hour after, the panic-call gate acts by
 its mode in the swarm config: observe logs the question to the swarm gate log, enforce sends it to the master seat's
 inbox, off skips.
 """
@@ -15,10 +16,12 @@ from typing import Any
 
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
+from scripts.gates import quiet as quiet_gate
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import blockers, timing
 from scripts.swarm.health import early_ends, spawn_stall, urgent_hold
+from scripts.swarm.health.findings import limits  # pyright: ignore[reportUnknownVariableType]
 
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
@@ -32,6 +35,7 @@ MASTER = "master"
 SPOKEN = "%d %B %H:%M UTC"
 LAUNCH = "a lane has a free seat, quota and claimable work and no agent launched"
 UNCLAIMED = "it is claimable but remains unclaimed"
+QUIET = "claimed by {name} with no ledger change for {minutes} minutes"
 QUESTION = (
     "Is this a panic mode call? {name} on swarm {slug} for {minutes} minutes, since {start}. Evidence: {evidence}. "
     "Yes: fix it yourself now; agentihooks swarm {slug} panic on --fix <pr url> raises panic and opens the master "
@@ -55,6 +59,7 @@ class Signal:
     name: str
     since: int
     evidence: str
+    after: int = HOUR_MS
 
 
 def _stored(store: Any, slug: str, key: str) -> dict[str, Any]:
@@ -109,11 +114,26 @@ def _urgent(store: Any, slug: str) -> list[Signal]:
     ]
 
 
+def _quiet(store: Any, slug: str, at: int) -> list[Signal]:
+    claimed = dict[str, Any](_stored(store, slug, URGENT_KEY).get(urgent_hold.CLAIMED, {}))
+    stale = limits().stale_minutes * MINUTE_MS
+    found: list[Signal] = []
+    for agent in store.agents(slug):
+        held = bool(quiet_gate.holding(agent, claimed))  # pyright: ignore[reportUnknownMemberType]
+        if not held or quiet_gate.declared_wait(store.redis, slug, agent.name, at):  # pyright: ignore[reportUnknownMemberType]
+            continue
+        since = quiet_gate.last_signal(store.redis, slug, agent)  # pyright: ignore[reportUnknownMemberType]
+        if since and at - since >= stale:
+            evidence = QUIET.format(name=agent.name, minutes=(at - since) // MINUTE_MS)
+            found.append(Signal(f"Urgent task {claimed[agent.task]['title']} claim quiet", since, evidence, stale))
+    return sorted(found, key=lambda signal: signal.name)
+
+
 def signals(store: Any, slug: str, at: int, early: dict[str, Any]) -> tuple[list[Signal], dict[str, Any]]:
     """Return every degradation signal holding now with its measured start, and the early end streak start to keep."""
     ended, kept = _early(store, slug, at, early)
     found = [*_launch(store, slug), *_merge(store, slug), *_steps(store, slug, at), *ended, *_urgent(store, slug)]
-    return found, kept
+    return [*found, *_quiet(store, slug, at)], kept
 
 
 def _spoken(at_ms: int) -> str:
@@ -164,7 +184,7 @@ def step(store: Any, slug: str, at: int) -> list[str]:
     asked: dict[str, int] = {}
     lines: list[str] = []
     for signal in found:
-        key, hours = f"{signal.name}|{signal.since}", (at - signal.since) // HOUR_MS
+        key, hours = f"{signal.name}|{signal.since}", (at - signal.since - signal.after) // HOUR_MS + 1
         if hours < 1 or hours <= before.get(key, 0):
             if key in before:
                 asked[key] = before[key]
