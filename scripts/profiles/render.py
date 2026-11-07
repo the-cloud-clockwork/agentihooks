@@ -98,7 +98,9 @@ def declared(name: str) -> list[str]:
 def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     if _resolve(name) is None:
         raise ValueError(f"Profile '{name}' not found")
-    managed = cast(dict[str, object] | None, brain_binding.current(os.environ)) is not None
+    managed = (
+        cast(Callable[[Mapping[str, str]], dict[str, object] | None], brain_binding.current)(os.environ) is not None
+    )
     always = [name, *(o for o in declared(name) if managed or o != brain_binding.OVERLAY)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
     dirs = _resolve_chain([*always, *worn])
@@ -109,7 +111,7 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
 def _bundle() -> Path | None:
     _i = cast(ModuleType, _install_module())
     bundle = bundle_copy.current() or _i._get_bundle_path()
-    linked: Any = (_i._load_state().get("bundle") or {}).get("path")
+    linked: Any = cast(dict[str, Any], _i._load_state().get("bundle") or {}).get("path")
     if bundle is None and linked:
         raise ValueError(
             f"linked bundle {linked} is missing; relink it with agentihooks bundle link <path> before rendering"
@@ -122,7 +124,7 @@ def _user() -> Path | None:
         return bundle_copy.current_user()
     _i = cast(ModuleType, _install_module())
     user = _i._get_user_bundle_path()
-    linked: Any = (_i._load_state().get("user_bundle") or {}).get("path")
+    linked: Any = cast(dict[str, Any], _i._load_state().get("user_bundle") or {}).get("path")
     if user is None and linked:
         raise ValueError(
             f"linked user bundle {linked} is missing; relink it with agentihooks bundle link --user <path> before rendering"
@@ -135,7 +137,7 @@ def _shared() -> Path | None:
         return bundle_copy.current_shared()
     _i = cast(ModuleType, _install_module())
     shared = _i._get_shared_bundle_path()
-    linked: Any = (_i._load_state().get("shared_bundle") or {}).get("path")
+    linked: Any = cast(dict[str, Any], _i._load_state().get("shared_bundle") or {}).get("path")
     if shared is None and linked:
         raise ValueError(
             f"linked shared bundle {linked} is missing; relink it with agentihooks bundle link --shared <path> "
@@ -189,7 +191,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict[str, Any]:
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
         "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
         "hosted_ledger": os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL", ""),
-        "swarm_brain": cast(dict[str, object] | None, brain_binding.current(os.environ)),
+        "swarm_brain": cast(Callable[[Mapping[str, str]], dict[str, object] | None], brain_binding.current)(os.environ),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": cast(dict[str, object], browser.spec())} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
@@ -239,7 +241,7 @@ def _settings(target: str, bundle: Path | None, dirs: list[tuple[str, Path]]) ->
 
 
 def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dict[str, Any]:
-    from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
+    from scripts import profile_telemetry
 
     env = doc["env"]
     if hosted := os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL"):
@@ -247,8 +249,10 @@ def claude_environment(doc: dict[str, Any], dirs: list[tuple[str, Path]]) -> dic
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed
-    cast(Callable[[dict[str, Any], list[tuple[str, Path]], Path | None], None], apply_langfuse_env)(doc, dirs, None)
-    cast(Callable[[dict[str, Any]], None], apply_collector_env)(doc)
+    cast(Callable[[dict[str, Any], list[tuple[str, Path]], Path | None], None], profile_telemetry.apply_langfuse_env)(
+        doc, dirs, None
+    )
+    cast(Callable[[dict[str, Any]], None], profile_telemetry.apply_collector_env)(doc)
     return doc
 
 
@@ -521,7 +525,7 @@ def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings
     doc["sqlite_home"] = str(operator)
     doc["features"]["hooks"] = True
     source = f"{operator / 'hooks.json'}:"
-    state: dict[str, Any] = cast(dict[str, Any], (installed.get("hooks") or {}).get("state") or {})
+    state: dict[str, Any] = cast(dict[str, Any], cast(dict[str, Any], installed.get("hooks") or {}).get("state") or {})
     trusted: dict[str, Any] = {
         f"{out / 'hooks.json'}:{k.removeprefix(source)}": v for k, v in state.items() if k.startswith(source)
     }
@@ -533,9 +537,9 @@ def _codex_config(installed: dict[str, Any], operator: Path, out: Path, settings
 
 
 def _codex_skills(
-    bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
+    bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    enabled = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
+    enabled: list[str] = [plugin for plugin, on in stamp["enabled_plugins"].items() if on]
     below = plugins.plugin_skills(enabled, claude_home(_global_env()) / "plugins")
     return below, plugins.layer_skills(_roots(bundle, dirs))
 
@@ -547,8 +551,8 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
         if item != "auth.json" or login:
             _link(out / item, operator / item)
     for item in homes.CODEX_ROLLOUTS if rollouts is not None else ():
-        (rollouts / item).mkdir(parents=True, exist_ok=True)
-        _link(out / item, rollouts / item)
+        (cast(Path, rollouts) / item).mkdir(parents=True, exist_ok=True)
+        _link(out / item, cast(Path, rollouts) / item)
 
 
 def render_codex(
@@ -569,7 +573,7 @@ def render_codex(
     installed = tomllib.loads(text)
     stamp = _stamp(bundle, dirs)
     below, above = _codex_skills(bundle, dirs, stamp)
-    current = {
+    current: dict[str, Any] = {
         "render": stamp,
         "operator": hashlib.sha256(text.encode()).hexdigest(),
         "hooks": _file_digest(operator / "hooks.json"),
@@ -578,7 +582,7 @@ def render_codex(
         **({"push": True} if push else {}),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
-    root = profile_dir(name, overlays)
+    root = cast(Path, profile_dir(name, overlays))
     out = root / "codex"
     if (
         not force
@@ -592,7 +596,7 @@ def render_codex(
     ):
         return None
     if out.exists():
-        root = render_claude(name, force=True, overlays=overlays).parent
+        root = cast(Path, render_claude(name, force=True, overlays=overlays)).parent
         out = root / "codex"
         bundle, dirs = _bundle(), _chain(name, overlays)
         below, above = _codex_skills(bundle, dirs, stamp)
@@ -640,8 +644,12 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     claude_fresh = render_claude(name, force=force, overlays=overlays) is None
     bundle, dirs = _bundle(), _chain(name, overlays)
     current = _stamp(bundle, dirs)
-    config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
-    root = profile_dir(name, overlays)
+    config: dict[str, Any] = {
+        "mcpServers": cast(Callable[[dict[str, Any]], dict[str, Any]], CopilotAdapter().mcp_entries)(
+            _mcp_servers("copilot", bundle, dirs)
+        )
+    }
+    root = cast(Path, profile_dir(name, overlays))
     out = root / "copilot"
     if (
         not force
@@ -651,10 +659,14 @@ def render_copilot(name: str, force: bool = False, overlays: Sequence[str] = ())
     ):
         return None
     if out.exists():
-        root = render_claude(name, force=True, overlays=overlays).parent
+        root = cast(Path, render_claude(name, force=True, overlays=overlays)).parent
         out = root / "copilot"
         bundle, dirs = _bundle(), _chain(name, overlays)
-        config = {"mcpServers": CopilotAdapter().mcp_entries(_mcp_servers("copilot", bundle, dirs))}
+        config = {
+            "mcpServers": cast(Callable[[dict[str, Any]], dict[str, Any]], CopilotAdapter().mcp_entries)(
+                _mcp_servers("copilot", bundle, dirs)
+            )
+        }
     out.mkdir()
     _link(out / "copilot-instructions.md", root / "claude" / "CLAUDE.md")
     operator = copilot_home()
@@ -747,7 +759,7 @@ def rendered_profiles(target: str) -> list[str]:
 
 def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
     _i = cast(ModuleType, _install_module())
-    done = []
+    done: list[str] = []
     for key in rendered_profiles(target):
         if key in skip:
             continue
@@ -765,7 +777,7 @@ def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
 def _seed_linked_profiles(out: Path) -> None:
     _i = cast(ModuleType, _install_module())
     state_file = out / "state.json"
-    state = _i.load_json(state_file) if state_file.exists() else {}
+    state: dict[str, Any] = _i.load_json(state_file) if state_file.exists() else {}
     state["linked_profiles"] = _i._get_linked_profiles()
     _i.save_json(state_file, state)
 
@@ -815,7 +827,7 @@ def main(argv: list[str] | None = None) -> int:
         return binding.main(args.canary)
     if args.command == "binding":
         try:
-            print(json.dumps(binding.record(args.home)))
+            print(json.dumps(cast(Callable[[Path | None], dict[str, Any]], binding.record)(args.home)))
         except (OSError, ValueError, KeyError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
