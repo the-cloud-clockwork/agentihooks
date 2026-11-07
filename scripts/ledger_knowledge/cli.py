@@ -21,7 +21,7 @@ def _parser() -> argparse.ArgumentParser:
     ask.add_argument("--limit", type=int, default=5)
     refresh = commands.add_parser("refresh")
     for command in (ask, refresh):
-        command.add_argument("--ledger", default="")
+        command.add_argument("--ledger")
     return parser
 
 
@@ -41,7 +41,7 @@ def main(
 ) -> int:
     """Run one knowledge command and print its JSON answer."""
     args = _parser().parse_args(argv)
-    slug = args.ledger or environ.get("AGENTIHOOKS_SWARM", "")
+    slug: str | None = args.ledger or environ.get("AGENTIHOOKS_SWARM")
     if not slug:
         print("knowledge: name a ledger with --ledger", file=sys.stderr)
         return 2

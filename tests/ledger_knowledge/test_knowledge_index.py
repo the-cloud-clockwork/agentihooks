@@ -25,11 +25,17 @@ COMMENT = Chunk("tasks/t/comments/c#0", "tasks/t/comments/c", "tasks/t", "commen
 
 
 def index(tmp_path: Path, embedder: HashEmbedder | None = None) -> KnowledgeIndex:
-    return KnowledgeIndex(tmp_path / "deep" / "slug.sqlite3", embedder or HashEmbedder())
+    return KnowledgeIndex(tmp_path / "deep" / "deeper" / "slug.sqlite3", embedder or HashEmbedder())
 
 
 def bucket(word: str, dimension: int = DIMENSION) -> int:
     return int(hashlib.sha256(word.encode()).hexdigest()[:8], 16) % dimension
+
+
+def test_a_query_refuses_vectors_of_another_dimension(tmp_path: Path) -> None:
+    index(tmp_path, HashEmbedder(4)).refresh([ROOT], 1)
+    with pytest.raises(ValueError):
+        index(tmp_path, HashEmbedder(8)).query("swarm", 1)
 
 
 def test_hash_embedder_counts_lowercased_words_into_unit_vectors() -> None:
@@ -51,7 +57,7 @@ def test_hash_embedder_takes_its_dimension_and_leaves_empty_text_zero() -> None:
 
 def test_the_index_file_and_its_folder_are_created(tmp_path: Path) -> None:
     built = index(tmp_path)
-    assert built.path == tmp_path / "deep" / "slug.sqlite3"
+    assert built.path == tmp_path / "deep" / "deeper" / "slug.sqlite3"
     assert built.path.is_file()
     assert built.refreshed_at() is None
     built.refresh([ROOT], 5)

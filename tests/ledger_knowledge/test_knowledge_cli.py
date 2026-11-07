@@ -70,7 +70,9 @@ def test_a_command_is_required(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_refresh_prints_its_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert run(["refresh", "--ledger", "rig"], {"AGENTIHOOKS_HOME": str(tmp_path)}, Reader()) == 0
+    reader = Reader()
+    assert run(["refresh", "--ledger", "rig"], {"AGENTIHOOKS_HOME": str(tmp_path)}, reader) == 0
+    assert reader.slugs == ["rig"]
     assert json.loads(capsys.readouterr().out) == {
         "ledger_slug": "rig",
         "added": 3,
