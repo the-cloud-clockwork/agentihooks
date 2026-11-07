@@ -435,8 +435,8 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
 
 
 def _kept(step: Step) -> bool:
-    """Return whether ``step`` is kept: it runs under its own budget even after its lane expired or a step it needs
-    was dropped."""
+    """Return whether ``step`` is kept: it runs under its own budget and the pass deadline even after its lane
+    expired or a step it needs was dropped."""
     return bool(getattr(step, "kept", False))
 
 
@@ -476,7 +476,7 @@ def _eager(
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
     A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
-    expired or a step it needs was dropped, bounded by its own budget alone.
+    expired or a step it needs was dropped, bounded by its own budget and the pass deadline.
     """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
