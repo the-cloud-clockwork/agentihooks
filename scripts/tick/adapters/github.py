@@ -108,13 +108,27 @@ def _hidden_rollups(refused: subprocess.CalledProcessError) -> Any:
     except ValueError:
         raise refused from None
     errors = body.get("errors") if isinstance(body, dict) else None
-    hidden = bool(errors) and all(
-        error.get("type") == "FORBIDDEN" and (error.get("path") or [None])[-1] == "statusCheckRollup"
-        for error in errors
+    hidden = (
+        isinstance(errors, list)
+        and bool(errors)
+        and all(isinstance(error, dict) and _rollup_refusal(error) for error in errors)
     )
-    if not hidden or not body.get("data"):
+    data = body.get("data") if hidden else None
+    repository = data.get("repository") if isinstance(data, dict) else None
+    if not isinstance(repository, dict) or not isinstance(repository.get("pullRequests"), dict):
         raise refused
-    return body["data"]
+    return data
+
+
+def _rollup_refusal(error: dict[str, Any]) -> bool:
+    """Say whether one GraphQL error is the App refused read of an open pull request's check rollup."""
+    path = error.get("path")
+    return (
+        error.get("type") == "FORBIDDEN"
+        and isinstance(path, list)
+        and path[:2] == ["repository", "pullRequests"]
+        and path[-1] == "statusCheckRollup"
+    )
 
 
 def _workflow_run(row: dict[str, Any]) -> WorkflowRun:

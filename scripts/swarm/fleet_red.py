@@ -174,7 +174,7 @@ def checker(reader: Reader | None = None, clock: Callable[[], float] = time.time
             try:
                 known[repo] = (reader or read)(repo)
             except ERRORS as exc:
-                said = str(getattr(exc, "stderr", None) or "").strip()
+                said = " ".join(str(getattr(exc, "stderr", None) or "").split())
                 why = f"{exc}: {said}" if said else str(exc)
                 print(f"fleet red hold skipped, listing open pull requests failed: {why}", file=sys.stderr)
                 known[repo] = []
