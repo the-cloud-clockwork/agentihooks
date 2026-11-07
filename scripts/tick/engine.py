@@ -403,9 +403,48 @@ def _applied(record: StepRecord, apply: Appliers) -> StepRecord:
     return replace(record, dropped=tuple(dropped), conflicts=tuple(conflicts), applied=tuple(lines))
 
 
-def _lane_context(step: Step, ctx: Context, found: pool.Pass) -> Context:
-    """Return ``ctx`` with its deadline capped by the deadline of the step's lane."""
+def _held_back(ordered: tuple[Step, ...], reserves: Mapping[str, float]) -> dict[str, float]:
+    """Return the seconds at the end of its lane each step of ``ordered`` leaves to the reserved steps that need it,
+    directly or through another: the largest reserve among them."""
+    held: dict[str, float] = {}
+    for step in reversed(ordered):
+        give = max(held.get(step.name, 0.0), reserves.get(step.name, 0.0))
+        for need in step.needs:
+            held[need] = max(held.get(need, 0.0), give)
+    return held
+
+
+def _lane_of(step: Step, found: pool.Pass, held: Mapping[str, float]) -> Deadline:
+    """Return the deadline of the step's lane less the seconds it leaves to the reserved steps that need it."""
     lane = found.lane(step.lane)
+    return Deadline(lane.expires_at - held.get(step.name, 0.0), lane.clock)
+
+
+def _drops(step: Step, dropped: set[str], found: pool.Pass) -> bool:
+    """Return whether ``step``, cut before it ended, drops its dependents: a need was dropped or its whole lane ran out,
+    never a reserve it left to a step that needs it."""
+    return bool(step.needs & dropped) or found.lane(step.lane).expired
+
+
+def _cut_off(
+    step: Step, lane: Deadline, lost: tuple[set[str], set[str]], found: pool.Pass, held: Mapping[str, float]
+) -> set[str] | None:
+    """Return the set of ``lost``, dropped or cut, that ``step`` joins when it cannot start, else None.
+
+    A step whose need was dropped or whose whole lane ran out is dropped. A step whose lane less its reserve ran out,
+    or that needs a cut step, is cut when a reserved step needs it and dropped otherwise; a reserved step runs on
+    after its cut needs.
+    """
+    dropped, cut = lost
+    if _drops(step, dropped, found):
+        return dropped
+    if lane.expired or (step.needs & cut and step.name not in found.reserves):
+        return cut if step.name in held else dropped
+    return None
+
+
+def _lane_context(lane: Deadline, ctx: Context) -> Context:
+    """Return ``ctx`` with its deadline capped by ``lane``."""
     clock = ctx.deadline.clock
     return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock), ctx.tools)
 
@@ -436,16 +475,18 @@ def _ended(found: pool.Pass, record: StepRecord) -> StepRecord:
 
 def _expire(
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
-    dropped: set[str],
+    lost: tuple[set[str], set[str]],
     records: dict[str, StepRecord],
     found: pool.Pass,
     clock: Callable[[], float],
 ) -> None:
-    """Abandon every running step whose lane expired, recording it dropped and ended on the pass."""
+    """Abandon every running step whose lane expired, recording it ended on the pass and in the dropped set of
+    ``lost``, or in its cut set when only the reserve it leaves to a step that needs it ran out."""
+    dropped, cut = lost
     for future, (step, started, lane) in list(running.items()):
         if lane.expired:
             running.pop(future)
-            dropped.add(step.name)
+            (dropped if _drops(step, dropped, found) else cut).add(step.name)
             _abandoned(step)
             left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
             records[step.name] = _ended(found, left)
@@ -468,10 +509,12 @@ def _eager(
     names = {step.name for step in ordered}
     records: dict[str, StepRecord] = {}
     dropped: set[str] = set()
+    cut: set[str] = set()
     pending = list(ordered)
     running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
     offsets: dict[str, float | None] = {}
     submitted: list[Future[StepRecord]] = []
+    held_back = _held_back(ordered, found.reserves)
     try:
         while pending or running:
             ready = [
@@ -479,18 +522,18 @@ def _eager(
             ]
             for step in ready:
                 pending.remove(step)
-                lane = found.lane(step.lane)
+                lane = _lane_of(step, found, held_back)
                 offsets[step.name] = _offset()
                 if step.name in rest | _shut(gate, step, records):
                     records[step.name] = _ended(found, _rested(step))
-                elif step.needs & dropped or lane.expired:
-                    dropped.add(step.name)
+                elif (cut_by := _cut_off(step, lane, (dropped, cut), found, held_back)) is not None:
+                    cut_by.add(step.name)
                     records[step.name] = _ended(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
                 else:
                     earlier = found.handed_of(step.needs - names)
-                    lane_ctx = _lane_context(step, ctx, found)
+                    lane_ctx = _lane_context(lane, ctx)
                     future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
                     submitted.append(future)
                     running[future] = (step, clock(), lane)
@@ -506,7 +549,7 @@ def _eager(
             for future in done:
                 step, _, _ = running.pop(future)
                 records[step.name] = _ended(found, _applied(future.result(), apply))
-            _expire(running, dropped, records, found, clock)
+            _expire(running, (dropped, cut), records, found, clock)
     finally:
         for future in submitted:
             future.cancel()

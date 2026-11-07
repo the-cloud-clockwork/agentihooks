@@ -423,6 +423,23 @@
       ]
     },
     {
+      "id": "swarm-tick-spawn-reserve",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-room",
+      "behaviour": "A parallel pass holds back the end of a lane for each reserved step: every step a reserved step needs, directly or through another, runs against its lane less the reserve, and one cut there is abandoned without dropping the reserved step, so spawn still starts with its reserve when the steps before it are slow; steps spawn does not need keep the whole lane, and one of them that needs a cut step is dropped.",
+      "seam": "scripts.tick.pool.Pass reserves, scripts.tick.engine.run_graph",
+      "tests": [
+        "tests/tick/test_spawn_room.py::test_spawn_still_runs_with_its_reserve_when_the_steps_it_needs_are_slow",
+        "tests/tick/test_spawn_room.py::test_without_a_reserve_slow_needs_spend_the_lane_and_spawn_is_skipped",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_keeps_the_whole_lane",
+        "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
+        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
+        "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
+        "tests/tick/test_spawn_room.py::test_a_shorter_critical_lane_reserves_the_same_share_for_spawn"
+      ]
+    },
+    {
       "id": "swarm-tick-territory",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13b",
