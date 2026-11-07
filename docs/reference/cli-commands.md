@@ -367,6 +367,21 @@ agentihooks recall eval golden.json                                           # 
 
 ---
 
+## `agentihooks knowledge`
+
+Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, question, follow up, note, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. The default embedder counts hashed words, so matching is lexical. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
+
+```bash
+agentihooks knowledge ask "merge queue priority" --limit 5   # summary, recent changes, hits with their parent chain
+agentihooks knowledge refresh                                # embed what changed now
+```
+
+`--ledger` defaults to `AGENTIHOOKS_SWARM`. Each hit carries its parents, nearest first, so a task hit names its phase and a comment hit names its task and phase.
+
+`AGENTIHOOKS_KNOWLEDGE_EMBEDDER` chooses the embedder: `hash` (default) or `semantic`, which matches by meaning, so a question worded differently from a task still finds it. `semantic` calls an OpenAI-compatible embeddings endpoint named by `AGENTIHOOKS_KNOWLEDGE_EMBED_URL` (HTTPS, or HTTP on loopback), `AGENTIHOOKS_KNOWLEDGE_EMBED_MODEL`, `AGENTIHOOKS_KNOWLEDGE_EMBED_DIMENSION` and `AGENTIHOOKS_KNOWLEDGE_EMBED_TOKEN`, sending at most 32 texts per request and ranking by cosine. A provider outage exits 1 with the reason. Each embedder and model keeps its own index file, so switching rebuilds rather than mixing vectors.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
