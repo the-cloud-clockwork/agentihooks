@@ -1456,30 +1456,37 @@ def test_a_claim_whose_agent_its_hive_still_lists_is_kept(remote: SimpleNamespac
 
 
 @pytest.mark.parametrize(
-    ("ended", "pod_started_after", "names", "gone"),
+    ("ended", "pod_started_after", "listed", "gone"),
     [
-        (False, 1, [], True),
-        (True, 1, [], True),
-        (False, 0, [], False),
-        (True, -1, [], False),
-        (False, 1, None, False),
-        (False, 1, ["member"], False),
+        (False, 1, False, True),
+        (True, 1, False, True),
+        (False, 0, False, False),
+        (True, -1, False, False),
+        (False, 1, True, False),
     ],
 )
 @pytest.mark.parametrize("remote", [{"launched_at": LAUNCHED, "target": {}}], indirect=True)
 def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_ceiling(
-    remote: SimpleNamespace, ended: bool, pod_started_after: int, names: list[str] | None, gone: bool
+    remote: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    ended: bool,
+    pod_started_after: int,
+    listed: bool,
+    gone: bool,
 ) -> None:
+    from scripts.hive import daemon
     from scripts.swarm import capacity
     from scripts.swarm.pane import PaneObservation
+    from scripts.swarm_v2.runtime import process
     from scripts.tick.steps import agents as agent_steps
 
     agent = replace(remote.agent, pane_id="")
     remote.store.put_agent("fixture", agent)
-    _publish(remote, state="unknown")
-    report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
-    listed = [agent.name] if names == ["member"] else names
-    report.update(names=listed, started_at=LAUNCHED + pod_started_after)
+    monkeypatch.setattr(process, "started_ms", lambda: LAUNCHED + pod_started_after)
+    herdr = Mock()
+    herdr.live_names.return_value = {agent.name} if listed else set()
+    report = daemon.execution_report(remote.redis, HIVE, herdr)
+    assert report["executions"] == {}
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report), ex=45)
     remote.store.claim("fixture", "task", agent.name, 60000)
     rows = {"task": {"state": "done" if ended else "claimed", "claimed_by": agent.name}}

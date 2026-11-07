@@ -73,7 +73,7 @@ class Reports:
         return bool(agent.pane_id) and agent.pane_id not in panes
 
     def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
-        """True when the beating hive ``agent`` was admitted to does not list it past startup, while it lists others
+        """True when the beating hive that admitted ``agent`` no longer lists it past startup, while it lists others
         or its pod started after the launch."""
         raw = self.redis.get(key(agent.hive)) if agent.hive else None
         launched = agent.launched_at or agent.started_at
