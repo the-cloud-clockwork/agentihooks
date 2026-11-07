@@ -39,10 +39,11 @@ def concept_vector(text: str) -> list[float]:
 
 class ConceptServer(BaseHTTPRequestHandler):
     batches: list[int] = []
+    authorizations: list[str] = []
 
     def do_POST(self) -> None:
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        assert self.headers["Authorization"] == "Bearer secret-value"
+        type(self).authorizations.append(self.headers["Authorization"])
         type(self).batches.append(len(body["input"]))
         data = [{"index": i, "embedding": concept_vector(text)} for i, text in enumerate(body["input"])]
         payload = json.dumps({"model": body["model"], "data": data}).encode()
@@ -58,6 +59,7 @@ class ConceptServer(BaseHTTPRequestHandler):
 @pytest.fixture
 def server() -> Iterator[str]:
     ConceptServer.batches = []
+    ConceptServer.authorizations = []
     httpd = HTTPServer(("127.0.0.1", 0), ConceptServer)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -102,6 +104,7 @@ def test_semantic_choice_wraps_the_memory_provider_in_bounded_batches(server: st
     assert "secret-value" not in repr(choice)
     vectors = choice.embedder.embed(["reboot", "stuck", "daemon", "billing", "hung"])
     assert ConceptServer.batches == [2, 2, 1]
+    assert ConceptServer.authorizations == ["Bearer secret-value"] * 3
     assert [vector.index(1.0) for vector in vectors] == [0, 1, 2, 3, 1]
     assert choice.embedder.embed([]) == []
     assert ConceptServer.batches == [2, 2, 1]

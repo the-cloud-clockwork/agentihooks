@@ -14,6 +14,7 @@ from typing import Protocol
 from .chunks import Chunk
 
 DIMENSION = 512
+HASH = "hash"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chunks (
     key TEXT PRIMARY KEY,

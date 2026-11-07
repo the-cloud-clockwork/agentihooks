@@ -94,6 +94,19 @@ class Settings:
     session_limit: int
 
 
+def checked_url(url: str) -> str:
+    """The embeddings URL, refused when it carries credentials, a query or a fragment, or is neither HTTPS nor loopback HTTP."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("embedding URL must not carry credentials, query parameters or a fragment")
+    if not parsed.hostname or (
+        parsed.scheme != "https"
+        and not (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1"))
+    ):
+        raise ValueError("embedding URL requires HTTPS or loopback HTTP")
+    return url
+
+
 def configure(environ: dict) -> Settings:
     if not all(environ.get(PREFIX + key) for key in REQUIRED):
         raise SystemExit("session embedding configuration is required: " + ", ".join(REQUIRED))
@@ -104,15 +117,7 @@ def configure(environ: dict) -> Settings:
         or any(not isinstance(item, str) or not item for item in projects)
     ):
         raise ValueError("embedding projects must be a nonempty JSON array of project names")
-    url = environ[PREFIX + "EMBED_URL"]
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("embedding URL must not carry credentials, query parameters or a fragment")
-    if not parsed.hostname or (
-        parsed.scheme != "https"
-        and not (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost", "::1"))
-    ):
-        raise ValueError("embedding URL requires HTTPS or loopback HTTP")
+    url = checked_url(environ[PREFIX + "EMBED_URL"])
     model = embeddings.require(
         EmbeddingModel(environ[PREFIX + "EMBED_MODEL"], int(environ[PREFIX + "EMBED_DIMENSION"]))
     )
