@@ -94,7 +94,7 @@ def priming(store: Any, engine: str, swarm: str, seat: str) -> str:
             "",
             seat_text(store, swarm, address),
             "",
-            reread_line(engine, swarm, address.partition("@")[0]),
+            reread_line(engine, swarm, address.rpartition("@")[0]),
         ]
     )
 
@@ -103,7 +103,7 @@ def register(mcp: Any) -> None:
     """Register the culture and seat resource templates and the swarm_culture prompt."""
     mcp.resource(CULTURE_URI, name="swarm_culture", mime_type="text/markdown")(swarm_culture_resource)
     mcp.resource(SEAT_URI, name="swarm_seat", mime_type="text/markdown")(swarm_seat_resource)
-    mcp.prompt(name="swarm_culture")(swarm_culture)
+    mcp.prompt()(swarm_culture)
 
 
 def swarm_culture_resource(slug: str) -> str:

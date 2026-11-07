@@ -256,3 +256,37 @@ def test_the_stdio_listing_skips_an_unknown_category(monkeypatch: pytest.MonkeyP
     )
 
     assert _stdio.list_served("prompts") == [{"name": "swarm_culture"}]
+
+
+def test_a_correction_by_source_withholds_a_reworded_culture_line() -> None:
+    _correct(f"culture:{SLUG}#2", "- old", {"swarm": SLUG, "line": 2})
+
+    text = culture.culture_text(_store(), SLUG)
+
+    assert BAD not in text
+    assert "- Write in plain words" in text
+
+
+def test_the_prompt_function_defaults_to_the_calling_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    _session_is(monkeypatch, "engineer@sw-3")
+    monkeypatch.setattr(culture, "_store", _store)
+
+    assert culture.swarm_culture() == culture.priming(_store(), "codex", SLUG, "eng-2")
+
+
+def test_an_explicit_engine_overrides_the_session_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(culture, "_store", _store)
+
+    text = culture.swarm_culture("codex", SLUG, "eng-2")
+
+    assert text.endswith(
+        "with read_mcp_resource on server agentihooks, uri swarm://sw/culture and uri swarm://sw/seats/eng-2."
+    )
+
+
+def test_the_reread_line_names_the_whole_label_before_the_swarm() -> None:
+    text = culture.priming(_store(), "claude", SLUG, "a@b@sw")
+
+    assert text.endswith("@agentihooks:swarm://sw/seats/a@b.")
