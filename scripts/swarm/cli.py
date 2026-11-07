@@ -58,6 +58,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -149,7 +150,7 @@ from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused, LedgerUnreachable
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -328,10 +329,27 @@ def _bin_stop(store, slug, ledger, runtime):
 
 
 def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
-    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    """Hold the pass's ledger view until beating closes, started with one delta read under a short timeout when the
+    client reads it; a slow or stopped server leaves the pass on the last good view this host stored, writing to
+    the outbox and refusing fresh reads."""
     beating.enter_context(ledger_view.holding())
-    if ledger_view.reads(ledger):
-        ledger_view.start(slug, ledger.service)
+    if not ledger_view.reads(ledger):
+        return
+    try:
+        ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
+    except OSError as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+            raise
+        _hold_stored(beating, slug, exc)
+
+
+def _hold_stored(beating: ExitStack, slug: str, exc: OSError) -> None:
+    """Hold the last good view of ledger ``slug`` for the pass and run it offline, or raise when none is stored."""
+    if ledger_view.hold_stored(slug) is None:
+        raise LedgerUnreachable(f"ledger {slug}: no stored view to run from while the server is not answering") from exc
+    print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
+    ledger_client.OFFLINE.set(True)
+    beating.callback(ledger_client.OFFLINE.set, False)
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):

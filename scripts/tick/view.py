@@ -33,9 +33,12 @@ __all__ = [
     "document",
     "freeze",
     "frozen_views",
+    "hold_stored",
     "holding",
+    "queued",
     "refreshed",
     "start",
+    "stored",
     "view_file",
     "wrote",
 ]
@@ -161,7 +164,7 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
     except (KeyError, IndexError, TypeError, AttributeError):
         reply, generation = reader(0, PARTS), None
         state = reply["data"]
-    if reply["generation"] != generation:
+    if stored is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
     return LedgerView(reply["generation"], state)
 
@@ -171,7 +174,7 @@ def reads(ledger: object) -> bool:
     return type(ledger) is LedgerClient
 
 
-def start(slug: str, service: bool) -> LedgerView | None:
+def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView | None:
     """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
     hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
@@ -179,7 +182,7 @@ def start(slug: str, service: bool) -> LedgerView | None:
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    client = ResourceClient(base, ledger.credentials(slug, service), timeout or ledger.REQUEST_TIMEOUT)
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:
@@ -193,10 +196,63 @@ def start(slug: str, service: bool) -> LedgerView | None:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
-    CURRENT.set(view)
-    HELD.set(None if view is None else Held(view, refresh))
-    REFRESH.set(None if view is None else (slug, refresh))
+    _hold(slug, view, _kept(refresh))
     return view
+
+
+def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
+    """``refresh``, answering with the view the pass already holds when the server stops answering mid pass."""
+
+    def renew() -> LedgerView:
+        """The held view patched with one delta read, or the held view as it is while the server is not answering."""
+        try:
+            return refresh()
+        except urllib.error.HTTPError:
+            raise
+        except OSError:
+            return HELD.get().view  # pyright: ignore[reportOptionalMemberAccess]
+
+    return renew
+
+
+def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:
+    """Hold ``view`` of ledger ``slug`` for the rest of the pass, read again through ``renew``."""
+    CURRENT.set(view)
+    HELD.set(None if view is None else Held(view, renew))
+    REFRESH.set(None if view is None else (slug, renew))
+
+
+def stored(slug: str) -> LedgerView | None:
+    """The last good view of this swarm's ledger stored on this host, or nothing when the host stores none."""
+    from scripts.scheduler import service as scheduler
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
+    found = read_export_file(view_file(base, slug, scheduler.runtime_dir()))
+    return None if found is None else LedgerView(found[0], found[1])
+
+
+def hold_stored(slug: str) -> LedgerView | None:
+    """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
+    the host stores none."""
+    view = stored(slug)
+    if view is not None:
+        _hold(slug, view, lambda: HELD.get().view)  # pyright: ignore[reportOptionalMemberAccess]
+    return view
+
+
+def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
+    """The held document with the task fields of queued ``ops`` applied, held as the view the rest of the pass
+    reads, or an empty document when the pass holds no view."""
+    held = HELD.get()
+    if held is None:
+        return {}
+    fields = {op["item"].removeprefix("tasks/"): op["fields"] for op in ops if op.get("op") == "task_update"}
+    document = dict(held.view.document)
+    document["tasks"] = [{**task, **fields.get(task.get("id"), {})} for task in held.view.tasks]
+    held.view = LedgerView(held.view.generation, document)
+    return document
 
 
 def document(slug: str) -> dict[str, Any] | None:

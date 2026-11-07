@@ -21,6 +21,10 @@ def resource_client(slug: str, service: bool = False) -> Clients:
     ledger: Any = _ledger()
 
     def build(remaining: float) -> ResourceClient:
+        from scripts.swarm.ledger_client import OFFLINE, OFFLINE_READ, LedgerUnreachable
+
+        if OFFLINE.get():
+            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         base: str = ledger.base(slug)
         credentials: dict[str, str] = ledger.credentials(slug, service)
         timeout: float = ledger.REQUEST_TIMEOUT

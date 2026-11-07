@@ -3,9 +3,10 @@
 import sys
 import urllib.error
 import uuid
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
@@ -34,6 +35,43 @@ UNREACHABLE = (
     "ledger talk queued while the server was down",
     "the local inbox outbox is full",
 )
+
+
+OFFLINE: ContextVar[bool] = ContextVar("tick_ledger_offline", default=False)
+OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
+SNAPSHOT_TIMEOUT_S = 3.0
+
+
+def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """``ops``, refused as the server would refuse them when a task write's guard fails against the held view."""
+    from scripts.tick import view
+
+    held = view.current()
+    for op in ops:
+        found = held.read("tasks", op["item"].removeprefix("tasks/")) if held and op["op"] == "task_update" else None
+        row = cast(dict[str, Any], found) if isinstance(found, dict) else None
+        states: list[str] = op.get("if_state") or []
+        expected: dict[str, Any] = op.get("if_match") or {}
+        moved = row is not None and (
+            bool(states)
+            and row.get("state") not in states
+            or any(row.get(key, "") != value for key, value in expected.items())
+        )
+        if moved:
+            raise LedgerRefused(f"ledger {slug} refused: {op['item']} moved since the last good view")
+    return ops
+
+
+def _ledger_queue(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """The answer of ``ledger`` queueing ``ops`` for ledger ``slug`` in the local outbox."""
+    return ledger.queue(slug, ops, service)
+
+
+def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
+    """The answer of ``ops`` queued in the outbox, carrying the held view with their task fields applied."""
+    from scripts.tick import view
+
+    return {**view.queued(ops), **answer}
 
 
 def _accepted(slug, state):
@@ -71,7 +109,11 @@ class LedgerClient:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
+        if OFFLINE.get() and not ops:
+            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         try:
+            if OFFLINE.get() and ops:
+                return _queued(ops, _ledger_queue(ledger, slug, _guarded(slug, ops), service))
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
@@ -90,6 +132,8 @@ class LedgerClient:
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
+        if OFFLINE.get():
+            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
         return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
