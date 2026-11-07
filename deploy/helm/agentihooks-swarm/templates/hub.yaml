@@ -4,10 +4,18 @@
 {{- if and (eq (toString $hub.bus.backend) "nats") (not $busUrl) }}
 {{- fail "hub.bus.url is required with the nats backend when nats.enabled is false: the hub reads every reactor's events from that address" }}
 {{- end }}
+{{- $reload := list }}
+{{- range $hub.secretEnv }}
+{{- $reload = append $reload .secretName }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "swarm.fullname" . }}-hub
+  {{- with ($reload | uniq) }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ join "," . | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: hub
