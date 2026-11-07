@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.702 · 2026-11-07
+
+### 2026-11-07 · 14c9069428ef · #9993 · @nestorcolt
+
+**Hold the controller lease through the shared database, never the ledger server**
+
+The controller's epoch lease previously went through the ledger HTTP client for acquire, current, transfer, renew, release and fenced checks, which meant a ledger server timeout could throw SwarmError during reap, as happened on 7 November. Since the ledger only proxies the same shared swarm state the controller already writes to, the lease now talks directly to the shared database when AGENTIHOOKS_SWARM_DATABASE_URL is set, bypassing the ledger entirely. This removes a needless dependency on the ledger server's availability for core controller operation, making reap and lease handling resilient to ledger outages.
+
 ## v2.17.701 · 2026-11-07
 
 ### 2026-11-07 · 64def43b5c0f · #9391 · @agenticore-app
