@@ -788,7 +788,9 @@ def test_pane_naming_and_stray_reaping_are_hive_orders(remote):
     hive.herdr.reap_name.assert_called_once_with(agent.name)
     assert runtime.name_pane(agent) is True
     assert runtime.reap_name(agent.name) is True
-    assert not remote.redis.exists(Orders(remote.redis).command_receipt(HIVE, f"reap:{agent.name}"))
+    assert not remote.redis.exists(
+        Orders(remote.redis).command_receipt(HIVE, f"reap:{agent.name}:{agent.execution_id}:{agent.generation}")
+    )
     assert runtime.reap_name(agent.name) is False
     assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
 
@@ -1003,7 +1005,7 @@ def test_command_orders_carry_their_exact_identity(remote):
     assert retire == {**base, "id": f"retire:{identity}", "action": "retire"}
     assert name == {**base, "id": f"name:{identity}", "action": "name"}
     assert reap == {
-        "id": f"reap:{agent.name}",
+        "id": f"reap:{agent.name}:{identity}",
         "action": "reap",
         "slug": "",
         "name": agent.name,
