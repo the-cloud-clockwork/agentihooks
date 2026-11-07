@@ -155,7 +155,9 @@ class PageCredential:
 PAGE = "page-credential-of-the-ledger"
 
 
-def test_outside_edge_mode_the_page_credential_opens_an_operator_session(served, monkeypatch):
+def test_outside_edge_mode_the_page_credential_opens_an_operator_session(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("SWARM_AUTH_MODE", "local")
     repository = PageCredential(PAGE)
 
@@ -170,7 +172,7 @@ def test_outside_edge_mode_the_page_credential_opens_an_operator_session(served,
     assert authority.caller(signed, "", SLUG) == ""
 
 
-def test_outside_edge_mode_a_wrong_page_credential_is_refused(served, monkeypatch):
+def test_outside_edge_mode_a_wrong_page_credential_is_refused(served: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SWARM_AUTH_MODE", "local")
 
     with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(PAGE)):
@@ -180,7 +182,9 @@ def test_outside_edge_mode_a_wrong_page_credential_is_refused(served, monkeypatc
     assert reply["error"]["code"] == "forbidden"
 
 
-def test_outside_edge_mode_a_ledger_without_a_page_credential_refuses(served, monkeypatch):
+def test_outside_edge_mode_a_ledger_without_a_page_credential_refuses(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("SWARM_AUTH_MODE", "local")
 
     with patch("scripts.swarm_ledger.storage.default", return_value=PageCredential(None)):
@@ -189,7 +193,10 @@ def test_outside_edge_mode_a_ledger_without_a_page_credential_refuses(served, mo
     assert status == 403
 
 
-def test_inside_edge_mode_the_page_credential_is_never_read_or_accepted(served):
+def test_inside_edge_mode_the_page_credential_is_never_read_or_accepted(
+    served: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SWARM_AUTH_MODE", "edge")
     reads = patch("scripts.swarm_ledger.storage.default", side_effect=AssertionError("read the page credential"))
 
     with reads:
@@ -216,7 +223,7 @@ def test_a_wrong_credential_is_refused(served):
     )
 
 
-def test_the_service_refuses_to_sign_without_a_key(served, monkeypatch):
+def test_the_service_refuses_to_sign_without_a_key(served: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENTIHOOKS_AUTH_KEY")
     derived = {"X-Ledger-Token": authority.agent_token(SEED, SLUG, WORKER), "X-Ledger-Agent": WORKER}
 

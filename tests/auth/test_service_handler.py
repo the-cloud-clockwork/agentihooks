@@ -96,7 +96,7 @@ def test_a_post_routes_the_agent_token(signing):
     assert (recorded.status, body(bare)) == (403, {"error": {"code": "forbidden", "message": "refused"}})
 
 
-def test_exchange_passes_the_page_credential_of_its_ledger(signing):
+def test_exchange_passes_the_page_credential_of_its_ledger(signing: None) -> None:
     headers = {"X-Ledger-Token": "page"}
 
     with (

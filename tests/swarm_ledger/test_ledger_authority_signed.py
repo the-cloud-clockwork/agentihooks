@@ -88,7 +88,9 @@ class Ledgers:
 
 
 @pytest.mark.parametrize(("stored", "expected"), [("page", "page"), (None, "")])
-def test_outside_edge_mode_the_page_credential_comes_from_the_ledger(monkeypatch, stored, expected):
+def test_outside_edge_mode_the_page_credential_comes_from_the_ledger(
+    monkeypatch: pytest.MonkeyPatch, stored: str | None, expected: str
+) -> None:
     monkeypatch.setenv("SWARM_AUTH_MODE", "local")
     ledgers = Ledgers(stored)
 
@@ -98,6 +100,6 @@ def test_outside_edge_mode_the_page_credential_comes_from_the_ledger(monkeypatch
     assert ledgers.asked == [SLUG]
 
 
-def test_inside_edge_mode_the_page_credential_is_never_read(edge):
+def test_inside_edge_mode_the_page_credential_is_never_read(edge: None) -> None:
     with patch("scripts.swarm_ledger.storage.default", side_effect=AssertionError("read the page credential")):
         assert authority.page_credential(SLUG) == ""
