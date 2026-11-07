@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.711 · 2026-11-07
+
+### 2026-11-07 · 2e6ddcf016e8 · #10052 · @nestorcolt
+
+**Remove network zsh setup from unit shards**
+
+This change removes the apt-based zsh installation step and the ZSH_REQUIRED flag from unit test shards, letting tests run with whatever shells are already on the runner. It was prompted by shards 8 and 10 timing out during zsh setup before tests could even start. Since the existing zsh-specific test already skips gracefully when the binary is missing, dropping the setup step is safe and eliminates install timeouts, confirmed by all 16 unit shards passing cleanly in the follow-up CI run.
+
 ## v2.17.710 · 2026-11-07
 
 ### 2026-11-07 · 07d40ab0fa3e · #9995 · @nestorcolt
