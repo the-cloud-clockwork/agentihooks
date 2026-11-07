@@ -49,7 +49,7 @@ def _holder(environ: Mapping[str, str], redis: Any, slug: str, task: str) -> str
     try:
         client = _client(environ) if redis is None else redis
         return None if client is None else client.get(key(slug, task))
-    except (redis_lib.RedisError, OSError, RuntimeError):
+    except (redis_lib.RedisError, OSError):
         return None
 
 
