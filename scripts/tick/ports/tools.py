@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
 from scripts.tick.deadline import Deadline
@@ -121,3 +122,6 @@ class Tools:
         }
         ports = {name: _RestrictedPort(adapter, name, name in effects) for name, adapter in adapters.items()}
         return replace(self, **ports)
+
+
+PASS_TOOLS: ContextVar[Tools | None] = ContextVar("tick_pass_tools", default=None)

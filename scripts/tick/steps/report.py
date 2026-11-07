@@ -21,9 +21,13 @@ from scripts.swarm import (
     timing,
     waits,
 )
+from scripts.swarm.health import early_ends
 from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
-from scripts.tick.steps import CallStep
+from scripts.tick.engine import SLOW
+from scripts.tick.pool import CLOSING_LANE
+from scripts.tick.step import Lane
+from scripts.tick.steps import CallStep, pass_domains
 from scripts.tick.steps.host import held
 
 Get = Callable[[str], Any]
@@ -101,7 +105,7 @@ def _stall_watch(cli: Any, get: Get) -> Any:
             lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType, reportUnknownMemberType]
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
-            released=release_wait.checker(get("config").repo),  # pyright: ignore[reportUnknownMemberType]
+            released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
             reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
         ),
         get("doc"),
@@ -196,43 +200,82 @@ def _inbox_wake(cli: Any, get: Get) -> Any:
     return cli.skip_refused(cli.wake.maintenance, get("inbox"), get("slug"), get("agents"), cli.now_ms(), window)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _snapshot_job(cli: Any, get: Get) -> None:
-    get("box")["started"] = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+def _snapshot_job(cli: Any, get: Get) -> list[str]:
+    started = timing.call(cli.snapshot_job.start, get("store"), get("slug"), cli.now_ms(), os.environ)  # pyright: ignore[reportUnknownMemberType]
+    return ["started automatic snapshot"] if started else []
 
 
 def _last_tick(cli: Any, get: Get) -> None:
+    if get("ended") is None:
+        return
     store = get("store")
     store.redis.set(store.key(get("slug"), "last-tick"), cli.now_ms())
 
 
 def _heartbeat(cli: Any, get: Get) -> None:
+    ended = get("ended")
+    if ended is None:
+        return
     tick_heartbeat.write(get("store"), get("slug"), cli.now_ms(), get("doc"))  # pyright: ignore[reportUnknownMemberType]
+    if ended == FULL:
+        early_ends.clear(get("store"), get("slug"))
+
+
+def early_end(store: Any, slug: str, missing: KeyError, left: list[str]) -> list[str]:
+    """Count a pass that ended early because no step stored ``missing`` and return the line naming that value and the
+    ``left`` steps of the pass; the closing group stamps its last tick and heartbeat."""
+    early_ends.note(store, slug, missing.args[0])
+    steps = ", ".join(dict.fromkeys(left)) or "no recorded step"
+    return [f"pass ended early: no step stored {missing.args[0]}, the pass left {steps}"]
 
 
 def _status_publish(cli: Any, get: Get) -> None:
-    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"))
+    """Publish the tick status with the health findings this pass already found, when the health step found them."""
+    found = get("box").get("found")
+    cli._publish_tick_status(get("store"), get("slug"), get("doc"), get("view"), get("failure"), found)
 
+
+CLOSING_GROUP = "closing"
+CLOSING = Lane(CLOSING_LANE)
+FULL = "full"
+EARLY = "early"
+VIEWED = frozenset({"tick view"})
+FOUND = frozenset({"health findings"})
+VIEW = pass_domains("view")
 
 STEPS = (
-    CallStep("ledger event pass", "wrapper events", 10, held(_event_pass)),
-    CallStep("done recheck", "wrapper events", 20, held(_done_recheck)),
-    CallStep("progress checks", "wrapper events", 30, held(_progress_checks)),
-    CallStep("waits end", "wrapper events", 40, held(_waits_end)),
-    CallStep("merge pass", "wrapper events", 50, held(_merge_pass)),
-    CallStep("stall watch", "wrapper events", 60, held(_stall_watch)),
-    CallStep("overrun pass", "wrapper events", 70, held(_overrun), frozenset({"stall watch"})),
-    CallStep("quiet pass", "wrapper events", 80, held(_quiet)),
-    CallStep("doc report", "wrapper events", 90, held(_doc_report)),
-    CallStep("priorities sweep", "wrapper events", 100, held(_priorities)),
-    CallStep("health findings", "wrapper events", 110, held(_health_findings)),
-    CallStep("findings pass", "wrapper events", 120, held(_findings_pass), frozenset({"health findings"})),
-    CallStep("metrics record", "wrapper metrics", 10, held(_metrics), frozenset({"health findings"})),
-    CallStep("bottleneck status", "wrapper metrics", 20, held(_bottleneck_status)),
-    CallStep("inbox wake", "wrapper metrics", 30, held(_inbox_wake)),
-    CallStep("snapshot job", "wrapper metrics", 40, held(_snapshot_job)),
-    CallStep("last tick", "wrapper metrics", 50, held(_last_tick)),
-    CallStep("heartbeat", "after", 10, held(_heartbeat)),
-    CallStep("status publish", "wrapper status", 10, held(_status_publish)),
+    CallStep("ledger event pass", "wrapper events", held(_event_pass), VIEWED, VIEW, lane=SLOW),
+    CallStep("done recheck", "wrapper events", held(_done_recheck), VIEWED, VIEW, lane=SLOW),
+    CallStep("progress checks", "wrapper events", held(_progress_checks), VIEWED, VIEW, lane=SLOW),
+    CallStep("waits end", "wrapper events", held(_waits_end), VIEWED, VIEW, lane=SLOW),
+    CallStep("merge pass", "wrapper events", held(_merge_pass), VIEWED, VIEW, lane=SLOW),
+    CallStep(
+        "stall watch",
+        "wrapper events",
+        held(_stall_watch),
+        VIEWED | {"page relay"},
+        pass_domains("agents", "view"),
+        pass_domains("live"),
+    ),
+    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"}), pass_domains("live")),
+    CallStep("quiet pass", "wrapper events", held(_quiet)),
+    CallStep("doc report", "wrapper events", held(_doc_report), lane=SLOW),
+    CallStep("priorities sweep", "wrapper events", held(_priorities), VIEWED, VIEW, lane=SLOW),
+    CallStep(
+        "health findings", "wrapper events", held(_health_findings), VIEWED, VIEW, pass_domains("found"), lane=SLOW
+    ),
+    CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found"), lane=SLOW),
+    CallStep("metrics record", "wrapper metrics", held(_metrics), FOUND, pass_domains("found", "view"), lane=SLOW),
+    CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
+    CallStep(
+        "inbox wake", "wrapper metrics", held(_inbox_wake), frozenset({"page relay"}), pass_domains("agents"), lane=SLOW
+    ),
+    CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=frozenset()),
+    CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
+    CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
+    CallStep(
+        "status publish", CLOSING_GROUP, held(_status_publish), FOUND, pass_domains("found", "view"), lane=CLOSING
+    ),
 )
 
 for _step in STEPS:

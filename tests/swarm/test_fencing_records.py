@@ -93,8 +93,10 @@ def test_migration_copies_the_document_into_records_and_reads_it_back(store: Any
     written = fencing.migrate_records(store, "sw", writers_upgraded=True)
 
     after = fencing.read(store, "sw")
-    assert written == 8
+    assert written == 10
     assert after[fencing.RECORDS_SLUG] == "sw"
+    indexed = fencing.records(store, "sw").record("sw", fencing.ARCHIVED_NAMES, "old")
+    assert indexed is not None and indexed.value == "z"
     skipped = ("archive_ref", fencing.RECORDS_SLUG)
     assert {key: value for key, value in after.items() if key not in skipped} == {
         key: value for key, value in before.items() if key not in skipped
@@ -298,8 +300,9 @@ def test_moving_rows_into_the_archive_writes_only_the_moved_rows(store: Any) -> 
     fencing.write(store, "sw", move)
     entries = _log(store)
     assert len(entries) == count + 1
-    assert entries[-1]["records"] == "3"
+    assert entries[-1]["records"] == "4"
     assert port.record("sw", "archive", "a").value == _row("a", "eng", 1)
+    assert port.record("sw", fencing.ARCHIVED_NAMES, "eng").value == "a"
     assert set(fencing.read(store, "sw")["archive"]) == {"0", "1", "2", "3", "4", "a"}
     bare = {"executions": {}, "archive": {}, fencing.RECORDS_SLUG: "sw"}
     assert fencing.execution_row(store, bare, "a") == _row("a", "eng", 1)
@@ -314,6 +317,60 @@ def test_authority_reads_single_records(store: Any) -> None:
     fencing.write(store, "sw", lambda doc: doc["journals"].update(t2=[{"a": 2}]))
     assert fencing.authority_held(store, "sw", "t1")
     assert fencing.authority_held(store, "sw", "t2")
+    assert not fencing.authority_held(store, "sw", "t3")
+
+
+def test_the_authority_check_reads_only_the_claims_and_journals_sections(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.adapters.records_redis import RedisRecords
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(x=_row("x", "old", 0)))
+    read: list[tuple[str, ...]] = []
+    original = RedisRecords.sections
+
+    def spy(self: RedisRecords, slug: str, names: Any) -> Any:
+        read.append(tuple(names))
+        return original(self, slug, names)
+
+    monkeypatch.setattr(RedisRecords, "sections", spy)
+    assert fencing.authority_held(store, "sw", "t1")
+    assert not fencing.authority_held(store, "sw", "t3")
+    assert read == [("claims", "journals"), ("claims", "journals")]
+
+
+def test_the_authority_check_holds_on_a_swarm_not_yet_migrated(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import fencing
+
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
+    fencing.write(store, "sw", lambda doc: doc["journals"].update(t2=[{"a": 2}]))
+    fencing.write(store, "sw", lambda doc: doc["archive"].update(x=_row("x", "old", 0)))
+    read: list[tuple[str, ...]] = []
+    original = fencing.WholeDocumentRecords.sections
+
+    def spy(self: Any, slug: str, names: Any) -> Any:
+        read.append(tuple(names))
+        return original(self, slug, names)
+
+    monkeypatch.setattr(fencing.WholeDocumentRecords, "sections", spy)
+    assert fencing.authority_held(store, "sw", "t1")
+    assert fencing.authority_held(store, "sw", "t2")
+    assert not fencing.authority_held(store, "sw", "t3")
+    assert read == [("claims", "journals")] * 3
+
+
+def test_the_authority_check_reads_the_records_of_a_migrated_swarm_on_any_backend(
+    store: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import fencing
+
+    _migrated(store)
+    fencing.write(store, "sw", lambda doc: doc["claims"].update(t1={"a": 1}))
+    monkeypatch.setattr(fencing.state, "backend", lambda *_: "bus")
+    assert fencing.authority_held(store, "sw", "t1")
     assert not fencing.authority_held(store, "sw", "t3")
 
 
@@ -624,7 +681,7 @@ def test_the_migration_command_needs_the_writer_rollout(
         .endswith(": error: upgrade every live fencing reader and writer before migrating to per record keys")
     )
     records_migration.main(["sw", "--writers-upgraded"])
-    assert capsys.readouterr().out.strip() == "1"
+    assert capsys.readouterr().out.strip() == "2"
     assert fencing.records(store, "sw").layout("sw") == fencing.RECORDS
 
 

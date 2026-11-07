@@ -4,7 +4,6 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
-from scripts.tick.adapters.inbox import check
 from scripts.tick.deadline import Deadline
 
 if TYPE_CHECKING:
@@ -29,7 +28,7 @@ class SpoolMetrics:
     tables: Mapping[str, "Table"]
 
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object:
-        check(deadline)
+        deadline.live()
         batches: list[tuple[Table, list[dict[str, object]]]] = []
         for name, rows in measurements.items():
             if name not in self.tables:

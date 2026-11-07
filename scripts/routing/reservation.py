@@ -7,7 +7,7 @@ from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
 from scripts import session_bands
 from scripts.routing import master_account
-from scripts.routing.slots import API
+from scripts.routing.slots import API, account_key
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
@@ -17,6 +17,42 @@ LOWEST = min(limit for _, limit in CEILINGS)
 MASTER_LEAVES = 100.0 - session_bands.WEEK_FLOOR
 MASTER_NAME = "master@"
 AGENT_NAME = "AGENTIHOOKS_AGENT_NAME"
+PRIMARY_RESERVE_ENV = "AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT"
+PRIMARY_RESERVE_DEFAULT = 20.0
+
+
+def primary_login() -> str:
+    """The operator's first claude ai login: rank zero of AGENTIHOOKS_MASTER_LOGIN_ORDER."""
+    from scripts import master_claude_login as login
+
+    ranks = login.preferred()
+    return next((name for name, rank in ranks.items() if rank == 0), "")
+
+
+def primary_reserve_pct(environ: Mapping[str, str]) -> float:
+    try:
+        return float(environ[PRIMARY_RESERVE_ENV])
+    except (KeyError, ValueError):
+        return PRIMARY_RESERVE_DEFAULT
+
+
+def primary_reserved(slug: str, week_left: float | None, environ: Mapping[str, str]) -> bool:
+    """Whether `slug` is the primary claude ai login with its week at or under the reserve: nothing new places there."""
+    primary = primary_login()
+    return (
+        bool(primary)
+        and week_left is not None
+        and account_key(slug) == account_key(primary)
+        and week_left <= primary_reserve_pct(environ)
+    )
+
+
+def primary_login_ceiling(account: str, environ: Mapping[str, str]) -> float | None:
+    """The week-used percent at which a master on the primary login must hand off, or None off that login."""
+    primary = primary_login()
+    if not primary or account_key(account) != account_key(primary):
+        return None
+    return 100.0 - primary_reserve_pct(environ)
 
 
 def ceiling(masters_live: int) -> float | None:
@@ -89,7 +125,7 @@ class Reservation:
         return reason(self.masters)
 
     def closes(self, slug: str, week_used: float | None) -> bool:
-        return slug == self.slug and reached(week_used, self.masters)
+        return account_key(slug) == account_key(self.slug) and reached(week_used, self.masters)
 
     def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:
         return harness == self.harness and kind != API and week_left is not None and self.closes(slug, 100 - week_left)
@@ -125,7 +161,7 @@ def current(
         if aggregate.enabled(environ):
             import time
 
-            row = aggregate.current(time.time()).get(f"{harness}:{declared.slug}", {})
+            row = aggregate.current(time.time()).get(aggregate.name(f"{harness}:{declared.slug}"), {})
             masters = row.get("masters", 0) + master_agents(store, harness, declared.slug)
         else:
             masters = masters_live(harness, declared.slug, store, proc)

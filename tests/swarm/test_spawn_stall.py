@@ -39,7 +39,7 @@ def stalled(env, monkeypatch):
     def broken(*args):
         raise error
 
-    monkeypatch.setattr(cli.phases, "phase_pass", broken)
+    monkeypatch.setattr(cli.task_steps.phases, "phase_changes", broken)
     return store, ledger, runtime, clock, error
 
 
@@ -116,7 +116,7 @@ def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stal
 
     monkeypatch.setattr(command_runner, "publish", broken_publish)
     if not failed_tick:
-        monkeypatch.setattr(cli.phases, "phase_pass", lambda *args: [])
+        monkeypatch.setattr(cli.task_steps.phases, "phase_changes", lambda *args: [])
     keeping = timing.BEFORE_STEP.get()
     with pytest.raises(RuntimeError) as caught:
         cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
@@ -428,7 +428,7 @@ def test_lost_controller_lease_blocks_final_alarm_delivery(stalled, monkeypatch)
         lease.acquire(store, "sw", "replacement")
         raise RuntimeError("old tick failed after takeover")
 
-    monkeypatch.setattr(cli.phases, "phase_pass", takeover)
+    monkeypatch.setattr(cli.task_steps.phases, "phase_changes", takeover)
     with pytest.raises(SwarmError):
         cli.run_tick(store, "sw", ledger, stalled[2], FakeHerdr({}))
     assert store.redis.get(store.key("sw", "spawn-stall")) == before

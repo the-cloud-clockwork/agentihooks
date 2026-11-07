@@ -872,14 +872,14 @@
         },
         {
           "cap": 6,
-          "five_left": 75.0,
-          "five_resets_at": 1900000600,
+          "five_left": 70.0,
+          "five_resets_at": 1900001800,
           "harness": "claude",
           "name": "DELTA",
           "sessions": 0,
           "state": "OPEN",
-          "week_left": 65.0,
-          "week_resets_at": 1900006000
+          "week_left": 100.0,
+          "week_resets_at": null
         },
         {
           "cap": 0,
@@ -905,14 +905,14 @@
         },
         {
           "cap": 6,
-          "five_left": 75.0,
-          "five_resets_at": 1900000600,
+          "five_left": 100.0,
+          "five_resets_at": null,
           "harness": "claude",
           "name": "GOLF",
           "sessions": 0,
           "state": "OPEN",
-          "week_left": 65.0,
-          "week_resets_at": 1900006000
+          "week_left": 60.0,
+          "week_resets_at": 1900007200
         },
         {
           "cap": 0,
@@ -1001,7 +1001,7 @@
       "placements": {
         "ci": [
           {
-            "account": "DELTA",
+            "account": "BRAVO",
             "harness": "claude",
             "index": 0
           }
@@ -1013,19 +1013,19 @@
             "index": 0
           },
           {
-            "account": "BRAVO",
+            "account": "GOLF",
             "harness": "claude",
             "index": 1
           },
           {
-            "account": "FOXTROT",
+            "account": "DELTA",
             "harness": "claude",
             "index": 2
           }
         ],
         "plan": [
           {
-            "account": "GOLF",
+            "account": "FOXTROT",
             "harness": "claude",
             "index": 0
           }

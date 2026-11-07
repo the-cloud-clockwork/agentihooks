@@ -2,7 +2,7 @@
 other hives; a hive that stopped beating has no report."""
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from scripts.hive import registry
 from scripts.hive.auth import HiveError
@@ -72,6 +72,16 @@ class Reports:
             return True
         return bool(agent.pane_id) and agent.pane_id not in panes
 
+    def vanished(self, agent: "AgentRecord", now_ms: int) -> bool:
+        """True when the beating hive ``agent`` was admitted to lists other members but not it past startup."""
+        raw = self.redis.get(key(agent.hive)) if agent.hive else None
+        launched = agent.launched_at or agent.started_at
+        if not raw or not launched or now_ms - launched < STARTUP_MS:
+            return False
+        found: object = json.loads(cast(str, raw)).get("names")
+        names = cast("list[object]", found) if isinstance(found, list) else []
+        return bool(names) and agent.name not in names
+
     def lost(self, agent: "AgentRecord", now_ms: int, after_ms: int) -> bool:
         hive = host(agent)
         if not hive or self.read(hive) is not None:
@@ -107,6 +117,16 @@ class Reports:
 
     def holder(self, name: str) -> str:
         return next((hive for hive, report in self.live().items() if name in report["names"]), "")
+
+    def executions_of(self, hive: str, name: str) -> list[str]:
+        """Each execution the hive reports under the name, as its execution id and generation, sorted."""
+        raw = self.redis.get(key(hive))
+        if not raw:
+            return []
+        executions: dict[str, dict[str, object]] = json.loads(raw)["executions"]
+        return sorted(
+            f"{execution}:{entry['generation']}" for execution, entry in executions.items() if entry["name"] == name
+        )
 
     def conversations(self) -> dict[str, str]:
         return {

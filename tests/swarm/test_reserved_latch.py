@@ -17,7 +17,9 @@ def world(monkeypatch):
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     rows, masters = [], {"claude": ("main", 2)}
-    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [row for row in rows if row.harness == "claude"])
+    monkeypatch.setattr(
+        capacity, "_claude", lambda environ, now, refresh=True: [row for row in rows if row.harness == "claude"]
+    )
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [r for r in rows if r.harness == "codex"])
     monkeypatch.setattr(
         reservation,

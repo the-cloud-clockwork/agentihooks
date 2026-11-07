@@ -5,11 +5,12 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
-from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
+from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -111,20 +112,15 @@ def loaded_hives(store: RedisStore) -> list[dict]:
     return hives
 
 
-def _key(account: str) -> str:
-    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
-    return account.replace("_", "-")
-
-
 def _master_logins(hives: list[dict], front: bool) -> list[dict]:
     if not front:
         return hives
     rejected = {
-        _key(result.account)
+        placement.account_key(result.account)
         for _, result in balancer.cached_observations()
         if result.provider_status in ("revoked", "rejected")
     }
-    return [hive for hive in hives if _key(hive["master_login"].get("claude", "")) not in rejected]
+    return [hive for hive in hives if placement.account_key(hive["master_login"].get("claude", "")) not in rejected]
 
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
@@ -178,13 +174,14 @@ def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> lis
     return placement.round_robin(hives, config.placement_nodes, config.repo, now)
 
 
-def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
+def _matched_origin(hives: list[dict[str, Any]], hive: str, repo: str) -> str | placement.Wait:
     from scripts.hive.daemon import origin
 
     found = next((found for found in hives if found["id"] == hive), None)
     if found is None:
         return placement.Wait(f"hive {hive} is not in the hive listing for {origin(Path(repo)) or repo}")
-    return found.get(orders.ORIGIN, "")
+    matched = found.get(orders.ORIGIN) or placement.repository(found, repo)
+    return matched if matched != repo else ""
 
 
 def _local_capped(hive: dict, taken: int, bound: int) -> dict:
@@ -375,9 +372,11 @@ class HiveLaunch:
         )
 
     def _master_selection(self, config, decision, hives, now, rows, front):
-        accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
+        accounts = {
+            placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
+        }
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]}
+            {**hive, "slots": [slot for slot in hive["slots"] if placement.account_key(slot["account"]) in accounts]}
             for hive in _master_logins(hives, front)
         ]
         selected = placement.place_master("claude", "", config.repo, available, now, front)
@@ -388,7 +387,7 @@ class HiveLaunch:
         elif selected.route_kind == "interactive":
             account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
-            row = accounts[_key(selected.account)]
+            row = accounts[placement.account_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
         matched = _matched_origin(hives, selected.hive, config.repo)
         if isinstance(matched, placement.Wait):
@@ -407,12 +406,21 @@ class HiveLaunch:
     def unacknowledged(self, order: LaunchOrder) -> bool:
         return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
 
+    def stale(self, order: LaunchOrder) -> bool:
+        """True when the order carries a controller epoch other than this pass's, or the hive refused it as stale."""
+        if order.epoch != self.held.epoch:
+            return True
+        ack = self.orders.ack(order)
+        return ack is not None and ack.failure == STALE_EPOCH
+
     def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
         self.reap(order, previous)
         self.end(previous, "hive launch order expired without an acknowledgement")
 
     def reap(self, order: LaunchOrder, agent: AgentRecord) -> None:
-        self.orders.command(order.hive, CommandOrder(f"reap:{agent.name}", "reap", name=agent.name))
+        self.orders.command(
+            order.hive, CommandOrder(f"reap:{agent.name}:{order.execution_id}", "reap", name=agent.name)
+        )
 
     def reap_execution(self, order: LaunchOrder) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
@@ -488,6 +496,12 @@ class HiveLaunch:
             previous = self.store.execution_registry.get(self.slug, order.execution_id)
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            elif self.stale(order):
+                if (ack := self.orders.ack(order)) is not None and ack.status == "live":
+                    self.reap_execution(order)
+                else:
+                    self.reap(order, previous)
+                self.end(previous, f"hive launch failed: {STALE_EPOCH}")
             elif self.abandoned(order, previous):
                 self.reap(order, previous)
                 self.end(previous, "hive launch order abandoned")

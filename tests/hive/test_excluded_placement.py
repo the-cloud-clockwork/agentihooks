@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.hive import cli, hive_state, placement, registry
@@ -28,16 +30,16 @@ def test_a_headless_hive_defaults_to_twenty_agents_and_excludes_the_master(redis
     assert "excluded" not in redis.hgetall(registry.key("anton"))
 
 
-def test_a_headed_hive_defaults_to_ten_agents_and_excludes_nothing(redis):
+def test_a_headed_hive_defaults_to_fifteen_agents_and_excludes_nothing(redis: Any) -> None:
     record = registry.update(redis, "root", ["ui=yes"])
-    assert (record["max_agents"], record["excluded"]) == (10, [])
-    assert (registry.show(redis, "root")["max_agents"], registry.show(redis, "root")["excluded"]) == (10, [])
+    assert (record["max_agents"], record["excluded"]) == (15, [])
+    assert (registry.show(redis, "root")["max_agents"], registry.show(redis, "root")["excluded"]) == (15, [])
 
 
-def test_the_defaults_follow_a_later_ui_change(redis):
+def test_the_defaults_follow_a_later_ui_change(redis: Any) -> None:
     registry.update(redis, "box", ["ui=no"])
     record = registry.update(redis, "box", ["ui=yes"])
-    assert (record["max_agents"], record["excluded"]) == (10, [])
+    assert (record["max_agents"], record["excluded"]) == (15, [])
 
 
 def test_excluded_and_max_agents_are_set_explicitly(redis):
@@ -64,10 +66,10 @@ def test_prefer_cannot_name_an_excluded_role(redis):
     assert str(error.value) == "prefer names master, a role this hive excludes"
 
 
-def test_a_hive_stored_with_roles_moves_to_the_new_rule_on_its_next_set(redis):
+def test_a_hive_stored_with_roles_moves_to_the_new_rule_on_its_next_set(redis: Any) -> None:
     redis.hset(registry.key("root"), mapping={"ui": "yes", "roles": '["master", "eng"]', "max_agents": "16"})
     record = registry.update(redis, "root", ["name=Root"])
-    assert (record["max_agents"], record["excluded"]) == (10, [])
+    assert (record["max_agents"], record["excluded"]) == (15, [])
     stored = hive_state.read(hive_state.records(redis, "root"), "root")
     assert "roles" not in stored and "max_agents" not in stored
     assert "roles" not in record
@@ -95,7 +97,9 @@ def test_a_heartbeat_keeps_an_explicit_max_agents(redis):
     assert registry.show(redis, "anton")["max_agents"] == 4
 
 
-def test_hive_list_shows_max_agents_and_excluded(redis, monkeypatch, capsys):
+def test_hive_list_shows_max_agents_and_excluded(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "anton", ["ui=no"])
@@ -103,11 +107,13 @@ def test_hive_list_shows_max_agents_and_excluded(redis, monkeypatch, capsys):
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "anton\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
-        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
+        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=15\texcluded=none\theadroom=missing\n"
     )
 
 
-def test_hive_list_shows_a_readable_name_beside_its_id(redis, monkeypatch, capsys):
+def test_hive_list_shows_a_readable_name_beside_its_id(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "ff0f11b025271d0c", ["ui=no", "name=anton-2"])
@@ -115,7 +121,7 @@ def test_hive_list_shows_a_readable_name_beside_its_id(redis, monkeypatch, capsy
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "ff0f11b025271d0c\tname=anton-2\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
-        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=10\texcluded=none\theadroom=missing\n"
+        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=15\texcluded=none\theadroom=missing\n"
     )
 
 

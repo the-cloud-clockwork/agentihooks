@@ -1,6 +1,51 @@
 {
   "features": [
     {
+      "id": "master-safety-nudge",
+      "origin": "operator",
+      "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2399",
+      "behaviour": "Live swarm masters record their herdr pane in a host registry file on orchestrator join and on later tool calls, and an hourly operating system cron round types the safety nudge into each live master pane idle at its prompt, Claude or Codex, without Redis, the tick or the controller.",
+      "seam": "agentihooks safety-nudge round|install|check",
+      "tests": [
+        "tests/swarm/test_safety_nudge.py::test_a_master_in_a_herdr_pane_is_recorded_and_dead_masters_are_dropped",
+        "tests/swarm/test_safety_nudge.py::test_a_session_that_is_not_a_master_in_a_pane_is_never_recorded",
+        "tests/swarm/test_safety_nudge.py::test_an_unreadable_registry_reads_as_empty",
+        "tests/swarm/test_safety_nudge.py::test_a_round_nudges_idle_claude_and_codex_masters_and_skips_busy_or_typed_panes",
+        "tests/swarm/test_safety_nudge.py::test_safety_nudge_text_is_the_operator_words",
+        "tests/swarm/test_safety_nudge.py::test_a_herdr_failure_is_logged_as_failed_and_the_round_goes_on",
+        "tests/swarm/test_safety_nudge.py::test_install_registers_one_hourly_round_and_keeps_other_entries",
+        "tests/swarm/test_safety_nudge.py::test_install_works_for_a_user_with_no_table",
+        "tests/swarm/test_safety_nudge.py::test_check_reports_the_job_and_the_pane_of_this_master",
+        "tests/swarm/test_safety_nudge.py::test_agentihooks_safety_nudge_is_a_delegated_command",
+        "tests/swarm/test_safety_nudge.py::test_home_defaults_to_the_agentihooks_folder_under_the_user_home",
+        "tests/swarm/test_safety_nudge.py::test_only_positive_process_ids_with_a_proc_entry_are_alive",
+        "tests/swarm/test_safety_nudge.py::test_an_entry_without_a_process_id_is_dropped",
+        "tests/swarm/test_safety_nudge.py::test_load_keeps_only_object_entries_of_an_object_file",
+        "tests/swarm/test_safety_nudge.py::test_record_takes_the_agent_process_when_no_pid_is_given",
+        "tests/swarm/test_safety_nudge.py::test_a_round_with_no_live_master_logs_no_masters_and_rounds_append",
+        "tests/swarm/test_safety_nudge.py::test_the_cron_line_reaches_agentihooks_herdr_and_the_herdr_socket",
+        "tests/swarm/test_safety_nudge.py::test_the_cron_line_falls_back_to_the_bare_command_when_nothing_is_found",
+        "tests/swarm/test_safety_nudge.py::test_cron_reads_and_writes_capture_text_output",
+        "tests/swarm/test_safety_nudge.py::test_install_raises_with_the_cron_error_when_the_write_is_refused",
+        "tests/swarm/test_safety_nudge.py::test_check_lists_every_live_master_for_a_caller_that_is_not_registered",
+        "tests/swarm/test_safety_nudge.py::test_main_runs_each_action_and_prints_its_json",
+        "tests/swarm/test_safety_nudge.py::test_main_install_prints_the_installed_line",
+        "tests/swarm/test_safety_nudge.py::test_main_usage_names_the_agentihooks_command",
+        "tests/swarm/test_safety_nudge.py::test_main_refuses_an_unknown_action",
+        "tests/swarm/test_safety_nudge.py::test_the_ledger_adapter_records_the_master",
+        "tests/swarm/test_safety_nudge.py::test_only_an_orchestrator_join_records_the_master"
+      ],
+      "semgrep_rule": "feature-master-safety-nudge",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.swarm.safety_nudge",
+        "check"
+      ]
+    },
+    {
       "id": "operator-dead-starting-front-door",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2335",
@@ -43,6 +88,24 @@
       ]
     },
     {
+      "id": "fenced-live-names-listing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g6",
+      "behaviour": "The fenced runtime lists live agent names once per tick pass, keeps that listing on the pass's process model shared by every fenced runtime of the pass, lists again after a fenced spawn, collect, expire, retire, reap, close or resume, and lists on every call outside a pass.",
+      "seam": "scripts.swarm.controller.FencedRuntime.live_names and scripts.swarm.cli.run_tick with the running scenario",
+      "tests": [
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_once_per_pass_and_serves_copies",
+        "tests/swarm/test_controller_live_names.py::test_live_names_lists_again_in_a_new_pass",
+        "tests/swarm/test_controller_live_names.py::test_live_names_outside_a_pass_lists_every_call",
+        "tests/swarm/test_controller_live_names.py::test_agent_changes_drop_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing",
+        "tests/swarm/test_controller_live_names.py::test_spawn_drops_the_pass_listing_when_it_fails",
+        "tests/swarm/test_controller_live_names.py::test_a_change_through_one_fenced_runtime_drops_the_listing_of_another",
+        "tests/swarm/test_controller_live_names.py::test_collect_and_expire_drop_the_pass_listing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_running_pass_lists_live_names_once_plus_once_per_launch"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-budget",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a4",
@@ -52,6 +115,7 @@
         "tests/swarm/test_tick_load.py::test_simulated_load_pass_fits_the_budget",
         "tests/swarm/test_tick_load.py::test_a_step_made_300_seconds_slower_breaks_the_budget",
         "tests/swarm/test_tick_load.py::test_the_budget_only_shrinks_against_its_base",
+        "tests/swarm/test_tick_load.py::test_the_base_budget_fetches_dev_when_origin_dev_is_missing",
         "tests/swarm/test_tick_load.py::test_a_raised_budget_is_refused",
         "tests/swarm/test_tick_load.py::test_an_equal_or_lower_budget_is_accepted"
       ],
@@ -72,6 +136,14 @@
       "seam": "scripts.tick.engine.run_group with step budgets from scripts.tick.steps.budgets.timing_of and the start bound from scripts.tick.registry.latest_start",
       "tests": [
         "tests/tick/test_step_isolation.py::test_a_300_second_step_before_spawn_no_longer_delays_spawn",
+        "tests/tick/test_step_isolation.py::test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step",
+        "tests/tick/test_step_isolation.py::test_notice_and_watch_steps_declare_the_slow_lane",
+        "tests/tick/test_step_isolation.py::test_pass_lanes_are_sized_for_the_minute",
+        "tests/tick/test_step_isolation.py::test_site_edges_keep_every_barrier_step_whatever_the_steps_declare",
+        "tests/tick/test_step_isolation.py::test_a_step_declaring_nothing_still_waits_for_the_site_before_it",
+        "tests/tick/test_step_isolation.py::test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read",
+        "tests/tick/test_step_isolation.py::test_the_quiet_pass_waits_for_the_steps_of_the_sites_before_it",
+        "tests/tick/test_step_isolation.py::test_site_barriers_of_the_pass_graph_hold_no_critical_step_on_a_slow_step",
         "tests/tick/test_step_isolation.py::test_a_step_that_ends_within_its_budget_is_kept_with_its_result",
         "tests/tick/test_step_isolation.py::test_an_abandoned_step_keeps_its_wall_time_and_a_daemon_thread",
         "tests/tick/test_step_isolation.py::test_an_abandoned_record_reads_late_even_inside_its_budget",
@@ -80,21 +152,359 @@
         "tests/tick/test_step_isolation.py::test_every_registered_call_step_declares_its_measured_timing",
         "tests/tick/test_step_isolation.py::test_spawn_needs_only_judge_orphans_and_preempt",
         "tests/tick/test_step_isolation.py::test_spawn_starts_by_forty_seconds_into_the_pass",
-        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path"
+        "tests/tick/test_step_isolation.py::test_latest_start_follows_the_longest_needs_path",
+        "tests/tick/test_intervals.py::test_a_wide_step_runs_every_other_pass_and_a_critical_step_every_pass",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_three_runs_once_in_three_passes",
+        "tests/tick/test_intervals.py::test_a_slow_lane_step_at_cadence_one_runs_every_pass",
+        "tests/tick/test_intervals.py::test_a_skipped_step_counts_as_ended_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_skipped_step_in_a_parallel_pass_ends_for_its_dependents",
+        "tests/tick/test_intervals.py::test_a_handed_off_slow_lane_step_in_a_parallel_pass_rests_inside_its_interval",
+        "tests/tick/test_intervals.py::test_a_failed_run_records_its_end_and_a_late_run_does_not",
+        "tests/tick/test_intervals.py::test_nothing_rests_without_a_recording_store",
+        "tests/tick/test_intervals.py::test_a_step_never_recorded_is_due",
+        "tests/tick/test_intervals.py::test_nothing_rests_with_a_swarm_but_no_store",
+        "tests/tick/test_intervals.py::test_a_pass_of_critical_steps_reads_no_step_ends",
+        "tests/tick/test_intervals.py::test_a_step_at_one_cron_minute_never_rests",
+        "tests/tick/test_intervals.py::test_a_step_end_storage_failure_is_reported",
+        "tests/tick/test_intervals.py::test_a_step_above_sixty_seconds_writing_a_pass_box_is_refused",
+        "tests/tick/test_intervals.py::test_every_registered_step_writing_the_pass_state_runs_every_pass",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_scenario_runs_each_wide_step_once_and_rests_it_once",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_interval_slow_scenario_runs_a_slow_step_once_in_three_passes",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_engine_ignoring_the_last_run_hash_breaks_the_interval_scenarios"
+      ]
+    },
+    {
+      "id": "swarm-tick-live-budgets",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g5",
+      "behaviour": "Each tick pass resolves every step's budget from the last sixty walls the tick recorded for it: the p95 with fifty percent headroom in whole seconds, never under the step's floor, and the floor alone until sixty walls exist; spawn's latest start is computed on floors.",
+      "seam": "scripts.tick.steps.budgets.resolve and budget_of, read through CallStep.budget_s, with walls pushed by scripts.swarm.timing.append_step",
+      "tests": [
+        "tests/tick/test_budgets.py::test_sixty_walls_give_the_p95_with_headroom_above_the_floor",
+        "tests/tick/test_budgets.py::test_a_live_p95_under_the_floor_keeps_the_floor",
+        "tests/tick/test_budgets.py::test_fifty_nine_walls_give_the_floor",
+        "tests/tick/test_budgets.py::test_the_window_keeps_the_last_sixty_walls",
+        "tests/tick/test_budgets.py::test_a_planted_floor_only_budget_goes_red",
+        "tests/tick/test_budgets.py::test_a_missing_window_is_rebuilt_from_the_steps_stream",
+        "tests/tick/test_budgets.py::test_a_step_budget_reads_the_live_budget_of_its_pass",
+        "tests/tick/test_budgets.py::test_a_write_step_budget_follows_its_live_budget",
+        "tests/tick/test_budgets.py::test_floors_keep_the_six_heavy_rows_and_two_seconds_elsewhere",
+        "tests/tick/test_budgets.py::test_spawn_starts_on_floors_by_forty_seconds_whatever_the_live_budgets",
+        "tests/tick/test_budgets.py::test_an_unknown_step_still_has_no_budget",
+        "tests/tick/test_budgets.py::test_a_budgeted_step_lands_on_the_steps_stream_trimmed_to_its_history",
+        "tests/tick/test_budgets.py::test_a_failed_steps_pipeline_reports_the_steps_stream",
+        "tests/tick/test_budgets.py::test_the_rebuild_marker_holds_one_rebuild_per_slow_interval",
+        "tests/tick/test_budgets.py::test_full_windows_leave_no_rebuild_marker",
+        "tests/tick/test_budgets.py::test_a_rebuild_keeps_only_the_newest_window_of_budgeted_walls_of_missing_steps",
+        "tests/tick/test_budgets.py::test_every_walls_pipeline_runs_without_a_transaction",
+        "tests/tick/test_budgets.py::test_a_window_caught_between_its_push_and_trim_still_reads_sixty_walls"
+      ]
+    },
+    {
+      "id": "swarm-tick-declared-effects",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h4",
+      "behaviour": "The tick wrapper builds the real port tools once per pass and the engine hands each step only the ports its declared effects name: a step that calls a write operation on any other port raises UndeclaredEffect and is recorded failed, while every existing step declares no effects.",
+      "seam": "scripts.tick.engine.run_step with Context.tools narrowed by Tools.for_effects(step.effects), fed by scripts.swarm.cli.run_tick through scripts.tick.ports.tools.PASS_TOOLS",
+      "tests": [
+        "tests/tick/test_effects.py::test_a_step_sends_through_its_declared_inbox",
+        "tests/tick/test_effects.py::test_a_ledger_write_outside_the_declared_effects_goes_red",
+        "tests/tick/test_effects.py::test_a_step_without_effects_cannot_write",
+        "tests/tick/test_effects.py::test_a_context_built_inside_a_pass_carries_the_pass_tools",
+        "tests/tick/test_effects.py::test_call_and_write_steps_declare_their_effects_and_feature",
+        "tests/tick/test_effects.py::test_only_the_reap_and_spawn_steps_declare_their_effects_yet",
+        "tests/tick/test_effects.py::test_a_step_of_a_parallel_pass_reaches_its_declared_ports",
+        "tests/tick/test_effects.py::test_the_pass_spool_opens_once_and_appends_every_batch",
+        "tests/tick/test_effects.py::test_the_pass_tools_wire_every_real_adapter_for_the_swarm",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_builds_the_real_tools_once_per_pass_for_every_group"
+      ]
+    },
+    {
+      "id": "swarm-tick-common-helpers",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h9",
+      "behaviour": "The helpers the tick steps and the swarm tick module share live in the common step module, the swarm tick module re-exports each one, and a moved helper reaches its siblings through the tick module so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.common, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_common.py::test_tick_reexports_the_common_helper",
+        "tests/tick/steps/test_common.py::test_common_helpers_reach_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_common.py::test_still_held_needs_active_state_owner_and_generation",
+        "tests/tick/steps/test_common.py::test_current_owner_accepts_an_unclaimed_row_or_its_own_claim",
+        "tests/tick/steps/test_common.py::test_ended_reads_the_task_row_except_for_masters",
+        "tests/tick/steps/test_common.py::test_operator_line_skips_operator_control_notices",
+        "tests/tick/steps/test_common.py::test_reopen_guards_on_active_state_and_reports_the_live_state",
+        "tests/tick/steps/test_common.py::test_rebind_takes_the_one_pane_holding_the_conversation",
+        "tests/tick/steps/test_common.py::test_follow_keeps_an_agent_without_a_pid_and_reports_a_rebind",
+        "tests/tick/steps/test_common.py::test_skip_refused_turns_a_refusal_or_redis_timeout_into_a_skip_line",
+        "tests/tick/steps/test_common.py::test_skip_dropped_retries_once_then_skips",
+        "tests/tick/steps/test_common.py::test_drop_releases_the_claim_refunds_a_held_life_and_reopens_the_task",
+        "tests/tick/steps/test_common.py::test_collected_records_a_masters_retired_tasks_then_drops_the_agent",
+        "tests/tick/steps/test_common.py::test_drop_releases_an_agent_whose_task_has_no_row"
+      ]
+    },
+    {
+      "id": "swarm-tick-agents-reap",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h10",
+      "behaviour": "The reap cluster lives in the agents step module, the swarm tick module re-exports each moved name, a moved helper reaches its siblings through the tick module so a patched tick seam still applies, and the reap step declares the ledger, runtime and inbox ports, its feature and its lane.",
+      "seam": "scripts.tick.steps.agents, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/test_agents.py::test_the_reap_cluster_lives_in_the_agents_step_module_and_tick_reexports_it",
+        "tests/tick/test_agents.py::test_the_reap_step_declares_its_ports_feature_and_lane",
+        "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam",
+        "tests/tick/steps/test_reap_watch.py::test_the_operator_holds_the_pane_while_typing_or_inside_the_quiet_window",
+        "tests/tick/steps/test_reap_watch.py::test_a_content_refusal_is_due_only_for_the_claimant_away_from_the_operator",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_is_stuck_on_its_provider_when_recovery_is_spent_or_the_idle_outage_ran_past_its_limit",
+        "tests/tick/steps/test_reap_watch.py::test_a_stale_claimant_is_nudged_only_outside_outages_retirement_and_the_operator",
+        "tests/tick/steps/test_reap_watch.py::test_a_due_refusal_frees_the_agent_before_the_pane_is_recorded",
+        "tests/tick/steps/test_reap_watch.py::test_a_waiting_pane_records_its_prompt_and_input_wait",
+        "tests/tick/steps/test_reap_watch.py::test_a_waiting_master_dismisses_its_questions",
+        "tests/tick/steps/test_reap_watch.py::test_a_provider_error_reads_an_untouched_pane_as_idle",
+        "tests/tick/steps/test_reap_watch.py::test_a_pane_that_stopped_waiting_clears_the_input_wait",
+        "tests/tick/steps/test_reap_watch.py::test_a_pane_never_waiting_keeps_its_input_wait_untouched",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_is_freed",
+        "tests/tick/steps/test_reap_watch.py::test_a_master_or_an_outage_held_agent_keeps_its_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_only_the_claimant_is_nudged",
+        "tests/tick/steps/test_reap_watch.py::test_a_working_or_waiting_verdict_resets_the_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_the_operator_a_ledger_probe_or_gc_holds_the_idle_count",
+        "tests/tick/steps/test_reap_watch.py::test_an_idle_agent_counts_its_idle_ticks_and_logs_each_one",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped",
+        "tests/tick/steps/test_reap_watch.py::test_an_owner_is_restored_only_for_a_live_current_agent_that_holds_its_claim",
+        "tests/tick/steps/test_reap_watch.py::test_a_refused_retire_is_recorded_with_its_refusal_and_retried",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_awaiting_a_decision_or_a_starting_master_is_not_judged",
+        "tests/tick/steps/test_reap_watch.py::test_a_live_local_agent_has_its_owner_restored_then_is_watched",
+        "tests/tick/steps/test_reap_watch.py::test_a_missing_agent_with_a_pending_recovery_keeps_its_lease",
+        "tests/tick/steps/test_reap_watch.py::test_a_suspect_remote_agent_that_answers_again_is_watched_as_working",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_refusing_content_is_handed_off_and_its_task_dropped",
+        "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane",
+        "tests/tick/steps/test_reap_watch.py::test_a_freeing_retire_asks_the_hive_report_with_its_store_agent_homes_and_time"
+      ]
+    },
+    {
+      "id": "swarm-tick-master-placement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13c",
+      "behaviour": "The master placement operations (start, adopt, retire, respawn, place and the tick lock they run under) live in the masters step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.masters, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_master_placement_ops.py::test_tick_reexports_the_moved_master_operation",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_module_holds_no_moved_master_operation",
+        "tests/tick/steps/test_master_placement_ops.py::test_retire_master_returns_the_hold_without_retiring",
+        "tests/tick/steps/test_master_placement_ops.py::test_retire_master_drops_the_master_only_once_retired",
+        "tests/tick/steps/test_master_placement_ops.py::test_retire_master_asks_the_hive_report_with_its_store_master_homes_and_time",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_stopping_swarm_waits_for_its_workers_then_retires_each_master",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_master_starts_only_once_the_old_lead_ended",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_seated_non_lead_master_never_holds_the_start",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_master_without_a_slot_is_recorded_as_waiting",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_host_hold_stops_the_master_unless_it_starts_past_the_host",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_master_refused_for_room_withdraws_its_start",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_failed_master_spawn_marks_the_transfer_and_affinity_failed",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_reported_master_is_working_and_clears_its_start",
+        "tests/tick/steps/test_master_placement_ops.py::test_an_unreported_master_is_starting_and_keeps_its_pending_start",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_leaves_a_live_lead_alone",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_finds_no_candidate_among_finished_or_foreign_names",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_adopts_a_live_master_of_this_swarm_code",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_prefers_the_seat_occupant_and_keeps_its_execution_record",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_takes_the_first_named_candidate_and_replaces_a_stale_execution_record",
+        "tests/tick/steps/test_master_placement_ops.py::test_recover_master_adopts_a_legacy_named_master_of_this_swarm",
+        "tests/tick/steps/test_master_placement_ops.py::test_place_master_starts_the_master_on_its_deployment_under_the_lock",
+        "tests/tick/steps/test_master_placement_ops.py::test_respawn_master_drops_gone_leads_then_adopts_or_spawns",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_is_never_taken_for_a_stopping_swarm",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_waits_without_a_lease",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_waits_when_another_pass_holds_it",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_releases_without_acting_once_the_swarm_stops",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_acts_inside_the_held_pass_and_releases",
+        "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_releases_when_the_act_raises"
+      ]
+    },
+    {
+      "id": "swarm-tick-launch-cluster",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h11",
+      "behaviour": "The launch check and acknowledgement helpers live in the observe step module and the spawn outcome and admission helpers in the place step module; the swarm tick module re-exports each one and the moved code reaches names the tick module defines through the tick module, so a patched tick seam still applies, and imports the modules it calls directly.",
+      "seam": "scripts.tick.steps.observe and scripts.tick.steps.place, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_launch_cluster.py::test_tick_reexports_the_moved_launch_name",
+        "tests/tick/steps/test_launch_cluster.py::test_the_tick_module_holds_no_launch_definition",
+        "tests/tick/steps/test_launch_cluster.py::test_moved_launch_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_launch_cluster.py::test_an_acknowledging_check_reads_the_launch_through_the_tick_master_lane",
+        "tests/tick/steps/test_launch_cluster.py::test_a_started_launch_records_its_claim_launch_spend_and_chain",
+        "tests/tick/steps/test_launch_cluster.py::test_a_held_back_task_follows_its_admission_decision",
+        "tests/tick/steps/test_launch_cluster.py::test_a_task_without_an_admission_gate_or_with_a_refusing_gate_is_held_or_passed",
+        "tests/tick/steps/test_launch_cluster.py::test_a_room_wait_names_the_placement_refusal",
+        "tests/tick/steps/test_collect_acks.py::test_collected_acknowledgements_start_finish_fail_or_wait_each_launch",
+        "tests/tick/steps/test_collect_acks.py::test_the_events_engine_collects_no_hive_pass_and_reads_a_missing_task_by_its_id",
+        "tests/tick/steps/test_place_outcomes.py::test_a_failed_spawn_releases_its_launch_and_reports_the_drop",
+        "tests/tick/steps/test_place_outcomes.py::test_an_unresolved_profile_spawn_also_blocks_its_task",
+        "tests/tick/steps/test_place_outcomes.py::test_a_full_account_reservation_reports_the_accounts_with_room",
+        "tests/tick/steps/test_place_outcomes.py::test_a_pending_launch_waits_for_its_hive_acknowledgement",
+        "tests/tick/steps/test_place_outcomes.py::test_a_refused_launch_waits_for_room_or_fails",
+        "tests/tick/steps/test_verify_checks.py::test_verification_skips_judged_acknowledging_and_ended_agents_and_retires_a_drifted_one",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_pass_fail_or_wait_each_pending_agent",
+        "tests/tick/steps/test_verify_checks.py::test_launch_checks_with_nothing_pending_do_nothing",
+        "tests/tick/steps/test_verify_checks.py::test_verification_retires_a_master_its_hive_reports_gone_in_one_pass_without_a_runtime_call",
+        "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_its_hive_reports_gone_makes_no_runtime_call",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_retires_reports_and_drops_its_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_launch_check_on_a_working_agent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_failing_an_enforced_check_hands_over_to_the_hive_failure",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_hive_agent_late_on_a_report_only_check_settles_its_admission",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_relaunched_launch_saves_its_assignment_and_drops_the_agent",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_expired_launch_reads_the_hive_answer",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_launch_finished_before_collection_is_recorded_as_started",
+        "tests/tick/steps/test_launch_outcomes.py::test_retiring_a_launch_holds_the_seat_of_an_agent_that_exited_first",
+        "tests/tick/steps/test_launch_outcomes.py::test_an_acknowledging_launch_is_read_from_the_launch_record",
+        "tests/tick/steps/test_place_waits.py::test_a_room_refused_launch_releases_its_holds_and_waits",
+        "tests/tick/steps/test_place_waits.py::test_a_failed_room_wait_reads_a_spawn_error_as_no_wait",
+        "tests/tick/steps/test_place_waits.py::test_a_settled_launch_activates_its_held_reservation",
+        "tests/tick/steps/test_place_waits.py::test_a_full_reservation_read_without_accounts_reports_none",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_failed_hive_launch_that_cannot_retire_retries_next_tick",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_after_its_relaunch_is_spent_is_only_reported",
+        "tests/tick/steps/test_launch_outcomes.py::test_a_local_launch_failure_that_cannot_retire_retries_next_tick"
+      ]
+    },
+    {
+      "id": "swarm-tick-claim-order",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13",
+      "behaviour": "Claim order, agent status and the launch records live in the claims step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.claims, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_claim_order.py::test_tick_reexports_the_moved_name",
+        "tests/tick/steps/test_claim_order.py::test_the_tick_module_holds_no_moved_definition",
+        "tests/tick/steps/test_claim_order.py::test_moved_claim_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_claim_order.py::test_agent_status_reads_state_prompt_and_idle_ticks",
+        "tests/tick/steps/test_claim_order.py::test_the_store_projects_agent_status_from_the_claims_module",
+        "tests/tick/steps/test_claim_order.py::test_a_spawn_error_defaults_to_a_refusal_with_no_pane_or_harness",
+        "tests/tick/steps/test_claim_order.py::test_claimable_puts_tasks_overlapping_held_territory_after_the_clear_ones",
+        "tests/tick/steps/test_claim_order.py::test_claimable_builds_its_claim_view_with_the_dispatch_order",
+        "tests/tick/steps/test_claim_order.py::test_launch_order_ranks_then_demotes_failed_launches_then_resumes_first",
+        "tests/tick/steps/test_claim_order.py::test_demoted_names_failed_launches_without_a_handoff",
+        "tests/tick/steps/test_claim_order.py::test_claim_view_holds_active_territories_and_marks_owned_or_claimed_tasks"
+      ]
+    },
+    {
+      "id": "swarm-tick-masters-moved",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13d",
+      "behaviour": "Master down, the woken check, night watch, the pass view, the group runner, its action printer and the Codex hook order live in the masters step module; the swarm tick module re-exports each one, run_group as the masters module's _run_group, and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.masters, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_masters_moved.py::test_tick_reexports_the_moved_name",
+        "tests/tick/steps/test_masters_moved.py::test_the_tick_module_holds_no_moved_definition",
+        "tests/tick/steps/test_masters_moved.py::test_the_step_wrappers_call_the_moved_operations_through_the_tick_module",
+        "tests/tick/steps/test_masters_moved.py::test_woken_reads_pending_operator_lines_at_the_master_seat",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_stays_quiet_while_a_master_lives_starts_or_the_swarm_stops",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_tells_each_waiting_operator_line_once_and_returns_taken_lines",
+        "tests/tick/steps/test_masters_moved.py::test_master_down_says_nothing_when_every_line_was_told",
+        "tests/tick/steps/test_masters_moved.py::test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_the_host",
+        "tests/tick/steps/test_masters_moved.py::test_the_pass_view_reads_only_the_pass_domain",
+        "tests/tick/steps/test_masters_moved.py::test_run_group_runs_the_registered_steps_and_notes_the_left_box",
+        "tests/tick/steps/test_masters_moved.py::test_print_actions_prints_actions_failures_and_the_held_exception",
+        "tests/tick/steps/test_masters_moved.py::test_codex_hook_order_reports_the_hooks_it_restored"
+      ]
+    },
+    {
+      "id": "swarm-tick-spawn",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
+      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane.",
+      "seam": "scripts.tick.steps.place, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
+        "tests/tick/test_place.py::test_the_tick_module_holds_no_spawn_definition",
+        "tests/tick/test_place.py::test_the_spawn_step_declares_its_ports_feature_and_lane",
+        "tests/tick/test_place.py::test_moved_spawn_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/test_place.py::test_a_free_seat_comes_from_the_tick_seat_address",
+        "tests/tick/test_place.py::test_a_free_seat_looks_no_further_than_one_seat_past_the_taken_ones",
+        "tests/tick/test_place.py::test_the_pass_reclaim_reads_remote_heads_once_and_binds_them",
+        "tests/tick/test_place.py::test_the_pass_reclaim_reuses_heads_the_pass_already_read",
+        "tests/tick/test_place.py::test_a_legacy_launch_is_admitted_with_the_pass_runtime",
+        "tests/tick/test_place.py::test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims"
+      ]
+    },
+    {
+      "id": "swarm-tick-territory",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13b",
+      "behaviour": "Task territory overlap, parked and stacked dependencies and the settle and close of a swarm live in the territory step module; the swarm tick module re-exports each one and the moved code reaches tick names through the tick module, so a patched tick seam still applies.",
+      "seam": "scripts.tick.steps.territory, re-exported by scripts.swarm.tick",
+      "tests": [
+        "tests/tick/steps/test_territory.py::test_tick_reexports_the_moved_name",
+        "tests/tick/steps/test_territory.py::test_the_tick_module_holds_no_moved_definition",
+        "tests/tick/steps/test_territory.py::test_moved_territory_code_reaches_tick_seams_through_the_tick_module",
+        "tests/tick/steps/test_territory.py::test_shared_names_the_narrower_of_two_nested_areas",
+        "tests/tick/steps/test_territory.py::test_a_parked_task_waits_until_every_parked_dependency_is_done",
+        "tests/tick/steps/test_territory.py::test_a_stacked_dependency_names_its_repo_only_when_it_lives_elsewhere",
+        "tests/tick/steps/test_territory.py::test_master_set_reads_the_state_stamp_author_lane",
+        "tests/tick/steps/test_territory.py::test_close_space_closes_only_an_empty_swarm",
+        "tests/tick/steps/test_territory.py::test_refund_parked_returns_the_claim_of_a_parked_quota_or_preempted_handoff",
+        "tests/tick/steps/test_territory.py::test_refund_parked_reads_a_task_missing_from_the_rows_as_not_parked",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_ends_awaiting_seats_and_stops_once_no_agent_is_left",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent",
+        "tests/tick/steps/test_territory.py::test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks",
+        "tests/tick/steps/test_territory.py::test_a_swarm_with_work_or_workers_or_not_running_does_not_drain",
+        "tests/tick/steps/test_territory.py::test_settle_hands_its_own_slug_store_ledger_rows_doc_and_config_to_each_seam",
+        "tests/tick/steps/test_territory.py::test_sharing_names_each_running_task_with_a_shared_area_and_its_claimant",
+        "tests/tick/steps/test_territory.py::test_stack_base_stacks_each_unfinished_dependency_with_the_given_or_default_origin",
+        "tests/tick/steps/test_territory.py::test_end_awaiting_seats_drops_only_agents_awaiting_a_decision",
+        "tests/tick/steps/test_territory.py::test_bin_closed_closes_the_swarm_inbox_and_bins_a_closed_empty_ledger"
+      ]
+    },
+    {
+      "id": "swarm-tick-declared-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-e1",
+      "behaviour": "Tick steps carry no hand written order: each declares its needs, reads and writes, the registry waves keep reap before the orphan reopen before spawn, preempt after reap and settle last, every group still runs in today's order, and the reap, reopen and spawn, drained to running and settle last scenarios hold through the tick core.",
+      "seam": "scripts.tick.registry.waves and ordered, scripts.tick.engine.group_steps and scripts.swarm.tick.tick with fake Redis, ledger and runtime",
+      "tests": [
+        "tests/swarm/test_tick_declared_edges.py::test_registry_waves_reproduce_todays_constraints",
+        "tests/swarm/test_tick_declared_edges.py::test_every_group_runs_in_todays_order_from_needs_and_registration",
+        "tests/swarm/test_tick_declared_edges.py::test_the_steps_on_each_edge_declare_what_they_read_and_write",
+        "tests/swarm/test_tick_declared_edges.py::test_a_reaped_or_orphaned_task_is_reopened_then_spawned_in_one_pass",
+        "tests/swarm/test_tick_declared_edges.py::test_a_drained_swarm_with_new_work_runs_again_before_the_spawn_check",
+        "tests/swarm/test_tick_declared_edges.py::test_settle_runs_last_and_drains_only_a_pass_with_nothing_left_to_spawn",
+        "tests/swarm/test_tick_declared_edges.py::test_a_pass_that_spawned_work_ends_on_the_spawn_without_draining"
+      ]
+    },
+    {
+      "id": "swarm-tick-pass-edges",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g9",
+      "behaviour": "Every pass box value a tick step reads is declared in its reads with a need on the step that wrote it, and every value it stores is declared in its writes, over the twelve tick scenarios through the tick core and the fenced command entry point; a planted undeclared read or missing need is named.",
+      "seam": "scripts.tick.registry.waves and the step declarations of scripts.tick.steps, replayed through scripts.swarm.tick.tick and scripts.swarm.cli.run_tick with a recording pass box and pass views",
+      "tests": [
+        "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
+        "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
+        "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
+      "id": "swarm-tick-no-shared-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c5",
+      "behaviour": "Tick steps share no mutable ledger state: the pass hands steps a read only rows mapping, spawn preparation and reaping work on their own copies, the ledger view is deep frozen under CI so a step changing it fails, and a ledger write marks the held view stale so the next step reads a fresh one.",
+      "seam": "scripts.tick.view.LedgerView with scripts.tick.view.current and wrote, and the rows mapping scripts.tick.steps.observe.step_ledger_state puts in the pass box",
+      "tests": [
+        "tests/tick/test_no_mutation.py::test_a_step_mutating_the_view_fails_under_ci",
+        "tests/tick/test_no_mutation.py::test_outside_ci_the_view_holds_the_state_it_was_given",
+        "tests/tick/test_no_mutation.py::test_a_ledger_write_makes_the_next_step_read_a_fresh_view",
+        "tests/tick/test_no_mutation.py::test_a_ledger_client_write_marks_the_held_view_stale",
+        "tests/tick/test_no_mutation.py::test_the_pass_hands_steps_rows_no_step_can_assign_into"
       ]
     },
     {
       "id": "swarm-tick-step-overlap-hold",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-overlap-hold",
-      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends.",
+      "behaviour": "A tick step still running from an earlier pass is held, not started again: the engine records it as held while its earlier run is alive, so placement runs once across two overlapping passes, and the step runs again once that earlier run ends. The hold is per swarm: a late step in one swarm's pass never holds the same step in another swarm's pass.",
       "seam": "scripts.tick.engine.run_step and scripts.tick.engine.run_group",
       "tests": [
         "tests/tick/test_step_overlap.py::test_a_step_whose_earlier_run_is_alive_is_held_without_running",
         "tests/tick/test_step_overlap.py::test_a_step_runs_again_once_its_earlier_run_ended",
         "tests/tick/test_step_overlap.py::test_another_step_is_not_held_by_a_running_one",
         "tests/tick/test_step_overlap.py::test_placement_runs_once_across_two_overlapping_passes",
-        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed"
+        "tests/tick/test_step_overlap.py::test_a_held_record_reads_held_unless_it_failed",
+        "tests/tick/test_step_overlap.py::test_a_late_step_in_one_swarm_does_not_hold_the_same_step_in_another"
       ]
     },
     {
@@ -108,6 +518,34 @@
         "tests/tick/test_left_value.py::test_a_held_writer_skips_its_reader_and_the_pass_completes",
         "tests/tick/test_left_value.py::test_an_observe_step_missing_a_pass_value_is_skipped_without_holding_an_error",
         "tests/tick/test_left_value.py::test_a_pass_box_names_the_left_value_as_a_key_error"
+      ]
+    },
+    {
+      "id": "swarm-tick-early-end-stamp",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-early-end-stamp",
+      "behaviour": "A wrapper pass that ends early because no step stored a pass value still writes last tick and the heartbeat, and logs the missing value with the steps the pass left behind, so the stale watcher sees a live tick.",
+      "seam": "scripts.swarm.cli.run_tick ending on scripts.tick.steps.Left, with the left step names kept on scripts.tick.steps.PassBox",
+      "tests": [
+        "tests/tick/test_early_end.py::test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value",
+        "tests/tick/test_early_end.py::test_a_pass_box_shares_the_names_of_the_steps_its_pass_left",
+        "tests/tick/test_early_end.py::test_an_early_end_names_each_left_step_once_and_counts_the_missing_value"
+      ]
+    },
+    {
+      "id": "swarm-tick-early-end-streak",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2369",
+      "behaviour": "Consecutive tick passes that end early on the same missing pass value raise one information only health finding naming the value and the count once the count reaches AGENTIHOOKS_HEALTH_EARLY_ENDS, and a full pass clears it.",
+      "seam": "scripts.swarm.status.findings after scripts.swarm.cli.run_tick passes that end on scripts.tick.steps.Left",
+      "tests": [
+        "tests/tick/test_early_end_streak.py::test_passes_ending_early_on_one_value_raise_one_finding_at_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_a_full_pass_clears_the_finding",
+        "tests/tick/test_early_end_streak.py::test_an_early_end_on_another_value_restarts_the_count",
+        "tests/tick/test_early_end_streak.py::test_the_health_setting_sets_the_threshold",
+        "tests/tick/test_early_end_streak.py::test_the_threshold_takes_only_a_positive_whole_number",
+        "tests/tick/test_early_end_streak.py::test_the_streak_is_stored_under_its_key_and_a_single_end_meets_a_threshold_of_one",
+        "tests/tick/test_early_end_streak.py::test_each_early_end_of_the_report_step_counts_the_missing_value"
       ]
     },
     {
@@ -131,7 +569,17 @@
         "tests/swarm/test_tick_records.py::test_step_history_is_bounded_and_keeps_the_journal",
         "tests/swarm/test_tick_records.py::test_tick_pass_is_recorded_even_when_a_step_raises",
         "tests/swarm/test_tick_records.py::test_budgeted_step_record_reads_late_past_its_budget_and_not_failed",
-        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps"
+        "tests/swarm/test_tick_records.py::test_budgeted_step_record_carries_its_lane_only_when_given",
+        "tests/swarm/test_tick_records.py::test_budgeted_step_records_and_fails_under_the_name_it_is_given",
+        "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
+        "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
+        "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
+        "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
+        "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
+        "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
       ]
     },
     {
@@ -217,6 +665,18 @@
       "tests": [
         "tests/swarm/test_claim_order.py::test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth",
         "tests/swarm/test_claim_order.py::test_within_a_rank_the_longer_chain_goes_first_and_ledger_order_breaks_ties"
+      ]
+    },
+    {
+      "id": "swarm-ordering-dependency-audit",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2382",
+      "behaviour": "Each tick pass records every open task dependency whose tasks share no territory and whose dependent never names the other task's code, and swarm status lists them with one health finding each.",
+      "seam": "the tick dependency audit step and agentihooks swarm status ordering_dependencies",
+      "tests": [
+        "tests/swarm_ledger/test_dependency_audit.py::test_a_dependency_with_disjoint_territories_and_no_named_code_is_reported",
+        "tests/swarm/test_ordering_dependencies.py::test_the_tick_records_each_ordering_only_dependency",
+        "tests/swarm/test_ordering_dependencies.py::test_status_prints_the_list"
       ]
     },
     {
@@ -563,12 +1023,12 @@
     {
       "id": "swarm-focus",
       "origin": "inventory",
-      "behaviour": "A focus holds normal work outside it, urgent tasks and Doctor fixes pass, and focused work takes at most half the lane slots.",
+      "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
       "seam": "scripts.swarm.freeze focus and scripts.swarm.focus_budget",
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
-        "tests/swarm/test_freeze.py::test_an_urgent_task_and_a_doctor_fix_pass_a_focus",
-        "tests/swarm/test_focus_budget.py::test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks"
+        "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
       ]
     },
     {
@@ -899,12 +1359,15 @@
     {
       "id": "ledger-event-relay",
       "origin": "inventory",
-      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order, and a crash between publish and mark never duplicates an event.",
+      "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
       "seam": "The ledger outbox relay",
       "tests": [
         "tests/swarm_ledger/test_outbox_relay.py::test_the_relay_publishes_each_unsent_row_on_its_subject_with_the_row_id_and_marks_it_sent",
         "tests/swarm_ledger/test_outbox_relay.py::test_a_sent_row_is_never_published_again",
-        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event"
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_crash_between_publish_and_mark_never_duplicates_the_event",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_the_bus_refuses_as_too_large_is_marked_sent_and_never_holds_back_the_rows_after_it",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_row_written_with_fields_outside_the_catalogue_is_published_with_only_the_catalogued_fields",
+        "tests/swarm_ledger/test_outbox_relay.py::test_a_removal_row_is_published_unchanged_with_empty_data"
       ]
     },
     {
@@ -1175,12 +1638,14 @@
     {
       "id": "ledger-item-reads",
       "origin": "inventory",
-      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API and refuses other items; ledger tasks lists open tasks one line each.",
+      "behaviour": "agentihooks ledger get prints one task, phase, follow up or priority read through the ledger API, or every task or freeze as JSON, and refuses other items; ledger tasks lists open tasks one line each.",
       "seam": "agentihooks ledger get and ledger tasks",
       "tests": [
         "tests/swarm_ledger/test_item_reads.py::test_get_prints_one_item_read_through_the_ledger_api",
         "tests/swarm_ledger/test_item_reads.py::test_get_refuses_an_item_outside_tasks_phases_followups_and_priorities",
-        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection"
+        "tests/swarm_ledger/test_item_reads.py::test_tasks_lists_open_tasks_one_line_each_from_the_tasks_collection",
+        "tests/swarm_ledger/test_item_reads.py::test_get_tasks_prints_every_task_row_as_json_through_the_collection_read",
+        "tests/swarm_ledger/test_item_reads.py::test_get_freezes_prints_every_freeze_and_focus_record_as_json"
       ]
     },
     {
@@ -1240,6 +1705,7 @@
         "tests/swarm_ledger/test_export_parts.py::test_parts_must_be_a_list_of_distinct_names",
         "tests/swarm_ledger/test_export_parts.py::test_the_client_reads_changes_of_the_named_parts",
         "tests/tick/test_view.py::test_a_first_pass_reads_the_parts_in_full_and_stores_them",
+        "tests/tick/test_view.py::test_a_hold_entered_on_another_thread_closes_on_this_one_without_raising",
         "tests/tick/test_view.py::test_a_later_pass_makes_one_delta_call_and_patches_the_stored_view",
         "tests/tick/test_view.py::test_an_exceeded_change_window_replaces_the_stored_view",
         "tests/tick/test_view.py::test_a_patch_that_does_not_fit_falls_back_to_one_full_read",
@@ -1251,7 +1717,152 @@
         "tests/tick/test_view.py::test_the_view_holds_every_top_level_part_the_pass_reads",
         "tests/tick/test_view.py::test_a_pass_holding_a_view_reads_each_document_through_one_delta_read",
         "tests/swarm/test_tick_view_start.py::test_a_pass_holding_a_view_makes_no_whole_ledger_read",
-        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view"
+        "tests/swarm/test_tick_view_start.py::test_a_stopped_pass_reads_its_ledger_through_the_view",
+        "tests/tick/test_view.py::test_document_serves_the_held_view_and_reads_again_only_after_a_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_running_pass_reads_the_ledger_once_plus_once_per_write",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_planted_second_read_without_a_write_is_counted"
+      ]
+    },
+    {
+      "id": "claude-settings-additive-merge",
+      "origin": "inventory",
+      "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
+      "seam": "scripts.targets.claude_target.ClaudeAdapter.write_settings and scripts.targets.claude_target.remove_managed_keys through scripts.install.uninstall_global",
+      "tests": [
+        "tests/test_claude_target.py::test_write_settings_keeps_unmanaged_user_keys_on_first_init",
+        "tests/test_claude_target.py::test_write_settings_second_run_keeps_a_key_added_between_runs",
+        "tests/test_claude_target.py::test_write_settings_merges_siblings_without_dropping_either_side",
+        "tests/test_claude_target.py::test_write_settings_removes_a_key_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removes_a_three_level_leaf_no_longer_rendered",
+        "tests/test_claude_target.py::test_additive_merge_removal_of_an_already_absent_leaf_is_a_no_op",
+        "tests/test_claude_target.py::test_additive_merge_prunes_a_container_left_empty_by_a_removed_leaf",
+        "tests/test_claude_target.py::test_additive_merge_keeps_a_container_that_still_holds_an_operator_key",
+        "tests/test_claude_target.py::test_additive_merge_prunes_every_ancestor_left_empty_by_a_four_level_leaf",
+        "tests/test_claude_target.py::test_additive_merge_processes_every_rendered_key_after_a_list_value",
+        "tests/test_claude_target.py::test_additive_merge_drops_a_stale_rendered_list_item_using_the_prior_record",
+        "tests/test_claude_target.py::test_additive_merge_discards_a_stale_list_entry_when_the_list_stops_rendering",
+        "tests/test_claude_target.py::test_remove_recorded_settings_tolerates_a_record_without_leaves_or_lists",
+        "tests/test_claude_target.py::test_remove_recorded_settings_skips_a_list_entry_whose_doc_value_is_not_a_list",
+        "tests/test_claude_target.py::test_remove_recorded_settings_removes_listed_entries_from_a_three_level_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_tolerates_a_group_without_a_hooks_list",
+        "tests/test_claude_target.py::test_remove_owned_hooks_drops_the_hooks_key_when_every_group_was_ours",
+        "tests/test_claude_target.py::test_remove_owned_hooks_keeps_checking_events_after_a_malformed_one",
+        "tests/test_claude_target.py::test_remove_owned_plugins_tolerates_a_name_the_operator_already_removed",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_for_a_missing_or_unmanaged_or_invalid_file",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_true_when_operator_content_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_state_with_no_recorded_keys_at_all",
+        "tests/test_claude_target.py::test_remove_managed_keys_returns_false_and_deletes_the_file_when_nothing_operator_owned_remains",
+        "tests/test_claude_target.py::test_remove_managed_keys_tolerates_a_marker_the_recorded_leaves_already_removed",
+        "tests/test_claude_target.py::test_enabled_plugins_reads_bundle_user_and_shared_separately",
+        "tests/test_claude_target.py::test_enabled_plugins_records_the_union_of_owned_and_layered_names",
+        "tests/test_claude_target.py::test_write_settings_keeps_hooks_and_enabled_plugins_out_of_the_generic_merge",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_uninstall_removes_only_agentihooks_keys_hooks_and_plugins",
+        "tests/test_ownership_scope.py::TestSettingsRestore::test_install_then_uninstall_returns_user_settings_unchanged"
+      ]
+    },
+    {
+      "id": "overrun-no-wall-time-handoff",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "Wall time on a claimed task only reports the agent to the master once; it never asks the agent to hand off, never retires it and never reopens its task. Only the context limit triggers a handoff.",
+      "seam": "The overrun step of the swarm tick",
+      "semgrep_rule": "feature-overrun-no-wall-time-handoff",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end"
+      ]
+    },
+    {
+      "id": "stale-nudge-cache-warm",
+      "origin": "regression",
+      "ordered_at": "2026-11-04",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-land-no-overrun",
+      "behaviour": "The swarm tick sends a claimed agent that sits silent inside a declared named wait one short cache warm inbox item per forty minutes, asking for a one line reply so its prompt cache stays warm; it never asks for a handoff.",
+      "seam": "The idle watch of the swarm tick through the stale nudge",
+      "tests": [
+        "tests/swarm/test_tick_cache_warm.py::test_the_tick_sends_a_quiet_agent_in_a_named_wait_one_cache_warm_item_past_forty_minutes"
+      ]
+    },
+    {
+      "id": "master-fallback-tick",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "The master fallback service starts exactly one master for a watched swarm left without a live master past its window, resets the wait while a master lives, skips stopped swarms without ending the pass, runs each pass in its own process bounded by a timeout, writes its systemd unit with every systemctl call bounded, and launches master up in a detached session.",
+      "seam": "python -m scripts.swarm.master_fallback run, pass and install",
+      "tests": [
+        "tests/swarm/test_master_fallback.py::test_no_master_for_the_window_starts_exactly_one_master",
+        "tests/swarm/test_master_fallback.py::test_a_live_master_resets_the_wait",
+        "tests/swarm/test_master_fallback.py::test_a_stopped_swarm_is_left_alone",
+        "tests/swarm/test_master_fallback.py::test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it",
+        "tests/swarm/test_master_fallback.py::test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute",
+        "tests/swarm/test_master_fallback.py::test_run_logs_a_timed_out_pass_and_goes_on",
+        "tests/swarm/test_master_fallback.py::test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes",
+        "tests/swarm/test_master_fallback.py::test_install_writes_and_restarts_the_service_and_retires_the_timer",
+        "tests/swarm/test_master_fallback.py::test_start_launches_master_up_new_in_its_own_session"
+      ]
+    },
+    {
+      "id": "panic-master-keeps-every-tool",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "During panic and sustained blockers the master keeps every tool and its hotfix window, while every other session stays frozen for pushes, reruns, dispatches and deploys.",
+      "seam": "The PreToolUse panic freeze, blocker window and master shell guard",
+      "tests": [
+        "tests/swarm/test_panic.py::test_panic_opens_the_master_hotfix_window",
+        "tests/swarm/test_panic.py::test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions",
+        "tests/swarm/test_blocker_window.py::test_the_master_keeps_every_tool_while_blockers_sustain",
+        "tests/swarm/test_blocker_window.py::test_checked_never_denies_the_master_and_notes_the_notice_kwargs",
+        "tests/test_master_coding.py::test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker"
+      ]
+    },
+    {
+      "id": "tick-pass-fence-first-site",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A tick pass fences its runtime at its first site, so every later step, slow lane wrapper steps included, reads the fenced runtime and the health site never fences again.",
+      "seam": "The tick pass site hooks through the tick group wrapper",
+      "tests": [
+        "tests/swarm/test_pass_fence.py::test_the_first_pass_site_fences_the_runtime_every_later_step_reads",
+        "tests/swarm/test_pass_fence.py::test_the_health_site_holds_the_ledger_view_without_fencing_again",
+        "tests/swarm/test_tick_groups.py::test_the_wrapper_steps_after_fencing_read_the_fenced_runtime"
+      ]
+    },
+    {
+      "id": "pod-controller-master-on-hive",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A controller running in a pod places every master seat, the login front door included, on a hive.",
+      "seam": "The controller master placement through the hive launch",
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_controller_in_a_pod_places_the_login_front_door_on_a_hive"
+      ]
+    },
+    {
+      "id": "starting-master-hooks-beat-kept",
+      "origin": "regression",
+      "ordered_at": "2026-11-06",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2401",
+      "behaviour": "A starting master whose own hooks beat after its launch is kept even when no runtime report reaches the tick; a beat from before the launch does not keep it.",
+      "seam": "The swarm tick master start deadline through master_start.hooked",
+      "tests": [
+        "tests/swarm/test_master_start.py::test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches",
+        "tests/swarm/test_master_start.py::test_a_hook_beat_from_before_the_launch_does_not_keep_the_master",
+        "tests/swarm/test_master_start.py::test_a_master_with_no_launch_time_counts_its_beat_from_its_start"
+      ]
+    },
+    {
+      "id": "swarm-tick-panic-holds-spawn",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2402",
+      "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
+      "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
+      "tests": [
+        "tests/tick/steps/test_spawn_due.py::test_spawn_due",
+        "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
       ]
     }
   ],

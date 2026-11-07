@@ -6,7 +6,6 @@ from typing import Protocol, cast
 
 from hooks.classifier.api import DecisionsApiBackend
 from hooks.classifier.result import DecisionRequest
-from scripts.tick.adapters.inbox import check
 from scripts.tick.deadline import Deadline
 
 __all__ = ["ApiLlm"]
@@ -23,6 +22,6 @@ class ApiLlm:
     backend: Callable[[str, str, float], Decider] = DecisionsApiBackend
 
     def classify(self, request: Mapping[str, object], *, deadline: Deadline) -> object:
-        check(deadline)
+        timeout = deadline.live()
         decision = DecisionRequest(state=request["state"], questions=cast(dict[str, object], request["questions"]))
-        return self.backend(self.model, self.url, deadline.remaining).decide(decision)
+        return self.backend(self.model, self.url, timeout).decide(decision)

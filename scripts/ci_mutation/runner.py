@@ -330,6 +330,7 @@ def mutate_files(
     deadline: float,
     shard: tuple[int, int],
     stats: SharedStats | None,
+    first: tuple[str, ...] = (),
 ) -> tuple[dict[str, list[dict]], str]:
     tests = sorted({test for _, chosen in selected.values() for test in chosen})
     prepare_workspace(root, work, list(selected), tests)
@@ -339,7 +340,12 @@ def mutate_files(
     selection.write_text(
         json.dumps(
             {
-                path: {"lines": sorted(lines), "tests": chosen, "direct": direct.get(path, [])}
+                path: {
+                    "lines": sorted(lines),
+                    "tests": chosen,
+                    "direct": direct.get(path, []),
+                    "first": list(first),
+                }
                 for path, (lines, chosen) in selected.items()
             }
         )
@@ -391,16 +397,21 @@ def mutate_files(
 def record_shard_measurement(
     report: dict, output: Path, stats: SharedStats | None, started: float, budget: float, shard: tuple[int, int]
 ) -> None:
-    if stats is None or stats.part is not None or not (stats.folder / "plan.json").is_file():
+    """Record the shard's expected and graded mutant counts, owning names by the plan or by sorted slice per run."""
+    if stats is None or stats.part is not None:
         return
-    plan = json.loads((stats.folder / "plan.json").read_text())
-    owned = {name for name, assignment in plan["assignments"].items() if holds(assignment, shard[0])}
-    completed = set()
+    plan_path = stats.folder / "plan.json"
+    plan = json.loads(plan_path.read_text()) if plan_path.is_file() else None
+    runs: dict[str, dict[str, int | None]] = {}
     for path in output.glob("*/mutants/**/*.py.meta"):
-        data = json.loads(path.read_text())
-        completed.update(
-            name for name, status in data["exit_code_by_key"].items() if status is not None and name in owned
-        )
+        runs.setdefault(path.relative_to(output).parts[0], {}).update(json.loads(path.read_text())["exit_code_by_key"])
+    if plan is None:
+        owned = {name for codes in runs.values() for name in sorted(codes)[shard[0] :: shard[1]]}
+    else:
+        owned = {name for name, assignment in plan["assignments"].items() if holds(assignment, shard[0])}
+    completed = {
+        name for codes in runs.values() for name, status in codes.items() if status is not None and name in owned
+    }
     graded = max(
         len(completed),
         sum(count for file in report["files"] for status, count in file["counts"].items() if status != "not checked")
@@ -416,7 +427,7 @@ def record_shard_measurement(
         "graded": graded,
         "complete": graded == len(owned) and not report["not_mutated"],
         "budget_exhausted": exhausted,
-        "estimated_worker_seconds": sum(unit_cost(plan, name, shard[0]) for name in owned),
+        "estimated_worker_seconds": sum(unit_cost(plan, name, shard[0]) for name in owned) if plan else 0.0,
     }
     print(json.dumps({"shard": report["shard"]}), flush=True)
 
@@ -449,6 +460,7 @@ def run_gate(
     budget: float,
     shard: tuple[int, int] = (0, 1),
     stats: SharedStats | None = None,
+    first: tuple[str, ...] = (),
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     started = time.monotonic() - probe_elapsed(stats)
@@ -479,7 +491,13 @@ def run_gate(
             continue
         work = Path(tempfile.mkdtemp(prefix=f"{index}-", dir=output))
         results, reason = mutate_files(
-            root, work, {path: selected[path] for path in group}, deadline, shard, stats and stats.group(index)
+            root,
+            work,
+            {path: selected[path] for path in group},
+            deadline,
+            shard,
+            stats and stats.group(index),
+            first,
         )
         if reason:
             reasons.update(dict.fromkeys(group, reason))

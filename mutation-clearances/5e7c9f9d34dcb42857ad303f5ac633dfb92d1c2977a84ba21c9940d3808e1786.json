@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/agents.py:scripts.tick.steps.agents.x__conversations:36ced5c93c13951a85f05d15c8942d70f4a66d105eec2ec35c61a4dd744e7136": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the guard is only evaluated when the pane is absent from the found conversations, so current is the empty string and neither the swarm pin nor the agent record write nor the name note runs whether the guard returns early or falls through. The helpers it calls, host and recovery_pending, only read the environment and Redis."
+  }
+}

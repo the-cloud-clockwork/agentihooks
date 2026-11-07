@@ -20,9 +20,12 @@ import re
 import sys
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
+
+_JSONDict = dict[str, Any]
 
 
-def _install_module():
+def _install_module() -> Any:
     mod = sys.modules.get("install") or sys.modules.get("scripts.install")
     if mod is None:
         from scripts import install as mod  # production cold path
@@ -30,6 +33,11 @@ def _install_module():
 
 
 HOOK_RECORD_KEY = "claude_hook_commands"
+
+
+SETTINGS_RECORD_KEY = "claude_settings_managed"
+
+PLUGIN_RECORD_KEY = "claude_enabled_plugins"
 
 
 def _hook_commands(hooks: dict) -> set[str]:
@@ -77,18 +85,177 @@ def _keep_foreign_hooks(settings_path: Path, rendered: dict) -> dict:
     return merged
 
 
+def _parent_dict(doc: _JSONDict, path: list[str]) -> _JSONDict | None:
+    current: Any = doc
+    for key in path:
+        current = current.get(key) if isinstance(current, dict) else None
+        if not isinstance(current, dict):
+            return None
+    return current
+
+
+def _pop_path(doc: _JSONDict, path: list[str]) -> None:
+    chain: list[_JSONDict] = [doc]
+    for key in path[:-1]:
+        nxt = chain[-1].get(key)
+        if not isinstance(nxt, dict):
+            return
+        chain.append(nxt)
+    chain[-1].pop(path[-1], None)
+    for index in range(len(chain) - 1, 0, -1):
+        if chain[index]:
+            break
+        chain[index - 1].pop(path[index - 1], None)
+
+
+def _merge_tree(
+    existing: _JSONDict,
+    rendered: _JSONDict,
+    prior_record: _JSONDict,
+    path: tuple[str, ...],
+    new_leaves: set[str],
+    new_lists: dict[str, list[Any]],
+) -> _JSONDict:
+    merged: _JSONDict = dict(existing) if isinstance(existing, dict) else {}
+    for key, value in rendered.items():
+        new_path = path + (key,)
+        dotted = ".".join(new_path)
+        current = merged.get(key)
+        if isinstance(value, dict):
+            merged[key] = _merge_tree(
+                current if isinstance(current, dict) else {}, value, prior_record, new_path, new_leaves, new_lists
+            )
+            continue
+        if isinstance(value, list):
+            prior_list: list[Any] = prior_record.get("lists", {}).get(dotted, [])
+            stale = [item for item in prior_list if item not in value]
+            base: list[Any] = [item for item in current if item not in stale] if isinstance(current, list) else []
+            for item in value:
+                if item not in base:
+                    base.append(item)
+            merged[key] = base
+            new_lists[dotted] = list(value)
+            continue
+        merged[key] = value
+        new_leaves.add(dotted)
+    return merged
+
+
+def _additive_merge(existing: _JSONDict, rendered: _JSONDict, prior_record: _JSONDict) -> tuple[_JSONDict, _JSONDict]:
+    """Merge rendered into existing, keeping every key agentihooks does not render.
+
+    A dict value recurses, a list value unions with existing order first and
+    the rendered entries appended, and a scalar leaf is overwritten. A path
+    prior_record names but rendered no longer carries is removed; a list
+    entry prior_record names but rendered no longer carries is discarded
+    from the list it names, leaving every other entry; a path or entry
+    never recorded here is never touched.
+    """
+    new_leaves: set[str] = set()
+    new_lists: dict[str, list[Any]] = {}
+    merged = _merge_tree(existing, rendered, prior_record, (), new_leaves, new_lists)
+
+    for dotted in set(prior_record.get("leaves", [])) - new_leaves:
+        _pop_path(merged, dotted.split("."))
+    prior_lists: _JSONDict = prior_record.get("lists", {})
+    for dotted in set(prior_lists) - set(new_lists):
+        _discard_list_entries(merged, dotted, prior_lists[dotted])
+
+    return merged, {"leaves": sorted(new_leaves), "lists": new_lists}
+
+
+def _discard_list_entries(doc: _JSONDict, dotted: str, written: list[Any]) -> None:
+    path = dotted.split(".")
+    parent = _parent_dict(doc, path[:-1])
+    if isinstance(parent, dict) and isinstance(parent.get(path[-1]), list):
+        parent[path[-1]] = [item for item in parent[path[-1]] if item not in written]
+
+
+def _remove_recorded_settings(doc: _JSONDict, record: _JSONDict) -> None:
+    for dotted in record.get("leaves", []):
+        _pop_path(doc, dotted.split("."))
+    for dotted, written in record.get("lists", {}).items():
+        _discard_list_entries(doc, dotted, written)
+
+
+def _remove_owned_hooks(doc: _JSONDict, owned: set[str]) -> None:
+    hooks = doc.get("hooks")
+    if not isinstance(hooks, dict):
+        return
+    for event in list(hooks):
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
+            continue
+        kept = [
+            g
+            for g in groups
+            if isinstance(g, dict)
+            and not any(isinstance(h, dict) and h.get("command") in owned for h in g.get("hooks", []))
+        ]
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+    if not hooks:
+        doc.pop("hooks", None)
+
+
+def _remove_owned_plugins(doc: _JSONDict, owned: set[str]) -> None:
+    plugins = doc.get("enabledPlugins")
+    if not isinstance(plugins, dict):
+        return
+    for name in owned:
+        plugins.pop(name, None)
+    if not plugins:
+        doc.pop("enabledPlugins", None)
+
+
+def remove_managed_keys(settings_path: Path) -> bool:
+    """Strip only what agentihooks added to a managed settings.json.
+
+    Removes every leaf and list entry recorded under SETTINGS_RECORD_KEY, the
+    hook groups recorded under HOOK_RECORD_KEY, the enabledPlugins entries
+    recorded under PLUGIN_RECORD_KEY, and the managed-by marker. Every other
+    key and entry the operator holds now is left as it is. Returns True if
+    the file still carries content afterwards, False if it was removed.
+    """
+    _i = _install_module()
+    if not settings_path.exists():
+        return False
+    try:
+        doc = json.loads(settings_path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(doc, dict) or doc.get(_i.MANAGED_BY_KEY) != _i.MANAGED_BY_VALUE:
+        return False
+
+    state = _i._load_state()
+    _remove_recorded_settings(doc, state.pop(SETTINGS_RECORD_KEY, {}))
+    _remove_owned_hooks(doc, set(state.pop(HOOK_RECORD_KEY, [])))
+    _remove_owned_plugins(doc, set(state.pop(PLUGIN_RECORD_KEY, [])))
+    doc.pop(_i.MANAGED_BY_KEY, None)
+    _i._save_state(state)
+
+    if doc:
+        _i.save_json(settings_path, doc)
+        return True
+    settings_path.unlink()
+    return False
+
+
 def settings_document(rendered: dict) -> dict:
+    """
+    rendered["env"] can carry connector-injected literal values, and this is the one adapter that copies the whole dict
+    into settings verbatim — codex and copilot read only permissions.defaultMode. Scan each env value and drop
+    credential-shaped literals before they reach disk; ${VAR}/$VAR references pass through untouched (claude expands
+    them).
+    """
     _i = _install_module()
     rendered = deepcopy(rendered)
     profile_env = rendered.pop("_agentihooks", {}).get("env", {})
     if profile_env:
         rendered["env"] = {**profile_env, **rendered.get("env", {})}
 
-    # rendered["env"] can carry connector-injected literal values, and this
-    # is the one adapter that copies the whole dict into settings verbatim
-    # — codex and copilot read only permissions.defaultMode. Scan each env
-    # value and drop credential-shaped literals before they reach disk;
-    # ${VAR}/$VAR references pass through untouched (claude expands them).
     env_block = rendered.get("env")
     if isinstance(env_block, dict) and env_block:
         from hooks.secrets import scan as _scan_secrets
@@ -110,11 +277,16 @@ def settings_document(rendered: dict) -> dict:
 
 
 def enabled_plugins(
-    operator: dict, layered: dict, bundle: Path | None, user: Path | None = None, shared: Path | None = None
-) -> dict:
+    operator: _JSONDict, layered: _JSONDict, bundle: Path | None, user: Path | None = None, shared: Path | None = None
+) -> _JSONDict:
     from scripts.deps_preflight import fleet_plugins
 
-    return {**operator, **dict.fromkeys(fleet_plugins(bundle, user, shared), True), **layered}
+    _i = _install_module()
+    owned = dict.fromkeys(fleet_plugins(bundle, user, shared), True)
+    state = _i._load_state()
+    state[PLUGIN_RECORD_KEY] = sorted(set(owned) | set(layered))
+    _i._save_state(state)
+    return {**operator, **owned, **layered}
 
 
 def _install_rule_files(dst: Path, sources: list[Path], filter_fn) -> None:
@@ -220,15 +392,19 @@ class ClaudeAdapter:
         mcp = installer.load_json(installer._CLAUDE_JSON) if installer._CLAUDE_JSON.exists() else {}
         return installed_counts(mcp.get("mcpServers", {}), self.home() / "skills", settings.get("enabledPlugins", {}))
 
-    def write_settings(self, rendered: dict) -> Path:
+    def write_settings(self, rendered: _JSONDict) -> Path:
         _i = _install_module()
         rendered = settings_document(rendered)
 
         existing_settings_path = _i.CLAUDE_HOME / "settings.json"
-        personal = _i._preserve_personal_keys(existing_settings_path)
-        merged: dict = deepcopy(personal)
-        merged.update(rendered)
         existing = _i.load_json(existing_settings_path) if existing_settings_path.exists() else {}
+        merge_source = {k: v for k, v in rendered.items() if k not in ("hooks", "enabledPlugins")}
+
+        state = _i._load_state()
+        merged, record = _additive_merge(existing, merge_source, state.get(SETTINGS_RECORD_KEY, {}))
+        state[SETTINGS_RECORD_KEY] = record
+        _i._save_state(state)
+
         merged["enabledPlugins"] = enabled_plugins(
             existing.get("enabledPlugins") or {},
             rendered.get("enabledPlugins") or {},
@@ -273,17 +449,19 @@ class ClaudeAdapter:
         _install_module()._merge_mcp_to_user_scope(servers)
 
     def teardown(self) -> None:
-        # Claude's removal path predates the adapter seam and stays in
-        # uninstall_global (settings restore, symlink sweep, CLAUDE.md restore,
-        # ~/.claude.json MCP removal). Nothing extra to do here.
+        """
+        Claude's removal path predates the adapter seam and stays in uninstall_global (settings key removal via
+        remove_managed_keys, symlink sweep, CLAUDE.md restore, ~/.claude.json MCP removal). Nothing extra to do here.
+        """
         return
 
     def post_install_reconcile(self, profile_chain: list[str], persisted_profile: str) -> None:
+        """
+        Guard: only prune when the FULL intended profile chain resolved this run — a transiently-missing profile source
+        would otherwise shrink the managed set and falsely delete that profile's servers.
+        """
         _i = _install_module()
 
-        # Guard: only prune when the FULL intended profile chain resolved this
-        # run — a transiently-missing profile source would otherwise shrink the
-        # managed set and falsely delete that profile's servers.
         intended_chain = [p.strip() for p in persisted_profile.split(",") if p.strip()]
         missing = [name for name in intended_chain if name not in profile_chain]
         if not missing:

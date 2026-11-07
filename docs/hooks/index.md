@@ -60,6 +60,7 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 | Page | What it covers |
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
+| [Worker Mode](worker-mode.md) | `AGENTIHOOKS_WORKER_RUN=1` for headless profile runs: inbox, broadcasts, refocus, wait nudge, claim watch and the plan mode ledger directive turn off; every guardrail stays |
 | [Hook Injection Budget](injection-budget.md) | Claude event limits, context priority, shortening notices and tool memory configuration |
 | [Context Preprocessor](context-preprocessor.md) | Token compression for injected banners and tool output (scope=all) |
 | [MCP Transport](mcp-transport.md) | Running `agentihooks` over `sse`/`streamable-http` instead of stdio, for clients that filter stdio MCP servers out. Covers the daemon `agentihooks init` now starts, `agentihooks mcp status` for diagnosing config-vs-reality drift, the systemd and pidfile supervisors, and the explicit `session_id` the network mode requires. |

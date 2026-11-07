@@ -1,9 +1,13 @@
+import dataclasses
 import re
 import sqlite3
+import sys
 import time
 from collections.abc import Callable
+from typing import Any, Protocol
 
 from scripts.events import catalogue, envelope, subjects
+from scripts.events.bus import PayloadTooLarge
 
 ENTITIES = {"tasks": "task", "phases": "phase"}
 INSERT = "INSERT INTO outbox VALUES (?, ?, ?, ?, ?)"
@@ -54,19 +58,39 @@ def write(connection, slug: str, revision: int, before: dict, after: dict) -> No
         )
 
 
+class Publisher(Protocol):
+    """What the relay needs from an event log: publishing one event under a subject."""
+
+    def publish(self, subject: str, event: envelope.Envelope) -> object: ...
+
+
 def now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-def relay(repository, events, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
-    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window."""
+def relay(repository: Any, events: Publisher, batch: int = BATCH, clock: Callable[[], int] = now_ms) -> int:
+    """Publish up to a batch of unsent rows under their row id, which the bus dedupes within its window.
+
+    A row the bus refuses as too large is marked sent and reported, so it never holds back the rows after it.
+    """
     with repository.connect() as connection:
         pending = connection.execute(PENDING, (batch,)).fetchall()
         for row_id, subject, value in pending:
-            events.publish(subject, envelope.Envelope.decode(value.encode()))
+            try:
+                events.publish(subject, slim(envelope.Envelope.decode(value.encode())))
+            except PayloadTooLarge as error:
+                sys.stderr.write(f"ledger outbox: row {row_id} skipped: {error}\n")
             with connection:
                 connection.execute(SENT, (row_id, clock()))
     return len(pending)
+
+
+def slim(event: envelope.Envelope) -> envelope.Envelope:
+    """The event with a changed entity's data cut to its catalogued fields, for rows written before the cut."""
+    kind = catalogue.LEDGER.get(event.type)
+    if kind is None or not kind.fields:
+        return event
+    return dataclasses.replace(event, data=catalogue.filled(event.entity, event.data))
 
 
 def migrate(connection) -> None:

@@ -10,11 +10,6 @@ from scripts.tick.deadline import Deadline
 __all__ = ["RouterRuntime"]
 
 
-def _live(deadline: Deadline) -> None:
-    if deadline.expired:
-        raise TimeoutError("tool deadline expired")
-
-
 def _missing(operation: str, handle: str) -> Outcome:
     return Outcome(operation, Status.UNAVAILABLE, "", detail=f"no agent named {handle}")
 
@@ -39,23 +34,23 @@ class RouterRuntime:
         self.router, self.agents, self.herdr, self.homes = router, agents, herdr, homes
 
     def inspect(self, handle: str, *, deadline: Deadline) -> Outcome:
-        _live(deadline)
+        deadline.live()
         agent = self.agents(handle)
         return _missing("inspect", handle) if agent is None else self.router.observe(agent)
 
     def launch(self, request: Mapping[str, object], *, deadline: Deadline) -> Outcome:
-        _live(deadline)
+        deadline.live()
         return self.router.spawn(SpawnRequest(**request))  # pyright: ignore[reportArgumentType]
 
     def stop(self, handle: str, *, deadline: Deadline) -> Outcome:
-        _live(deadline)
+        deadline.live()
         agent = self.agents(handle)
         if agent is None:
             return _missing("stop", handle)
         return self.router.terminate(agent, self.homes(agent))  # pyright: ignore[reportUnknownMemberType]
 
     def panes(self, *, deadline: Deadline) -> list[dict[str, object]]:
-        _live(deadline)
+        deadline.live()
         listed = self.herdr(["pane", "list"]).get("panes")
         panes: list[dict[str, object]] = listed if isinstance(listed, list) else []  # pyright: ignore[reportUnknownVariableType]
         return panes
