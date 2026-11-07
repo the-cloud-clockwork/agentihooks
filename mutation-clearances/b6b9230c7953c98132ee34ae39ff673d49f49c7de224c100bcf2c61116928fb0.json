@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence:907f03997eca08d8bf1b68a68862351ee32eaf6ddfc29f39ec80ac93d33aac8e": {
+    "reader": "standards_reader",
+    "reason": "Replaces the typing.cast type argument for doc with None; cast returns doc unchanged at runtime, so the mutant is equivalent."
+  }
+}
