@@ -180,12 +180,14 @@ AgentiHooks registers shared lifecycle handlers for Claude Code and Codex. The e
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session_id` | string | Subagent's session identifier |
-| `transcript_path` | string | Path to subagent transcript |
+| `session_id` | string | The parent session's identifier |
+| `agent_id` | string | The subagent's identifier |
+| `agent_transcript_path` | string | Path to subagent transcript |
 
 **Handler actions:**
 
 1. Logs the subagent's transcript entries to the hooks log
+2. Clears the subagent's live helper record, which SubagentStart wrote under the parent session; while a record lives the push stop gate does not demand a commit for uncommitted changes
 
 ---
 
