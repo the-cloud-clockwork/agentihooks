@@ -24,6 +24,7 @@ DELEGATED_CLIS = {
     "cron": "scripts.scheduler.cli:cron",
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
+    "safety-nudge": "scripts.swarm.safety_nudge",
 }
 
 

@@ -55,6 +55,7 @@ def _tick(calls: list[tuple[Any, ...]]) -> SimpleNamespace:
 
     return SimpleNamespace(
         PLACING=nullcontext(),
+        panic=SimpleNamespace(state=lambda store: None),
         skip_refused=skip_refused,
         _master_down="master down",
         _night_watch="night watch",

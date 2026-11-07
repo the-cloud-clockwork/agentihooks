@@ -528,6 +528,7 @@ def master(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_opens_the_master_hotfix_window(store, master):
     panic.engage(store, "60 errors in the last hour", True, [], blocker_window._now_ms(store))
     notice, block = blocker_window.pretool("Write", {"file_path": "/etc/x"}, SID)
@@ -535,7 +536,7 @@ def test_panic_opens_the_master_hotfix_window(store, master):
     assert notice is not None
     assert "panic for 0 minutes" in notice
     assert f"agentihooks swarm {SLUG} panic on --fix <pr url>" in notice
-    assert block is not None
+    assert block is None
 
 
 def test_the_master_may_press_the_panic_button(store, master):
@@ -558,6 +559,7 @@ def test_the_master_may_press_the_panic_button(store, master):
         "argocd app sync x",
     ],
 )
+@pytest.mark.feature("panic-master-keeps-every-tool")
 def test_panic_freezes_pushes_reruns_dispatches_and_deploys_for_other_sessions(store, command):
     panic.engage(store, "60 errors in the last hour", True, [], 0)
     notice, block = blocker_window.pretool("Bash", {"command": command}, "engineer-session")

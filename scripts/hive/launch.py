@@ -10,7 +10,7 @@ from typing import Any
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
-from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
+from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -406,6 +406,13 @@ class HiveLaunch:
     def unacknowledged(self, order: LaunchOrder) -> bool:
         return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
 
+    def stale(self, order: LaunchOrder) -> bool:
+        """True when the order carries a controller epoch other than this pass's, or the hive refused it as stale."""
+        if order.epoch != self.held.epoch:
+            return True
+        ack = self.orders.ack(order)
+        return ack is not None and ack.failure == STALE_EPOCH
+
     def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
         self.reap(order, previous)
         self.end(previous, "hive launch order expired without an acknowledgement")
@@ -487,6 +494,12 @@ class HiveLaunch:
             previous = self.store.execution_registry.get(self.slug, order.execution_id)
             if previous.state in ("ended", "finished"):
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            elif self.stale(order):
+                if (ack := self.orders.ack(order)) is not None and ack.status == "live":
+                    self.reap_execution(order)
+                else:
+                    self.reap(order, previous)
+                self.end(previous, f"hive launch failed: {STALE_EPOCH}")
             elif self.abandoned(order, previous):
                 self.reap(order, previous)
                 self.end(previous, "hive launch order abandoned")

@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
 
 LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
+POD_NAME = "AGENTIHOOKS_POD_NAME"
 NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
@@ -314,11 +315,15 @@ def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
 
 
 def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
+    """The master seats placed on hives. The claude ai login front door stays local only where local is the
+    workstation; a controller in a pod has no workstation checkout, so every seat goes to hive placement there."""
     from scripts import master_claude_login
     from scripts.inbox.seats import seat_address
     from scripts.swarm_v2 import masters
 
     seats = (masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
+    if os.environ.get(POD_NAME):
+        return frozenset(seats)
     return frozenset(
         seat for seat in seats if not master_claude_login.enabled(slug, seat_address(slug, seat), "master", "claude")
     )

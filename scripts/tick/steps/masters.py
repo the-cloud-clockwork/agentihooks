@@ -149,6 +149,8 @@ def _seat_alarm(tick: Any, get: Get) -> Any:
 
 
 def _dispatch_seat(tick: Any, get: Get) -> Any:
+    if tick.panic.state(get("store")) is not None:
+        return []
     return tick.skip_refused(
         SEAT.dispatch_seat.run,
         get("slug"),
@@ -424,7 +426,9 @@ def _retire_master(slug: Any, store: Any, runtime: Any, master: Any, now_ms: Any
     live = master.name in runtime.live_names()
     if held := tick.master_retire.hold(store, slug, master, "the swarm is stopping", live, now_ms):
         return held
-    if not runtime.retire(master, homes=tick.reaper.scratch_homes(slug, master.task)):
+    if not tick.retire_watch.retire_unless_gone(
+        store, runtime, master, tick.reaper.scratch_homes(slug, master.task), now_ms
+    ):
         return f"could not retire {master.name}, retrying next tick"
     store.drop_agent(slug, master.name)
     return f"retired {master.name}"
