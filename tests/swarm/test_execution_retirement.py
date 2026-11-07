@@ -217,6 +217,56 @@ def test_a_drop_with_a_before_write_never_commits_through_the_row_fallback(store
     assert store.redis.hgetall(key) == before
 
 
+def _abort_watched_drops(store: RedisStore, limit: int, after: Callable[[int], None] = lambda count: None) -> Any:
+    """Patches pipeline execute so the first `limit` watched drops abort, calling `after` with each abort count."""
+    from redis.exceptions import WatchError
+
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+    aborted: list[bool] = []
+
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
+        if len(aborted) >= limit or not any(command[0][0] == "HDEL" for command in pipe.command_stack):
+            return execute(pipe, *args, **kwargs)
+        aborted.append(True)
+        after(len(aborted))
+        raise WatchError
+
+    return patch.object(pipe_type, "execute", commit)
+
+
+def test_the_row_fallback_retires_an_agent_without_a_row_and_writes_no_history(store: RedisStore) -> None:
+    other = started(store)
+    rows = store.redis.hgetall(store.key("fixture", "agents"))
+
+    with _abort_watched_drops(store, PROJECTION_ATTEMPTS):
+        assert store.drop_agent("fixture", "missing", at=40) is True
+
+    assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
+    assert store.redis.hgetall(store.key("fixture", "agents")) == rows
+    assert store.execution("fixture", other.execution_id) == other
+    assert store.names.entry("missing").get("retired_at") == 40
+
+
+def test_the_row_fallback_refuses_when_the_expected_execution_was_replaced(store: RedisStore) -> None:
+    agent = started(store)
+    replaced: list[AgentRecord] = []
+
+    def replace_last(count: int) -> None:
+        if count == PROJECTION_ATTEMPTS:
+            fresh = replace(agent, execution_id="", generation=0)
+            replaced.append(store.start_execution("fixture", fresh, agent.execution_id))
+
+    with _abort_watched_drops(store, PROJECTION_ATTEMPTS, replace_last):
+        assert store.drop_agent("fixture", agent.name, at=50, expected=agent) is False
+
+    (successor,) = replaced
+    assert store.execution("fixture", successor.execution_id) == successor
+    assert store.redis.hexists(store.key("fixture", "agents"), agent.name)
+    assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
+    assert not store.names.entry(agent.name).get("retired_at")
+
+
 def test_drop_commits_while_other_agents_registry_writes_interleave(store: RedisStore) -> None:
     from scripts.swarm import lease
 
