@@ -22,6 +22,7 @@ def test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock(
 ) -> None:
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
+    running = cli.pool.running
 
     @contextmanager
     def failing_close(**_: Any) -> Generator[None, None, None]:
@@ -32,7 +33,7 @@ def test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock(
     with pytest.raises(LedgerUnreachable, match="the heartbeat timed out"):
         cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert store.redis.get(store.key("sw", "tick-lock")) is None
-    monkeypatch.undo()
+    monkeypatch.setattr(cli.pool, "running", running)
     take = controller.take_tick_lock
     taken: list[str | None] = []
 
