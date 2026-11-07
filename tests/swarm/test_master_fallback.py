@@ -59,6 +59,7 @@ def test_the_watched_swarms_come_from_the_env():
     assert master_fallback.swarms({}) == []
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_no_master_for_the_window_starts_exactly_one_master():
     store, down = Store({"sw": [Agent("master@x-1")]}), {}
     started, launch = _launches(3)
@@ -75,6 +76,7 @@ def test_no_master_for_the_window_starts_exactly_one_master():
     assert started == ["sw"]
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_a_live_master_resets_the_wait():
     store, down = Store({"sw": [Agent("master@x-1"), Agent("engineer@x-2", "eng")]}), {}
     started, launch = _launches()
@@ -98,6 +100,7 @@ def test_a_live_engineer_is_no_master():
 
 
 @pytest.mark.parametrize("state", ["stopped", "stopping"])
+@pytest.mark.feature("master-fallback-tick")
 def test_a_stopped_swarm_is_left_alone(state):
     store, down = Store({"sw": []}, {"sw": state}), {"sw": 0}
     started, launch = _launches()
@@ -109,6 +112,7 @@ def test_a_stopped_swarm_is_left_alone(state):
     assert master_fallback.check(store, env, set, 60 * MINUTE, down, launch) == []
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it():
     store, down = Store({"a": [], "b": []}, {"a": "stopped"}), {"a": 0, "b": 0}
     started, launch = _launches(5)
@@ -120,6 +124,7 @@ def test_a_stopped_swarm_does_not_end_the_pass_for_the_swarms_after_it():
     assert started == ["b"]
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_the_service_runs_the_loop_with_the_watched_swarms_and_minutes():
     text = master_fallback.unit_text("/py", "/repo", {master_fallback.SWARMS: "sw", master_fallback.MINUTES: "20"})
 
@@ -148,6 +153,7 @@ class Done(Exception):
     pass
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_start_launches_master_up_new_in_its_own_session(monkeypatch):
     calls = []
 
@@ -161,10 +167,13 @@ def test_start_launches_master_up_new_in_its_own_session(monkeypatch):
     assert calls == [(["agentihooks", "swarm", "sw", "master", "up", "--new"], True)]
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_install_writes_and_restarts_the_service_and_retires_the_timer(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(master_fallback.subprocess, "run", lambda command, check: calls.append((command, check)))
+    monkeypatch.setattr(
+        master_fallback.subprocess, "run", lambda command, check, timeout: calls.append((command, check, timeout))
+    )
     folder = tmp_path / ".config" / "systemd" / "user"
     folder.mkdir(parents=True)
     (folder / "agentihooks-master-fallback.timer").write_text("old")
@@ -177,16 +186,16 @@ def test_install_writes_and_restarts_the_service_and_retires_the_timer(tmp_path,
     assert path.read_text() == master_fallback.unit_text(sys.executable, repo, env)
     assert not (folder / "agentihooks-master-fallback.timer").exists()
     assert calls == [
-        (["systemctl", "--user", "disable", "--now", "agentihooks-master-fallback.timer"], False),
-        (["systemctl", "--user", "daemon-reload"], True),
-        (["systemctl", "--user", "enable", "agentihooks-master-fallback.service"], True),
-        (["systemctl", "--user", "restart", "agentihooks-master-fallback.service"], True),
+        (["systemctl", "--user", "disable", "--now", "agentihooks-master-fallback.timer"], False, 60),
+        (["systemctl", "--user", "daemon-reload"], True, 60),
+        (["systemctl", "--user", "enable", "agentihooks-master-fallback.service"], True, 60),
+        (["systemctl", "--user", "restart", "agentihooks-master-fallback.service"], True, 60),
     ]
 
 
 def test_install_makes_the_unit_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(master_fallback.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(master_fallback.subprocess, "run", lambda command, check: None)
+    monkeypatch.setattr(master_fallback.subprocess, "run", lambda command, check, timeout: None)
 
     assert master_fallback.install({}).exists()
 
@@ -208,6 +217,7 @@ def test_main_installs_passes_or_runs(monkeypatch, capsys):
     assert capsys.readouterr().out == "/unit\n"
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute(monkeypatch):
     from scripts.scheduler import process_timer
 
@@ -230,6 +240,7 @@ def test_run_makes_each_pass_in_its_own_bounded_process_and_waits_a_minute(monke
     assert waits == [(60, 120)]
 
 
+@pytest.mark.feature("master-fallback-tick")
 def test_run_logs_a_timed_out_pass_and_goes_on(monkeypatch, capsys):
     from scripts.scheduler import process_timer
 

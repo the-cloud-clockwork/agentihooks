@@ -22,6 +22,7 @@ def _wrapper(state: dict[str, Any]) -> Any:
     return wrapper
 
 
+@pytest.mark.feature("tick-pass-fence-first-site")
 def test_the_first_pass_site_fences_the_runtime_every_later_step_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     made: list[tuple[Any, ...]] = []
     monkeypatch.setattr(controller, "deployment_for", lambda config, environ: f"deployment for {config}")
@@ -34,6 +35,7 @@ def test_the_first_pass_site_fences_the_runtime_every_later_step_reads(monkeypat
     assert made == [(store, "sw", "held", "raw", "deployment for config of sw")]
 
 
+@pytest.mark.feature("tick-pass-fence-first-site")
 def test_the_health_site_holds_the_ledger_view_without_fencing_again(monkeypatch: pytest.MonkeyPatch) -> None:
     held: list[tuple[Any, ...]] = []
     monkeypatch.setattr(cli, "_hold_view", lambda beating, slug, ledger: held.append((beating, slug, ledger)))

@@ -1077,7 +1077,9 @@ def _inject_after_tool(payload: dict) -> None:
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
+        from scripts.swarm.safety_nudge import record
 
+        record(os.environ)
         beat(state)
         if prompt is not None:
             heard(prompt)

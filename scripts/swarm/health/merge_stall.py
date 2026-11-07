@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 import time
@@ -6,7 +7,7 @@ from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 
-from scripts.swarm import github_reads, timing
+from scripts.swarm import github_reads, holder_pod, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
@@ -16,6 +17,7 @@ CACHE_MS = 300_000
 RUNS = 10
 STREAK = 3
 NO_GH = "merge observation skipped: this host has no gh binary"
+NO_CHECKOUT = "merge observation skipped: this pod has no repository checkout"
 REMOTE = re.compile(r"[a-z][a-z0-9+.-]*://|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
 FAILED = frozenset({"failure", "timed_out", "action_required", "startup_failure"})
 QUERY = """
@@ -37,6 +39,7 @@ def request(repo: str, args: list[str]) -> dict:
     if remaining <= 0:
         raise SwarmError("GitHub merge observation exhausted its read budget")
     cwd = None if REMOTE.match(repo) else repo
+    skipped = NO_GH
     with timing.step("scripts.swarm.health.merge_stall.github_read"):
         try:
             result = github_reads.rest(
@@ -50,10 +53,12 @@ def request(repo: str, args: list[str]) -> dict:
             )
         except FileNotFoundError as exc:
             if exc.filename == cwd:
-                raise
+                if not os.environ.get(holder_pod.ENV["name"]):
+                    raise
+                skipped = NO_CHECKOUT
             result = None
     if result is None:
-        raise SwarmError(NO_GH)
+        raise SwarmError(skipped)
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)
