@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from time import monotonic
+from time import monotonic, time
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
@@ -16,10 +16,10 @@ from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import holder_pod, lease, local_slots, tick_stop, timing
+from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.ledger_client import LedgerUnreachable
-from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
@@ -574,46 +574,103 @@ def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: Modu
     proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
 
 
+def _reached(outage: redis_grace.Outage) -> RedisStore:
+    """Connect at startup, retrying one tick apart while Redis refuses inside the grace window."""
+    while True:
+        try:
+            store = connect()
+        except Unreachable as exc:
+            if not outage.tolerated():
+                raise
+            print(
+                f"controller: {exc}; retrying after one tick inside the Redis grace window", file=sys.stderr, flush=True
+            )
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        outage.ended()
+        return store
+
+
+def _passes(
+    store: RedisStore,
+    service: "ControlService | None",
+    proof_swarm: ModuleType,
+    once: bool,
+    outage: redis_grace.Outage,
+) -> int:
+    """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
+    while True:
+        started = monotonic()
+        try:
+            _pass(store, service, proof_swarm)
+        except LedgerUnreachable as exc:
+            print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
+            if once:
+                return 1
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        except store_errors() as exc:
+            if not outage.tolerated():
+                raise Unreachable(f"Redis is unreachable past the {outage.grace_s:.0f}s grace window ({exc})") from exc
+            print(
+                f"controller: pass ended inside the Redis grace window, next pass after one tick: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if once:
+                return 1
+            scheduled_wait(lease.tick_ms() / 1000)
+            continue
+        outage.ended()
+        redis_grace.cleared(redis_grace.marker(os.environ))
+        if once:
+            return 0
+        _cadence_wait(started)
+
+
+def _probe(action: str) -> int:
+    """Run one container probe; liveness passes while a Redis outage is inside the grace window."""
+    from scripts.swarm import controller_probes
+
+    path = redis_grace.marker(os.environ)
+    try:
+        status = getattr(controller_probes, action)(os.environ, connect())
+    except (SwarmError, *store_errors()) as exc:
+        if action == "live" and isinstance(exc, (Unreachable, *store_errors())):
+            grace = redis_grace.grace_seconds(os.environ)
+            down = redis_grace.down_for(path, time())
+            if down < grace:
+                print(f"controller: {exc}; live inside the {grace:.0f}s Redis grace window, down {down:.0f}s")
+                return 0
+        print(f"controller: {exc}")
+        return 1
+    if action == "live":
+        redis_grace.cleared(path)
+    return status
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks controller")
     parser.add_argument("action", choices=("run", "live", "ready"))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     if args.action != "run":
-        from scripts.swarm import controller_probes
-
-        try:
-            store = connect()
-        except SwarmError as exc:
-            print(f"controller: {exc}")
-            return 1
-        return getattr(controller_probes, args.action)(os.environ, store)
+        return _probe(args.action)
     from scripts import operator_env
     from scripts.swarm import commands
     from scripts.swarm_v2 import control_service, proof_swarm
 
     operator_env.fill(os.environ)
     operator_env.classifier(os.environ)
-    store = connect()
+    outage = redis_grace.Outage(redis_grace.grace_seconds(os.environ))
+    store = _reached(outage)
     service = None
     bus = open_controller_bus(os.environ)
     previous = signal.signal(signal.SIGTERM, _stopped)
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
-        while True:
-            started = monotonic()
-            try:
-                _pass(store, service, proof_swarm)
-            except LedgerUnreachable as exc:
-                print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
-                if args.once:
-                    return 1
-                scheduled_wait(lease.tick_ms() / 1000)
-                continue
-            if args.once:
-                return 0
-            _cadence_wait(started)
+        return _passes(store, service, proof_swarm, args.once, outage)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1
