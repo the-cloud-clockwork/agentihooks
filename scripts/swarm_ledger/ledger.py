@@ -286,7 +286,7 @@ def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = Fal
     return (database_call if database_ledger.serving() else server_call)(slug, ops, service)
 
 
-def server_call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
+def server_call(slug: str, ops: list[dict[str, Any]] | None, service: bool) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)

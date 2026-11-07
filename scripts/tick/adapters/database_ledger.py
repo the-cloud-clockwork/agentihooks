@@ -12,7 +12,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from email.message import Message
 from typing import Any, cast
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources as api_resources
@@ -112,7 +112,7 @@ def request(slug: str, path: str, payload: dict[str, Any] | None = None) -> dict
     extra: dict[str, str] = writer_header() if path == "operations" else {}
     for name, value in extra.items():
         headers[name] = value
-    url = f"/api/v1/ledgers/{quote(slug, safe='')}/{path}"
+    url = f"/api/v1/ledgers/{slug}/{path}"
     exchange = Exchange("GET" if payload is None else "POST", url, headers, io.BytesIO(encoded))
     status, body = answer(services(), exchange, slug, urlsplit(path).path or "metadata")
     if status >= 400:

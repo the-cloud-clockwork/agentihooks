@@ -138,10 +138,10 @@ def _answered(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> list
 @pytest.mark.feature("swarm-tick-database-ledger")
 def test_a_read_request_hands_the_route_code_a_bodiless_get(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _answered(monkeypatch, 200, b'{"data": 1}')
-    assert database_ledger.request("a/b", "tasks?limit=1") == {"data": 1}
+    assert database_ledger.request("sw", "tasks?limit=1") == {"data": 1}
     [(services, exchange, slug, path)] = calls
-    assert (services, slug, path) == (True, "a/b", "tasks")
-    assert (exchange.command, exchange.path) == ("GET", "/api/v1/ledgers/a%2Fb/tasks?limit=1")
+    assert (services, slug, path) == (True, "sw", "tasks")
+    assert (exchange.command, exchange.path) == ("GET", "/api/v1/ledgers/sw/tasks?limit=1")
     assert list(exchange.headers.items()) == [("Content-Type", "application/json"), ("Content-Length", "0")]
     assert exchange.rfile.read() == b""
 
