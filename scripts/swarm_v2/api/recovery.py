@@ -22,9 +22,10 @@ class RecoveryAPI:
         recovery: Callable[[], Recovery | None],
         operator: Callable[[str, str], object] | None = None,
         worker: Callable[[str], object] | None = None,
+        agent: Callable[[str, str, str], bool] | None = None,
     ) -> None:
         self.store, self.slug, self.recovery, self.operator = store, slug, recovery, operator
-        self.worker = worker
+        self.worker, self.agent = worker, agent
         self.lock = Lock()
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
@@ -83,7 +84,10 @@ class RecoveryAPI:
         caller = self.operator(self.slug, token) if self.operator is not None else None
         if caller is not None and caller.role == Role.OPERATOR:
             return
-        if not isinstance(name, str) or not name or not auth.agent_member(self.store.redis, token, self.slug, name):
+        if not isinstance(name, str) or not name:
+            raise GrantRefused("unauthenticated", "the credential is not bound to this swarm and caller")
+        derived = self.agent is not None and self.agent(self.slug, token, name)
+        if not derived and not auth.agent_member(self.store.redis, token, self.slug, name):
             raise GrantRefused("unauthenticated", "the credential is not bound to this swarm and caller")
         if not any(
             agent.name == name and agent.lane == MASTER and agent.state != "finished"

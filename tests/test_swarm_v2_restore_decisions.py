@@ -288,11 +288,13 @@ def test_restore_command_delivers_master_decision_to_anton(pending, monkeypatch,
     from scripts.gates import Who
     from scripts.swarm import cli, resume
     from scripts.swarm_ledger import ledger
+    from scripts.swarm_v2 import control_service
 
     slug = pending.recovery.slug
     pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
     monkeypatch.setattr(cli.Who, "from_env", lambda: Who("coordinator", slug, "master"))
     monkeypatch.delenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", raising=False)
+    monkeypatch.setattr(control_service, "page_credential", lambda _: None)
     minted = []
     monkeypatch.setattr(ledger, "launch_token", lambda slug, name: minted.append((slug, name)) or pending.token)
     monkeypatch.setattr(
@@ -313,6 +315,7 @@ def test_restore_command_cannot_gain_operator_role_from_its_name(pending, monkey
     from scripts.gates import Who
     from scripts.swarm import cli
     from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2 import control_service
 
     slug = pending.recovery.slug
     name = "worker"
@@ -321,10 +324,54 @@ def test_restore_command_cannot_gain_operator_role_from_its_name(pending, monkey
     pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
     monkeypatch.setattr(cli.Who, "from_env", lambda: Who(name, slug, "eng"))
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", token)
+    monkeypatch.setattr(control_service, "page_credential", lambda _: None)
     args = SimpleNamespace(slug=slug, name="operator", agent=pending.old.name, choice="fresh")
     before = pending.world.protected()
     with pytest.raises(SwarmError, match="master or operator"):
         cli.cmd_restore_decision(pending.world.store, args)
+    assert pending.world.protected() == before
+
+
+def test_workstation_master_decides_with_the_credential_derived_from_the_page_credential(
+    pending: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.gates import Who
+    from scripts.swarm_ledger import ledger
+    from scripts.swarm_v2 import control_service
+
+    slug = pending.recovery.slug
+    pending.world.store.update(slug, api_url=pending.url.split("/v1/")[0])
+    monkeypatch.setattr(
+        control_service, "page_credential", lambda requested: "fixture page credential" if requested == slug else None
+    )
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "a swarm secret token the controller cannot check")
+    monkeypatch.setattr(ledger, "launch_token", lambda *args: pytest.fail("a page credential host mints no hive token"))
+    result = decide(pending.world.store, slug, pending.old, "fresh", Who("coordinator", slug, "master"))
+    assert result["mode"] == "fresh"
+    assert pending.recovery.decision(pending.old.execution_id).mode == "fresh"
+
+
+def test_page_derived_credentials_bind_only_their_own_master_name(
+    pending: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_v2 import control_service
+    from scripts.swarm_v2.operator_auth import agent_credential
+
+    slug = pending.recovery.slug
+    page = "fixture page credential"
+    monkeypatch.setattr(control_service, "page_credential", lambda requested: page if requested == slug else None)
+    pending.world.store.put_agent(slug, AgentRecord("worker", "eng", "task"))
+    before = pending.world.protected()
+    worker = agent_credential(slug, lambda _: page, "worker")
+    status, result = post(pending, worker, {"agent": "worker", "choice": "fresh"})
+    assert (status, result["error_class"]) == (403, "forbidden_scope")
+    status, result = post(pending, worker, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (401, "unauthenticated")
+    other = agent_credential("another-swarm", lambda _: page, "coordinator")
+    status, result = post(pending, other, {"agent": "coordinator", "choice": "fresh"})
+    assert (status, result["error_class"]) == (401, "unauthenticated")
+    assert agent_credential(slug, lambda _: None, "coordinator") == ""
+    assert agent_credential(slug, lambda _: page, "") == ""
     assert pending.world.protected() == before
 
 
