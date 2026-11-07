@@ -154,7 +154,7 @@
   "hooks/memory/collector.py": 9,
   "hooks/memory/compatibility.py": 51,
   "hooks/memory/cursors.py": 2,
-  "hooks/memory/embedding_process.py": 57,
+  "hooks/memory/embedding_process.py": 46,
   "hooks/memory/importer.py": 163,
   "hooks/memory/index_worker.py": 146,
   "hooks/memory/legacy_backfill.py": 241,
