@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wiring.py:scripts.ci_wiring.x_triggers:c949e21b8aa2b1ecf6758ef76156682df05aba9822c84ea194f4540748f5e09e": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) is return val on CPython 3.12 and never reads typ, so replacing its first argument with None, another string, or a builtin or typing expression already in scope changes no output and cannot raise."
+  }
+}
