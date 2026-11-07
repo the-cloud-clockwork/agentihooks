@@ -28,6 +28,10 @@ class LedgerUnreachable(SwarmError):
     pass
 
 
+class LedgerOffline(LedgerUnreachable):
+    """A fresh read refused while the pass runs from its last good view; the step that needs it is skipped."""
+
+
 UNREACHABLE = (
     "ledger server not answering",
     "server refused: 5",
@@ -110,7 +114,7 @@ class LedgerClient:
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
         if OFFLINE.get() and not ops:
-            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
+            raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
             if OFFLINE.get() and ops:
                 return _queued(ops, _ledger_queue(ledger, slug, _guarded(slug, ops), service))
@@ -133,7 +137,7 @@ class LedgerClient:
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
         if OFFLINE.get():
-            raise LedgerUnreachable(f"ledger {slug}: {OFFLINE_READ}")
+            raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
         return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 

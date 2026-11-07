@@ -37,7 +37,7 @@ def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Ge
             return []
         try:
             return call(import_module("scripts.swarm.cli"), get)
-        except Left:
+        except (Left, ledger_client.LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
             found["raised"] = exc

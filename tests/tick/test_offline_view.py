@@ -15,6 +15,8 @@ from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerUnreachable
 from scripts.swarm_ledger.api import client as api
 from scripts.tick import view
 from scripts.tick.adapters.ledger import resource_client
+from scripts.tick.steps import host as host_steps
+from scripts.tick.steps import masters, observe, tasks
 
 STATE = {
     "tasks": [{"id": "t1", "state": "open"}, {"id": "t2", "state": "claimed"}],
@@ -273,3 +275,33 @@ def test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view(
     found = {"ledger": LedgerClient(), "slug": "sw", "box": box}
     host._ledger_health(SimpleNamespace(now_ms=lambda: 1000), found.__getitem__)
     assert box == ({} if kept else {"stop": ["Ledger health probe failed"]})
+
+
+def _refuse_fresh(*_args: object, **_kwargs: object) -> None:
+    raise ledger_client.LedgerOffline(f"ledger sw: {ledger_client.OFFLINE_READ}")
+
+
+def _read_events(slug: str) -> None:
+    raise ledger_client.LedgerOffline(f"ledger {slug}: {ledger_client.OFFLINE_READ}")
+
+
+def _observed(_tick: Any, get: Any) -> Any:
+    return observe._run(_read_events, None, get)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        host_steps.held(_refuse_fresh),
+        masters._held(_refuse_fresh),  # pyright: ignore[reportPrivateUsage]
+        tasks.held(_refuse_fresh),
+        _observed,
+    ],
+)
+def test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on(wrapped: Any) -> None:
+    box: dict[str, Any] = {}
+    values = {"box": box, "slug": "sw", "store": None, "ledger": None, "runtime": None, "now_ms": 0}
+
+    assert wrapped(None, values.__getitem__) == []
+    assert "raised" not in box
