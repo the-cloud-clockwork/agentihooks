@@ -96,6 +96,7 @@ def test_first_hook_confirms_startup_and_prevents_retry(store):  # noqa: F811
     assert len(runtime.masters) == 1
 
 
+@pytest.mark.feature("starting-master-hooks-beat-kept")
 def test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches(store):  # noqa: F811
     from scripts.swarm import idle
 
@@ -111,6 +112,7 @@ def test_a_master_whose_hooks_beat_is_kept_when_no_runtime_report_reaches(store)
     assert len(runtime.masters) == 1
 
 
+@pytest.mark.feature("starting-master-hooks-beat-kept")
 def test_a_hook_beat_from_before_the_launch_does_not_keep_the_master(store):  # noqa: F811
     from scripts.swarm import idle
 
@@ -122,6 +124,7 @@ def test_a_hook_beat_from_before_the_launch_does_not_keep_the_master(store):  # 
     assert master.name in runtime.killed
 
 
+@pytest.mark.feature("starting-master-hooks-beat-kept")
 def test_a_master_with_no_launch_time_counts_its_beat_from_its_start(store):  # noqa: F811
     from scripts.swarm import idle, master_start
     from scripts.swarm.store import AgentRecord

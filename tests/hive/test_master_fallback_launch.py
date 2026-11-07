@@ -186,6 +186,7 @@ def test_controller_keeps_only_the_workstation_login_master_off_hive_placement(s
     assert fenced.runtime.router.placed_backend("master", {"id": "master-4"}) == "local"
 
 
+@pytest.mark.feature("pod-controller-master-on-hive")
 def test_a_controller_in_a_pod_places_the_login_front_door_on_a_hive(setup, monkeypatch):
     from scripts import master_claude_login
     from scripts.swarm import controller
