@@ -1,4 +1,6 @@
 import json
+import threading
+from collections.abc import Callable
 from unittest.mock import Mock, patch
 
 import pytest
@@ -239,3 +241,84 @@ def test_hook_dispatch_passes_the_normalized_payload_through_the_claim_fence():
     assert exited.value.code == 0
     check.assert_called_once_with(payload)
     handler.assert_called_once_with(payload)
+
+
+def _held_claim(monkeypatch: pytest.MonkeyPatch) -> object:
+    bus = open_bus(BusConfig())
+    revision = bus.state("spoke-work").create("claim-a", b'{"state":"started"}')
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({"key": "claim-a", "revision": revision}))
+    return bus
+
+
+def _stalled_bus(release: threading.Event) -> Callable[[BusConfig], None]:
+    def stall(_config: BusConfig) -> None:
+        release.wait(10)
+        raise RuntimeError("stalled")
+
+    return stall
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_slow_nats_costs_at_most_the_bound(monkeypatch, cached):
+    import threading
+    import time
+
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    if cached:
+        with patch.object(claim_fence, "open_bus", return_value=bus):
+            assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    release = threading.Event()
+    try:
+        with (
+            patch.object(claim_fence, "open_bus", side_effect=_stalled_bus(release)),
+            patch.object(claim_fence, "terminate") as kill,
+        ):
+            started = time.monotonic()
+            message = claim_fence.check({"hook_event_name": "PreToolUse"})
+            elapsed = time.monotonic() - started
+    finally:
+        release.set()
+    assert claim_fence.BOUND == 1.0
+    assert elapsed < claim_fence.BOUND + 0.5
+    assert message == (None if cached else claim_fence.CHECK_FAILED)
+    kill.assert_not_called()
+
+
+def test_a_moved_claim_still_blocks_after_a_cached_positive_answer(monkeypatch):
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    with (
+        patch.object(claim_fence, "open_bus", return_value=bus),
+        patch.object(claim_fence, "agent_pid", return_value=4321),
+        patch.object(claim_fence, "terminate") as kill,
+    ):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+        current = bus.state("spoke-work").get("claim-a")
+        bus.state("spoke-work").update("claim-a", b'{"state":"claimed"}', current.revision)
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.REVOKED
+    kill.assert_called_once_with(4321)
+
+
+def test_a_cached_answer_covers_only_its_own_claim_generation(monkeypatch):
+    import threading
+
+    from hooks.context import claim_fence
+
+    bus = _held_claim(monkeypatch)
+    with patch.object(claim_fence, "open_bus", return_value=bus):
+        assert claim_fence.check({"hook_event_name": "PreToolUse"}) is None
+    current = json.loads(claim_fence.os.environ["AGENTIHOOKS_CLAIM_FENCE"])
+    monkeypatch.setenv("AGENTIHOOKS_CLAIM_FENCE", json.dumps({**current, "revision": current["revision"] + 1}))
+    release = threading.Event()
+    try:
+        with (
+            patch.object(claim_fence, "open_bus", side_effect=_stalled_bus(release)),
+            patch.object(claim_fence, "terminate") as kill,
+        ):
+            assert claim_fence.check({"hook_event_name": "PreToolUse"}) == claim_fence.CHECK_FAILED
+    finally:
+        release.set()
+    kill.assert_not_called()
