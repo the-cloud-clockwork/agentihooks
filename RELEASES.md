@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.712 · 2026-11-07
+
+### 2026-11-07 · 347f23ec112a · #10048 · @agenticore-app
+
+**End unschedulable worker executions and place fresh restores through hives**
+
+This change fixes a bug where retried worker pods that no node could schedule kept occupying every worker quota slot, starving new hive launches. Now, unschedulable pods are detected and their executions ended after five minutes, their owned tasks reopened, and capacity accounting excludes stuck Pending pods from pool and quota usage. Fresh restores and node_lost retries route through hive placement rather than relaunching directly on the original backend, and cancellation handling correctly resumes after interruptions. This prevents worker starvation and restores correct scheduling behavior.
+
 ## v2.17.711 · 2026-11-07
 
 ### 2026-11-07 · 2e6ddcf016e8 · #10052 · @nestorcolt
