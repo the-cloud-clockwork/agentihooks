@@ -528,11 +528,23 @@ def test_a_controller_with_no_local_accounts_sizes_engineer_and_ci_lanes_from_fl
     ]
 
 
-def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_quota_rows(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("reserved", "expected"),
+    [({}, (2, 1)), ({ACCOUNT: 1, "codex-fixtureatexample-com": 4}, (2, 4))],
+)
+def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_quota_rows(
+    tmp_path, monkeypatch, reserved, expected
+):
     from scripts.hive import registry as hives
 
     store = _store()
     other = "codex-fixtureatexample-com"
+
+    def fleet(given, now):
+        assert given.redis is store.redis and now >= beat
+        return dict(reserved)
+
+    monkeypatch.setattr(deployed, "fleet_held", fleet)
     monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof", keys=(ACCOUNT, other)))
     beat = lease.now_ms(store)
     hives.update(store.redis, "hive-a", ["max-agents=8"])
@@ -558,7 +570,10 @@ def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_qu
     finally:
         service.stop()
 
-    assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [(ACCOUNT, 2), (other, 1)]
+    assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [
+        (ACCOUNT, expected[0]),
+        (other, expected[1]),
+    ]
 
 
 class PoolPods(Pods):

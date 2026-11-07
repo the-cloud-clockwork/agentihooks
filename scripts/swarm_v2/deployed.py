@@ -5,6 +5,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from scripts.routing import aggregate
+from scripts.routing.slots import account_key
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
@@ -290,12 +291,13 @@ def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> Term
 
 
 def _held(capacity: AccountCapacity) -> dict[str, int]:
-    """Kubernetes account reservations plus the sessions every live hive reports, per account."""
+    """Per account, the larger of its Kubernetes account reservations and the sessions live hives report, since a
+    worker pod's hive reports the same session its reservation holds."""
     now = capacity.clock()
-    held = fleet_held(capacity.store, now)
+    held = {account_key(account): count for account, count in fleet_held(capacity.store, now).items()}
     for name, row in aggregate.read(capacity.store.redis, now / 1000).items():
         account = name.partition(":")[2]
-        held[account] = held.get(account, 0) + row["sessions"]
+        held[account] = max(held.get(account, 0), row["sessions"])
     return held
 
 
