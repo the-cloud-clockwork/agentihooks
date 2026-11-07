@@ -2,6 +2,7 @@
 
 import sys
 import urllib.error
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +15,8 @@ from scripts.swarm import ledger_client as ledger_client_module
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_route, ledger_server
-from scripts.swarm_ledger.api import local_client
+from scripts.swarm_ledger.repository import postgres
+from scripts.tick.adapters import database_ledger
 from scripts.tick.adapters.ledger import ClientLedger, resource_client
 from scripts.tick.deadline import Deadline
 
@@ -31,7 +33,7 @@ DATABASE = "postgresql://ledger@shared/ledger"
 
 
 @pytest.fixture
-def stored(monkeypatch: pytest.MonkeyPatch, memory_path: Path) -> list[tuple[str, int]]:
+def stored(monkeypatch: pytest.MonkeyPatch, memory_path: Path) -> Iterator[list[tuple[str, int]]]:
     """A ledger on disk, its ledger server address pointing at a closed port, the epoch fence recorded."""
     monkeypatch.setattr(core, "LEDGER_DIR", memory_path)
     monkeypatch.setenv("LEDGER_DIR", str(memory_path))
@@ -53,7 +55,7 @@ def stored(monkeypatch: pytest.MonkeyPatch, memory_path: Path) -> list[tuple[str
 
 def _serving() -> AbstractContextManager[None]:
     """Serve ledger calls in process while inside, as a tick pass does with the database URL set."""
-    return local_client.scoped({local_client.postgres.URL: DATABASE})
+    return database_ledger.scoped({postgres.URL: DATABASE})
 
 
 def _comment(text: str) -> dict[str, object]:
@@ -75,13 +77,13 @@ def test_a_tick_routed_call_serves_in_process_only_while_the_database_url_is_set
 
     @ledger_route.tick
     def probe(store: object, slug: str) -> bool:
-        return local_client.serving()
+        return database_ledger.serving()
 
-    monkeypatch.delenv(local_client.postgres.URL, raising=False)
+    monkeypatch.delenv(postgres.URL, raising=False)
     assert probe(store, SLUG) is False
-    monkeypatch.setenv(local_client.postgres.URL, DATABASE)
+    monkeypatch.setenv(postgres.URL, DATABASE)
     assert probe(store, SLUG) is True
-    assert local_client.serving() is False
+    assert database_ledger.serving() is False
 
 
 def test_the_port_exports_the_ledger_with_the_ledger_server_down(stored: list[tuple[str, int]]) -> None:
