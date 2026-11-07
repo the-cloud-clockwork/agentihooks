@@ -40,8 +40,8 @@ TICK_GROUPS = [
     "placement notices",
     "placement acks",
     "master seats",
-    "placement",
     "dispatch seat",
+    "placement",
     "master watch",
     "close",
 ]

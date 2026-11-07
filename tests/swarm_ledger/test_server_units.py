@@ -1,6 +1,7 @@
 import io
 import json
 import threading
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -134,6 +135,7 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
             pass
 
     monkeypatch.setattr(server.threading, "Thread", Thread)
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: steps.append("drain")))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
@@ -202,6 +204,7 @@ def test_a_successor_warms_reports_ready_then_waits_for_the_lease_and_takes_the_
     monkeypatch.setattr(
         server.threading, "Thread", lambda **kwargs: threads.append(kwargs) or SimpleNamespace(start=lambda: None)
     )
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
@@ -257,6 +260,7 @@ def test_a_successor_without_a_carry_refreshes_every_view_it_warmed(monkeypatch,
     monkeypatch.setattr(
         server.threading, "Thread", lambda **kwargs: threads.append(kwargs) or SimpleNamespace(start=lambda: None)
     )
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
@@ -295,6 +299,7 @@ def test_a_carry_that_cannot_be_written_still_releases_the_lease(monkeypatch, tm
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
@@ -333,6 +338,7 @@ def test_requests_still_running_at_the_drain_bound_keep_the_lease_until_the_proc
     monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
     monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
     monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
     monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
@@ -421,6 +427,7 @@ def test_serve_follows_a_shared_database_on_its_own_daemon_thread(monkeypatch, t
             pass
 
     monkeypatch.setattr(server.threading, "Thread", Thread)
+    monkeypatch.setattr("scripts.swarm_ledger.outbox_host.running", lambda repository: nullcontext())
     monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
     monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
     monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())

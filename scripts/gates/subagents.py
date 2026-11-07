@@ -1,8 +1,13 @@
 """The sub-agent budget: every sub-agent launch and continuation in a swarm task is counted, whatever its name."""
 
-from scripts.gates import log
-from scripts.gates.base import Decision
+from typing import TYPE_CHECKING
+
+from scripts.gates import lift, log
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.budget import Budget
+
+if TYPE_CHECKING:
+    from scripts.gates.verdicts import Verdicts
 
 LAUNCH_TOOLS = frozenset({"Agent", "Task"})
 CONTINUE_TOOLS = frozenset({"SendMessage"})
@@ -26,7 +31,7 @@ class SubagentBudget:
     def matches(self, call):
         return call.tool in LAUNCH_TOOLS or call.tool in CONTINUE_TOOLS
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task):
             return Decision()
         counter, cap = (
@@ -34,11 +39,13 @@ class SubagentBudget:
         )
         budget = Budget(state.slug, self.name, state.home)
         allowed, spent = budget.spend(who.task, counter, cap)
+        named = {call.tool_input.get("name"), call.tool_input.get("subagent_type")}
+        readers = named.intersection(READERS) if call.tool in LAUNCH_TOOLS else set()
+        if readers and (allowed or lift.head_lifted(state.slug, who.task, self.name, state.home)):
+            for reader in readers:
+                budget.spend(who.task, reader, 1)
         if not allowed:
             return Decision.deny(refusal(who.swarm, who.task, counter, cap))
-        if call.tool in LAUNCH_TOOLS:
-            for reader in {call.tool_input.get("name"), call.tool_input.get("subagent_type")}.intersection(READERS):
-                budget.spend(who.task, reader, 1)
         reason = f"sub-agent {counter} {spent} of {cap} for task {who.task}"
         log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
         return Decision()

@@ -152,7 +152,7 @@ def port(repository: str) -> SourceControl:
     return GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
-def _branch(url: str) -> str:
+def fix_branch(url: str) -> str:
     """Return the head branch of a fix pull request, read through the source control port."""
     from scripts.swarm import stack
 
@@ -171,7 +171,7 @@ def _spared(row: RepositoryRun, branches: set[str]) -> bool:
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags and the named fixes."""
-    branches = {_branch(url) for url in fixes}
+    branches = {fix_branch(url) for url in fixes}
     cancelled: list[str] = []
     for repo in repos:
         provider = ports(repo)

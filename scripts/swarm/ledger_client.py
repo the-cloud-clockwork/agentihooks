@@ -372,14 +372,12 @@ class LedgerClient:
 
     def _lifecycle(self, slug: str, payload: dict[str, Any]) -> Any:
         from scripts.swarm import lease
-        from scripts.swarm_ledger.api.client import ResourceClient
 
         if (epoch := lease.epoch_for(slug)) is not None:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:
-            client = ResourceClient(ledger.base(slug), ledger.credentials(slug, self.service))
-            return client.request(slug, "lifecycle/actions", payload)["data"]
+            return ledger.client(slug, self.service).request(slug, "lifecycle/actions", payload)["data"]
         except urllib.error.HTTPError as exc:
             error = LedgerRefused if 400 <= exc.code < 500 else SwarmError
             raise error(f"ledger {slug}: server refused: {exc.code} {ledger.refusal_text(exc)}") from exc

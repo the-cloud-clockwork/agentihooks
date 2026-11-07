@@ -117,7 +117,8 @@ def subjects(context):
 def test_the_ca_file_is_trusted_beside_the_system_roots(monkeypatch, cert):
     made = spied(monkeypatch)
 
-    context = ledger_link.transport({"LEDGER_CA_FILE": cert[0]})["context"]
+    context = ledger_link.transport({"LEDGER_CA_FILE": cert[0]}).get("context")
+    assert context is not None
 
     assert made == [((), {})]
     assert "localhost" in subjects(context)

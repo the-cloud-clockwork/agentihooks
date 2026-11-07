@@ -1,7 +1,7 @@
 """Per pass tick executor: tick mode, two lane deadlines, the critical heartbeat, per agent fan out and call caps."""
 
 import fcntl
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import BoundedSemaphore, Event, Lock, Thread, Timer, local
 from time import monotonic
+from types import MappingProxyType
 from typing import IO, TypeVar
 
 from scripts.tick.deadline import Deadline
@@ -19,6 +20,8 @@ __all__ = [
     "CRITICAL_S",
     "LIMITS",
     "PARALLEL",
+    "RESERVES",
+    "RESERVE_SHARES",
     "SEQUENTIAL",
     "SLOW_LANE",
     "SLOW_S",
@@ -28,6 +31,7 @@ __all__ = [
     "active",
     "fan_out",
     "limit",
+    "reserved",
     "running",
 ]
 
@@ -41,6 +45,9 @@ CLOSING_LANE = "closing"
 CLOSING_S = 30.0
 LATER_GRACE_S = 1.0
 LIMITS = {"herdr": 6, "github": 4}
+RESERVE_SHARES: Mapping[str, float] = MappingProxyType({"spawn": 1 / 3})
+SPAWN_RESERVE_S = CRITICAL_S * RESERVE_SHARES["spawn"]
+RESERVES: Mapping[str, float] = MappingProxyType({"spawn": SPAWN_RESERVE_S})
 
 _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
 
@@ -50,7 +57,8 @@ Found = TypeVar("Found")
 
 @dataclass(frozen=True)
 class Pass:
-    """One tick pass: its mode, worker bound and the deadlines of its critical and slow lanes."""
+    """One tick pass: its mode, worker bound, the deadlines of its critical and slow lanes and the seconds at the end
+    of a lane each reserved step holds back from the steps it needs."""
 
     mode: str
     workers: int
@@ -60,6 +68,7 @@ class Pass:
     steps: ThreadPoolExecutor
     fans: ThreadPoolExecutor
     closing_s: float = CLOSING_S
+    reserves: Mapping[str, float] = RESERVES
     closer: list[Deadline] = field(default_factory=list[Deadline], compare=False)
     later: list[Thread] = field(default_factory=list[Thread], compare=False)
     handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
@@ -130,6 +139,11 @@ class Pass:
         return self.slow if name == SLOW_LANE else self.critical
 
 
+def reserved(critical_s: float) -> Mapping[str, float]:
+    """Return the seconds each reserved step holds back at the end of a ``critical_s`` lane: its share of the lane."""
+    return MappingProxyType({name: share * critical_s for name, share in RESERVE_SHARES.items()})
+
+
 _ACTIVE: ContextVar[Pass | None] = ContextVar("tick_pass", default=None)
 
 
@@ -170,8 +184,10 @@ def running(
     slow_s: float = SLOW_S,
     heartbeat: Callable[[], object] | None = None,
     closing_s: float = CLOSING_S,
+    reserves: Mapping[str, float] | None = None,
 ) -> Generator[Pass, None, None]:
-    """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work."""
+    """Run one pass in ``mode``; a parallel pass writes ``heartbeat`` by the critical deadline without slow work and
+    holds ``reserves`` back from the steps each reserved step needs, by default each step's share of ``critical_s``."""
     if mode not in (PARALLEL, SEQUENTIAL):
         raise ValueError(f"tick mode must be one of {PARALLEL}, {SEQUENTIAL}")
     if workers < 1:
@@ -185,6 +201,7 @@ def running(
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-step"),
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
         closing_s,
+        reserved(critical_s) if reserves is None else reserves,
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None

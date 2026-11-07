@@ -292,8 +292,10 @@ STEPS = (
         lane=SLOW,
     ),
     CallStep("prompt stall", MASTERS, _held(_prompt_stall), RESUMED, CONFIG, lane=SLOW),
-    CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG),
-    CallStep("tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc")),
+    CallStep("master down", SEATS, _held(tasks.placing(_master_down_step)), RESUMED, CONFIG, kept=True),
+    CallStep(
+        "tick master", SEATS, _held(tasks.placing(_tick_master)), RESUMED, pass_domains("config", "doc"), kept=True
+    ),
     CallStep("master scale", SEATS, _held(tasks.placing(_master_scale)), RESUMED, pass_domains("config", "doc")),
     CallStep("seat alarm", SEATS, _held(tasks.placing(_seat_alarm)), LISTED, pass_domains("doc")),
     CallStep(
@@ -357,7 +359,8 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, past_
         if any(a.lane != tick.MASTER for a in agents):
             return []
         return [tick._retire_master(slug, store, runtime, m, now_ms) for m in masters]
-    masters = [m for m in masters if tick.master_seats.is_lead(slug, m)]
+    retired = store.key(slug, "retired-process")
+    masters = [m for m in masters if tick.master_seats.is_lead(slug, m) and not store.redis.hexists(retired, m.name)]
     pending = tick.master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or tick.master_start.blocked(pending, now_ms):
         return []

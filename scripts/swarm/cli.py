@@ -208,7 +208,7 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets, note_left
+from scripts.tick.steps import Left, PassBox, budgets
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -457,14 +457,6 @@ class _Wrapper:
         early = self._acted(records, ("wrapper phases", "wrapper reboot"))
         return early + tick + self.checked + self._acted(records, ("wrapper events",))
 
-    def _noted(self, found: dict[str, Any], key: str) -> Any:
-        """Return ``found[key]``, noting the steps the pass left on the box first when no step stored it."""
-        try:
-            return found[key]
-        except Left:
-            note_left(self.box, self.seen.values())
-            raise
-
     def _fence(self) -> bool:
         """Fence the runtime the rest of the pass uses."""
         from scripts.swarm import controller
@@ -506,15 +498,19 @@ class _Wrapper:
         return True
 
     def _judged(self) -> bool:
-        """End the tick's scan, raise what the intent check held and keep its view and checked actions."""
+        """End the tick's scan, raise what the intent check held and keep its view and checked actions when it stored
+        them; an intent check that overran its budget stored nothing and leaves the pass going."""
         self.ticks.close()
         host_steps.raise_held(self.judging)
-        self.box["view"], self.checked = self._noted(self.judging, "judged")
+        if "judged" in self.judging:
+            self.box["view"], self.checked = self.judging["judged"]
         return True
 
     def _reread(self) -> bool:
-        """Read the pass state, config and task rows again for the view, events and metrics sites."""
-        self._noted(self.box, "agents")
+        """List the agents when the lane dropped the page relay, then read the pass state, config and task rows again
+        for the view, events and metrics sites."""
+        if "agents" not in self.box:
+            self.box["agents"] = host_steps.listed(self.store, self.slug)
         doc = timing.call(ledger_client.pass_state, self.ledger, self.slug)
         self.box.update(doc=doc, config=self.store.config(self.slug), rows={t["id"]: t for t in doc["tasks"]})
         return True
@@ -653,10 +649,12 @@ def run_tick(
             run_group(report_steps.CLOSING_GROUP, **closing, failure=sys.exception())
             host_steps.raise_held(published)
         finally:
-            beating.close()
-            timing.BEFORE_STEP.reset(keeping)
-            tick_stop.drop(token)
-            controller.release_tick_lock(store, slug, token, "pass")
+            try:
+                beating.close()
+            finally:
+                controller.release_tick_lock(store, slug, token, "pass")
+                timing.BEFORE_STEP.reset(keeping)
+                tick_stop.drop(token)
 
 
 def cmd_list(store, args):

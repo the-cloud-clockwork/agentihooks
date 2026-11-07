@@ -1,0 +1,6 @@
+{
+  "scripts/tick/engine.py:scripts.tick.engine.x__kept:4ba42229cbd758bc1a61504a2bd82f0e0ae7e33d069cd03bbc52a476a6665d51": {
+    "reader": "standards_reader",
+    "reason": "The default of getattr is used only when kept is absent, and bool(None) and bool(False) are both False, so the mutant returns the same value for every step."
+  }
+}

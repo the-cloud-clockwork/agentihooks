@@ -64,6 +64,33 @@ jobs:
           fi
           cd "$grader"
           python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"
+      - name: Round trip a scaffolded step through its check, the catalogue and the pattern
+        env:
+          PYTHONPATH: ${{ runner.temp }}/scaffold-round-trip
+        run: |
+          if [[ ! -f head/scripts/tick/new_step.py ]]; then
+            if [[ -f base/scripts/tick/new_step.py ]]; then
+              echo "::error::The head removes the step scaffold the base holds"
+              exit 1
+            fi
+            echo "::notice::The head predates the step scaffold; round trip skipped"
+            exit 0
+          fi
+          copy="$PYTHONPATH"
+          cp -a head "$copy"
+          cd "$copy"
+          python -c 'import sys, scripts; assert scripts.__file__.startswith(sys.argv[1] + "/"), scripts.__file__' "$copy"
+          python -m scripts.tick.new_step "round trip probe" --group round-trip --lane tick --interval 120 \
+            --effects ledger --feature tick-step-round-trip --module round_trip > written.txt
+          xargs -r -d '\n' git add -- < written.txt
+          python -m scripts.tick.new_step --check "round trip probe"
+          python -m scripts.tick.catalogue check
+          grader="$GITHUB_WORKSPACE/head"
+          if [[ -f "$GITHUB_WORKSPACE/base/scripts/tick_pattern.py" ]]; then
+            grader="$GITHUB_WORKSPACE/base"
+          fi
+          cd "$grader"
+          python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/head" --head "$copy"
       - name: Replay tick scenarios on base and head concurrently and check the dropped action
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}

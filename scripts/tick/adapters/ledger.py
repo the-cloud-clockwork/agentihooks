@@ -15,8 +15,10 @@ Clients = Callable[[float], ResourceClient]
 
 
 def resource_client(slug: str, service: bool = False) -> Clients:
-    """Build clients for ledger slug whose request timeout never outlasts the deadline left."""
+    """Build clients for ledger slug whose request timeout never outlasts the deadline left, served in process
+    over the shared database while a database pass is in scope."""
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+    from scripts.tick.adapters import database_ledger
 
     ledger: Any = _ledger()
 
@@ -26,9 +28,11 @@ def resource_client(slug: str, service: bool = False) -> Clients:
         if OFFLINE.get():
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         base: str = ledger.base(slug)
+        timeout: float = min(ledger.REQUEST_TIMEOUT, remaining)
+        if database_ledger.serving():
+            return database_ledger.client(base, timeout)
         credentials: dict[str, str] = ledger.credentials(slug, service)
-        timeout: float = ledger.REQUEST_TIMEOUT
-        return ResourceClient(base, credentials, min(timeout, remaining))
+        return ResourceClient(base, credentials, timeout)
 
     return build
 

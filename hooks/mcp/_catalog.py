@@ -4,27 +4,42 @@ import subprocess
 import sys
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 
 @cache
-def get_catalog() -> dict[str, list[dict]]:
+def get_catalog() -> dict[str, dict[str, list[dict[str, Any]]]]:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             """
 import asyncio
+import contextlib
+import io
 import json
 from hooks.mcp import build_server
 from hooks.mcp._registry import CATEGORY_MODULES
 
+LISTINGS = {
+    "tools": "list_tools",
+    "resources": "list_resources",
+    "resourceTemplates": "list_resource_templates",
+    "prompts": "list_prompts",
+}
+
 async def catalog():
+    with contextlib.redirect_stderr(io.StringIO()):
+        servers = {category: build_server([category]) for category in CATEGORY_MODULES}
     return {
-        category: [
-            tool.model_dump(by_alias=True, exclude_none=True)
-            for tool in await build_server([category]).list_tools()
-        ]
-        for category in CATEGORY_MODULES
+        kind: {
+            category: [
+                item.model_dump(by_alias=True, exclude_none=True)
+                for item in await getattr(server, listing)()
+            ]
+            for category, server in servers.items()
+        }
+        for kind, listing in LISTINGS.items()
     }
 
 print(json.dumps(asyncio.run(catalog())))

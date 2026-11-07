@@ -3,6 +3,7 @@ import socket
 from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -605,9 +606,9 @@ class QuotaPods(PoolPods):
 
 
 def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quota_with_no_pool_declared(
-    tmp_path, monkeypatch
-):
-    def own_node(*args, **kwargs):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def own_node(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("the deployed controller read its own node")
 
     monkeypatch.setattr(host_budget, "read_host", own_node)
@@ -620,7 +621,7 @@ def test_the_deployed_controller_sizes_spawn_room_from_the_worker_namespace_quot
     finally:
         service.stop()
 
-    assert pods.selectors == []
+    assert pods.selectors == [""]
     assert (decision["host"]["room"], decision["host"]["limit"], decision["host"]["reason"]) == (
         2,
         "quota pods",
@@ -1184,6 +1185,35 @@ def test_the_exporter_worker_setting_reaches_the_launch_record(tmp_path, monkeyp
     assert json.loads(pods.maps[0]["data"]["launch.json"])["exporter"] == ["python", "-m", "exporter"]
 
 
+def test_the_tick_runtime_routes_claude_and_codex_and_reads_the_planned_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store()
+    monkeypatch.setattr(deployed, "pod_api", lambda environ, namespace: Pods("swarm-pod-proof"))
+    service = _cs().host(_environ(tmp_path, store), store, "hive-fixture")
+    assert service is not None
+    try:
+        runtime: Any = service.runtime
+        launcher = runtime.launch.func.__self__
+        route = runtime.herdr_runtime.quota_accounts.route
+        runtime.herdr_runtime._quota_tasks = {"t1": "codex"}
+        planned = (launcher.planned_harness("t1"), launcher.planned_harness("t2"))
+    finally:
+        service.stop()
+
+    assert planned == ("codex", None)
+    assert launcher.accounts == route.choose
+    assert {harness: (found.harness, found.keys.index) for harness, found in route.routes.items()} == {
+        "claude": ("claude", "swarm-claude-accounts"),
+        "codex": ("codex", "swarm-codex-accounts"),
+    }
+    for found in route.routes.values():
+        assert found.quota.slug == SLUG
+        with pytest.raises(GrantRefused) as refused:
+            found.quota.authorize("not-a-grant")
+        assert str(refused.value) == "launch grant is malformed"
+
+
 @pytest.mark.parametrize("value", [None, ""])
 def test_an_unset_exporter_setting_names_the_image_session_exporter(tmp_path, value):
     workers = deployed.Workers.from_environ(_workers(tmp_path, **{deployed.EXPORTER_ENV: value}), SLUG)
@@ -1625,3 +1655,16 @@ def test_a_controller_keeping_no_saved_machines_leaves_kubernetes_command_unsupp
         assert Capability.COMMAND not in kubernetes.capabilities
     finally:
         service.stop()
+
+
+@pytest.mark.parametrize(("task", "harness"), [({"harness": "codex"}, "codex"), ({}, "claude")])
+def test_a_launch_record_names_the_harness_its_task_was_planned_on(
+    tmp_path: Path, registry: object, task: dict[str, str], harness: str
+) -> None:
+    workers = deployed.Workers.from_environ(_workers(tmp_path), SLUG)
+    assert workers is not None
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
+
+    record = workers.launch(SpawnRequest(config, "eng", "engineer-1", {**_task(), **task}))
+
+    assert record["harness"] == harness
