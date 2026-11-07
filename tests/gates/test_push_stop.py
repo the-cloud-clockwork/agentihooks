@@ -7,7 +7,7 @@ from typing import NoReturn
 
 import pytest
 
-from scripts.gates import Call, Gate, Who, push_stop
+from scripts.gates import Call, Decision, Gate, Who, push_stop
 from scripts.gates.progress import Progress
 from scripts.gates.push_stop import (
     FLOOR_S,
@@ -180,7 +180,7 @@ def test_a_live_review_helper_of_the_session_holds_the_commit_demand_until_it_en
     monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
     helper = {"session_id": "main", "agent_id": "reader", "agent_type": "code-reviewer"}
 
-    def stop(session):
+    def stop(session: str) -> Decision:
         rig.gate.started = time.monotonic()
         return rig.gate.decide(Call("", session=session), WHO, Verdicts(SLUG, rig.gate.name, tmp_path))
 

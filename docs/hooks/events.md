@@ -187,7 +187,7 @@ AgentiHooks registers shared lifecycle handlers for Claude Code and Codex. The e
 **Handler actions:**
 
 1. Logs the subagent's transcript entries to the hooks log
-2. Clears the subagent's live helper record, which SubagentStart wrote under the parent session; while a record lives the push stop gate does not demand a commit for uncommitted changes
+2. Clears the subagent's live helper record, which SubagentStart wrote under the parent session; while a record lives, for at most one hour, the push stop gate does not demand a commit for uncommitted changes
 
 ---
 
