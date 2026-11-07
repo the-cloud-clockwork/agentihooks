@@ -1,0 +1,1 @@
+- Swarm agents read their seat's learned notes before any tool call made to find missing context, then the brain (operator, 1 November).
