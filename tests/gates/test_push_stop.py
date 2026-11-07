@@ -78,6 +78,7 @@ def rig(tmp_path):
         root=root,
         now=lambda: NOW,
         clock=lambda: ticks.pop(0) if ticks else time.monotonic(),
+        github=lambda url: None,
     )
 
     def stop(who=WHO, started=None):
@@ -1093,7 +1094,7 @@ def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig,
     rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
     wait_on(rig, {"kind": "merge", "target": target})
     assert rig.stop().allowed
-    assert seen == [target]
+    assert seen == ["https://github.com/o/r/pull/7", target]
     assert rig.remote_head() == theirs
 
 
@@ -1191,3 +1192,63 @@ def test_a_redis_error_reading_fleet_panic_reads_as_no_panic_so_the_hook_pushes(
     head = rig.commit()
     assert rig.stop().allowed
     assert rig.remote_head() == head
+
+
+RUNNING_URL = "https://github.com/o/r/pull/7"
+
+
+def running_pull(**changes: object) -> object:
+    from scripts.swarm.ledger_events import PullRequest
+
+    fields = {"state": "OPEN", "merged_at": None, "pushed_at": 1, "red": False, "running": True, "started": True}
+    return PullRequest(**{**fields, **changes})
+
+
+def test_running_checks_let_unpushed_work_stop_without_a_push_and_name_the_checks(rig: SimpleNamespace) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    seen: list[str] = []
+    rig.gate._github = lambda url: seen.append(url) or running_pull()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (
+        True,
+        f"Checks still run on {RUNNING_URL} and none is red, so the stop hook did not push: a push now cancels them. "
+        f"Wait with agentihooks swarm {SLUG} wait --on checks {RUNNING_URL}, then push once they resolve.",
+    )
+    assert seen == [RUNNING_URL]
+    assert rig.remote_head() == ""
+    assert rig.inbox() == []
+
+
+def test_running_checks_still_demand_a_commit_of_uncommitted_work_without_a_push(rig: SimpleNamespace) -> None:
+    rig.ledger.task["pr_url"] = RUNNING_URL
+    rig.commit()
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"running": False},
+        {"red": True},
+        {"state": "MERGED"},
+        {"queued": True},
+        {"started": False},
+    ],
+)
+def test_resolved_red_closed_queued_or_unstarted_checks_still_demand_the_push(
+    rig: SimpleNamespace, changes: dict[str, object]
+) -> None:
+    refuse_the_push(rig)
+    rig.gate._github = lambda url: running_pull(**changes)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_running_checks_on_a_pull_request_in_another_repo_still_demand_the_push(rig: SimpleNamespace) -> None:
+    refuse_the_push(rig)
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.gate._github = lambda url: running_pull()
+    assert rig.stop().reason == TEMPLATE
