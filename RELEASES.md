@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.685 · 2026-11-07
+
+### 2026-11-07 · 517e2667cd96 · #9893 · @agenticore-app
+
+**Move master down, night watch and the group runner into the masters step module**
+
+This change relocates the master-down check, woken detection, night watch, pass-view helper, group runner, action printer, and codex hook ordering out of scripts/swarm/tick.py into scripts/tick/steps/masters.py as part of the ongoing tick rework, continuing the module-splitting effort from prior sweeps. The move is verbatim, with tick still exposing run_group for backward compatibility and patched seams routed through tick.NAME so existing tests keep working. It shrinks the tick module's pattern registry by seven names and reduces its type-checking baseline, while leaving caller modules and masters' own baseline unaffected, and is backed by new seam tests confirming equivalence with the prior behavior.
+
 ## v2.17.682 · 2026-11-07
 
 ### 2026-11-07 · a325a76a3d95 · #9938 · @agenticore-app
