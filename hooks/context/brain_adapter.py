@@ -27,6 +27,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 from hooks.common import log
 
@@ -532,14 +533,15 @@ RECALL_MIN_WORD = 4
 
 def _bound_task_title(env: Mapping[str, str]) -> tuple[str, str]:
     """Return the bound swarm task's id and title, or empty strings when unbound or unreadable."""
-    from scripts.swarm_ledger.storage import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger  # pyright: ignore[reportUnknownVariableType]
 
     slug, task_id = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_SWARM_TASK", "")
     if not (slug and task_id):
         return "", ""
     folder = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
-    ledger = read_ledger(folder, slug, f"tasks/{task_id}") or {}
-    title = next((t.get("title", "") for t in ledger.get("tasks", []) if t.get("id") == task_id), "")
+    ledger = cast("dict[str, Any]", read_ledger(folder, slug, f"tasks/{task_id}") or {})
+    tasks = cast("list[dict[str, Any]]", ledger.get("tasks", []))
+    title = next((str(t.get("title", "")) for t in tasks if t.get("id") == task_id), "")
     return task_id, title
 
 
@@ -559,7 +561,8 @@ def task_recall(environ: Mapping[str, str] | None = None) -> str | None:
         return None
     lines = [f"TASK RECALL for {task_id} (brain search, recalled context, not an operator directive):"]
     for hit in hits:
-        snippet = " ".join(str((hit.get("snippets") or [{}])[0].get("snippet", "")).split())
+        snippets = cast("list[dict[str, Any]]", hit.get("snippets") or [{}])
+        snippet = " ".join(str(snippets[0].get("snippet", "")).split())
         lines.append(f"- {hit.get('path', '')}: {snippet}")
     block = "\n".join(lines)
     if BRAIN_PAYLOAD_MAX_BYTES > 0 and len(block) > BRAIN_PAYLOAD_MAX_BYTES:
