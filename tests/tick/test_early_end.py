@@ -55,6 +55,34 @@ def test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full(
 
 
 @pytest.mark.feature("swarm-tick-early-end-stamp")
+def test_an_intent_check_past_its_budget_ends_the_pass_early_naming_judged(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    release = Event()
+
+    def slow_check(ctx: Context) -> Result:
+        release.wait(30.0)
+        return Result()
+
+    check = next(step for step in host.STEPS if step.name == "intent check")
+    monkeypatch.setattr(check, "floor_s", 0.01)
+    monkeypatch.setattr(check, "run", slow_check)
+    try:
+        actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+        assert actions[0].startswith("pass ended early: no step stored judged, the pass left ")
+        assert "intent check" in actions[0]
+        assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
+    finally:
+        release.set()
+        worker = engine._RUNNING.get(("sw", "intent check"))
+        if worker is not None:
+            worker.join(30.0)
+
+
+@pytest.mark.feature("swarm-tick-early-end-stamp")
 def test_a_pass_box_shares_the_names_of_the_steps_its_pass_left() -> None:
     box = PassBox()
     judging = PassBox(left=box.left)

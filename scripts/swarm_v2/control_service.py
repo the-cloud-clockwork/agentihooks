@@ -154,6 +154,7 @@ class ControlService:
             lambda: getattr(self.recover, "recovery", None),
             operator,
             lambda token: self.grants.bound(slug, token),
+            operator_auth.agent_authenticator(lambda requested: page_credential(requested)) if operator else None,
         )
         self.views: Callable[[], dict] | None = None
         self.viewing: threading.Thread | None = None

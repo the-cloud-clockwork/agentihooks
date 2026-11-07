@@ -840,7 +840,19 @@ def test_the_map_names_each_consumer_with_its_redis_role(published):
         "ledger server": "ledger",
         "worker": "worker",
         "hooks": "worker",
+        "nats trust": "nats-trust",
     }
+
+
+def test_nats_trust_publishes_only_the_revoked_members_reads_and_seeds_and_no_scheduler_keys(published: dict) -> None:
+    trust = published["nats trust"]
+    assert trust["commands"] == {
+        "HGETALL": ["scripts.hive.nats_grant:revoked"],
+        "HSETNX": ["scripts.hive.nats_trust:retire"],
+    }
+    assert trust["keys"] == {}
+    assert trust["stores"] == {}
+    assert published["controller"]["keys"]
 
 
 def test_the_controller_issues_the_lease_counter_and_the_scheduler_wait(published):
