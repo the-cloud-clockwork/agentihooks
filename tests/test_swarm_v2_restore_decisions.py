@@ -721,6 +721,38 @@ def test_published_listener_drops_a_caller_that_never_starts_tls(
             pass
 
 
+def test_tls_server_hands_the_wrapped_socket_and_caller_address_to_the_handler() -> None:
+    from scripts.swarm_v2.api.server import TLSServer
+
+    seen: list[tuple[object, object]] = []
+    closed: list[bool] = []
+
+    class Secure:
+        def settimeout(self, value: float | None) -> None:
+            return None
+
+        def close(self) -> None:
+            closed.append(True)
+
+    secure = Secure()
+
+    class Context:
+        def wrap_socket(self, request: object, server_side: bool) -> Secure:
+            return secure
+
+    class Handler:
+        def __init__(self, request: object, client_address: object, server: object) -> None:
+            seen.append((request, client_address))
+
+    server = TLSServer(("127.0.0.1", 0), Handler, bind_and_activate=False)  # pyright: ignore[reportArgumentType]
+    server.tls = Context()  # pyright: ignore[reportAttributeAccessIssue]
+    raw = SimpleNamespace(settimeout=lambda value: None)
+    server.finish_request(raw, ("192.0.2.7", 4431))  # pyright: ignore[reportArgumentType]
+    server.server_close()
+    assert seen == [(secure, ("192.0.2.7", 4431))]
+    assert closed == [True]
+
+
 def test_restore_decision_prefers_the_published_address_and_trusts_the_ledger_ca(
     pending: SimpleNamespace, cert: tuple[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
