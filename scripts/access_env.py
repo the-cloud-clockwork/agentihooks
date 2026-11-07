@@ -26,7 +26,10 @@ def _opener(request: Request, timeout: float) -> HTTPResponse:
 
 
 def values(environ: Mapping[str, str], opener: Callable[[Request, float], HTTPResponse] = _opener) -> dict[str, str]:
-    bao = openbao_kv.from_env(environ, opener)
+    bao = cast(
+        "Callable[[Mapping[str, str], Callable[[Request, float], HTTPResponse]], openbao_kv.OpenBao | None]",
+        openbao_kv.from_env,
+    )(environ, opener)
     if bao is None:
         return {}
     try:

@@ -1,12 +1,13 @@
 import argparse
 import json
 import statistics
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
-from scripts.ci_minutes import seconds
+import scripts.ci_minutes
 from scripts.ci_storage import rows
 
 
@@ -36,7 +37,7 @@ def measure(repo: str, count: int, until: str, since: str = "") -> dict[str, Any
                             "head": run["head_sha"],
                             "job": job["id"],
                             "name": job["name"],
-                            "seconds": max(0, seconds(job)),
+                            "seconds": max(0, cast(Callable[[dict[str, Any]], float], scripts.ci_minutes.seconds)(job)),
                             "conclusion": job["conclusion"],
                         }
                     )

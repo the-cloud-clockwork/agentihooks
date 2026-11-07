@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import AbstractSet, Any, cast
 from urllib.parse import quote
 
 LONG_LIVED = frozenset({"dev", "main", "master"})
@@ -43,6 +43,7 @@ def _read(command: list[str], key: str | None) -> list[dict[str, Any]]:
             time.sleep(attempt + 1)
         else:
             return [json.loads(line) for line in done.stdout.splitlines() if line]
+    raise AssertionError
 
 
 def rows(path: str, key: str | None) -> list[dict[str, Any]]:
@@ -89,7 +90,7 @@ def kept_branches(repo: dict[str, Any]) -> frozenset[str]:
     return LONG_LIVED | {repo["default_branch"]} | heads
 
 
-def passed_runs(repo: str, branches: set[str]) -> set[int]:
+def passed_runs(repo: str, branches: AbstractSet[str]) -> set[int]:
     return {
         run["id"]
         for branch in sorted(branches)
@@ -100,11 +101,11 @@ def passed_runs(repo: str, branches: set[str]) -> set[int]:
 
 
 def _branch(row: dict[str, Any]) -> str | None:
-    return (row.get("workflow_run") or {}).get("head_branch")
+    return cast("dict[str, Any]", row.get("workflow_run") or {}).get("head_branch")
 
 
 def _run(row: dict[str, Any]) -> int | None:
-    return (row.get("workflow_run") or {}).get("id")
+    return cast("dict[str, Any]", row.get("workflow_run") or {}).get("id")
 
 
 def _created(row: dict[str, Any]) -> datetime:
