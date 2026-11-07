@@ -924,7 +924,7 @@ by the engine and does not leave the pass.
 
 ## Adding a step
 
-Run the scaffold from the repository root with every field the pattern needs; see
+Run the [step scaffold](tick-step-scaffold.md) from the repository root with every field the pattern needs; see
 [Tick step skill and rule](tick-step-skill.md):
 
 ```bash
@@ -1064,7 +1064,7 @@ The delivered proof and limitations are recorded in
 | `wait on needs that never end` | `_eager` was called directly with steps that need each other and none waits on a handed off step of an earlier group; `run_group` refuses the same steps earlier with `Dependency cycle`. Fix the `needs` cycle |
 | `RuntimeError: cannot schedule new futures after shutdown` from a step or fan out | The submit ran after its pass ended, for example from a worker that outlived the pass. The pass executors close at pass end; start such work inside a pass |
 | `slow lane step <name> failed` in the tick journal | That handed off step raised; its error follows the colon. The critical work of the pass already finished |
-| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module was not imported by `scripts.swarm.tick` |
+| A step never runs | `engine.group_steps("<group>")` lists the registered steps of a group; a missing step means its module is not listed in `scripts.tick.steps.MODULES` |
 | Import of the tick fails with `Duplicate step name` | Two registered steps share a name. Rename the new step; every `CallStep` writes only its own `actions:<name>` domain, so distinct names also keep `waves()` from refusing unordered writers |
 | Spawning happens in the `observe` group, before the agents group | The previous pass left the `spawn-due` marker, meaning it did not reach the spawn step. Find what ended that pass early in the tick journal |
 | Preempt and spawn run no calls | The swarm is paused, on the events engine or in panic, or, for spawn, `readiness.tick_places` refused; rank pass and bottleneck remedy still run |
