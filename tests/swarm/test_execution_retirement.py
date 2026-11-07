@@ -9,7 +9,7 @@ import pytest
 from scripts.swarm import fencing
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.master_start import DEADLINE_MS
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import PROJECTION_ATTEMPTS, AgentRecord, RedisStore, SwarmConfig
 
 
 @pytest.fixture
@@ -239,7 +239,7 @@ def test_drop_commits_while_other_agents_registry_writes_interleave(store: Redis
 
     with patch("scripts.swarm.lease.fenced", churn):
         assert store.drop_agent("fixture", agent.name, at=30) is True
-    assert len(writes) >= 6
+    assert len(writes) == PROJECTION_ATTEMPTS + 1
     assert [a.name for a in store.agents("fixture")] == [other.name]
     assert store.agents("fixture")[0].pane_id == f"pane-{len(writes) - 1}"
     assert store.execution("fixture", agent.execution_id).state == "ended"

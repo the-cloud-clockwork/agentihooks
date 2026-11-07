@@ -637,7 +637,7 @@ class RedisStore:
         raise SwarmError("agent registry kept changing; retirement was not committed")
 
     def _end_named(
-        self, slug: str, name: str, expected: Any, previous: str | None
+        self, slug: str, name: str, expected: "AgentRecord | None", previous: str | None
     ) -> tuple[set[str], list[AgentRecord]] | None:
         """Ends the named agent's current executions under the lease; None when the lease or an occupant refuses."""
         from scripts.swarm import fencing, lease
