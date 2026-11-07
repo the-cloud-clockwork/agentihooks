@@ -118,6 +118,16 @@ class Reports:
     def holder(self, name: str) -> str:
         return next((hive for hive, report in self.live().items() if name in report["names"]), "")
 
+    def executions_of(self, hive: str, name: str) -> list[str]:
+        """Each execution the hive reports under the name, as its execution id and generation, sorted."""
+        raw = self.redis.get(key(hive))
+        if not raw:
+            return []
+        executions: dict[str, dict[str, object]] = json.loads(raw)["executions"]
+        return sorted(
+            f"{execution}:{entry['generation']}" for execution, entry in executions.items() if entry["name"] == name
+        )
+
     def conversations(self) -> dict[str, str]:
         return {
             f"{hive}/{pane}": conversation
