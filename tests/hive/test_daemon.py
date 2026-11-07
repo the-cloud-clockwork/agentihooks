@@ -1946,6 +1946,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
 
 def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis, monkeypatch):
     from scripts.hive import orders, reports
+    from scripts.swarm_v2.runtime import process
 
     herdr = Mock()
     herdr.live_names.return_value = set()
@@ -1954,8 +1955,11 @@ def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
+    monkeypatch.setattr(process, "started_ms", lambda: 7)
     daemon.beat(redis, "machine")
-    assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
+    report = json.loads(redis.get(reports.key("machine")))
+    assert isinstance(report.pop("observed_at"), int)
+    assert report == {"names": [], "panes": {}, "executions": {}, "started_at": 7}
     herdr.bindings.assert_not_called()
     herdr.conversations.assert_not_called()
 
