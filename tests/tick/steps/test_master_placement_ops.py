@@ -65,7 +65,9 @@ def _store(
     occupants: dict[str, AgentRecord] | None = None,
 ) -> Any:
     """Return a store holding ``agents`` whose writes are recorded."""
-    redis = SimpleNamespace(hdel=calls.fn("hdel"), hset=calls.fn("hset"), delete=calls.fn("delete"))
+    redis = SimpleNamespace(
+        hdel=calls.fn("hdel"), hset=calls.fn("hset"), delete=calls.fn("delete"), hexists=lambda key, field: False
+    )
     seats = SimpleNamespace(occupant=lambda seat: SimpleNamespace(occupant=occupant), occupy=calls.fn("occupy"))
     return SimpleNamespace(
         redis=redis,
