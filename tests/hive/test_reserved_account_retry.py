@@ -59,7 +59,7 @@ def setup() -> SimpleNamespace:
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
     launcher.wait = Mock(return_value="pending")
-    return SimpleNamespace(store=store, config=config, held=held, launcher=launcher)
+    return SimpleNamespace(store=store, config=config, held=held, launcher=launcher, herdr=herdr)
 
 
 def request_for(setup: SimpleNamespace, config: Any = None) -> Any:
