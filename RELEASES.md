@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.693 · 2026-11-07
+
+### 2026-11-07 · cd76f171c962 · #9941 · @agenticore-app
+
+**Key the herdr runtime name reap on the execution as well as the name**
+
+This fixes a bug where reaping a remote name could be silently dropped because the hive command key was based only on the name, so a stale receipt from an earlier reap of that same name would incorrectly answer a later reap tied to a new execution. HerdrRuntime.reap_name now includes the execution id and generation, via the new Reports.executions_of, in the order key so reaps are correctly scoped per execution, not just per name. A seam test covers this case. A known low-severity gap remains for names the hive lists without an execution entry, tracked separately.
+
 ## v2.17.689 · 2026-11-07
 
 ### 2026-11-07 · 0e4e93d1fcae · #9862 · @agenticore-app
