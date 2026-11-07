@@ -315,7 +315,7 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] not in (excluded or ())]
         hosted = hosted_profiles(self.store.redis, hives)
-        decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ), hosted)
+        decision = self.herdr._profile_decision(config, lane, task, saved, saved, dict(os.environ), hosted)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
