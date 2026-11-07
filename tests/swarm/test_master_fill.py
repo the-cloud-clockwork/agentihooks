@@ -41,13 +41,19 @@ def test_a_master_that_ended_in_seat_two_is_respawned_in_seat_two(store):
 
 
 def test_a_retired_lead_whose_record_drop_was_refused_does_not_hold_its_successor(store: RedisStore) -> None:
-    from scripts.swarm.tick import _master
+    from unittest.mock import patch
+
+    from scripts.swarm.store import SwarmError
+    from scripts.swarm.tick import _master, _retire_ended
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, 1)
     (lead,) = masters(store)
     runtime.live.discard(lead.name)
-    store.redis.hset(store.key("sw", "retired-process"), lead.name, 2)
+    refused = SwarmError("agent registry kept changing; retirement was not committed")
+    with patch.object(store, "drop_agent", side_effect=refused), pytest.raises(SwarmError):
+        _retire_ended("sw", store, ledger, runtime, ledger.rows, lead, 2)
+    assert [a.name for a in masters(store)] == [lead.name]
     actions = _master("sw", store.config("sw"), store, runtime, 2 + STARTUP_GRACE_MS)
     assert len(runtime.masters) == 2
     successor = runtime.masters[1][0]
