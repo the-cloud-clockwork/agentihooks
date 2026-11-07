@@ -111,7 +111,11 @@ def test_tick_equivalence_runs_characterisation_equivalence_and_load_budget() ->
 
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
     steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
-    [pattern] = [step for step in steps if "scripts.tick_pattern" in step.get("run", "")]
+    [pattern] = [
+        step
+        for step in steps
+        if "scripts.tick_pattern" in step.get("run", "") and "scripts.tick.new_step" not in step.get("run", "")
+    ]
     assert (
         'python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/base" --head "$GITHUB_WORKSPACE/head"'
         in pattern["run"]
