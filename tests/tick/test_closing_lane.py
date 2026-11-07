@@ -115,7 +115,7 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
     monkeypatch.setattr(pool, "running", lambda **kw: real_running(**kw, critical_s=1.0))
     try:
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
-        assert actions[0].startswith("pass ended early: no step stored ")
+        assert not any(action.startswith("pass ended early") for action in actions)
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
         assert tick_heartbeat.read(swarm, "sw") is not None
         outcomes = {record.name: record.outcome for record in closing}

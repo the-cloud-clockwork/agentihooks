@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.feature("swarm-tick-early-end-stamp")
-def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
+def test_a_held_reboot_pass_and_page_relay_still_stamp_the_pass_and_end_it_full(
     env: tuple[Any, Any, Any],  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -44,10 +44,8 @@ def test_a_held_reboot_pass_still_stamps_the_pass_and_names_the_missing_value(
         actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
         assert tick_heartbeat.read(swarm, "sw") is not None
-        assert len(actions) == 1
-        assert actions[0].startswith("pass ended early: no step stored agents, the pass left ")
-        assert "reboot pass" in actions[0]
-        assert "page relay" in actions[0]
+        assert not any(action.startswith("pass ended early") for action in actions)
+        assert early_ends.read(swarm, "sw") == {}
     finally:
         release.set()
         for name in ("reboot pass", "page relay"):
