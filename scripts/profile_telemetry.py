@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -22,11 +23,11 @@ def langfuse_env(profile_dirs: list[tuple[str, Path]], settings_profile: Path | 
     return {}
 
 
-def apply_langfuse_env(settings: dict, profiles: list[tuple[str, Path]], overlay: Path | None) -> None:
+def apply_langfuse_env(settings: dict[str, Any], profiles: list[tuple[str, Path]], overlay: Path | None) -> None:
     settings.setdefault("_agentihooks", {}).setdefault("env", {}).update(langfuse_env(profiles, overlay))
 
 
-def apply_collector_env(settings: dict) -> None:
+def apply_collector_env(settings: dict[str, Any]) -> None:
     env = settings.get("env", {})
     aliases = {
         "OTEL_EXPORTER_OTLP_ENDPOINT": "AGENTIHOOKS_OTLP_ENDPOINT",
