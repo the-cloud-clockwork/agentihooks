@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.694 · 2026-11-07
+
+### 2026-11-07 · 58f463bd4497 · #9900 · @agenticore-app
+
+**Move the prepare function into the place step module**
+
+This change relocates `_prepare` from `scripts.swarm.tick` into `scripts.tick.steps.place`, next to `_spawn`, its sole caller, continuing the tick sweep's module reorganization. The place module now reads tick names via `tick.NAME` so existing patches on `tick.primed`, `tick._room_wait`, `tick._release_admission`, `tick._not_launched`, and `tick._prepare` still work. `scripts.swarm.tick` re-exports `_prepare` and drops imports it no longer needs, while allowlists, type baselines, and tests are updated to reflect the move. This keeps related logic colocated, trims unused imports, and maintains full backward compatibility for tests and callers.
+
+### 2026-11-07 · dac3441ae969 · #9804 · @nestorcolt
+
+**Document the shared tick helpers in the common step module**
+
+This change adds documentation for the shared tick helpers introduced in PR #9708, covering all eleven helpers in `scripts.tick.steps.common`, the re-export in `scripts.swarm.tick`, the late tick import, and the reasoning behind test patching of the tick module, plus guidance for relocating additional helpers through the allowlist and feature map. It also adds a tests reference row, two troubleshooting entries, updates the index to name the new section, and includes a changelog fragment. This closes the documentation gap left after Sweep one of the tick development pattern work, ensuring contributors understand and correctly use the shared helper layer going forward.
+
+### 2026-11-07 · 32f41c8aaab3 · #9841 · @nestorcolt
+
+**Document the tick step scaffold**
+
+This change adds the reference page docs/reference/tick-step-scaffold.md for the `python -m scripts.tick.new_step` scaffold delivered in #9788, documenting the five generated artefacts, the `MODULES` registry, every CLI option with its exact example output, `--check`, refusal cases, limits, tests, and troubleshooting, with every quoted output verified against a real run. It's linked from the reference index, the tick pattern gate page, and the tick engine steps page, so anyone adding or changing a tick step now has one authoritative, verified source describing what the scaffold does and why its outputs look the way they do.
+
 ## v2.17.693 · 2026-11-07
 
 ### 2026-11-07 · cd76f171c962 · #9941 · @agenticore-app
