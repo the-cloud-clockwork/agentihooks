@@ -622,6 +622,7 @@ def _passes(
             scheduled_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
+        redis_grace.cleared(redis_grace.marker(os.environ))
         if once:
             return 0
         _cadence_wait(started)
@@ -635,7 +636,7 @@ def _probe(action: str) -> int:
     try:
         status = getattr(controller_probes, action)(os.environ, connect())
     except (SwarmError, *store_errors()) as exc:
-        if action == "live":
+        if action == "live" and isinstance(exc, (Unreachable, *store_errors())):
             grace = redis_grace.grace_seconds(os.environ)
             down = redis_grace.down_for(path, time())
             if down < grace:

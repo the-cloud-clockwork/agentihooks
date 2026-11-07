@@ -170,6 +170,27 @@ def test_a_single_pass_reports_a_tolerated_redis_error_as_failed(monkeypatch):
     assert controller._passes(None, None, None, True, redis_grace.Outage(30, Clock())) == 1
 
 
+def test_a_pass_that_reaches_redis_clears_a_probe_outage(home, monkeypatch):
+    marker = home / "controller" / "redis-outage"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(str(time.time() - 500))
+    monkeypatch.setattr(controller, "_pass", lambda store, service, proof_swarm: None)
+
+    assert controller._passes(None, None, None, True, redis_grace.Outage(30, Clock())) == 0
+    assert not marker.exists()
+
+
+def test_live_fails_at_once_on_a_swarm_error_other_than_redis(home, monkeypatch, capsys):
+    def misconfigured():
+        raise SwarmError("swarm fixture is not configured")
+
+    monkeypatch.setattr("scripts.swarm.controller.connect", misconfigured)
+
+    assert controller.main(["live"]) == 1
+    assert capsys.readouterr().out == "controller: swarm fixture is not configured\n"
+    assert not (home / "controller" / "redis-outage").exists()
+
+
 def test_startup_retries_a_refused_connect_inside_the_window(monkeypatch):
     attempts = []
 
