@@ -1789,6 +1789,17 @@
         "tests/swarm/test_master_start.py::test_a_hook_beat_from_before_the_launch_does_not_keep_the_master",
         "tests/swarm/test_master_start.py::test_a_master_with_no_launch_time_counts_its_beat_from_its_start"
       ]
+    },
+    {
+      "id": "swarm-tick-panic-holds-spawn",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2402",
+      "behaviour": "While fleet panic is on, the spawn due step spawns no agent and keeps its due mark, and the dispatch seat step runs no dispatcher seat call; once panic clears both spawn again.",
+      "seam": "scripts.tick.steps.observe.step_spawn_due and the dispatch seat step in scripts.tick.steps.masters",
+      "tests": [
+        "tests/tick/steps/test_spawn_due.py::test_spawn_due",
+        "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
     }
   ],
   "unmapped_rules": [
