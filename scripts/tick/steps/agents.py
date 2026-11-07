@@ -143,7 +143,9 @@ def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
 
 def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
     tick.master_retire.forget(store, slug, agent.name)
-    removed = tick.reports.Reports(store.redis).removed(agent, now_ms)
+    removed = tick.reports.Reports(store.redis).removed(agent, now_ms) or tick.retire_watch.reported_gone(
+        store, agent, now_ms
+    )
     if not removed and not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
         tick.retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
         return [f"could not retire {agent.name}, retrying next tick"]
@@ -264,7 +266,9 @@ def _refusal_due(slug: Any, store: Any, rows: Any, agent: Any, observed: Any, no
 
 
 def _free_refused(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
-    if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+    if not tick.retire_watch.retire_unless_gone(
+        store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
+    ):
         return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
     tick.content_refusal.handoff(store, slug, agent, now_ms)
     return [
@@ -278,7 +282,9 @@ def _free_revoked(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     if agent.lane == tick.MASTER:
         tick.revoked_seats.recycle_master(slug, store, ledger, agent, now_ms)
         return [f"recycled master {agent.name} in its seat: {account} was revoked"]
-    if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+    if not tick.retire_watch.retire_unless_gone(
+        store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
+    ):
         return [f"could not retire {agent.name} on revoked {account}, retrying next tick"]
     tick.revoked_seats.worker_handoff(store, slug, agent, now_ms)
     return [
@@ -420,7 +426,9 @@ def _stuck_on_provider(slug: Any, store: Any, agent: Any, observed: Any, exhaust
 
 
 def _free_stuck(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, agent: Any, now_ms: Any) -> list[str]:
-    if not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
+    if not tick.retire_watch.retire_unless_gone(
+        store, runtime, agent, tick.reaper.scratch_homes(slug, agent.task), now_ms
+    ):
         store.put_agent(slug, agent)
         return [f"could not retire {agent.name}, stuck on a provider error, retrying next tick"]
     tick.resume.free_seat(store, slug, agent, now_ms)

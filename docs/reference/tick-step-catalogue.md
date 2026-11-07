@@ -55,7 +55,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | bottleneck remedy | placement | tick | 2 | 60 | ledger state | none | none |
 | preempt | placement | tick | 18 | 60 | drained resume, prerequisite reopen, reap, recover outages | none | none |
 | rank pass | placement | tick | 7 | 60 | drained resume | none | none |
-| spawn | placement | tick | 33 | 60 | launch checks, orphans, overrun pass, preempt, quiet pass, reap, track outages, verify | none | none |
+| spawn | placement | tick | 33 | 60 | launch checks, orphans, overrun pass, preempt, quiet pass, reap, track outages, verify | coordination, inbox, ledger, runtime | swarm-tick-spawn |
 | codex hook order | placement acks | tick | 2 | 60 | sleeping | none | none |
 | collect acks | placement acks | tick | 7 | 60 | drained resume | none | none |
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
