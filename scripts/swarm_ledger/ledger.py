@@ -276,10 +276,13 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
+    """One ledger read or write: in process over the shared database inside a database pass, else to the server."""
     from scripts.tick.adapters import database_ledger
 
-    if database_ledger.serving():
-        return database_call(slug, ops, service)
+    return (database_call if database_ledger.serving() else server_call)(slug, ops, service)
+
+
+def server_call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict:
     if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
