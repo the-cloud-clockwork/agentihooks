@@ -1,5 +1,6 @@
 """The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds
-or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
+or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
+refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
 ledger line since the push, unless any declared wait during fleet panic, a checked wait on another task not yet done,
 or one on the merge of a pull request still open, holds it."""
 
@@ -247,10 +248,8 @@ class PushStop:
                 doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, found)
             )
         if not (owed or progress):
-            if checks:
-                return Decision(reason=CHECKS.format(url=checks, swarm=who.swarm))
             self.settle(store, who)
-            return Decision()
+            return Decision(reason=CHECKS.format(url=checks, swarm=who.swarm)) if checks else Decision()
         if self.waiting(store, who, doc, task, any(tree.dirty for tree in found), frozen):
             return Decision()
         reason = " ".join(
