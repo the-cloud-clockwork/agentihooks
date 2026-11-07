@@ -308,9 +308,8 @@ def _native_layer_path(root: Path, target: str, names: dict[str, str]) -> Path |
 def _load_native_layer(path: Path) -> dict[str, Any]:
     """Load a native settings/MCP layer as a plain dict, JSON or TOML by suffix.
 
-    TOML is parsed to a plain dict rather than a tomlkit document: this value is
-    merged and handed to an adapter, and the adapter owns the comment-preserving
-    round-trip into the live config file.
+    TOML is parsed to a plain dict rather than a tomlkit document: this value is merged and handed to an adapter,
+    and the adapter owns the comment-preserving round-trip into the live config file.
     """
     if path.suffix == ".toml":
         import tomlkit
