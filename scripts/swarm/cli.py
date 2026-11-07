@@ -423,12 +423,11 @@ class _Wrapper:
         self.watching.callback(self.ticks.close)
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the wrapper's probes, health, commands, phases, intent, relay, view and metrics
+        """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
         later site's step may spawn before its hook runs."""
         return {
             "wrapper probes": self._fence,
-            "wrapper health": self._hold,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
             "wrapper intent": self._judge,
@@ -465,11 +464,6 @@ class _Wrapper:
         except Left:
             note_left(self.box, self.seen.values())
             raise
-
-    def _hold(self) -> bool:
-        """Hold the pass's ledger view."""
-        _hold_view(self.beating, self.slug, self.ledger)
-        return True
 
     def _fence(self) -> bool:
         """Fence the runtime the rest of the pass uses."""
@@ -626,6 +620,7 @@ def run_tick(
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
+        _hold_view(beating, slug, ledger)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
