@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -54,6 +55,24 @@ def test_aggregate_sums_hives_and_selects_freshest_slot_quota(redis):
         "observed_at": 95,
     }
     assert rows["codex:one"]["quota"] is None
+
+
+def test_sessions_add_every_harness_of_an_account_under_its_secret_key_spelling(redis: Any) -> None:
+    report(redis, "a", {"claude:one_two": 2, "codex:one_two": 1, "claude:one": 4}, 90)
+    registry.beat(
+        redis,
+        "a",
+        {
+            "heartbeat_at": 100000,
+            "slots": [
+                {"harness": "claude", "account": "one_two", "kind": "subscription", "cap": 6},
+                {"harness": "codex", "account": "one_two", "kind": "subscription", "cap": 6},
+                {"harness": "claude", "account": "one", "kind": "subscription", "cap": 6},
+            ],
+        },
+    )
+
+    assert aggregate.sessions(redis, 100) == {"one-two": 3, "one": 4}
 
 
 def test_nonlocal_consumers_use_aggregate_without_credential_probes(redis, monkeypatch):

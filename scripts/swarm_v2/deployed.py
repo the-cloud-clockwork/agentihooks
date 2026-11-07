@@ -297,9 +297,8 @@ def _held(capacity: AccountCapacity) -> dict[str, int]:
     held: dict[str, int] = {}
     for account, count in fleet_held(capacity.store, now).items():
         held[account_key(account)] = held.get(account_key(account), 0) + count
-    for name, row in aggregate.read(capacity.store.redis, now / 1000).items():
-        account = name.partition(":")[2]
-        held[account] = max(held.get(account, 0), row["sessions"])
+    for account, count in aggregate.sessions(getattr(capacity.store, "redis"), now / 1000).items():
+        held[account] = max(held.get(account, 0), count)
     return held
 
 
