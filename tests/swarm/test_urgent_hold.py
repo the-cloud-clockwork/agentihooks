@@ -103,6 +103,25 @@ def test_stacking_on_a_live_dependency_is_claimable_but_parked_work_waits(store)
     assert rows["frozen"]["why"] == "the freeze on task title frozen holds it"
 
 
+def test_a_blocked_urgent_task_is_held_with_its_claimant_block_and_raises_no_finding(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = doc([task("stuck", rank="urgent", state="blocked"), task("calm", state="blocked")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
+    rows = urgent_hold.read(store, SLUG)["tasks"]
+    assert rows == {"stuck": {"since": 0, "why": "its claimant blocked it", "title": "title stuck"}}
+    assert urgent_hold.findings(store, SLUG) == []
+
+
+def test_an_out_of_scope_urgent_task_is_never_held(store):
+    from scripts.swarm.health import urgent_hold
+
+    found = doc([task("gone", rank="urgent", out_of_scope=True), task("stuck", rank="urgent", state="blocked")])
+    urgent_hold.observe(store, SLUG, found, 0)
+    assert list(urgent_hold.read(store, SLUG)["tasks"]) == ["stuck"]
+
+
 def test_a_task_in_a_waiting_phase_is_held_by_its_phase():
     assert hold(doc([task("a", phase="p2")]), "a") == "its phase later is waiting on an earlier phase"
 

@@ -313,3 +313,179 @@ def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatc
     state = _pass(calm, box={tasks.RAISED: RuntimeError("earlier")})
     assert _run(place.PLACEMENT, _tick(calm), state, monkeypatch) == []
     assert calm == []
+
+
+SPAWN_CLUSTER = (
+    "_spawn",
+    "_Pass",
+    "_pass_reclaim",
+    "Launch",
+    "_launch",
+    "_launch_all",
+    "_retry_successor",
+    "_reported",
+    "_spawn_order",
+    "_ranked",
+    "_block_unresolved",
+    "_unresolved",
+    "_lives_spent",
+    "_claim_cap",
+    "_free_seat",
+    "primed",
+    "placed_record",
+    "_LaunchClock",
+    "_launch_room",
+    "_steer",
+    "_steered_off",
+    "_record_spawn_failure",
+    "_owner_hold",
+    "_placement_pass",
+    "_spawn_stop",
+    "_host_full",
+    "host_spent",
+    "_spend_host",
+    "_spend_local",
+    "_release_hive_launch",
+    "_hold",
+    "spawn_holds",
+    "_held_for_master",
+)
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize("name", SPAWN_CLUSTER)
+def test_tick_reexports_the_moved_spawn_name(name: str) -> None:
+    from scripts.swarm import tick
+
+    moved = getattr(place, name)
+    assert moved.__module__ == "scripts.tick.steps.place"
+    assert getattr(tick, name) is moved
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_tick_module_holds_no_spawn_definition() -> None:
+    from pathlib import Path
+
+    from scripts.swarm import tick
+
+    text = Path(str(tick.__file__)).read_text(encoding="utf-8")
+    defined = [
+        name
+        for name in SPAWN_CLUSTER
+        if any(f"\n{kind} {name}{end}" in text for kind in ("def", "class") for end in "(:")
+    ]
+    assert defined == []
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_spawn_step_declares_its_ports_feature_and_lane() -> None:
+    spawn = next(step for step in place.STEPS if step.name == "spawn")
+    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox"})
+    assert (spawn.feature, spawn.lane, spawn.group) == ("swarm-tick-spawn", CallStep.lane, place.PLACEMENT)
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize(("owned", "expected"), [({"t1"}, "task t1 retains its live owner"), ({"t2"}, "")])
+def test_moved_spawn_code_reaches_tick_seams_through_the_tick_module(
+    monkeypatch: pytest.MonkeyPatch, owned: set[str], expected: str
+) -> None:
+    from scripts.swarm import tick
+
+    released: list[tuple[str, str, dict[str, str]]] = []
+    monkeypatch.setattr(tick, "_owned_tasks", lambda slug, store: owned if (slug, store) == ("sw", "store") else set())
+    monkeypatch.setattr(tick, "_release_admission", lambda slug, runtime, task: released.append((slug, runtime, task)))
+    task = {"id": "t1"}
+    assert place._owner_hold("sw", "store", "runtime", task) == expected
+    assert released == ([("sw", "runtime", task)] if expected else [])
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_free_seat_comes_from_the_tick_seat_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    monkeypatch.setattr(tick, "seat_address", lambda slug, label: f"{label}@{slug}")
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "") == "eng-2@sw"
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-1@sw") == "eng-2@sw"
+    assert place._free_seat("sw", "eng", {"eng-1@sw"}, "eng-7@sw") == "eng-7@sw"
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_free_seat_looks_no_further_than_one_seat_past_the_taken_ones(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    monkeypatch.setattr(tick, "seat_address", lambda slug, label: "x" if label in ("eng-1", "eng-2") else label)
+    with pytest.raises(StopIteration):
+        place._free_seat("sw", "eng", {"x"}, "")
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_pass_reclaim_reads_remote_heads_once_and_binds_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    calls: list[str] = []
+    monkeypatch.setattr(tick, "remote_heads", lambda repo: calls.append(repo) or {"repo": repo})
+    monkeypatch.setattr(tick, "reclaim", lambda *args, **kwargs: (args, kwargs))
+    run = SimpleNamespace(memo={}, config=SimpleNamespace(repo="org/repo"))
+    first = place._pass_reclaim(run)
+    second = place._pass_reclaim(run)
+    assert first.func is tick.reclaim
+    assert first.keywords == {"heads": {"repo": "org/repo"}}
+    assert second.keywords == {"heads": {"repo": "org/repo"}}
+    assert first("task") == (("task",), {"heads": {"repo": "org/repo"}})
+    assert run.memo == {"heads": {"repo": "org/repo"}}
+    assert calls == ["org/repo"]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_pass_reclaim_reuses_heads_the_pass_already_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    monkeypatch.setattr(tick, "remote_heads", lambda repo: pytest.fail("heads read twice"))
+    run = SimpleNamespace(memo={"heads": {"cached": "h"}}, config=SimpleNamespace(repo="org/repo"))
+    assert place._pass_reclaim(run).keywords == {"heads": {"cached": "h"}}
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_legacy_launch_is_admitted_with_the_pass_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+    from scripts.swarm_v2.runtime import codex
+
+    admitted: list[tuple[Any, ...]] = []
+    placed = SimpleNamespace(launch_job=None)
+    runtime = SimpleNamespace(spawn=lambda config, lane, name, primed: placed)
+    monkeypatch.setattr(tick, "placed_record", lambda record, where: ("placed", record, where))
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args) or "admitted")
+    record = SimpleNamespace(lane="eng", name="eng@1")
+    run = SimpleNamespace(runtime=runtime, config="config", store="store", slug="sw")
+    launch = SimpleNamespace(record=record, primed={})
+    assert place._launch(run, launch) == (placed, "admitted")
+    assert admitted == [("store", "sw", ("placed", record, placed), runtime)]
+
+
+class _ReadyRead(Exception):
+    """Stops the spawn order once it has asked the tick for the ready tasks of a lane."""
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import capacity, tick
+
+    asked: list[tuple[Any, ...]] = []
+
+    def ready(*args: Any) -> list[Any]:
+        asked.append(args)
+        raise _ReadyRead
+
+    monkeypatch.setattr(capacity, "read", lambda store, slug: "decision")
+    monkeypatch.setattr(capacity, "caps", lambda decision, config: {"eng": 1})
+    monkeypatch.setattr(place.dispatcher, "claim_key", lambda config, doc: "key")
+    monkeypatch.setattr(place.preempt, "yielding", lambda store, slug, doc, key: "dispatched")
+    monkeypatch.setattr(tick, "claim_view", lambda slug, store, rows, doc, dispatched: "claims")
+    monkeypatch.setattr(tick, "_running", lambda agents, rows, lane: [])
+    monkeypatch.setattr(tick, "ready_in_order", ready)
+    rows, doc = {"t1": {"id": "t1"}}, {"tasks": {}}
+    config: Any = SimpleNamespace()
+    store: Any = "store"
+    with pytest.raises(_ReadyRead):
+        place._spawn_order("sw", config, store, [], rows, doc, SimpleNamespace())
+    assert asked == [("sw", "store", rows, doc, "eng", "dispatched", "claims")]

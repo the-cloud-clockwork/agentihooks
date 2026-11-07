@@ -1,4 +1,7 @@
-"""Urgent tasks the tick cannot claim: each tick records why, and a hold past ten minutes is a health finding."""
+"""Urgent tasks the tick cannot claim: each tick records why, and a hold past ten minutes is a health finding.
+
+Each tick also records the urgent tasks under claim with their claimant, which the panic call reads for quiet claims.
+"""
 
 import json
 from typing import Any
@@ -11,6 +14,9 @@ from scripts.swarm_ledger.repository import hierarchy
 HOLD_MS = 600_000
 KEY = "urgent-hold"
 RELEASE = "it waits on a release newer than {after_release}"
+BLOCKED = "blocked"
+BLOCKED_WHY = "its claimant blocked it"
+CLAIMED = "claimed"
 
 
 def read(store, slug: str) -> dict:
@@ -25,17 +31,32 @@ def observe(store: RedisStore, slug: str, doc: dict[str, Any], at: int) -> dict[
     rows = {t["id"]: t for t in doc["tasks"]}
     held = {}
     for task in rows.values():
-        if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
+        if task.get("rank") != "urgent" or task.get("state") not in ("open", BLOCKED) or task.get("out_of_scope"):
             continue
-        why = claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
+        why = (
+            BLOCKED_WHY
+            if task["state"] == BLOCKED
+            else claim_hold.urgent(task, rows, doc, graph, fix) or (not released(task) and RELEASE.format(**task))
+        )
         if task.get("merged_into"):
             continue
         previous = before.get(task["id"], {})
         since = previous["since"] if previous.get("why") == why else at
         held[task["id"]] = {"since": since, "why": why, "title": task.get("title") or task["id"]}
+    state: dict[str, Any] = {"at": at, "tasks": held}
+    if claimed := _claimed(rows):
+        state[CLAIMED] = claimed
     timing.keep()
-    store.redis.set(store.key(slug, KEY), json.dumps({"at": at, "tasks": held}))
+    store.redis.set(store.key(slug, KEY), json.dumps(state))
     return held
+
+
+def _claimed(rows: dict[str, dict[str, Any]]) -> dict[str, dict[str, str]]:
+    return {
+        task_id: {"title": task.get("title") or task_id, "claimed_by": task.get("claimed_by", ""), "state": CLAIMED}
+        for task_id, task in rows.items()
+        if task.get("rank") == "urgent" and task.get("state") == CLAIMED and not task.get("out_of_scope")
+    }
 
 
 def findings(store, slug: str) -> list[Finding]:
