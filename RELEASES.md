@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.688 · 2026-11-07
+
+### 2026-11-07 · 7bc0366b1925 · #9869 · @agenticore-app
+
+**Move the claim order and launch records into the claims step module**
+
+This change relocates the claim ordering logic and launch record types out of the monolithic tick module into a dedicated `scripts.tick.steps.claims` module, with `scripts.swarm.tick` re-exporting everything so existing patches and seams keep working. It was split off from a larger sweep because the mutation gate rejected the full change as too large for one review. The move shrinks the tick module's type-check surface substantially (1495 to 1274 baseline) and lets the new claims module pass strict checks cleanly, improving maintainability without altering behavior. Follow-up parts (#9891 and others) continue the same decomposition.
+
 ## v2.17.687 · 2026-11-07
 
 ### 2026-11-07 · 859e0ed7c833 · #9930 · @agenticore-app
