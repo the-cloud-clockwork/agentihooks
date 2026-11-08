@@ -2705,3 +2705,53 @@ def test_a_probe_refreshes_claude_and_codex_at_the_given_time(monkeypatch):
     env = {"K": "v"}
     assert capacity.probe(env, 7.0) == ["c", "x"]
     assert calls == [("claude", env, 7.0, True), ("codex", env, 7.0, True)]
+
+
+def test_live_inputs_leave_out_ready_work_with_a_fresh_placement_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0))
+    ledger = FakeLedger([{"id": "e0"}, {"id": "e1"}])
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [])
+    placement_waits.observe(store, "sw", "eng", "e0", "no hive for eng has room: h1 disk", 1_000)
+    fresh = capacity.live_inputs("sw", store, ledger, {}, 1_000 + placement_waits.FRESH_MS - 1)
+    expired = capacity.live_inputs("sw", store, ledger, {}, 1_000 + placement_waits.FRESH_MS)
+    assert fresh.demand == {"eng": 1, "ci": 0, "plan": 0}
+    assert expired.demand == {"eng": 2, "ci": 0, "plan": 0}
+
+
+def test_the_tick_host_is_the_room_the_tick_last_granted() -> None:
+    granted = {"room": 6, "reason": "quota pods", "limit": "quota pods", "held": False, "granted_at": 4_000}
+    inputs = replace(capacity.fixture_inputs(_readings()), previous={"host": granted})
+    assert capacity.tick_host(inputs) == granted
+    assert capacity.tick_host(replace(inputs, previous={"host": {**granted, "room": None}})) is None
+    assert capacity.tick_host(replace(inputs, previous={"host": {"room": 6}})) is None
+    assert capacity.tick_host(replace(inputs, previous={})) is None
+
+
+def test_a_legacy_placement_refusal_without_seen_at_is_fresh_from_its_start() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive for eng has room", "started_at": 1_000}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}, {"id": "e1"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS - 1)
+    expired = capacity.placement_ready(store, "sw", ready, 1_000 + placement_waits.FRESH_MS)
+    assert fresh == (
+        {"eng": [{"id": "e1"}]},
+        ["capacity skipped eng task e0: fresh placement refusal: no hive for eng has room"],
+    )
+    assert expired == (ready, [])
+
+
+def test_a_placement_refusal_seen_again_stays_fresh_from_its_last_sighting() -> None:
+    from scripts.hive import placement_waits
+
+    store = _store()
+    row = {"lane": "eng", "reason": "no hive", "started_at": 0, "seen_at": placement_waits.FRESH_MS}
+    store.redis.hset(store.key("sw", placement_waits.WAITS), "e0", json.dumps(row))
+    ready = {"eng": [{"id": "e0"}]}
+    fresh = capacity.placement_ready(store, "sw", ready, 2 * placement_waits.FRESH_MS - 1)
+    assert fresh == ({"eng": []}, ["capacity skipped eng task e0: fresh placement refusal: no hive"])

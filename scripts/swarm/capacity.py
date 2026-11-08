@@ -494,11 +494,13 @@ def ready_work(
     return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 
-def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
+def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:
+    """The tick's own scale inputs: ready work less fresh placement refusals, quota without a refresh, live agents."""
     from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
+    ready, _ = placement_ready(store, slug, ready, now_ms)
     observations = accounts(environ, now_ms / 1000, refresh=False)
     thresholds = quota_handoff.Thresholds.from_env(environ)
     warned = {
@@ -513,6 +515,12 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
 
         host = deployed.worker_host(environ, slug)
     return ScaleInputs(observations, agents, demand, host, read(store, slug), warned, spent, now_ms)
+
+
+def tick_host(inputs: ScaleInputs) -> dict[str, Any] | None:
+    """The host room the tick last granted, so a preview autoscales on the room the tick spawns against."""
+    stored = inputs.previous.get("host") or {}
+    return stored if stored.get("room") is not None and "granted_at" in stored else None
 
 
 def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:
@@ -650,13 +658,17 @@ def placement_ready(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
-    refused = placement_waits.read(store, slug)
+    refused: dict[str, dict[str, Any]] = placement_waits.read(store, slug)
     eligible, actions = {}, []
     for lane, tasks in ready.items():
         eligible[lane] = []
         for task in tasks:
             wait = refused.get(task["id"])
-            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+            if (
+                wait
+                and wait["lane"] == lane
+                and now_ms - wait.get("seen_at", wait["started_at"]) < placement_waits.FRESH_MS
+            ):
                 actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
             else:
                 eligible[lane].append(task)
