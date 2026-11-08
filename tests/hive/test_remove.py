@@ -366,17 +366,17 @@ def test_remove_lists_exactly_the_manifests_hive_create_wrote(label: str) -> Non
 
 def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
     old = [
-        "k8s/argocd/apps/agentihooks-hive-anton-2.yaml",
         "k8s/manifests/agentihooks-hive-anton-2/hive.yaml",
+        "k8s/argocd/apps/agentihooks-hive-anton-2.yaml",
         "k8s/values-overlays/agentihooks-hive-anton-2/values.yaml",
     ]
-    run = Run(tree=[*TREE, *old[::2]])
+    run = Run(tree=[*TREE, *old[1:]])
 
     lines = remove.unmanifest(remove.Plan("m", "anton-2", "k8s/agentihooks-hive-anton-2", dry_run=True), run)
 
     assert lines == [
         "would open a pull request into the-cloud-clockwork/antoncore dev deleting "
-        f"{', '.join([old[1], old[0], old[2]])} and merge it once its checks pass"
+        f"{', '.join(old)} and merge it once its checks pass"
     ]
 
 
