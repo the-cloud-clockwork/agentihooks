@@ -15,6 +15,7 @@ SYNC_ORDER = "sync requested"
 EVERYONE = "swarm"
 SENT_TTL_S = 30 * 24 * 3600
 ENTRY_LISTS = ("tasks", "phases", "questions", "followups", "notes")
+PLAN_EVENT_TARGETS = ("plans/", "slices/")
 MASTER_RULE = "Answer the operator in your next turn: reply to this message saying what you will do."
 ANSWER_RULE = (
     "Answer the operator in your next turn: reply to this message saying what you will do. If the work is not "
@@ -92,6 +93,8 @@ def relay(inbox, store, slug, doc, events, line):
     held = list(masters.held(inbox.redis, slug, agents))
     for event in events:
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
+            continue
+        if event.get("kind") == "added" and event.get("target", "").startswith(PLAN_EVENT_TARGETS):
             continue
         ref = write_ref(slug, event)
         mark = inbox.key("ledger-sent", ref)
