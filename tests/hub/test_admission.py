@@ -334,21 +334,30 @@ def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subjec
 
 
 @pytest.mark.feature("hive-drain-events-admission")
-@pytest.mark.parametrize("draining", ["yes", "no"])
-def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, draining, capsys):
+def test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining(rig, monkeypatch, capsys):
     from scripts.hive import registry
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
     registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
-    registry.update(rig.store.redis, "hive-a", [f"draining={draining}"])
+    registry.update(rig.store.redis, "hive-a", ["draining=no"])
 
     admitted = rig.admitter.admit(SLUG, ask())
 
-    if draining == "no":
-        assert admitted is not None
-        assert admitted["hive"] == "hive-a"
-        assert capsys.readouterr().err == ""
-        return
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hive-drain-events-admission")
+def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, capsys):
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, "hive-a", ["draining=yes"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
     assert admitted is None
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []

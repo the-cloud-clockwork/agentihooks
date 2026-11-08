@@ -17,7 +17,8 @@
       "behaviour": "The hub refuses an events admission request from a hive whose registry record is draining, such as a hive stopping for a release, before any claim, execution, seat or ledger write.",
       "seam": "Admission.admit for a hive spoke request",
       "tests": [
-        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release"
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
       ]
     },
     {
