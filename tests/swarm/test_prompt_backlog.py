@@ -100,9 +100,8 @@ def test_the_controller_journal_is_read_by_default(store):
 def test_the_tick_samples_the_controller_journal(stalled):
     store, ledger, runtime, clock, error = stalled
     journal(controller_home(), 2, since=clock[0] // 1000)
-    with pytest.raises(RuntimeError) as caught:
-        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert caught.value is error
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised RuntimeError: {error}"]
     assert prompt_backlog.read(store, "sw") == [2]
 
 

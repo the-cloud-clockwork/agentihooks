@@ -354,3 +354,59 @@ def test_a_held_call_after_a_held_exception_does_not_run(monkeypatch: pytest.Mon
 
 def test_an_empty_box_raises_nothing() -> None:
     assert host.raise_held({}) is None
+
+
+def test_a_viewed_step_without_a_view_skips_and_says_so(capsys: pytest.CaptureFixture[str]) -> None:
+    ran: list[object] = []
+    step = host.viewed("stall watch", lambda cli, get: ran.append(cli) or ["ran"])
+    line = "skipped stall watch: no step stored the tick view this pass"
+    assert step("cli", {"view": None}.get) == [line]
+    assert ran == []
+    assert capsys.readouterr().err == f"{line}\n"
+
+
+def test_a_viewed_step_with_a_view_runs_its_call(capsys: pytest.CaptureFixture[str]) -> None:
+    step = host.viewed("stall watch", lambda cli, get: [cli, get("view")])
+    assert step("cli", {"view": "lookup"}.get) == ["cli", "lookup"]
+    assert capsys.readouterr().err == ""
+
+
+def test_a_failed_pass_logs_the_error_and_records_the_pass_as_an_error(capsys: pytest.CaptureFixture[str]) -> None:
+    record: dict[str, Any] = {"outcome": "success"}
+    token = timing.PASS.set(record)
+    try:
+        assert host.failed_pass(RuntimeError("boom")) == ["pass failed: a step raised RuntimeError: boom"]
+    finally:
+        timing.PASS.reset(token)
+    assert record == {"outcome": "error"}
+    assert capsys.readouterr().err.endswith("RuntimeError: boom\n")
+
+
+def test_a_failed_pass_outside_a_pass_record_still_returns_its_line() -> None:
+    assert host.failed_pass(ValueError("x")) == ["pass failed: a step raised ValueError: x"]
+
+
+def test_a_held_failure_ends_the_pass_and_an_unheld_one_raises_again() -> None:
+    held, other = RuntimeError("held"), RuntimeError("other")
+    assert host.held_failure(held, {}, {"raised": held}) == ["pass failed: a step raised RuntimeError: held"]
+    with pytest.raises(RuntimeError) as raised:
+        host.held_failure(other, {"raised": held})
+    assert raised.value is other
+
+
+def test_a_held_redis_error_raises_again_for_the_outage_guard() -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    dropped = RedisConnectionError("dropped")
+    with pytest.raises(RedisConnectionError) as raised:
+        host.held_failure(dropped, {"raised": dropped})
+    assert raised.value is dropped
+    with pytest.raises(RedisConnectionError):
+        host.end_held({"raised": dropped})
+
+
+def test_end_held_returns_nothing_raises_a_stop_and_fails_an_error() -> None:
+    assert host.end_held({}) == []
+    with pytest.raises(SystemExit):
+        host.end_held({"raised": SystemExit(2)})
+    assert host.end_held({"raised": KeyError("k")}) == ["pass failed: a step raised KeyError: 'k'"]

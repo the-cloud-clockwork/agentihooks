@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/host.py:scripts.tick.steps.host.x_failed_pass:fe01feb46874b9fb0057c96d9dbd9b305b8559eae70982e1c2274c43ee1c2157": {
+    "reader": "standards_reader",
+    "reason": "traceback.print_exception resolves file=None to the current sys.stderr at call time, so file=None and omitting the file argument print the same output as file=sys.stderr; the standards reader confirmed both as equivalent."
+  }
+}
