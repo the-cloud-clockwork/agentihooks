@@ -1,4 +1,5 @@
 import os
+import subprocess
 import uuid
 
 import pytest
@@ -78,6 +79,29 @@ def test_a_postgres_ledger_write_advances_its_revision_and_records_its_events():
     assert [event for event in shared.export_document(slug)["_meta"]["events"] if event["rev"] > created]
     with pytest.raises(sqlite.Missing):
         shared.export_document(fresh("missing"))
+
+
+def test_a_ledger_write_succeeds_after_the_database_restarts() -> None:
+    slug = fresh("restart")
+    shared = postgres.PostgresLedgerRepository(URL)
+    assert shared.create(slug, CONTENT)
+    subprocess.run(["docker", "restart", "writer-lock-postgres"], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            "writer-lock-postgres",
+            "sh",
+            "-c",
+            "until pg_isready -h 127.0.0.1 -p 5432 -d ledger; do sleep 0.1; done",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    claimed, rejected = shared.apply_ops(slug, ops=[CLAIM])
+    assert not rejected
+    assert claimed["tasks"][0]["state"] == "claimed"
 
 
 def test_the_postgres_relay_journal_holds_each_revision_once_and_drops_it():

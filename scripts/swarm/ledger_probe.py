@@ -3,6 +3,7 @@ alert with its deciding samples; latency recovery needs two passes below the low
 
 import http.client
 import json
+import sqlite3
 import sys
 import time
 import urllib.error
@@ -21,7 +22,7 @@ SENDER = "swarm"
 TEXT_KEPT = 700
 TIMED_OUT, NO_ANSWER, SERVER_ERROR = "timed out", "gave no answer", "answered with a server error"
 REFUSED_5XX = "server refused: 5"
-FAILED = (OSError, ValueError, SwarmError, SystemExit, http.client.HTTPException)
+FAILED = (OSError, ValueError, SwarmError, SystemExit, http.client.HTTPException, sqlite3.DatabaseError)
 RAISED = (
     "The ledger server is slow: two swarm passes in a row took {took}. Server {cpu}, {started}. Newest on dev{newest}."
 )
