@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/cli.py:scripts.ledger_knowledge.cli.x_main:29d6e4a9b55928c0e264264ae43ca0e2a9550ebaab522590b2ec86c395f70b45": {
+    "reader": "Standards",
+    "reason": "json.dumps tests ensure_ascii only for truth, so None and False print the same text."
+  }
+}
