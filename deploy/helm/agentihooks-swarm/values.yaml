@@ -307,8 +307,10 @@ workers:
     namespace: default
     leaseName: agentihooks-hive-rollout
     drainSeconds: 1200
-    # Optional pod stamp; each new value rolls the hives one at a time. Release hives leave it unset and roll on the chart version.
+    # Optional pod stamp; each new value rolls the hives one at a time. Unset, a worker on the release tag stamps imageDigest; any other tag stays pinned.
     release: ""
+    # Written by the release chart build: the digest the hive worker release tag names, so a hive on that tag rolls each time it moves.
+    imageDigest: ""
   excluded: [master]
   # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
   masterSwarms: []
