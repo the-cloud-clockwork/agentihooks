@@ -2118,7 +2118,11 @@
         "tests/swarm/test_workflow_runner.py::test_bad_task_does_not_prevent_the_next_task",
         "tests/swarm/test_workflow_runner.py::test_filtered_stages_use_judge_including_the_head",
         "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion",
-        "tests/tick/steps/test_workflow_runner.py::test_tick_passes_claimed_snapshot_to_runner"
+        "tests/tick/steps/test_workflow_runner.py::test_tick_passes_claimed_snapshot_to_runner",
+        "tests/swarm/test_workflow_job.py::test_background_job_holds_workspace_lock_until_child_finishes",
+        "tests/swarm/test_workflow_job.py::test_failed_spawn_releases_workspace_lock",
+        "tests/swarm/test_workflow_job.py::test_worker_advances_once_and_releases_lock_on_success_or_failure",
+        "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline"
       ]
     }
   ],

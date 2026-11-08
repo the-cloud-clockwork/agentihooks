@@ -16,7 +16,7 @@ def test_workflow_runner() -> None:
         "wrapper phases",
         "slow",
         "swarm-workflow-runner",
-        frozenset({"host", "inbox", "llm"}),
+        frozenset({"host"}),
     )
 
 
@@ -53,7 +53,7 @@ def test_tick_passes_claimed_snapshot_to_runner() -> None:
     assert len(tools.host.calls) == 1
     assert tools.host.calls[0].args == ({"job": "workflow", "task": task, "repo": "/proof/repo"},)
     assert tools.host.calls[0].deadline is deadline
-    assert found.needs == frozenset({"planning and phase pass", "ledger state"})
+    assert found.needs == frozenset({"planning and phase pass", "ledger state", "config load"})
     assert found.reads == pass_domains("doc", "config")
     values["deadline"] = Deadline.after(-1)
     with pytest.raises(TimeoutError, match="tool deadline expired"):
