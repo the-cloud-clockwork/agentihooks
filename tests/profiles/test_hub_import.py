@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from scripts.profiles.hub_import import import_hub
 
 pytestmark = pytest.mark.feature("hub-import-core")
@@ -53,15 +52,11 @@ def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) 
         "claude": {"model": "opus", "effort": "high"},
     }
     for relative in ("CLAUDE.md", ".claude/skills/render/SKILL.md", ".claude/rules/render.md"):
-        assert (profile / relative).read_bytes() == (
-            hub / "agents/diagram/package" / relative
-        ).read_bytes()
+        assert (profile / relative).read_bytes() == (hub / "agents/diagram/package" / relative).read_bytes()
     assert not (profile / "command.yml").exists()
 
 
-def test_settings_remove_absolute_paths_but_keep_environment_references(
-    hub: Path, tmp_path: Path
-) -> None:
+def test_settings_remove_absolute_paths_but_keep_environment_references(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     import_hub(hub, out, False)
     settings = json.loads((out / "profiles/diagram/.claude/settings.overrides.json").read_text())
