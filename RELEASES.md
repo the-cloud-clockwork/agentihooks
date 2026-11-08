@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.736 · 2026-11-08
+
+### 2026-11-08 · cbd9f747d01c · #10122 · @agenticore-app
+
+**Print the failed worker build log tail in the smoke job log**
+
+This change makes smoke.sh print the last 40 lines of the Docker build log to stderr whenever a `docker build` step fails, instead of just reporting the exit code. It directly addresses the dev outage where the job log showed only a generic failure line while the real cause, an HTTP 504 during tool downloads, was buried in an uploaded artifact. With the log tail surfaced in the job output itself, future transient or upstream failures in the worker image rebuild proof will be diagnosable immediately, without needing to dig through separate build log uploads.
+
+### 2026-11-08 · c032d047edb5 · #10145 · @nestorcolt
+
+**Reconnect every shared NATS bus after a drop and log lifecycle events**
+
+This change fixes a shared NATS bus bug where connections, after their initial bounded connect succeeded, would never reconnect once dropped, leaving controllers, hubs or webhooks silently running without the bus until manually restarted. Now, after the first successful connect, the bus enables unlimited automatic reconnection, restores subscriptions, and logs disconnect and reconnect events through the scripts.events.nats logger, so a bus outage self-heals and is observable without requiring a pod restart. The original fast-fail behavior for an unreachable bus on first connect is preserved.
+
 ## v2.17.735 · 2026-11-08
 
 ### 2026-11-08 · e095530d8f39 · #10102 · @agenticore-app
