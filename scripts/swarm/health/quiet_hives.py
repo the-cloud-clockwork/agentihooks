@@ -13,9 +13,9 @@ def findings(redis: Any, now_ms: int) -> list[Finding]:
     """Return a finding for each non ephemeral hive whose last heartbeat is older than the registry quiet window."""
     found: list[Finding] = []
     for record in registry.hives(redis):
-        if record["ephemeral"] == "yes" or not registry.quiet(record, now_ms):
+        if record.get("ephemeral") == "yes" or not registry.quiet(record, now_ms):
             continue
-        minutes = (now_ms - record["heartbeat_at"]) // MINUTE_MS
+        minutes: int = (now_ms - record["heartbeat_at"]) // MINUTE_MS
         found.append(
             Finding(
                 KIND,

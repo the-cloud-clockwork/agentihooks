@@ -94,7 +94,9 @@ def verdict_store(store, slug):
     return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
 
 
-def findings(store, slug, config, tasks, events, view=None):
+def findings(
+    store: Any, slug: str, config: Any, tasks: list[dict[str, Any]], events: list[Any], view: Any = None
+) -> list[Any]:
     agents, limits = store.agents(slug), health.limits()
     if view is None:
         pending = checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST)

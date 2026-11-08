@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
-from scripts.swarm.keyspace import ROOT
+from scripts.hive import auth, create, create_github, machine, nats_grant, registry
+from scripts.hive.purge import forget, hosted
+from scripts.hive.purge import keys as _keys
+from scripts.hive.purge import recorded as _recorded
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -19,7 +21,6 @@ if TYPE_CHECKING:
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import AgentRecord, RedisStore
 
-ENDED = ("finished", "ended")
 POLL_S = 15
 SENDER = "operator"
 ORDER = (
@@ -103,15 +104,6 @@ def _sole(redis: "Redis", hive: str, name: str) -> str:
                 "could be the other hive's; pass --label"
             )
     return hive
-
-
-def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [
-        (slug, agent)
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-        if agent.hive == hive and agent.state not in ENDED
-    ]
 
 
 def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
@@ -254,34 +246,6 @@ def _created(state: Path) -> str | None:
         return json.loads(state.read_text()).get("name")
     except (OSError, ValueError, AttributeError):
         return None
-
-
-def _keys(redis: "Redis", hive: str) -> list[str]:
-    return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
-
-
-def _recorded(redis: "Redis", hive: str) -> bool:
-    return hive_state.read(hive_state.records(redis, hive), hive) is not None
-
-
-def forget(redis: "Redis", hive: str) -> list[str]:
-    keys = _keys(redis, hive)
-    prefix = f"{registry.key(hive)}:swarm:"
-    histories = {
-        f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
-        for source in keys
-        if source.startswith(prefix) and ":wait-history:" in source
-    }
-    with redis.pipeline() as pipe:
-        for target, history in histories.items():
-            pipe.hset(target, mapping=history)
-        pipe.delete(*keys)
-        deleted = pipe.execute()[-1]
-    if _recorded(redis, hive):
-        registry.forget(redis, hive)
-        deleted += 1
-    hive_state.indexed(redis, hive, False)
-    return [f"deleted {deleted} registry records of {hive}"]
 
 
 def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> list[str]:

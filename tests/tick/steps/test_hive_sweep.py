@@ -5,8 +5,9 @@ from importlib import import_module
 
 import pytest
 
-from scripts.hive import registry, sweep
+from scripts.hive import hive_state, purge, registry, sweep
 from scripts.swarm.health import quiet_hives
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.tick import registry as tick_registry
 
@@ -63,7 +64,7 @@ def test_a_quiet_ephemeral_hive_is_drained_and_removed_after_the_window(store: R
 def test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept(store: RedisStore) -> None:
     """The sweep marks the hive draining with its owner and reason, then removes it once its agents end."""
     _hive(store, "proof", "yes", QUIET_AT)
-    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", hive="proof", state="working")
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="proof", state="working")
     store.put_agent("sw", agent)
     assert sweep.sweep(store, NOW_MS) == [
         "drained quiet ephemeral hive proof",
@@ -86,6 +87,39 @@ def test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none(store
     found = quiet_hives.findings(store.redis, NOW_MS)
     assert [(f.id, f.measure, f.threshold) for f in found] == [("quiet-hive/lasting", 60, quiet_hives.THRESHOLD)]
     assert found[0].summary == "Hive lasting has sent no heartbeat for 60 minutes"
+
+
+@pytest.mark.feature("hive-quiet-sweep")
+def test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories(store: RedisStore) -> None:
+    """Purge counts the hash, the keys under it and the state record, unindexes the hive and moves wait histories."""
+    _hive(store, "proof", "yes", QUIET_AT)
+    source = f"{registry.key('proof')}:swarm:sw:wait-history:engineer@1"
+    store.redis.hset(source, mapping={"1": "proof"})
+    store.redis.set(f"{registry.key('other')}:sessions", "{}")
+    assert purge.keys(store.redis, "proof") == [
+        registry.key("proof"),
+        *store.redis.scan_iter(f"{registry.key('proof')}:*"),
+    ]
+    assert purge.recorded(store.redis, "proof") is True
+    held = sum(store.redis.exists(key) for key in purge.keys(store.redis, "proof"))
+    assert held >= 2
+    assert purge.forget(store.redis, "proof") == [f"deleted {held + 1} registry records of proof"]
+    assert store.redis.hgetall(f"{ROOT}:swarm:sw:wait-history:engineer@1") == {"1": "proof"}
+    assert purge.recorded(store.redis, "proof") is False
+    assert "proof" not in hive_state.index(store.redis)
+    assert store.redis.exists(f"{registry.key('other')}:sessions") == 1
+
+
+@pytest.mark.feature("hive-quiet-sweep")
+def test_purge_counts_only_agents_still_running_on_the_hive(store: RedisStore) -> None:
+    """Hosted lists the hive's working agents and leaves finished, ended and elsewhere agents out."""
+    for n, (hive, state) in enumerate(
+        (("proof", "working"), ("proof", "finished"), ("proof", "ended"), ("x", "working"))
+    ):
+        store.put_agent(
+            "sw", AgentRecord(f"engineer@{n}", "eng", f"t{n}", seat=f"eng-{n + 1}@sw", hive=hive, state=state)
+        )
+    assert [(slug, agent.name) for slug, agent in purge.hosted(store, "proof")] == [("sw", "engineer@0")]
 
 
 @pytest.mark.feature("hive-quiet-sweep")

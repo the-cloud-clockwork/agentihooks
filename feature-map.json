@@ -2111,6 +2111,8 @@
         "tests/tick/steps/test_hive_sweep.py::test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept",
         "tests/tick/steps/test_hive_sweep.py::test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none",
         "tests/tick/steps/test_hive_sweep.py::test_a_hive_is_quiet_only_once_a_beat_is_older_than_the_window",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_counts_only_agents_still_running_on_the_hive",
         "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_that_stops_after_its_invite_removes_the_member",
         "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_told_to_keep_its_hive_leaves_it"
       ]

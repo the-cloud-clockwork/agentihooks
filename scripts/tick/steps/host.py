@@ -249,20 +249,18 @@ for _step in STEPS:
     registry.register(_step)
 
 
-def _hive_sweep(tick: Any, get: Callable[[str], Any]) -> list[str]:
+def _hive_sweep(cli: Any, get: Get) -> Any:
     """Drain and remove each ephemeral hive quiet past the registry window, returning what it removed."""
     from scripts.hive import sweep
-    from scripts.swarm import lease
 
-    store = get("store")
-    return timing.call(sweep.sweep, store, lease.now_ms(store))  # pyright: ignore[reportUnknownMemberType]
+    return timing.call(sweep.sweep, get("store"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
 registry.register(
     CallStep(
         "hive sweep",
         "wrapper health",
-        _hive_sweep,
+        held(_hive_sweep),
         needs=frozenset(),
         reads=frozenset(),
         writes=frozenset(),

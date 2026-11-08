@@ -111,6 +111,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     assert declared == {
         "reap": frozenset({"ledger", "runtime", "inbox"}),
         "spawn": frozenset({"ledger", "runtime", "coordination", "inbox"}),
+        "hive sweep": frozenset({"coordination"}),
     }
 
 

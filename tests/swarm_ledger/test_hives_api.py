@@ -2,7 +2,7 @@ import io
 import json
 import re
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -304,7 +304,7 @@ def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_o
         record = {**registry._default(hive_id), "ephemeral": ephemeral, "heartbeat_at": NOW_MS - registry.QUIET_MS - 1}
         store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
         store.redis.sadd(registry.INDEX, hive_id)
-    reply = dispatch(request("GET", token=None, slug=None), store)
+    reply: Any = dispatch(request("GET"), store)
     assert [hive["id"] for hive in reply["data"]] == ["desk", "lasting", "pod"]
     assert refusal(request("GET", "/api/v1/hives/proof"), store) == (404, "resource_missing", "No such hive")
 
@@ -317,7 +317,8 @@ def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_co
         json.dumps({"claude:luna": 3, "interactive:claude:luna": 1, "_executions": {"claude:luna": ["e1"]}}),
     )
     store.redis.set(f"{registry.key('pod')}:sessions", json.dumps({"claude:luna": 3}))
-    desk, pod = dispatch(request("GET", token=None, slug=None), store)["data"]
+    reply: Any = dispatch(request("GET"), store)
+    desk, pod = reply["data"]
     assert (desk["agents_at"], desk["agents"], desk["slots"][0]["agents"]) == (NOW_MS - 1000, 2, 3)
     assert (pod["agents_at"], pod["agents"], pod["slots"][0]["agents"]) == (NOW_MS - registry.LIVE_MS - 1, 0, 0)
 
