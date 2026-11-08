@@ -68,6 +68,25 @@ def test_the_endpoint_answers_200_with_the_grant_and_403_for_an_unknown_credenti
     assert _post(hive, json.dumps({"ledger_credential": "unknown"}).encode()) == (403, UNKNOWN)
 
 
+def test_a_redis_refusal_answers_a_fixed_reply_and_logs_the_redis_text(admin, hive, monkeypatch, capsys):
+    from redis.exceptions import ResponseError
+
+    member = auth.mint(admin, "laptop", PUBLIC)
+
+    def refuse(*args, **kwargs):
+        raise ResponseError("ERR planted ACL SETUSER detail")
+
+    monkeypatch.setattr(admin, "acl_setuser", refuse)
+
+    status, body = _post(hive, json.dumps({"ledger_credential": member["ledger_credential"]}).encode())
+
+    assert (status, body) == (403, {"error": "Redis refused the refreshed member"})
+    assert "planted" not in json.dumps(body)
+    assert capsys.readouterr().err == (
+        "hive endpoint refused a refresh: Redis refused the refreshed member (ERR planted ACL SETUSER detail)\n"
+    )
+
+
 def test_a_join_is_not_found(hive):
     assert _raw(hive, b"POST /hive/join HTTP/1.0\r\nContent-Length: 2\r\n\r\n{}") == (404, {"error": "not found"})
 
