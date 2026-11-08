@@ -182,9 +182,10 @@ def test_pointer_names_the_command_only_for_a_sliced_task():
 def test_installer_delegates_plan_deps_and_quota():
     import scripts.agents_quota
     import scripts.deps_preflight
+    import scripts.plans.cli
     from scripts.cli_delegates import delegated_cli
 
-    assert delegated_cli(["plan", "read"]) is plan_read.main
+    assert delegated_cli(["plan", "read"]) is scripts.plans.cli.main
     assert delegated_cli(["deps", "check"]) is scripts.deps_preflight.main
     assert delegated_cli(["quota"]) is scripts.agents_quota.main
 
