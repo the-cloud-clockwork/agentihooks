@@ -142,9 +142,10 @@ def test_remove_after_create_leaves_the_signer_record_without_the_hive_and_a_sec
     fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
     bao = _bao(fake)
     member_swarms.assign(bao, SIGNER, ["m1"], ("rig",))
-    assert remove.unlist(bao, _unlisting()) == [f"unlisted m1 from the hub signer record {SIGNER}"]
+    step = dict(remove.STEPS)["signer"]
+    assert step(None, bao, _unlisting(), None) == [f"unlisted m1 from the hub signer record {SIGNER}"]
     assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}
-    assert remove.unlist(bao, _unlisting()) == [f"the hub signer record {SIGNER} lists no member swarms for m1"]
+    assert step(None, bao, _unlisting(), None) == [f"the hub signer record {SIGNER} lists no member swarms for m1"]
     assert fake.written == [SIGNER, SIGNER]
 
 
