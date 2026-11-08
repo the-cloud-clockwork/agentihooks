@@ -2303,7 +2303,7 @@
       "seam": "remote retirement and the reap/spawn tick passes",
       "tests": [
         "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
-        "tests/tick/steps/test_drop_remote.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes"
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes"
       ]
     }
   ],

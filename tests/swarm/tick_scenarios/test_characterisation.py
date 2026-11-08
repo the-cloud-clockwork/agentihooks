@@ -245,6 +245,37 @@ def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
     assert record == expected, "GOLDEN_RECORD=" + json.dumps({key: record}, sort_keys=True)
 
 
+@pytest.mark.feature("swarm-tick-dead-remote-budget")
+@pytest.mark.parametrize("entry", ["tick", "run_tick"])
+def test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes(
+    entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dropped: list[float] = []
+    reaped: list[float] = []
+    drop, reap = tick_module._drop_remote, agent_steps._reap
+
+    def measured_drop(*args: Any, **kwargs: Any) -> str:
+        started = time.monotonic()
+        action: str = drop(*args, **kwargs)
+        dropped.append(time.monotonic() - started)
+        return action
+
+    def measured_reap(*args: Any, **kwargs: Any) -> list[str]:
+        started = time.monotonic()
+        actions: list[str] = reap(*args, **kwargs)
+        reaped.append(time.monotonic() - started)
+        return actions
+
+    monkeypatch.setattr(tick_module, "_drop_remote", measured_drop)
+    monkeypatch.setattr(agent_steps, "_reap", measured_reap)
+    record = replay("hive-roll", entry, monkeypatch, tmp_path)
+    assert len(dropped) == 10
+    assert max(dropped) < 5.0
+    assert len(reaped) == 2
+    assert max(reaped) < 22.0
+    assert any(action.startswith("spawned engineer") for actions in record["actions"][:2] for action in actions)
+
+
 @pytest.mark.feature("swarm-tick-characterisation")
 @pytest.mark.parametrize("entry", ["tick", "run_tick"])
 @pytest.mark.parametrize("scenario", SCENARIOS)
