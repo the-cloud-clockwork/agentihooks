@@ -415,7 +415,9 @@ def _claimed(store: Swarm, member: str, name: str, task: str, lane: str = "eng",
     return {"id": task, "state": "claimed", "claimed_by": name}
 
 
-def test_remove_with_running_agents_leaves_every_claim_handed_off_or_released_with_true_counts(store, tmp_path):
+def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_released_with_true_counts(
+    store, tmp_path
+):
     member = _member(store)
     elsewhere = AgentRecord("engineer@9", "eng", "t9", seat=f"eng-9@{SLUG}", hive="other", state="working")
     store.put_agent(SLUG, elsewhere)
