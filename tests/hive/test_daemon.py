@@ -1059,6 +1059,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "heartbeat_at": record["heartbeat_at"],
         "beat_at": record["beat_at"],
         "version": "",
+        "members": {registry.member_name(): {"heartbeat_at": record["heartbeat_at"], "draining": "no"}},
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
 

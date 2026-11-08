@@ -229,15 +229,16 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
     """Drains hive, or only member while another live member of the hive takes its new agents."""
     from scripts.inbox.store import InboxStore
 
-    if registry.show(store.redis, hive) is None:
+    client: Any = store.redis
+    if registry.show(client, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
     deadline_at = int((host.wall() + wait_s) * 1000)
     drain = registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at)
     own = host.namespace() if member else ""
-    if not (own and registry.leave(store.redis, hive, member, drain)):
+    if not (own and registry.leave(client, hive, member, drain)):
         own = ""
-        registry.update(store.redis, hive, ["draining=yes"], drain=drain)
-    inbox, ordered = InboxStore(store.redis), {}
+        registry.update(client, hive, ["draining=yes"], drain=drain)
+    inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
     while remaining := _unhanded(store, hive, own):
         _order(inbox, ordered, remaining, ROLL, hive)

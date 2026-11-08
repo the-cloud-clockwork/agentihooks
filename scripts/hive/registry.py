@@ -180,7 +180,7 @@ def _stored(client, hive_id: str) -> dict | None:
     return hive_state.read(hive_state.records(client, hive_id), hive_id, _legacy(client, hive_id))
 
 
-def _seeded(hive_id: str) -> dict:
+def _seeded(hive_id: str) -> dict[str, Any]:
     return {field: value for field, value in _default(hive_id).items() if field not in KEPT}
 
 
@@ -233,7 +233,7 @@ def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None
     return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
 
 
-def show(client, hive_id: str) -> dict | None:
+def show(client: Any, hive_id: str) -> dict[str, Any] | None:
     stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
@@ -277,7 +277,7 @@ def _index(client, hive_id: str) -> None:
         pass
 
 
-def hives(client) -> list[dict]:
+def hives(client: Any) -> list[dict[str, Any]]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
@@ -349,12 +349,13 @@ def leave(client: Any, hive_id: str, member: str, drain: Drain) -> bool:
         stored = stored or {}
         members = stored.get("members", {})
         entry = {"heartbeat_at": at, **members.get(member, {}), "draining": "yes"}
-        record = {**_seeded(hive_id), **stored, "members": {**members, member: entry}}
+        record: dict[str, Any] = {**_seeded(hive_id), **stored, "members": {**members, member: entry}}
         if _serving(record, member, at):
             return record
         return _drained({**record, "draining": "yes"}, stored, drain)
 
-    return _serving(_amend(client, hive_id, write) or {}, member, at)
+    written: dict[str, Any] = _amend(client, hive_id, write) or {}
+    return _serving(written, member, at)
 
 
 def member_draining(client: Any, hive_id: str, member: str) -> bool:
