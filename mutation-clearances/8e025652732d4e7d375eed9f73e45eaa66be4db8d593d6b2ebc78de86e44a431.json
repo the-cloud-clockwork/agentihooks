@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact__mutmut_13:acefb1f6b9aa16794ca0bee5f4bcd1305196eb04483bf9cd6a2dc9c2c36d4ff4": {
+    "reader": "Standards reader",
+    "reason": "HTTP header lookup on the request message is case insensitive, so the lowercased name reads the same header."
+  }
+}

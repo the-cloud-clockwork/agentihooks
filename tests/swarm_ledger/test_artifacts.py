@@ -184,6 +184,25 @@ class ArtifactEndpoint(Endpoint):
             assert error.value.read().decode().startswith("title must be text of at most ")
             assert {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()} == before
 
+    def test_an_unparsable_upload_request_names_the_parse_error(self) -> None:
+        self.put([{"op": "join", "id": "j-garbled-upload", "by": "garbled-engineer"}])
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/artifacts/via-media",
+            data=b"# Garbled upload\n",
+            headers={
+                "Host": f"127.0.0.1:{server.PORT}",
+                "X-Ledger-Agent": "garbled-engineer",
+                "X-Ledger-Token": str(self.token),
+                "X-Artifact-Name": "garbled.md",
+                "X-Artifact-Request": "{not json",
+            },
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(req)
+        assert error.value.code == 400
+        assert error.value.read().decode().startswith("Expecting property name enclosed in double quotes")
+
     def test_artifact_uploads_require_an_agent_even_with_the_operator_token(self):
         folder = media.folder("via-media")
         before = {p.name: p.read_bytes() for p in folder.glob("*") if p.is_file()}

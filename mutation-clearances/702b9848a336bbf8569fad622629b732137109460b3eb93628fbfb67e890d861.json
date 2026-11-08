@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1receive__mutmut_2:d0a6b74f717725c923a1478d642bc1e61a8c2d58a943ec106aee0d95e6d156da": {
+    "reader": "Standards reader",
+    "reason": "Every caller passing agents_only also passes operator_plan, and with agents_only False the operator_plan value is never read."
+  }
+}

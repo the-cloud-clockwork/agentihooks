@@ -107,7 +107,7 @@ def relay(
     for event in events:
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
             continue
-        if event.get("kind") == "added" and event.get("target", "").startswith(PLAN_EVENT_TARGETS):
+        if event.get("kind") == "added" and event["target"].startswith(PLAN_EVENT_TARGETS):
             continue
         ref = write_ref(slug, event)
         mark = inbox.key("ledger-sent", ref)
