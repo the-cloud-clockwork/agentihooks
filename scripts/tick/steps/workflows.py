@@ -1,16 +1,20 @@
 """The workflows steps of the tick."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+
+from scripts.swarm import workflow_runner
 
 from scripts.tick import registry
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep
+from scripts.tick.steps import CallStep, pass_domains
 
 
 def _workflow_runner(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Return the actions of the workflow runner step, given the tick module and a reader of the pass state."""
-    return []
+    return workflow_runner.advance_tasks(
+        get("inbox"), get("slug"), get("doc"), Path(get("store").config(get("slug")).repo)
+    )
 
 
 registry.register(
@@ -18,8 +22,8 @@ registry.register(
         "workflow runner",
         "wrapper phases",
         _workflow_runner,
-        needs=frozenset(),
-        reads=frozenset(),
+        needs=frozenset({"planning and phase pass", "ledger state"}),
+        reads=pass_domains("inbox", "slug", "doc", "store"),
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"host", "inbox", "llm"}),
