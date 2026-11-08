@@ -1,5 +1,6 @@
 import dataclasses
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -151,23 +152,23 @@ def test_a_free_text_stage_exit_ends_the_stage_when_the_stub_says_yes() -> None:
 @pytest.mark.parametrize("visit", [1, 2])
 def test_a_nonpassing_stage_never_consults_its_exit_check(outcome: str, visit: int) -> None:
     definition = simple(head="scout")
-    check = answers(True)
+    check = Mock(return_value=True)
     current = definition.stages["scout"]
 
     result = machine.stage_outcome(current, visit, outcome, [{"status": "ok"}, {"status": "retry"}], check)
 
-    assert check.calls == []
+    check.assert_not_called()
     assert result == (None if visit < current.iterations else outcome)
 
 
 def test_a_stage_with_a_retried_run_stays_open_despite_an_accepting_exit_check() -> None:
     definition = simple(head="scout")
-    check = answers(True)
+    check = Mock(return_value=True)
     outputs = [{"status": "ok"}, {"status": "retry"}]
 
     state = machine.advance(definition, machine.start(definition), "scout", "retry", outputs, check)
 
-    assert check.calls == []
+    check.assert_not_called()
     assert state["stage"] == "scout"
     assert state["status"] == "running"
     assert state["visit"] == 1

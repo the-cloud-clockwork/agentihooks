@@ -58,7 +58,7 @@ def stage_outcome(current: Stage, visit: int, outcome: str, outputs: Any, exit_c
         raise WorkflowError([f"{current.id} already ran its {current.iterations} iterations"])
     if current.exit is None:
         return outcome
-    if exit_check(current.exit, outputs):
+    if outcome == "pass" and exit_check(current.exit, outputs):
         return "pass"
     return None if visit < current.iterations else outcome
 
