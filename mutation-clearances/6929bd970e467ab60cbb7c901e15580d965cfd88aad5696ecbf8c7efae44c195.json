@@ -1,0 +1,6 @@
+{
+  "scripts/ci_requeue.py:scripts.ci_requeue.x_sweep:f6541507c2f0dd6e73e180255ce29eaaa66a94c770e69a67ed584c84e3778296": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

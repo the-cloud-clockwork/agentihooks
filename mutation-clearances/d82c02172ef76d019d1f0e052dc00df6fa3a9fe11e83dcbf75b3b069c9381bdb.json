@@ -1,0 +1,6 @@
+{
+  "scripts/agents_quota.py:scripts.agents_quota.x__codex:124e1bc255a4c51dba1602eb29f23dc46def0e6ffd6ba02a26b223f72994d2ea": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

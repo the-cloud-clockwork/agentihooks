@@ -10,10 +10,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 
 from hooks import config
 from hooks.context.account_sessions import CODEX_TOKEN_PREFIX
@@ -63,7 +63,7 @@ NO_BAO_REFRESH = "OpenBao holds no refresh token for it"
 
 
 class GrantError(RuntimeError):
-    def __init__(self, status: int, error: str):
+    def __init__(self, status: int, error: str) -> None:
         super().__init__(f"HTTP {status} {error or NO_OAUTH_ERROR}" if status else f"unreachable: {error}")
         self.status = status
         self.error = error
@@ -75,11 +75,11 @@ def _oauth_error(exc: urllib.error.HTTPError) -> str:
     except (ValueError, AttributeError):
         return ""
     if isinstance(error, dict):
-        error = error.get("code")
+        error = cast("dict[str, Any]", error).get("code")
     return error if isinstance(error, str) else ""
 
 
-def grant(refresh_token: str, opener: Callable = urllib.request.urlopen) -> dict:
+def grant(refresh_token: str, opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
     form = {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLIENT_ID}
     data = urllib.parse.urlencode(form).encode()
     request = urllib.request.Request(TOKEN_URL, data=data, headers={"Accept": "application/json"})
@@ -92,13 +92,13 @@ def grant(refresh_token: str, opener: Callable = urllib.request.urlopen) -> dict
         raise GrantError(0, str(exc.reason)) from None
     except (OSError, ValueError) as exc:
         raise GrantError(0, str(exc)) from None
-    return found if isinstance(found, dict) else {}
+    return cast("dict[str, Any]", found) if isinstance(found, dict) else {}
 
 
 @dataclass(frozen=True)
 class Deps:
-    grant: Callable[[str], dict] = grant
-    opener: Callable | None = None
+    grant: Callable[[str], dict[str, Any]] = grant
+    opener: Callable[..., Any] | None = None
     now: Callable[[], float] = field(default=time.time)
 
 
@@ -121,7 +121,7 @@ GRANT_FAILED = Outcome(ok=False)
 
 
 def _expiry(token: str | None) -> int | None:
-    exp = codex_router._claims(str(token)).get("exp")
+    exp = cast("Callable[[str], dict[str, Any]]", codex_router._claims)(str(token)).get("exp")
     return exp if isinstance(exp, int) else None
 
 
@@ -134,12 +134,12 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _failed(slug: str, reason: str) -> dict:
+def _failed(slug: str, reason: str) -> dict[str, Any]:
     print(term_colors.red(FAILED.format(slug=slug, reason=reason)))
     return {}
 
 
-def _renew(slug: str, access: str | None, refresh: str | None, run: Run) -> dict | None:
+def _renew(slug: str, access: str | None, refresh: str | None, run: Run) -> dict[str, Any] | None:
     now = run.deps.now()
     left = _days_left(access, now)
     if not run.force and left >= run.days:
@@ -161,24 +161,24 @@ def _renew(slug: str, access: str | None, refresh: str | None, run: Run) -> dict
     return fresh
 
 
-def _load(path: Path) -> dict:
+def _load(path: Path) -> dict[str, Any]:
     try:
         found = json.loads(path.read_bytes())
     except (OSError, ValueError):
         return {}
-    return found if isinstance(found, dict) else {}
+    return cast("dict[str, Any]", found) if isinstance(found, dict) else {}
 
 
-def _save_auth(path: Path, fresh: dict, now: float) -> None:
+def _save_auth(path: Path, fresh: dict[str, Any], now: float) -> None:
     auth = _load(path)
-    tokens = auth.get("tokens") if isinstance(auth.get("tokens"), dict) else {}
+    tokens = cast("dict[str, Any]", auth.get("tokens")) if isinstance(auth.get("tokens"), dict) else {}
     auth["tokens"] = {**tokens, **fresh}
     auth["last_refresh"] = time.strftime(STAMP_FORMAT, time.gmtime(now))
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     aicode_tokens.atomic_write(path, json.dumps(auth).encode(), 0o600)
 
 
-def _entries(slug: str, fresh: dict) -> dict[str, str]:
+def _entries(slug: str, fresh: dict[str, Any]) -> dict[str, str]:
     return {
         f"{CODEX_TOKEN_PREFIX}{slug}": fresh["access_token"],
         f"{codex_login.REFRESH_PREFIX}{slug}": fresh["refresh_token"],
@@ -187,7 +187,7 @@ def _entries(slug: str, fresh: dict) -> dict[str, str]:
 
 def _store(run: Run, entries: dict[str, str]) -> bool:
     try:
-        total = openbao_kv.merge(run.bao, run.creds, entries)
+        total = openbao_kv.merge(cast("openbao_kv.OpenBao", run.bao), run.creds, entries)
     except Exception as exc:
         print(term_colors.red(f"OpenBao write failed: {exc}"))
         return False
@@ -196,7 +196,7 @@ def _store(run: Run, entries: dict[str, str]) -> bool:
 
 
 def _select(names: list[str], force: str) -> list[str]:
-    kept = []
+    kept: list[str] = []
     for name in names:
         try:
             found = aicode_tokens.slug(name)
@@ -242,7 +242,7 @@ def _attempt(slug: str, action: Callable[[], object]) -> bool:
 
 def _refresh_local(run: Run, home: Path) -> Outcome | None:
     slug = home.name
-    tokens = codex_login._tokens(home)
+    tokens = cast("Callable[[Path], dict[str, Any]]", codex_login._tokens)(home)
     fresh = _renew(slug, tokens.get("access_token"), tokens.get("refresh_token"), run)
     if fresh is None:
         return None
@@ -280,11 +280,11 @@ def _recovery(slug: str) -> Path:
     return codex_login.homes() / slug / RECOVERY_FILE
 
 
-def _recovered(slug: str, access: str | None) -> dict | None:
+def _recovered(slug: str, access: str | None) -> dict[str, Any] | None:
     path = _recovery(slug)
     if not path.exists():
         return None
-    tokens = codex_login._tokens(path.parent, path.name)
+    tokens = cast("Callable[[Path, str], dict[str, Any]]", codex_login._tokens)(path.parent, path.name)
     kept = _expiry(tokens.get("access_token"))
     if not tokens.get("refresh_token") or kept is None:
         print(term_colors.yellow(UNREADABLE.format(slug=slug, path=path)))
@@ -297,7 +297,7 @@ def _recovered(slug: str, access: str | None) -> dict | None:
     return {key: tokens[key] for key in TOKEN_KEYS if tokens.get(key)}
 
 
-def _store_or_recover(run: Run, slug: str, fresh: dict) -> bool:
+def _store_or_recover(run: Run, slug: str, fresh: dict[str, Any]) -> bool:
     if _store(run, _entries(slug, fresh)):
         return True
     recovery = _recovery(slug)
@@ -330,7 +330,7 @@ def _refresh_bao(run: Run, secret: Mapping[str, str], slug: str) -> bool:
 
 def run_openbao(run: Run) -> int:
     try:
-        secret, _ = openbao_kv.read(run.bao, run.creds)
+        secret, _ = openbao_kv.read(cast("openbao_kv.OpenBao", run.bao), run.creds)
     except openbao_kv.OpenBaoError as exc:
         print(term_colors.red(f"OpenBao read failed: {exc}"))
         return 1
@@ -360,7 +360,7 @@ def _days(option: float | None, environ: Mapping[str, str]) -> float:
 
 
 @contextlib.contextmanager
-def _exclusive() -> Iterator[bool]:
+def _exclusive() -> Generator[bool]:
     path = Path(config.AGENTIHOOKS_HOME) / LOCK_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as lock:
@@ -378,7 +378,9 @@ def _settings(args: list[str], environ: Mapping[str, str], deps: Deps) -> tuple[
     store = (environ.get(STORE_ENV) or LOCAL).strip().lower()
     if store not in (LOCAL, OPENBAO):
         raise ValueError(BAD_STORE.format(store=store))
-    bao = openbao_kv.from_env(environ, deps.opener)
+    bao = cast("Callable[[Mapping[str, str], Any], openbao_kv.OpenBao | None]", openbao_kv.from_env)(
+        environ, deps.opener
+    )
     named = {name.removeprefix(CODEX_TOKEN_PREFIX) for name in environ if name.startswith(CODEX_TOKEN_PREFIX)}
     tokens = tuple(
         sorted(slug for slug in named - {"", codex_router.API_ACCOUNT} if environ[CODEX_TOKEN_PREFIX + slug])

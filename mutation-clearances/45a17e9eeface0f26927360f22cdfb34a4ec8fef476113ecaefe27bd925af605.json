@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_consume:bac7513e951cf3e4e021dd1e8130db24e531dffc60280924cddfbf61be68e851": {
+    "reader": "standards_reader",
+    "reason": "b\"\\x1b\" and b\"\\x1B\" are the same byte, so the comparison and value are unchanged."
+  }
+}

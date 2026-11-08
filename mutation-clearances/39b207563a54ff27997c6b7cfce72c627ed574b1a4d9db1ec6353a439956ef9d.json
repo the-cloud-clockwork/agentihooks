@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x_parse_probe:1df9d4b2e2d81e51a5fd79e04400a7da72d3766ea91b069d1828484e18045494": {
+    "reader": "standards_reader",
+    "reason": "usage is read only at if usage:, which is False for None and an empty dict, and every assignment before it is unchanged."
+  }
+}

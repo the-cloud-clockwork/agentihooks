@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -48,3 +49,21 @@ def test_a_plain_folder_under_a_trusted_parent_is_left_as_is(tmp_path):
 
     assert claude_trust.ensure_trusted(folder, {"HOME": str(tmp_path)}) == ("trusted", "")
     assert config.read_text() == original
+
+
+from pathlib import Path
+
+
+def test__read_decodes_the_config_as_utf8(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = tmp_path / ".claude.json"
+    config.write_text("{}")
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    original = Path.read_text
+
+    def spy(self: Path, *args: Any, **kwargs: Any) -> str:
+        calls.append((args, kwargs))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", spy)
+    assert claude_trust._read(config) == {}
+    assert calls == [((), {"encoding": "utf-8"})]

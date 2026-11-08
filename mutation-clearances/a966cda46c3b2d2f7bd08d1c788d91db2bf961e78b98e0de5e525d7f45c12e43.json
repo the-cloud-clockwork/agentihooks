@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_coverage.py:scripts.ci_branch_coverage.x_artifacts:c20b59f373b6bfd6d99c62558ba7197b211f589deb6056befa599c3a2bf1343f": {
+    "reader": "standards_reader",
+    "reason": "The unreachable AssertionError sits after a loop that always returns or raises first, so its message is never shown."
+  }
+}

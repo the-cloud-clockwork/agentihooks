@@ -1,0 +1,6 @@
+{
+  "scripts/ci_hive_nats_grants.py:scripts.ci_hive_nats_grants.x__direction:c9235a8908f6a64886915ee65754ddd728e455df7126ee6b045b6f46cfbff28e": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

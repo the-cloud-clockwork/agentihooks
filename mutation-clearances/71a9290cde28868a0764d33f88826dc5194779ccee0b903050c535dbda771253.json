@@ -1,0 +1,6 @@
+{
+  "scripts/ci_access_audit.py:scripts.ci_access_audit.x_inventory:242ffe3010bfe93d3c797d675128531629fb008b4a0a01b4e264415fc3c1d658": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

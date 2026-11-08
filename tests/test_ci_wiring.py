@@ -317,3 +317,9 @@ def test_the_tests_workflow_runs_wiring_in_lint_and_brain_smoke_as_gate_needs():
     check = next(step for step in lint["steps"] if step.get("run") == "python -m scripts.ci_wiring")
     assert check["if"] == "${{ !cancelled() }}"
     assert lint["needs"] in (["reuse"], ["reuse", "admission"])
+
+
+def test_a_pull_request_workflow_without_jobs_needs_no_declaration() -> None:
+    workflows = {"test.yml": _gate_workflow(), "bare.yml": {"on": "pull_request"}}
+
+    assert _check(workflows, {}) == []

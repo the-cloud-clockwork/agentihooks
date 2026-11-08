@@ -34,3 +34,11 @@ def test_context_is_the_last_turn_not_the_session_total(tmp_path, monkeypatch):
 def test_missing_rollout_returns_none(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     assert codex_context("nosuchsession") is None
+
+
+def test__parse_requires_the_token_count_type_even_when_info_is_present() -> None:
+    from scripts.codex_context import _parse
+
+    info = {"last_token_usage": {"total_tokens": 5}, "model_context_window": 10}
+    event = json.dumps({"payload": {"type": "not_token_count", "info": info}})
+    assert _parse(event) is None

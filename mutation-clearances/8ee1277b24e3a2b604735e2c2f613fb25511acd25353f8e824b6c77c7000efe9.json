@@ -1,0 +1,6 @@
+{
+  "scripts/ci_queue_retry.py:scripts.ci_queue_retry.x__api:9e78b774566516e0959373bcc5622c9fd8f319e445e7fb427fa63fdb73c1a12b": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}
