@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, create_render, hive_state, machine, nats_grant, registry
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    hive_state,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -76,6 +86,7 @@ class Plan:
     merge_s: int = create.Options.timeout_s
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
+    signer_path: str | None = None
 
 
 class TaskLedger(Protocol):
@@ -290,6 +301,16 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
+def unlist(bao: openbao_kv.OpenBao | None, plan: Plan) -> list[str]:
+    if plan.signer_path is None:
+        return []
+    if plan.dry_run:
+        return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
+    if member_swarms.unassign(bao, plan.signer_path, plan.hive):
+        return [f"unlisted {plan.hive} from the hub signer record {plan.signer_path}"]
+    return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
+
+
 def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     nodes = sorted(node for node, name in redis.hgetall(machine.MACHINES).items() if name == plan.label)
     state = home / create.STATE_FILE
@@ -409,6 +430,7 @@ def _until(
 STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
+    ("signer", lambda store, bao, plan, host: unlist(bao, plan)),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
     ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
     ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run, host.sleep, host.clock)),

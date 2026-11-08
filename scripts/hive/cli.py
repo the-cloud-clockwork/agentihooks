@@ -187,7 +187,7 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, machine, remove
+    from scripts.hive import invite, machine, member_swarms, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
@@ -207,6 +207,7 @@ def _remove(args: argparse.Namespace) -> list[str]:
         wait_s=args.wait,
         signer=_signer(),
         dry_run=args.dry_run,
+        signer_path=member_swarms.signer_path(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
 

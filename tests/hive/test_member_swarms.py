@@ -110,6 +110,24 @@ def test_unassign_of_a_member_the_record_does_not_list_writes_nothing(records):
     assert fake.records == records
 
 
+def test_unassign_rereads_the_record_and_reports_nothing_dropped_when_a_concurrent_write_removed_the_member():
+    fake = Bao({SIGNER: {"member_swarms": {"m1": ["rig"]}}})
+    plain = fake.__call__
+    raced = []
+
+    def racing(request, timeout=None):
+        if request.get_method() != "GET" and not raced:
+            raced.append(True)
+            fake.records[SIGNER] = {"member_swarms": {"m2": ["rig"]}}
+            fake.versions[SIGNER] += 1
+            raise http_error(request.full_url, 400, b'{"errors": ["check-and-set parameter did not match"]}')
+        return plain(request, timeout)
+
+    assert member_swarms.unassign(openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, racing), SIGNER, "m1") is False
+    assert fake.records[SIGNER] == {"member_swarms": {"m2": ["rig"]}}
+    assert fake.written == []
+
+
 def test_unassign_reports_an_openbao_failure_as_a_hive_error():
     fake = Bao({SIGNER: {"member_swarms": {"m1": ["rig"]}}}, fail_writes=True)
     with pytest.raises(auth.HiveError) as error:

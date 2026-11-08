@@ -57,6 +57,25 @@ def assign(
     return added
 
 
+def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
+    dropped: list[str] = []
+
+    def change(record: Mapping) -> dict:
+        dropped.clear()
+        listed = dict(record.get(FIELD) or {})
+        if member not in listed:
+            return {}
+        del listed[member]
+        dropped.append(member)
+        return {FIELD: listed}
+
+    try:
+        openbao_kv.update(bao, path, change)
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    return bool(dropped)
+
+
 def backfill(redis: "Redis", bao: openbao_kv.OpenBao, path: str, named: Iterable[str]) -> str:
     added = assign(bao, path, scope.members(redis), swarms(redis, named), create=True)
     listed = ", ".join(added) if added else "no member"
