@@ -258,7 +258,9 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
             if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
         }
         _check(_settle(hive_id, {**stored, **fields}))
-        merged = {f: v for f, v in {**_seeded(hive_id), **stored, **fields}.items() if v is not None}
+        merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
+        if merged.get("max_agents") is None:
+            merged.pop("max_agents", None)
         return _drained(merged, stored, drain)
 
     record = _settle(hive_id, _amend(client, hive_id, write))

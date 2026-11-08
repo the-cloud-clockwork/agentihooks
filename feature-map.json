@@ -2104,6 +2104,8 @@
       "id": "hive-agent-ceiling",
       "origin": "operator",
       "operator_words": "a hive's max agents must not be a fixed number such as the default twenty or ten. With no cap set, the ceiling is computed each tick from the hive's own reported memory, swap and load, the same host room rule the workstation autoscale uses, and placement uses that number. A cap set by the operator through the hive command or the page bounds it from above.",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1428",
       "behaviour": "A hive with no operator cap takes its agent ceiling from its own heartbeat reading of memory, swap and one minute load under the workstation host room rule, placement admits by that ceiling, a set cap holds it lower, auto clears the cap, and the Hives panel shows the ceiling and marks a set cap.",
       "seam": "The hive registry max agents setting, the hive headroom heartbeat, the hive placement load and the Hives panel max agents cell",
       "tests": [
@@ -2119,6 +2121,13 @@
         "tests/hive/test_hive_ceiling.py::test_placement_reads_the_computed_ceiling_and_keeps_the_cap",
         "tests/swarm_ledger/test_hives_panel.py::test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap",
         "tests/swarm_ledger/test_hives_panel.py::test_clearing_max_agents_writes_auto"
+      ],
+      "semgrep_rule": "feature-hive-agent-ceiling",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.hive.cli",
+        "list"
       ]
     }
   ],

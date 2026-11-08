@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator, Mapping, MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, bundle_origin, registry, server
@@ -380,11 +380,12 @@ def _list() -> None:
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
-        reading = headroom.read(redis, record["id"], now)
+        reading = cast("dict[str, Any] | None", headroom.read(redis, record["id"], now))
         room = headroom.summary(reading)
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
-        top = ceiling.ceiling(record["max_agents"], reading)
-        cap = registry.AUTO if record["max_agents"] is None else f"cap {record['max_agents']}"
+        stored = cast("int | None", record["max_agents"])
+        top = ceiling.ceiling(stored, reading)
+        cap = registry.AUTO if stored is None else f"cap {stored}"
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top} ({cap})\texcluded={excluded}\t{room}"
         )

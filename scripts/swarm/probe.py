@@ -3,7 +3,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm.store import SwarmError
 
@@ -178,7 +178,9 @@ def run(
         here = hive_id()
         if here != ROOT:
             raise SwarmError(f"counted only on the {ROOT} hive, this host is {here}")
-        cap = ceiling.ceiling(registry.show(store.redis, ROOT)["max_agents"], headroom.read(store.redis, ROOT, now_ms))
+        redis = cast("Any", store.redis)
+        stored = cast("int | None", registry.show(redis, ROOT)["max_agents"])
+        cap = ceiling.ceiling(stored, cast("dict[str, Any] | None", headroom.read(redis, ROOT, now_ms)))
         return [workstation(local_slots.occupancy(store, ROOT)[0], cap, config.local_max_agents)]
 
     def released() -> list[Probe]:

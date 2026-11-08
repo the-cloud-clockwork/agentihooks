@@ -1,7 +1,7 @@
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import lease
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
@@ -51,7 +51,7 @@ def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
 
     hive = registry.show(store.redis, hive_id())
     bound = min(ceiling, store.config(slug).local_max_agents)
-    cap = hive["max_agents"] if hive is not None else None
+    cap = cast("int | None", hive["max_agents"]) if hive is not None else None
     return bound if cap is None else min(bound, cap)
 
 
