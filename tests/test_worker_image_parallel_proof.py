@@ -341,7 +341,8 @@ def test_a_failed_worker_rebuild_prints_only_its_rebuild_log(tmp_path: Path) -> 
     assert result.returncode == 1, result.stderr
     message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
     assert '> "$output/rebuild.log" 2>&1 (exit 1)' in message
-    assert result.stderr.rstrip().endswith("urllib.error.HTTPError: HTTP Error 504: Gateway Time-out")
+    lines = result.stderr.splitlines()
+    assert lines[lines.index(message) + 1] == "urllib.error.HTTPError: HTTP Error 504: Gateway Time-out"
     assert result.stderr.count("HTTP Error 504") == 1
     assert f"{output}/build.log" not in result.stderr
 
