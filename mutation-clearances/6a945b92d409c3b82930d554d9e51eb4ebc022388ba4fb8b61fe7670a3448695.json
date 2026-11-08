@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_client.py:scripts.swarm.ledger_client.x\u01c1LedgerClient\u01c1_call:9837e5acf6cf23948310f6e22b284c5fae4ec2f456e59c8416144385fd4aa17f": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and ignores the type argument; the mutant changes only that type argument from Any to None, so ledger.queue receives the same object and arguments and no test can observe a difference. Only the static type differs, which the type checker reports."
+  }
+}

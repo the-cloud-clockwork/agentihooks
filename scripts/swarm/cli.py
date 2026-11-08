@@ -58,6 +58,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -328,10 +329,29 @@ def _bin_stop(store, slug, ledger, runtime):
 
 
 def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
-    """Hold the pass's ledger view until beating closes, started with one delta read when the client reads it."""
+    """Hold the pass's ledger view until beating closes, started with one delta read under a short timeout when the
+    client reads it; a slow or stopped server leaves the pass on the last good view this host stored, writing to
+    the outbox and refusing fresh reads."""
     beating.enter_context(ledger_view.holding())
-    if ledger_view.reads(ledger):
-        ledger_view.start(slug, ledger.service)
+    if not ledger_view.reads(ledger):
+        return
+    beating.callback(ledger_client.OFFLINE.set, False)
+    try:
+        ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
+    except OSError as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+            raise
+        _hold_stored(slug, exc)
+
+
+def _hold_stored(slug: str, exc: OSError) -> None:
+    """Hold the last good view of ledger ``slug`` for the pass and run it offline, or leave the pass to its ledger
+    health probe when this host stores none."""
+    if ledger_view.hold_stored(slug) is None:
+        print(f"ledger {slug} not answering ({exc}) and no view is stored to run from", file=sys.stderr)
+        return
+    print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
+    ledger_client.OFFLINE.set(True)
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):
@@ -405,12 +425,11 @@ class _Wrapper:
         self.watching.callback(self.ticks.close)
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the wrapper's probes, health, commands, phases, intent, relay, view and metrics
+        """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
         later site's step may spawn before its hook runs."""
         return {
             "wrapper probes": self._fence,
-            "wrapper health": self._hold,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
             "wrapper intent": self._judge,
@@ -439,11 +458,6 @@ class _Wrapper:
         tick = [] if self.ticks.left else self._acted(records, TICK_SITES)
         early = self._acted(records, ("wrapper phases", "wrapper reboot"))
         return early + tick + self.checked + self._acted(records, ("wrapper events",))
-
-    def _hold(self) -> bool:
-        """Hold the pass's ledger view."""
-        _hold_view(self.beating, self.slug, self.ledger)
-        return True
 
     def _fence(self) -> bool:
         """Fence the runtime the rest of the pass uses."""
@@ -604,6 +618,7 @@ def run_tick(
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
+        _hold_view(beating, slug, ledger)
         gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
         try:
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
