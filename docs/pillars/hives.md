@@ -1335,7 +1335,7 @@ The PATCH body takes one or more of these fields and nothing else:
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
 | `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
 | `prefer` | object of role to whole number rank |
-| `max_agents` | integer, 1 or more |
+| `max_agents` | integer, 0 or more |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
 UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
