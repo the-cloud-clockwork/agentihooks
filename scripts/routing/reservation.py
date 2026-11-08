@@ -187,14 +187,19 @@ local held = raw and cjson.decode(raw) or nil
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 local seen, used, previous = {}, 0, nil
+local spellings = {slot}
+local slug = (string.gsub(slot, '%-', '_'))
+if slug ~= slot then spellings[2] = slug end
 for hive, heartbeat in pairs(cjson.decode(ARGV[8])) do
     local key = ARGV[6] .. ':hive:' .. hive
     local sessions = redis.call('GET', key .. ':sessions')
     if heartbeat > 0 and millis - heartbeat <= 90000 and sessions then
         local report = cjson.decode(sessions)
-        used = used + (report[slot] or 0)
-        for _, id in ipairs((report._executions or {})[slot] or {}) do
-            seen[id] = true
+        for _, name in ipairs(spellings) do
+            used = used + (report[name] or 0)
+            for _, id in ipairs((report._executions or {})[name] or {}) do
+                seen[id] = true
+            end
         end
     end
 end
