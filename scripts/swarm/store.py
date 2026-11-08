@@ -652,9 +652,12 @@ class RedisStore:
         """Ends the named agent's current executions under the lease; None when the lease or an occupant refuses."""
         from scripts.swarm import fencing, lease
 
-        doc = fencing.read(self, slug)
+        doc = {"executions": fencing.read_executions(self, slug), "archive": {}}
         live = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
         lives = records_of(doc) if previous else []
+        started_at = json.loads(previous).get("started_at") if previous else None
+        if previous and not any((a.name, a.started_at) == (name, started_at) for a in lives):
+            lives = records_of(fencing.read(self, slug))
 
         def end(doc: dict[str, Any]) -> Any:
             current = {a.execution_id for a in occupants_of(doc).values() if a.name == name}
@@ -670,7 +673,7 @@ class RedisStore:
     def _occupants_kept(self, slug: str, name: str, live: set[str]) -> bool:
         from scripts.swarm import fencing
 
-        observed = occupants_of(fencing.read(self, slug)).values()
+        observed = occupants_of({"executions": fencing.read_executions(self, slug)}).values()
         return {a.execution_id for a in observed if a.name == name} == live
 
     def _history_row(self, slug: str, name: str, previous: str, lives: list[AgentRecord], ended: int) -> str:
