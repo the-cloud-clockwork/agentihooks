@@ -19,7 +19,7 @@ from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import LedgerCalls
+from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
@@ -111,18 +111,22 @@ def _preempt(tick: Any, get: Get) -> Any:
 
 
 def _spawn_step(tick: Any, get: Get) -> Any:
-    config, store = get("config"), get("store")
+    config, deadline, tools = get("config"), get(DEADLINE), get("tools")
+    recording = _recording(tick, deadline)
+    store = SpawnStoreCalls(tools.coordination, recording, tools.inbox)
     if (
         config.state == "running"
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
-        rows, deadline = dict(get("rows")), get(DEADLINE)
-        bound = {"rows": rows, "ledger": LedgerCalls(get("tools").ledger, _recording(tick, deadline))}
+        rows = dict(get("rows"))
+        runtime = SpawnRuntimeCalls(tools.runtime, recording)
+        ledger = LedgerCalls(tools.ledger, recording)
+        bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
         args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
         token = PASS_DEADLINE.set(deadline)
         try:
-            with tick._placement_pass(get("runtime")):
+            with tick._placement_pass(runtime):
                 found = tick.skip_refused(tick._spawn, *args)
         finally:
             PASS_DEADLINE.reset(token)
@@ -246,7 +250,7 @@ def _admission(runtime: Any) -> Any:
     from scripts.swarm_v2.admission import PendingAdmission
 
     gate = getattr(runtime, "admission", None)
-    return gate if isinstance(gate, PendingAdmission) else None
+    return gate if isinstance(gate, (PendingAdmission, AdmissionCalls)) else None
 
 
 def _held_back(slug: str, ledger: Any, rows: dict[str, Any], runtime: Any, task: dict[str, Any], now_ms: int) -> str:
@@ -369,7 +373,8 @@ class _LaunchClock:
 
 def _launch_room(runtime: Any, config: SwarmConfig) -> int:
     room = getattr(runtime, "launch_room", None)
-    return max(1, min(tick.SPAWN_POOL, room(config) if room else 1))
+    value = room(config) if room else None
+    return max(1, min(tick.SPAWN_POOL, 1 if value is None else value))
 
 
 def _steer(slug: str, store: Any, task: dict[str, Any], failing: str) -> dict[str, str]:

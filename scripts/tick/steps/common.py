@@ -60,8 +60,17 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
-    tick.exits.settle(tick.InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
+    _settle_exit(store, agent.name, agent.seat if reopen else "")
     return f", task {agent.task} reopened" if reopen else ""
+
+
+def _settle_exit(store: Any, name: str, seat: str) -> None:
+    from scripts.tick.adapters.calls import SpawnStoreCalls
+
+    if isinstance(store, SpawnStoreCalls):
+        store.settle_exit(name, seat, "stopped")
+    else:
+        tick.exits.settle(tick.InboxStore(store.redis), name, seat, "stopped")
 
 
 def _still_held(row: dict[str, Any] | None, expected: dict[str, Any]) -> bool:
