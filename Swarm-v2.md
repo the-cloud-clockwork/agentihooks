@@ -594,7 +594,7 @@ A local exporter can cover local sessions through the same ingestion contract.
 Do not retain its dispatcher, agent registry, daemon installer, OAuth server, or separate fleet lifecycle.
 The bundle catalogue replaces its agent registry: each profile's `profile.yml` `description` and `capabilities` form its agent card, read by `agentihooks agents list|show` and the MCP `agents` category (`agent_list`, `agent_show`, `agent_run`).
 A specialist runs on demand as a one-stage workflow through the agentihooks workflow runner; `agent_run` is refused inside a worker run, so runs cannot nest.
-No separate agent registry, registration service or registry database is added; a profile becomes discoverable only by shipping in a bundle, a linked profile or the package roles.
+No separate agent registry, registration service or registry database is added; a profile becomes discoverable only by shipping in the built-in profiles, a bundle, a linked profile or the package roles.
 Before extraction, inventory consumers and retain compatibility aliases only inside the replacement agentihooks surface.
 Time-limit any compatibility aliases and test that they use the replacement storage rather than the retired service.
 Preserve attribution and license notices for extracted code.

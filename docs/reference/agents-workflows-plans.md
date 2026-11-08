@@ -7,8 +7,9 @@ nav_order: 75
 # Agents, workflows and plan ingestion
 {: .no_toc }
 
-The bundle is the agent catalogue. Every profile that ships in the package
-roles, the bundle, a shared or user bundle or a linked profile is an agent, and
+The bundle is the agent catalogue. Every profile that ships in the built-in
+profiles, the package roles, the bundle, a shared or user bundle or a linked
+profile is an agent, and
 its `profile.yml` is its card. A workflow runs profiles as stages; a single
 agent run is a one-stage workflow. A plan file becomes ledger phases and slices
 through one normalizer.
@@ -68,7 +69,7 @@ carries the run on; read it with `agentihooks workflow status <run id>`.
 
 `agent_run` is refused inside a worker run (`agent_run is refused inside a
 worker run, so runs cannot nest`). Every rendered home sets
-`MCP_CATEGORIES=all`, so specialists see the tool and the refusal is what keeps
+`MCP_CATEGORIES=all` for the stdio transport, so specialists see the tool and the refusal is what keeps
 runs flat.
 
 ## Workflows
@@ -144,14 +145,14 @@ The phase description is the prose up to the first slice or heading.
   `planning` (`manual` or `auto`) and `not_duplicate` (a plain words reason).
   Any other key is refused.
 - Every phase heading sits at one heading level.
-- Slice markers need phase markers above them, and each slice name appears once
-  in the file.
+- A file with slice markers needs at least one phase marker, and each slice
+  name appears once in the file.
 - A marked phase holding headings but no slice markers is refused as prose
   only.
 - The file must be UTF-8, nonempty and free of YAML front matter.
 - Dependencies must name phases in the plan or already on the ledger.
 
-Every refusal lists all its errors at once.
+The marker field checks list every field error at once.
 
 ## Troubleshooting
 
@@ -160,4 +161,4 @@ Every refusal lists all its errors at once.
 | A profile is missing from `agents list` | it ships in no installed layer | add it to the bundle or link it, then `agentihooks init` |
 | `agent_run` answers the nesting refusal | the caller is itself a worker run | run the agent from the parent session or add a stage to the workflow |
 | `workflow show` loads an unexpected file | a later layer defines the same name | `agentihooks workflow list` names the layer and file |
-| A plan is refused with `slice markers need phase markers above them` | slices without a phase marker | add a phase marker under each phase heading |
+| A plan is refused with `slice markers need phase markers above them` | slice markers in a file with no phase marker | add a phase marker under each phase heading |
