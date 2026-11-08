@@ -680,7 +680,11 @@
       "tests": [
         "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
         "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock",
-        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock", "tests/swarm/test_tick_lock.py::test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces", "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass", "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process", "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock",
+        "tests/swarm/test_tick_lock.py::test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces",
+        "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass",
+        "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process",
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
       ]
     },
     {
@@ -2098,6 +2102,17 @@
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_takers_wait_for_the_first_connection_to_measure_the_server",
         "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
         "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
+      ]
+    },
+    {
+      "id": "hive-overrun-progress",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1761",
+      "behaviour": "An overrun report quotes the latest progress published by the execution hive, matching the ledger workspace view even when the workstation folder is empty or stale.",
+      "seam": "Overrun inbox reports and published ledger workspace progress",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_remote_overrun_quotes_the_same_progress_as_the_ledger"
       ]
     }
   ],

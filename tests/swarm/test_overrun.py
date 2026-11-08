@@ -77,6 +77,41 @@ def _progress(lines):
     (folder / "progress.md").write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
 
 
+@pytest.mark.feature("hive-overrun-progress")
+@pytest.mark.parametrize("local", ["", "stale workstation step\n"])
+def test_remote_overrun_quotes_the_same_progress_as_the_ledger(local: str) -> None:
+    import json
+
+    from scripts.swarm import commands
+    from scripts.swarm_ledger import ledger_workspace
+
+    _progress(local.splitlines())
+    agent = AgentRecord(
+        OWNER,
+        "eng",
+        "t1",
+        seat=SEAT,
+        started_at=START,
+        hive="remote",
+        runtime_target={"host_id": "remote"},
+    )
+    swarm = Swarm(task={"workspace": str(ledger_workspace.folder(SLUG, "t1"))}, agent=agent)
+    expected = {
+        "latest_progress": "hive step seven\nhive step eight\nhive step nine",
+        "latest_proof": "hive check green",
+    }
+    swarm.store.redis.set(ledger_workspace.synced_key("remote"), json.dumps({SLUG: {"t1": expected}}))
+    published = ledger_workspace.published(swarm.store, SLUG, swarm.ledger.state(SLUG))
+    commands.publish(swarm.store, SLUG, {}, published)
+    swarm.tick(REPORT)
+    [item] = swarm.master()
+    page = commands.workspaces(swarm.store, SLUG)["t1"]
+    assert page == expected
+    assert f"Last steps: {'; '.join(page['latest_progress'].splitlines())}. " in item.text
+    assert "stale workstation step" not in item.text
+    assert overrun.NO_STEPS not in item.text
+
+
 def test_the_limits_are_set_in_code() -> None:
     assert overrun.REPORT_MINUTES == 90
 
