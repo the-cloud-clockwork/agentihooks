@@ -24,9 +24,9 @@ INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm
 WHEEL = {"pyproject.toml", "README.md", "hooks/", "scripts/"}
 
 
-def builds():
+def builds() -> list[str]:
     joined = re.sub(r"\\\n\s*", " ", PROOF.read_text())
-    return [line.strip() for line in joined.splitlines() if "docker build" in line]
+    return [line.strip() for line in joined.splitlines() if re.match(r"docker build(?:x build)? ", line.strip())]
 
 
 def judge(tmp_path, *, diff=0, read=0, fetch=0):
@@ -139,6 +139,40 @@ def test_kind_proof_builds_the_checkout_and_reuses_layers_without_skipping_the_p
     assert "HIVE_LAYER_CACHE" in build["env"]
     assert "if" not in build
     assert proof.index("in_pod init ") > proof.index("worker_hive_image_build_seconds=")
+
+
+def test_kind_proof_keeps_base_layers_in_the_registry_until_the_pods_pull_them() -> None:
+    steps = hive_jobs()["kind"]["steps"]
+    builder = next(step for step in steps if step.get("uses") == "docker/setup-buildx-action@v3")
+    assert builder["with"]["driver"] == "docker-container"
+    assert builder["with"]["driver-opts"] == "network=host"
+    assert '[registry."localhost:5001"]' in builder["with"]["buildkitd-config-inline"]
+    assert "http = true" in builder["with"]["buildkitd-config-inline"]
+    proof = PROOF.read_text()
+    assert all(build.startswith("docker buildx build ") for build in builds())
+    assert "worker_image=localhost:5001/worker-base:dev" in proof
+    assert 'docker buildx imagetools inspect "$image"' in proof
+    assert "docker image inspect" not in proof
+    assert "--load" not in proof
+    assert f"for warm in {BASE}" not in proof
+    publish = next(step for step in steps if step.get("name") == "Publish the proven hive worker image")
+    assert "docker buildx imagetools create" in publish["run"]
+    assert "docker pull" not in publish["run"]
+    assert "docker tag" not in publish["run"]
+
+
+def test_kind_registry_outlives_publication_and_is_always_removed() -> None:
+    steps = hive_jobs()["kind"]["steps"]
+    build = next(step for step in steps if "kind-proof.sh" in step.get("run", ""))
+    assert build["env"]["HIVE_REGISTRY_KEEP"] == "true"
+    publish = next(i for i, step in enumerate(steps) if step.get("name") == "Publish the proven hive worker image")
+    cleanup = next(i for i, step in enumerate(steps) if step.get("name") == "Remove the worker hive image registry")
+    assert cleanup > publish
+    assert steps[cleanup]["if"] == "always()"
+    assert 'docker rm -f "$(cat "$HOME/scratchpad/worker-hive-proof/registry.txt")"' in steps[cleanup]["run"]
+    proof = PROOF.read_text()
+    assert 'if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then\n    docker rm -f "$cluster-registry"' in proof
+    assert proof.index('> "$out/registry.txt"') < proof.index("kind create cluster")
 
 
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
@@ -409,7 +443,7 @@ def hive_jobs():
     return yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
 
 
-def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof():
+def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof() -> None:
     jobs = hive_jobs()
     kind = jobs["kind"]
     assert "publish" not in jobs
@@ -422,7 +456,8 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
     assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
     publish = next(step for step in kind["steps"] if step.get("name") == "Publish the proven hive worker image")
-    assert "docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/" in publish["run"]
+    assert "docker buildx imagetools create --tag ghcr.io/" in publish["run"]
+    assert "localhost:5001/agentihooks-hive-worker:dev" in publish["run"]
 
 
 @pytest.mark.parametrize(("installed", "downloads"), [(True, 0), (False, 2)])
@@ -585,31 +620,32 @@ def test_the_proven_image_skips_the_artifact_round_trip():
     assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
 
 
-def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds():
+def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> None:
     lines = PROOF.read_text().splitlines()
     start = lines.index("{")
     assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
     registry = (
         'docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null'
     )
-    assert lines[start - 1] == registry
+    assert lines[start - 2] == registry
+    assert lines[start - 1] == 'printf \'%s\\n\' "$cluster-registry" > "$out/registry.txt"'
     assert lines[start + 2 : start + 5] == [
         '  docker network connect kind "$cluster-registry"',
         '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
         '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
     ]
     assert lines[start + 5 : start + 8] == [
-        f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
+        "  for warm in mirror.gcr.io/library/redis:7-alpine; do",
         '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
         "  done",
     ]
     assert lines[lines.index("EOF") + 1] == '} > "$out/cluster.log" 2>&1 &'
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
-    assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
+    assert lines.index('    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
         '  kind delete cluster --name "$cluster"'
     )
-    assert lines.index('docker image inspect --format \'{{.Id}}\' "$image" > "$out/image.txt"') < lines.index(
+    assert lines.index('docker buildx imagetools inspect "$image" > "$out/image.txt"') < lines.index(
         'wait "$cluster_pid"'
     )
 
