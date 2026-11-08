@@ -28,6 +28,8 @@ services:
     environment:
       LEDGER_TLS_CERT: /tls/cert.pem
       LEDGER_TLS_KEY: /tls/key.pem
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('https://127.0.0.1:8765/healthz', timeout=2).read()"]
 YAML
 chmod 0755 "$tls"
 chmod 0644 "$tls"/*.pem "$override"
