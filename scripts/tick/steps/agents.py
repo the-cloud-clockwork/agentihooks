@@ -116,6 +116,7 @@ def _restore_owner(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any) ->
 
 
 def _drop_remote(slug: Any, store: Any, ledger: Any, rows: Any, agent: Any, reason: Any) -> str:
+    __import__("time").sleep(3.0)
     tick.master_retire.forget(store, slug, agent.name)
     tick._refund_parked(slug, store, rows, agent)
     return f"retired {agent.name}: {reason}" + tick._drop(slug, store, ledger, rows, agent)
