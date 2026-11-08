@@ -4,6 +4,7 @@ import subprocess
 import urllib.error
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -301,7 +302,7 @@ def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_
     ]
 
 
-def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(store: Swarm, tmp_path: Path) -> None:
+def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     rollups = iter(["PENDING", "SUCCESS"])
     states = iter(["OPEN", "MERGED"])
@@ -327,7 +328,7 @@ def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(s
     assert merges == [["gh", "pr", "merge", PR, "--squash"]]
 
 
-def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(store: Swarm, tmp_path: Path) -> None:
+def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
 
     def pending(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
@@ -380,7 +381,7 @@ def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
     ]
 
 
-def test_a_removal_pull_request_closed_unmerged_fails_at_once(store: Swarm, tmp_path: Path) -> None:
+def test_a_removal_pull_request_closed_unmerged_fails_at_once(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
 
     def closed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
@@ -403,7 +404,7 @@ def test_a_removal_pull_request_closed_unmerged_fails_at_once(store: Swarm, tmp_
     assert clock.slept == 2
 
 
-def test_a_removal_with_failed_checks_names_hive_remove(store: Swarm, tmp_path: Path) -> None:
+def test_a_removal_with_failed_checks_names_hive_remove(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
 
     def failed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:

@@ -298,7 +298,7 @@ def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> 
 
 def unmanifest(
     plan: Plan,
-    run: Callable[..., subprocess.CompletedProcess],
+    run: create_github.Run,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> list[str]:
@@ -330,7 +330,7 @@ def unmanifest(
     return [f"opened pull request {url} deleting {listed} and merged it"]
 
 
-def _merged(run: Callable[..., subprocess.CompletedProcess], url: str) -> bool:
+def _merged(run: create_github.Run, url: str) -> bool:
     state = create_github.pr_state(run, url)
     if state == "CLOSED":
         raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive remove to open a new one")

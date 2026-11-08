@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from scripts.hive import auth, machine
 
-Run = Callable[..., subprocess.CompletedProcess]
+Run = Callable[..., subprocess.CompletedProcess[str]]
 GH_TIMEOUT_S = 120
 RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
