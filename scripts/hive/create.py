@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
@@ -29,6 +30,13 @@ POLL_S = 15
 COMMAND_TIMEOUT_S = 60
 NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def report(line: str, clock: Callable[[], float] = time.time) -> None:
+    """Write one hive create line to standard output, stamped with its UTC time and flushed at once."""
+    sys.stdout.write(f"{time.strftime(STAMP, time.gmtime(clock()))} {line}\n")
+    sys.stdout.flush()
 
 
 @dataclass(frozen=True)
@@ -53,7 +61,7 @@ class Tools:
     run: create_github.Run = subprocess.run
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
-    out: Callable[[str], None] = print
+    out: Callable[[str], None] = report
     state: dict = field(default_factory=dict)
 
 
