@@ -435,6 +435,8 @@ def _spawn(
     taken = {a.seat for a in agents}
     held = timing.timed(tick._held_for_master, slug, store, now_ms)
     order, actions = timing.timed(tick._spawn_order, slug, config, store, agents, rows, doc, runtime)
+    if stop := _past_deadline(deadline, len(order), len(order)):
+        return actions + stop
     actions += timing.timed(tick._block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     run = tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
@@ -697,6 +699,9 @@ def _block_unresolved(
 ) -> list[str]:
     blocked: list[str] = []
     for _, task in order:
+        if deadline := PASS_DEADLINE.get():
+            if deadline.expired:
+                break
         if profile_first.UNRESOLVED in task:
             blocked.append(tick._unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
     return blocked

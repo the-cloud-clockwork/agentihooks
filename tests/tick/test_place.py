@@ -582,6 +582,21 @@ def test_a_spawn_pass_past_its_deadline_stops_and_leaves_every_task_for_the_next
 
 
 @pytest.mark.feature("swarm-tick-spawn")
+def test_an_expired_spawn_pass_never_blocks_unresolved_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    clock = _Clock(100.0)
+    _spawn_pass(monkeypatch, clock, 0.0, ["t1", "t2"])
+
+    def block(*args: Any) -> list[str]:
+        pytest.fail("expired spawn pass reached unresolved task writes")
+
+    monkeypatch.setattr(tick, "_block_unresolved", block)
+
+    assert _spawn_with(Deadline(100.0, clock)) == [SPAWN_LEFT.format(left=2, total=2)]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
 def test_a_spawn_pass_whose_deadline_expires_midway_launches_what_it_prepared_and_leaves_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

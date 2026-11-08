@@ -456,6 +456,9 @@
         "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
         "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect"
+        ,"tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks"
+        ,"tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires"
+        ,"tests/tick/steps/test_spawn.py::test_spawn"
       ]
     },
     {
