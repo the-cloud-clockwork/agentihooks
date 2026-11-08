@@ -1,6 +1,6 @@
 """The coordination operations the spawn step reaches the swarm store through: its facade, the store adapter, the fake and the step."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import SimpleNamespace
 from typing import Any, Iterator, cast
 
@@ -91,12 +91,16 @@ def test_the_spawn_store_keeps_the_store_method_names_for_step_timing() -> None:
 
 
 @pytest.mark.feature("swarm-tick-spawn")
-@pytest.mark.parametrize("reach", [lambda store: store._untyped, lambda store: store.redis._client])
-def test_the_spawn_store_refuses_private_names(reach: Any) -> None:
+@pytest.mark.parametrize(
+    ("reach", "name"),
+    [(lambda store: store._untyped, "_untyped"), (lambda store: store.redis._client, "redis._client")],
+)
+def test_the_spawn_store_refuses_private_names(reach: Any, name: str) -> None:
     port, store = _calls()
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError) as raised:
         reach(store)
+    assert str(raised.value) == name
     assert port.calls == []
 
 
@@ -133,6 +137,14 @@ def test_the_store_coordination_refuses_private_operations(operation: str) -> No
     with pytest.raises(AttributeError) as raised:
         _adapter().store_write(operation, (), {}, deadline=DEADLINE)
     assert str(raised.value) == operation.rsplit(".", 1)[-1]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize("operation", ["claim", "seats.occupy", "redis.set"])
+def test_the_store_coordination_refuses_a_write_named_as_a_read(operation: str) -> None:
+    with pytest.raises(UndeclaredEffect) as raised:
+        _adapter().store_read(operation, (), {}, deadline=DEADLINE)
+    assert str(raised.value) == f"{operation} is a store write"
 
 
 @pytest.mark.feature("swarm-tick-spawn")
@@ -186,6 +198,7 @@ def _tick() -> SimpleNamespace:
     return SimpleNamespace(
         readiness=SimpleNamespace(tick_places=lambda engine_name, rows: True),
         panic=SimpleNamespace(state=lambda store: store.redis.get(store.key("sw", "panic"))),
+        PLACING=nullcontext(),
         skip_refused=lambda function, *args: function(*args),
         _placement_pass=_placement_pass,
         _spawn=_spawn,
@@ -216,6 +229,7 @@ def test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports(
 
     spawn.run(Context(_State(state), Deadline(50.0, lambda: 0.0), tools.for_effects(spawn.effects)))
 
+    assert state["box"] == {"rows": state["rows"]}
     assigned = f"{PREFIX}:sw:launch-assignments"
     assert [call.args[:2] for call in coordination.calls] == [
         ("redis.get", (f"{PREFIX}:sw:panic",)),

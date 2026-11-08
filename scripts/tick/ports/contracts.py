@@ -59,6 +59,57 @@ class Ledger(Protocol):
     def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None: ...
 
 
+STORE_READS = frozenset(
+    {
+        "agents",
+        "claims",
+        "config",
+        "earlier_lives",
+        "execution",
+        "execution_occupants",
+        "failed_harness",
+        "handoff",
+        "handoff_envelope",
+        "handoff_seat",
+        "launches",
+        "slugs",
+        "culture.get",
+        "execution_registry.agents",
+        "execution_registry.get",
+        "execution_registry.occupants",
+        "execution_registry.records",
+        "memory.learned",
+        "memory.recaps",
+        "seats.key",
+        "seats.occupant",
+        "seats.seat_of",
+        *(
+            f"redis.{command}"
+            for command in (
+                "exists",
+                "get",
+                "hexists",
+                "hget",
+                "hgetall",
+                "hmget",
+                "llen",
+                "lrange",
+                "mget",
+                "pttl",
+                "scard",
+                "sismember",
+                "smembers",
+                "ttl",
+                "xlen",
+                "zcount",
+                "zrange",
+                "zscore",
+            )
+        ),
+    }
+)
+
+
 @runtime_checkable
 class Coordination(Protocol):
     def read(self, *, deadline: Deadline) -> object: ...

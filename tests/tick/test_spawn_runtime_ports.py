@@ -182,13 +182,21 @@ def test_the_router_runtime_keeps_the_optional_runtime_defaults() -> None:
 
 
 @pytest.mark.feature("swarm-tick-spawn")
+def test_the_router_runtime_answers_no_launch_room_when_the_pass_runtime_names_none() -> None:
+    adapter = _router(SimpleNamespace(launch_room=lambda config: None))
+
+    assert adapter.launch_room(CONFIG, deadline=Deadline(10, lambda: 0)) is None
+
+
+@pytest.mark.feature("swarm-tick-spawn")
 def test_the_router_runtime_refuses_spawn_operations_past_their_deadline() -> None:
     adapter = _router(_Legacy())
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(TimeoutError) as placing:
         adapter.place(CONFIG, "eng", "eng-1", TASK, deadline=EXPIRED)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(TimeoutError) as admitting:
         adapter.admit("sw", [TASK], 7, deadline=EXPIRED)
+    assert [str(placing.value), str(admitting.value)] == ["tool deadline expired"] * 2
 
 
 @pytest.mark.feature("swarm-tick-spawn")

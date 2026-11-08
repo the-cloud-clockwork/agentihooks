@@ -8,6 +8,7 @@ from typing import Any
 from scripts.swarm.store import PREFIX, AgentRecord, SwarmConfig
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Coordination, Ledger, Runtime
+from scripts.tick.ports.contracts import STORE_READS
 
 
 @dataclass(frozen=True)
@@ -94,61 +95,12 @@ class SpawnRuntimeCalls(RuntimeCalls):
 
 
 _STORE_GROUPS = frozenset({"redis", "seats", "memory", "culture", "execution_registry", "names"})
-_STORE_READS = frozenset(
-    {
-        "agents",
-        "claims",
-        "config",
-        "earlier_lives",
-        "execution",
-        "execution_occupants",
-        "failed_harness",
-        "handoff",
-        "handoff_envelope",
-        "handoff_seat",
-        "launches",
-        "slugs",
-        "culture.get",
-        "execution_registry.agents",
-        "execution_registry.get",
-        "execution_registry.occupants",
-        "execution_registry.records",
-        "memory.learned",
-        "memory.recaps",
-        "seats.key",
-        "seats.occupant",
-        "seats.seat_of",
-        *(
-            f"redis.{command}"
-            for command in (
-                "exists",
-                "get",
-                "hexists",
-                "hget",
-                "hgetall",
-                "hmget",
-                "llen",
-                "lrange",
-                "mget",
-                "pttl",
-                "scard",
-                "sismember",
-                "smembers",
-                "ttl",
-                "xlen",
-                "zcount",
-                "zrange",
-                "zscore",
-            )
-        ),
-    }
-)
 
 
 def _store_operation(port: Coordination, deadline: Deadline, path: str) -> Callable[..., Any]:
     if path.rsplit(".", 1)[-1].startswith("_"):
         raise AttributeError(path)
-    send = port.store_read if path in _STORE_READS else port.store_write
+    send = port.store_read if path in STORE_READS else port.store_write
 
     def operation(*args: Any, **kwargs: Any) -> Any:
         return send(path, args, kwargs, deadline=deadline)

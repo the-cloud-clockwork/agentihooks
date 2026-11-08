@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from scripts.swarm import lease as leases
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import STORE_READS, UndeclaredEffect
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore, SwarmConfig
@@ -89,6 +90,8 @@ class StoreCoordination:
     ) -> Any:
         """Answer the named swarm store read, a dotted path such as ``redis.hget``, while the deadline holds."""
         deadline.live()
+        if operation not in STORE_READS:
+            raise UndeclaredEffect(f"{operation} is a store write")
         return self._operation(operation)(*args, **kwargs)
 
     def store_write(

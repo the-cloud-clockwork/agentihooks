@@ -105,7 +105,8 @@ class RouterRuntime:
         """The launches the pass runtime takes at once, or None when it does not say."""
         deadline.live()
         room = getattr(self.legacy, "launch_room", None)
-        return None if room is None else int(room(config))
+        value = None if room is None else room(config)
+        return None if value is None else int(value)
 
     def reported(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
         deadline.live()
