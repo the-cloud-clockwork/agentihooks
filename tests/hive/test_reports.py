@@ -760,6 +760,7 @@ def test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_
     assert remote.store.claimant("fixture", "task") is None
     assert capacity._busy(remote.store.agents("fixture"))[agent.lane] == 0
     assert agent.name not in runtime.refusals
+    assert runtime.retire(agent) is True
     runtime.end.assert_not_called()
     assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
 
