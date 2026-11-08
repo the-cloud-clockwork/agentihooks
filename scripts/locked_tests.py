@@ -54,10 +54,7 @@ def _nodes(statements: list[ast.AST]) -> list[ast.AST]:
 
 def _disables(nodes: list[ast.AST], skippers: set[str]) -> bool:
     names = DISABLING | skippers
-    return any(
-        _named(node) in names or (isinstance(node, ast.Constant) and node.value in DISABLING)
-        for node in nodes
-    )
+    return any(_named(node) in names or (isinstance(node, ast.Constant) and node.value in DISABLING) for node in nodes)
 
 
 def _checks(nodes: list[ast.AST], helpers: frozenset[str]) -> list[ast.AST]:
