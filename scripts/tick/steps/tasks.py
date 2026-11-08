@@ -14,7 +14,7 @@ from scripts.swarm import (
     promotion_watch,
     release_wait,
 )
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerOffline, LedgerRefused
 from scripts.tick import registry, steps, view
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
@@ -92,7 +92,7 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(tick, get)
-        except Left:
+        except (Left, LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc

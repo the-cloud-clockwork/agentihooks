@@ -18,6 +18,7 @@ from scripts.swarm import (
     master_wake,
     tick_master,
 )
+from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry, steps
@@ -64,7 +65,7 @@ def _held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return []
         try:
             return call(tick, get)
-        except Left:
+        except (Left, LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc

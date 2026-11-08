@@ -12,6 +12,7 @@ from inspect import signature
 from types import MappingProxyType
 from typing import Any
 
+from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
@@ -43,7 +44,7 @@ def _run(call: Callable[..., Any], _module: Any, get: Callable[[str], Any]) -> A
     try:
         values = PassBox({**{key: get(key) for key in PASS_KEYS}, **box})
         return call(**{name: values[name] for name in signature(call).parameters})
-    except Left:
+    except (Left, LedgerOffline):
         return []
     except (Exception, SystemExit) as exc:
         box[RAISED] = exc

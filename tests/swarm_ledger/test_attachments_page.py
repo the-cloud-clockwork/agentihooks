@@ -7,7 +7,7 @@ from tests.swarm_ledger.test_outline import function_source
 PNG_ID = "a" * 64 + ".png"
 ATT = {"id": PNG_ID, "type": "image/png", "size": 10, "width": 30, "height": 20}
 PRELUDE = (
-    "const SLUG = 'shots'; const TOKEN = 'tok'; const API = '/api/shots'; const MAX_ATTACH = 6;"
+    "const SLUG = 'shots'; const API = '/api/shots'; const MAX_ATTACH = 6;"
     "const API_V1 = '/api/v1/ledgers/shots'; const attaching = {}; const attachNote = {}; const nodes = {};"
     "const $ = id => nodes[id] ||= {value: '', kids: [], replaceChildren(...k) { this.kids = k; }};"
     "const h = (tag, attrs, ...kids) => ({tag, ...attrs, kids: kids.filter(Boolean)});"
@@ -78,7 +78,7 @@ def test_no_attachments_render_nothing():
     )
 
 
-def test_each_file_is_uploaded_with_the_token_and_a_refusal_is_shown_on_the_tray():
+def test_each_file_is_uploaded_without_a_token_and_a_refusal_is_shown_on_the_tray():
     result = run(
         ["uploadImage", "addImages"],
         "const calls = []; const replies = ["
@@ -90,8 +90,8 @@ def test_each_file_is_uploaded_with_the_token_and_a_refusal_is_shown_on_the_tray
         " console.log(JSON.stringify({calls, list: attaching['tasks/t1/comments'], note: attachNote['tasks/t1/comments']})));",
     )
     assert result["calls"] == [
-        ["/api/v1/ledgers/shots/uploads/media", "POST", "tok", {"name": "a.png"}],
-        ["/api/v1/ledgers/shots/uploads/media", "POST", "tok", {"name": "b.txt"}],
+        ["/api/v1/ledgers/shots/uploads/media", "POST", None, {"name": "a.png"}],
+        ["/api/v1/ledgers/shots/uploads/media", "POST", None, {"name": "b.txt"}],
     ]
     assert result["list"] == [ATT]
     assert "PNG, JPEG, WebP or GIF" in result["note"]

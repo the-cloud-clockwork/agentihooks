@@ -21,7 +21,7 @@ def test_a_pass_starts_the_ledger_view_once_before_its_first_ledger_read(
     started, reads = [], []
     monkeypatch.setattr(client, "state", lambda slug: reads.append(slug) or {})
 
-    def start(slug: str, service: bool = False) -> None:
+    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         started.append((slug, service, list(reads)))
         raise RuntimeError("view read")
 
@@ -37,7 +37,7 @@ def test_a_pass_with_a_stand_in_ledger_reads_no_view(env: tuple, monkeypatch: py
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     started = []
-    monkeypatch.setattr(view, "start", lambda slug, service=False: started.append(slug))
+    monkeypatch.setattr(view, "start", lambda slug, service=False, timeout=None: started.append(slug))
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert started == []
 
@@ -55,7 +55,7 @@ def test_a_pass_with_a_ledger_client_stand_in_reads_no_view(env: tuple, monkeypa
         raise RuntimeError("fenced")
 
     started = []
-    monkeypatch.setattr(view, "start", lambda slug, service=False: started.append(slug))
+    monkeypatch.setattr(view, "start", lambda slug, service=False, timeout=None: started.append(slug))
     monkeypatch.setattr(controller, "FencedRuntime", fenced)
     with pytest.raises(RuntimeError, match="^fenced$"):
         cli.run_tick(store, "sw", StandIn(), rt, FakeHerdr({}))
@@ -81,7 +81,7 @@ def test_a_pass_holding_a_view_makes_no_whole_ledger_read(env: tuple, monkeypatc
         refreshes.append(len(refreshes))
         return view.LedgerView(len(refreshes), doc)
 
-    def start(slug: str, service: bool = False) -> None:
+    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         view.REFRESH.set((slug, refresh))
 
     monkeypatch.setattr(view, "reads", lambda client: client is ledger)
@@ -100,7 +100,7 @@ def test_a_stopped_pass_reads_its_ledger_through_the_view(env: tuple, monkeypatc
     ledger.service = True
     monkeypatch.setattr(ledger, "state", lambda slug: whole.append(slug) or doc, raising=False)
 
-    def start(slug: str, service: bool = False) -> None:
+    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         started.append((slug, service))
         view.REFRESH.set((slug, lambda: view.LedgerView(1, doc)))
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_session_credential:418c5d4541195655510c92fa06274d942a85f4ad54bf3fe9e8933d055d15be0b": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the Cookie name read through email.message.Message.__getitem__, which is case insensitive, so the same cookie value is parsed."
+  }
+}

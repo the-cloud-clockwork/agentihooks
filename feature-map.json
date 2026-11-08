@@ -67,6 +67,32 @@
       ]
     },
     {
+      "id": "swarm-tick-cached-ledger",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped claims and launches a ready task from the last good ledger view inside the pass deadline, and its claim lands on the ledger once the server answers again.",
+      "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
+      "tests": [
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped",
+        "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
+        "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
+        "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing",
+        "tests/tick/test_offline_view.py::test_queued_writes_without_a_held_view_patch_nothing",
+        "tests/tick/test_offline_view.py::test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view",
+        "tests/tick/test_offline_view.py::test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe",
+        "tests/tick/test_offline_view.py::test_a_refusing_server_still_ends_the_pass",
+        "tests/tick/test_offline_view.py::test_a_cleartext_ledger_address_leaves_the_pass_to_its_health_probe",
+        "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused",
+        "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_holds_is_queued",
+        "tests/tick/test_offline_view.py::test_an_offline_write_matching_a_held_field_is_queued",
+        "tests/tick/test_offline_view.py::test_an_offline_write_without_a_held_view_is_queued_unguarded",
+        "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
+        "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
+        "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
+        "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+      ]
+    },
+    {
       "id": "scheduler-tick-delivery",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a5",
@@ -433,6 +459,7 @@
         "tests/tick/test_spawn_room.py::test_without_a_reserve_slow_needs_spend_the_lane_and_spawn_is_skipped",
         "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_keeps_the_whole_lane",
         "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
+        "tests/tick/test_spawn_room.py::test_spawn_starts_when_its_needs_are_cut_while_a_step_it_does_not_need_still_runs",
         "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
         "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
         "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
