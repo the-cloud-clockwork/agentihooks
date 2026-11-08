@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/connectors.py:scripts.profiles.connectors.x_codex:9b8dbaffc30cb1e3beaa7d79a96642191023e00cc7a6a2c319b904bdaf8d99a7": {
+    "reader": "standards_reader",
+    "reason": "In x_codex, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to \"TUPLE[DICT[STR, ANY] | NONE, STR]\"); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

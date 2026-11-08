@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/browser.py:scripts.profiles.browser.x_spec:73d957fb8fff9e5194df56f6ee742dc22f6c689d111c36b6ae03d702c9badfa8": {
+    "reader": "standards_reader",
+    "reason": "In `x_spec`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to \"XXModuleTypeXX\"; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

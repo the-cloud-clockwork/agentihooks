@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundles.py:scripts.profiles.bundles.x_warn_unavailable:7471bfd8a86454304fa02f7bcf4356fdb3e497c7fa870a43170af3f74080c392": {
+    "reader": "standards_reader",
+    "reason": "In `x_warn_unavailable`, the mutation changes only the static type argument of `typing.cast` on cast target `profile_chain.missing_bundle_roots`, from Callable[[dict[str, Any]], \"list[tuple[str, Path]]\"] to Callable[[dict[str, Any]], \"LIST[TUPLE[STR, PATH]]\"]; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

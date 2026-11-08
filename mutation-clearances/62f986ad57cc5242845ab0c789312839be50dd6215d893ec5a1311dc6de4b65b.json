@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_copilot:9d2772c4cbbf732080acc3ea51059183755c1ac4b4015c6e93b00232660b96cb": {
+    "reader": "standards_reader",
+    "reason": "In `x_render_copilot`, the mutation changes only the static type argument of `typing.cast` on cast target `profile_dir(name, overlays)`, from Path to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__link_codex_state:2d02aea945be0ac0557ba1b3a2b94204be157c24b38548862e2479d842a17cb3": {
+    "reader": "standards_reader",
+    "reason": "In x__link_codex_state, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

@@ -6,7 +6,9 @@ import shlex
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 PERSONAS = {"claude": "CLAUDE.md", "codex": "AGENTS.md"}
 FILE = ".profile-binding.json"
@@ -32,7 +34,7 @@ def persona(text: str) -> str:
     )
 
 
-def _report(report: Path, data: dict) -> None:
+def _report(report: Path, data: dict[str, Any]) -> None:
     from scripts.targets._common import _atomic_write
 
     _atomic_write(report, json.dumps(data) + "\n")
@@ -40,7 +42,7 @@ def _report(report: Path, data: dict) -> None:
 
 
 def request(report: Path, profile: str, target: str, home: Path | None = None) -> None:
-    data = {"profile": profile, "harness": target, "state": "pending"}
+    data: dict[str, Any] = {"profile": profile, "harness": target, "state": "pending"}
     if home is not None:
         data["rendered"] = inspect(home, profile, target)
     _report(report, data)
@@ -80,7 +82,7 @@ def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, 
         if comm in HOMES:
             raw = (root / "environ").read_bytes().split(b"\0")
             keys = {REPORT, "AGENTIHOOKS_PROFILE", "AGENTIHOOKS_RUN_MODEL", "AGENTIHOOKS_RUN_EFFORT", *HOMES.values()}
-            env, names = {}, []
+            env, names = cast(dict[str, str], {}), cast(list[str], [])
             for item in raw:
                 key, _, value = item.partition(b"=")
                 name = key.decode(errors="replace")
@@ -100,7 +102,7 @@ def process(proc: Path = Path("/proc"), start: int | None = None) -> tuple[int, 
     raise ValueError("profile canary has no supported live harness ancestor")
 
 
-def validate(canary: str) -> dict:
+def validate(canary: str) -> dict[str, Any]:
     pid, target, env, account = process()
     if not env.get(REPORT):
         raise ValueError("profile canary has no launch validation request")
@@ -156,7 +158,7 @@ def main(canary: str) -> int:
     return 0
 
 
-def wait(report: Path, timeout: float) -> dict:
+def wait(report: Path, timeout: float) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         data = json.loads(report.read_text())
@@ -171,14 +173,14 @@ def wait(report: Path, timeout: float) -> dict:
     )
 
 
-def fields(data: dict, profile: str, target: str) -> dict:
+def fields(data: dict[str, Any], profile: str, target: str) -> dict[str, Any]:
     result = json.loads(data.get("profile_binding", "{}"))
     if not isinstance(result, dict) or data.get("profile_validation") != "validated":
         raise ValueError("mounted profile validation is missing or failed")
-    return checked(result, profile, target)
+    return checked(cast(dict[str, Any], result), profile, target)
 
 
-def checked(result: dict, profile: str, target: str) -> dict:
+def checked(result: dict[str, Any], profile: str, target: str) -> dict[str, Any]:
     if result.get("state") != "validated":
         raise ValueError("mounted profile validation is missing or failed")
     if result.get("profile") != profile or result.get("harness") != target:
@@ -188,7 +190,7 @@ def checked(result: dict, profile: str, target: str) -> dict:
     return result
 
 
-def confirm(report: Path, profile: str, target: str, account: str) -> dict:
+def confirm(report: Path, profile: str, target: str, account: str) -> dict[str, Any]:
     data = json.loads(report.read_text())
     if data["state"] == "failed":
         raise ValueError(data["reason"])
@@ -216,10 +218,17 @@ def continuation(args: list[str], target: str, environ: dict[str, str] | None = 
     from scripts.swarm.store import MASTER
 
     environ = environ or {}
-    named = effort_range.named(target, effort)
+    named = cast(Callable[[str, str], str], effort_range.named)(target, effort)
     flags = model_flags(target, model, named)
-    _, bounded, _ = _native_options(target, effort_range.launch_args(target, flags, environ))
-    if effort_range.rank(bounded) != effort_range.rank(named) and environ.get("AGENTIHOOKS_SWARM_LANE") != MASTER:
+    _, bounded, _ = _native_options(
+        target,
+        cast(Callable[[str, list[str], dict[str, str]], list[str]], effort_range.launch_args)(target, flags, environ),
+    )
+    if (
+        cast(Callable[[str], int | None], effort_range.rank)(bounded)
+        != cast(Callable[[str], int | None], effort_range.rank)(named)
+        and environ.get("AGENTIHOOKS_SWARM_LANE") != MASTER
+    ):
         raise ValueError("unsupported quota transfer: saved effort is outside the current swarm range")
     return [*flags, *remaining]
 
@@ -227,7 +236,7 @@ def continuation(args: list[str], target: str, environ: dict[str, str] | None = 
 def write(home: Path, profile: str, target: str) -> None:
     manifest = home.parent / f"{target}.sources.json"
     rows = json.loads(manifest.read_text())
-    revisions = {}
+    revisions: dict[str, str | None] = {}
     for row in rows:
         repo = row.get("locator", {}).get("repo")
         if repo and repo not in revisions:
@@ -246,7 +255,7 @@ def write(home: Path, profile: str, target: str) -> None:
     (home / FILE).write_text(json.dumps(data) + "\n")
 
 
-def inspect(home: Path, profile: str, target: str) -> dict:
+def inspect(home: Path, profile: str, target: str) -> dict[str, Any]:
     if target not in PERSONAS:
         raise ValueError(f"unsupported profile binding harness: {target}")
     if not home.is_dir():
@@ -264,7 +273,7 @@ def inspect(home: Path, profile: str, target: str) -> dict:
     return data
 
 
-def record(home: Path | None = None) -> dict:
+def record(home: Path | None = None) -> dict[str, Any]:
     account, report = None, None
     if home is None:
         _, target, env, account = process()

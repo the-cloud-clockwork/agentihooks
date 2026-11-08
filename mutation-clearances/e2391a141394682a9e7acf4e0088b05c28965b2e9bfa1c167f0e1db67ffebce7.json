@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundles.py:scripts.profiles.bundles.x_warn_unavailable:dd711cc30fc5a33afa1e4780704067ee5d02803fee7aa9fc7113349865950024": {
+    "reader": "standards_reader",
+    "reason": "In `x_warn_unavailable`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to \"MODULETYPE\"; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

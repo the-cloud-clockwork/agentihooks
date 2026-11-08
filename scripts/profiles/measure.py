@@ -9,7 +9,7 @@ import tempfile
 import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 
 from scripts import select_profile
 
@@ -78,17 +78,19 @@ def first_turn(agent: str, stdout: str) -> Reading | None:
     pending: tuple[str, ...] = ()
     for line in stdout.splitlines():
         try:
-            event = json.loads(line)
+            event: Any = json.loads(line)
         except ValueError:
             continue
         if not isinstance(event, dict):
             continue
-        if event.get("subtype") == "init":
-            pending = tuple(s["name"] for s in event.get("mcp_servers", []) if s.get("status") != "connected")
-        if agent == "claude" and event.get("type") == "assistant":
-            usage = event["message"]["usage"]
+        if cast(dict[str, Any], event).get("subtype") == "init":
+            pending = tuple(
+                s["name"] for s in cast(dict[str, Any], event).get("mcp_servers", []) if s.get("status") != "connected"
+            )
+        if agent == "claude" and cast(dict[str, Any], event).get("type") == "assistant":
+            usage = cast(dict[str, Any], event)["message"]["usage"]
             return Reading(sum(usage.get(key, 0) for key in CLAUDE_USAGE), pending)
-        if agent == "codex" and event.get("type") == "turn.completed":
+        if agent == "codex" and cast(dict[str, Any], event).get("type") == "turn.completed":
             return Reading(event["usage"]["input_tokens"], pending)
     return None
 
@@ -98,7 +100,7 @@ def measure(
     agent: str,
     off: frozenset[str],
     environ: Mapping[str, str] | None = None,
-    run: Callable = subprocess.run,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> Reading:
     base = _environment(os.environ if environ is None else environ)
     native = CLAUDE_ARGS if agent == "claude" else CODEX_ARGS

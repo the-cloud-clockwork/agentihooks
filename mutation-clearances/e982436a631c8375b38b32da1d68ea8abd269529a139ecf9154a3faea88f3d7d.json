@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__claude_settings:acf124a487e27211f3a02f9318f89d65a4d168864de80993d0e110c768201f4e": {
+    "reader": "standards_reader",
+    "reason": "In x__claude_settings, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}
