@@ -14,8 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.plans.normalize import Normalized, PlanError, normalize
-from scripts.swarm_ledger import ledger_plans, plan_ranges
-from scripts.swarm_ledger.ledger_phase_cli import append_phases
+from scripts.swarm_ledger import ledger_phase_cli, ledger_plans, plan_ranges
 
 LIMIT = 100
 OPERATOR = "operator"
@@ -39,11 +38,11 @@ class Links:
     """Where the stored plan lives once uploaded, and the plan id it maps to."""
 
     plan: str
-    file: dict
+    file: dict[str, Any]
     artifact: str
     url: str
     task: str = ""
-    source: dict | None = None
+    source: dict[str, Any] | None = None
 
 
 def author(name: str, swarm: str, slug: str, remote: bool) -> Author:
@@ -64,21 +63,24 @@ def plan_of(markdown: str) -> str:
     return ledger_plans.plan_id(hashlib.sha256(markdown.encode()).hexdigest())
 
 
-def entries(plan: Normalized, taken: list[str], planning: str = "") -> list[dict]:
+def entries(plan: Normalized, taken: list[str], planning: str = "") -> list[dict[str, Any]]:
     """The phase entries with their ledger ids, depends resolved and the planning override applied."""
-    content = {
-        **plan.content,
-        "phases": [{**phase, "planning": planning} if planning else phase for phase in plan.content["phases"]],
+    legacy: Any = ledger_phase_cli
+    normalized: Any = plan
+    content: dict[str, Any] = {
+        **normalized.content,
+        "phases": [{**phase, "planning": planning} if planning else phase for phase in normalized.content["phases"]],
     }
-    return append_phases(content, taken)
+    return legacy.append_phases(content, taken)
 
 
-def batch(plan: Normalized, phases: list[dict], links: Links, by: str) -> list[dict]:
+def batch(plan: Normalized, phases: list[dict[str, Any]], links: Links, by: str) -> list[dict[str, Any]]:
     """Build the ops: the artifact, the plan, one phase op each with its plan links, then a slice per anchor."""
-    ranges = plan_ranges.phase_lines(
+    legacy: Any = plan_ranges
+    ranges: dict[str, str] = legacy.phase_lines(
         plan.markdown, [{"id": entry["phase"], "title": entry["title"]} for entry in phases]
     )
-    ops = [
+    ops: list[dict[str, Any]] = [
         {"op": "artifact_add", "task": links.task, "title": plan.title, "file": links.file, "plan": True},
         {
             "op": "plan_add",
@@ -119,21 +121,22 @@ def swarm_state(slug: str, connect: Callable[[], Any]) -> str:
         return "absent"
 
 
-def report(doc: Mapping[str, list[dict]], plan: str, state: str, **extra: object) -> dict:
+def report(doc: Mapping[str, list[dict[str, Any]]], plan: str, state: str, **extra: object) -> dict[str, Any]:
     """The command's JSON: the plan, its phases, each phase's lifecycle and the swarm state."""
     from scripts.swarm import phase_state
 
+    legacy: Any = phase_state
     linked = [phase for phase in doc["phases"] if phase.get("plan") == f"plans/{plan}"]
     return {
         "plan": plan,
         "phases": [phase["id"] for phase in linked],
-        "lifecycle": {phase["id"]: phase_state.lifecycle(phase, doc) for phase in linked},
+        "lifecycle": {phase["id"]: legacy.lifecycle(phase, doc) for phase in linked},
         "swarm": state,
         **extra,
     }
 
 
-def source(env: Mapping[str, str], path: str, markdown: str) -> dict:
+def source(env: Mapping[str, str], path: str, markdown: str) -> dict[str, Any]:
     """The provenance an operator-authored plan row records."""
     return {
         "harness": env.get("AGENTIHOOKS_TARGET", "claude"),
@@ -159,16 +162,24 @@ def read_plan(path: str) -> bytes:
     return sys.stdin.buffer.read() if path == "-" else Path(path).read_bytes()
 
 
-def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict:
+def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, Any]:
     """Run one ingest and return its JSON report, or raise IngestError."""
-    from scripts.gates.base import Who
-    from scripts.swarm.store import connect
-    from scripts.swarm_ledger import ledger, ledger_link
+    from scripts.gates import base
+    from scripts.swarm import store
+    from scripts.swarm_ledger import ledger as ledger_module
+    from scripts.swarm_ledger import ledger_link
+
+    identity: Any = base
+    ledger: Any = ledger_module
+    link: Any = ledger_link
+    swarm: Any = store
 
     slug = args.ledger
-    who = Who.from_env(env)
-    by = author(who.name, who.swarm, slug, ledger_link.remote(env, slug=slug))
-    doc = {key: ledger.resource(slug, key, collection=True) for key in ("phases", "tasks", "plans")}
+    who = identity.Who.from_env(env)
+    by = author(who.name, who.swarm, slug, link.remote(env, slug=slug))
+    doc: dict[str, list[dict[str, Any]]] = {
+        key: ledger.resource(slug, key, collection=True) for key in ("phases", "tasks", "plans")
+    }
     try:
         plan = normalize(
             read_plan(args.path), "stdin.md" if args.path == "-" else args.path, [p["id"] for p in doc["phases"]]
@@ -177,7 +188,7 @@ def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict:
         raise IngestError(str(exc)) from None
     plan_id = plan_of(plan.markdown)
     if any(row["id"] == plan_id for row in doc["plans"]):
-        return report(doc, plan_id, swarm_state(slug, connect), ingested=False, note="already ingested")
+        return report(doc, plan_id, swarm_state(slug, swarm.connect), ingested=False, note="already ingested")
     phases = entries(plan, [p["id"] for p in doc["phases"]], args.planning)
     if args.dry_run:
         placeholder = Links(plan_id, {}, "https://ledger.invalid/plan", "https://ledger.invalid/plan")
@@ -196,20 +207,31 @@ def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict:
     if state.get("rejected") and where == "issue":
         from scripts.swarm_ledger import ledger_publish
 
-        ledger_publish.close_issue(url)
+        publisher: Any = ledger_publish
+        publisher.close_issue(url)
     ledger.refused(state, ops)
-    after = {key: ledger.resource(slug, key, collection=True) for key in ("phases", "tasks")}
+    after: dict[str, list[dict[str, Any]]] = {
+        key: ledger.resource(slug, key, collection=True) for key in ("phases", "tasks")
+    }
     if not by.name.startswith(MASTER):
         notify(slug, plan, by.name, len(phases))
-    return report(after, plan_id, swarm_state(slug, connect), ingested=True, plan_url=url, published_to=where)
+    return report(after, plan_id, swarm_state(slug, swarm.connect), ingested=True, plan_url=url, published_to=where)
 
 
 def publish(
-    args: argparse.Namespace, env: Mapping[str, str], plan: Normalized, phases: list[dict], by: Author, plan_id: str
-) -> tuple[list[dict], str, str]:
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    plan: Normalized,
+    phases: list[dict[str, Any]],
+    by: Author,
+    plan_id: str,
+) -> tuple[list[dict[str, Any]], str, str]:
     """Upload the canonical markdown, open the issue where the repo has issues, and build the batch."""
-    from scripts.swarm_ledger import ledger, ledger_publish
+    from scripts.swarm_ledger import ledger as ledger_module
+    from scripts.swarm_ledger import ledger_publish
 
+    ledger: Any = ledger_module
+    publisher: Any = ledger_publish
     stored: dict[str, Any] = {}
     task = env.get("AGENTIHOOKS_SWARM_TASK", "") if by.seat else ""
 
@@ -221,9 +243,9 @@ def publish(
 
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / f"{Path('stdin' if args.path == '-' else args.path).stem}.md"
-        path.write_text(plan.markdown, encoding="utf-8")
+        path.write_bytes(plan.markdown.encode())
         try:
-            url, where = ledger_publish.publish(str(path), plan.title, args.repo, artifact, issue_title=plan.title)
+            url, where = publisher.publish(str(path), plan.title, args.repo, artifact, issue_title=plan.title)
         except ledger_publish.PublishError as exc:
             raise IngestError(str(exc)) from None
     artifact_url = f"{ledger.base()}/artifacts/{args.ledger}/{stored['file']['id']}"
@@ -236,7 +258,8 @@ def notify(slug: str, plan: Normalized, by: str, count: int) -> None:
     """Tell the ledger's master, as information, that a plan landed."""
     from scripts.inbox import cli as inbox
 
-    inbox.main(["send", f"{MASTER}{slug}", "--fyi", f"{by} ingested the plan {plan.title} as {count} phases."])
+    legacy: Any = inbox
+    legacy.main(["send", f"{MASTER}{slug}", "--fyi", f"{by} ingested the plan {plan.title} as {count} phases."])
 
 
 def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:

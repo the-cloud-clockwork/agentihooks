@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 
 def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
@@ -16,4 +17,5 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         return ingest.main(args[1:], environ)
     from scripts.swarm_ledger import plan_read
 
-    return plan_read.main(args, environ)
+    reader: Any = plan_read
+    return reader.main(args, environ)
