@@ -20,6 +20,19 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --w
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
 RUN apt-get update && apt-get install -y --no-install-recommends gh
 
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS browser-libs
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN dpkg-query -W -f='${Package}\n' | sort > /base-packages \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 \
+        libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
+        libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 fonts-liberation \
+    && mkdir /browser-libs \
+    && dpkg-query -W -f='${Package}\n' | sort | comm -13 /base-packages - | xargs dpkg -L \
+        | while read -r path; do if [ ! -d "$path" ] && { [ -f "$path" ] || [ -L "$path" ]; }; then \
+            printf '%s/%s\n' "$(readlink -f "$(dirname "$path")")" "$(basename "$path")"; fi; done \
+        | sort -u | tar -cf - --no-recursion -T - | tar -xf - -C /browser-libs
+
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS overlay
 COPY --from=wheel /wheels /wheels
 WORKDIR /opt/venv
@@ -34,6 +47,7 @@ RUN python -m venv /opt/venv \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /links/npx
 
 FROM ${WORKER_IMAGE}
+COPY --link=true --from=browser-libs /browser-libs/ /
 COPY --link=true --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --link=true --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --link=true --from=uv /uv /uvx /usr/local/bin/

@@ -32,11 +32,12 @@ class JobHost:
 
 def local_host(store: "RedisStore", slug: str, environ: Mapping[str, str]) -> JobHost:
     """Wire the controller host sample and the refresh and snapshot jobs of one swarm."""
-    from scripts.swarm import host_budget, refresh_job, snapshot_job
+    from scripts.swarm import host_budget, refresh_job, snapshot_job, workflow_job
 
     return JobHost(
         {"sample": lambda: host_budget.controller_host(environ)},
         {
+            "workflow": workflow_job.start,
             "refresh": lambda request: refresh_job.start(store, slug),  # pyright: ignore[reportUnknownMemberType]
             "snapshot": lambda request: snapshot_job.start(store, slug, request["now_ms"], environ),  # pyright: ignore[reportUnknownMemberType]
         },

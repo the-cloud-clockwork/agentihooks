@@ -6,20 +6,28 @@ import pytest
 import hooks.context.ledger_decision as decision
 from hooks import hook_manager
 from hooks.targets.emitter import flush
+from scripts.swarm_ledger import ledger_phases
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORDED = json.loads((ROOT / "tests" / "fixtures" / "ledger_decision_payloads.json").read_text(encoding="utf-8"))
 TOOLBELT = ROOT / "profiles" / "package" / "rules" / "agentihooks-toolbelt.md"
 MARK = "LEDGER DECISION"
+PLAN_PATH = RECORDED["claude_plan_accept"]["tool_input"]["planFilePath"]
 
 
 @pytest.fixture(autouse=True)
-def isolated(tmp_path, monkeypatch):
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ledgers = tmp_path / "ledgers"
     (ledgers / ".sessions").mkdir(parents=True)
     monkeypatch.setenv("LEDGER_DIR", str(ledgers))
     monkeypatch.setattr(decision, "STATE_DIR", tmp_path / "decision-state")
-    for name in ("AGENTIHOOKS_TARGET", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_AGENT_NAME"):
+    for name in (
+        "AGENTIHOOKS_TARGET",
+        "AGENTIHOOKS_SWARM",
+        "AGENTIHOOKS_SWARM_TASK",
+        "AGENTIHOOKS_AGENT_NAME",
+        "AGENTIHOOKS_SWARM_LANE",
+    ):
         monkeypatch.delenv(name, raising=False)
     return ledgers
 
@@ -134,20 +142,25 @@ def test_a_non_plan_tool_call_on_an_unbound_session_gets_nothing(capsys, monkeyp
     assert MARK not in run(payload, capsys, "claude", monkeypatch)
 
 
-def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(capsys, monkeypatch):
+def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "swarm-buildout")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@323133-1")
     out = run(recorded("codex_plan_accept"), capsys, "codex", monkeypatch)
     assert MARK in out
-    assert "agentihooks ledger --slug swarm-buildout --as master@323133-1 plan phases" in out
+    assert "agentihooks plan ingest <plan file> --ledger swarm-buildout" in out
+    assert "write the accepted plan as markdown" in out
     assert "init-swarm" not in out
 
 
-def test_a_session_bound_to_a_ledger_appends_its_plan_there(isolated, capsys, monkeypatch):
+def test_a_session_bound_to_a_ledger_appends_its_plan_there(
+    isolated: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     bind(isolated, RECORDED["claude_plan_accept"]["session_id"], slug="rig-grade-swarm", name="master@323133-0001")
     out = run(recorded("claude_plan_accept"), capsys, "claude", monkeypatch)
     assert MARK in out
-    assert "agentihooks ledger --slug rig-grade-swarm --as master@323133-0001 plan phases <phases.json>" in out
+    assert f"agentihooks plan ingest {PLAN_PATH} --ledger rig-grade-swarm" in out
     assert "without asking" in out
 
 
@@ -190,17 +203,21 @@ def test_a_plan_without_a_session_id_gets_nothing(monkeypatch):
     assert decision.directive(recorded("claude_plan_accept", session_id="")) == ""
 
 
-def test_the_binding_defaults_to_the_home_ledger_folder(capsys, monkeypatch):
+def test_the_binding_defaults_to_the_home_ledger_folder(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("LEDGER_DIR")
     sessions = Path.home() / "development-ledger" / ".sessions"
     sessions.mkdir(parents=True)
     (sessions / "s1.json").write_text(json.dumps({"slug": "home-ledger", "name": "master@1"}), encoding="utf-8")
     out = run(recorded("claude_plan_accept", session_id="s1"), capsys, "claude", monkeypatch)
-    assert "--slug home-ledger --as master@1 plan phases" in out
+    assert "--ledger home-ledger" in out
 
 
 @pytest.mark.parametrize("content", ["{}", "not json", "[1]", None])
-def test_an_unreadable_binding_names_placeholders(isolated, content, monkeypatch):
+def test_an_unreadable_binding_names_placeholders(
+    isolated: Path, content: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     binding = isolated / ".sessions" / "s1.json"
     if content is None:
@@ -208,16 +225,16 @@ def test_an_unreadable_binding_names_placeholders(isolated, content, monkeypatch
     else:
         binding.write_text(content, encoding="utf-8")
     out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
-    assert "`agentihooks ledger --slug <slug> --as <your name> plan phases <phases.json>`" in out
+    assert f"`agentihooks plan ingest {PLAN_PATH} --ledger <slug>`" in out
 
 
-def test_an_unreadable_binding_falls_back_to_the_swarm(isolated, monkeypatch):
+def test_an_unreadable_binding_falls_back_to_the_swarm(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "env-swarm")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@2")
     (isolated / ".sessions" / "s1.json").write_text("[1]", encoding="utf-8")
     out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
-    assert "--slug env-swarm --as master@2 plan phases" in out
+    assert "--ledger env-swarm" in out
 
 
 def test_the_toolbelt_rule_bars_automatic_creation():
@@ -226,3 +243,63 @@ def test_the_toolbelt_rule_bars_automatic_creation():
     assert "No session creates a ledger or starts a swarm on its own" in section
     assert "gets no directive and" in section
     assert "keeps its ledger duties" in section
+
+
+def test_a_plan_without_a_path_is_written_to_a_scratch_file(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    payload = recorded("claude_plan_accept", session_id="s1")
+    payload["tool_input"] = {"plan": "# Ship it\n\n1. Build\n"}
+    out = decision.directive(payload)
+    scratch = decision.STATE_DIR / "s1.plan.md"
+    assert scratch.read_text(encoding="utf-8") == "# Ship it\n\n1. Build\n"
+    assert f"`agentihooks plan ingest {scratch} --ledger rig-grade-swarm`" in out
+
+
+def test_a_planner_seat_leaving_plan_mode_gets_nothing(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig-grade-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", "plan")
+    bind(isolated, "s1")
+    assert decision.directive(recorded("claude_plan_accept", session_id="s1")) == ""
+
+
+def test_the_directive_names_the_planning_default_and_no_review(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
+    assert f"planned {ledger_phases.PLANNING_DEFAULT}" in out
+    assert "in review" not in out
+    assert "plan phases" not in out
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        TOOLBELT,
+        ROOT / "profiles" / "package" / "skills" / "init-swarm" / "SKILL.md",
+        ROOT / "profiles" / "package" / "roles" / "master" / "CLAUDE.md",
+    ],
+)
+def test_the_doctrine_names_plan_ingest(path: Path) -> None:
+    assert "agentihooks plan ingest" in path.read_text(encoding="utf-8")
+
+
+def test_an_empty_plan_path_falls_back_to_a_scratch_copy(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    payload = recorded("claude_plan_accept", session_id="s1")
+    payload["tool_input"] = {"planFilePath": "", "plan": "# Plan é\n"}
+    out = decision.directive(payload)
+    scratch = decision.STATE_DIR / "s1.plan.md"
+    assert scratch.read_bytes() == "# Plan é\n".encode("utf-8")
+    assert f"without asking: run `agentihooks plan ingest {scratch} --ledger rig-grade-swarm`." in out
+
+
+def test_a_carried_plan_path_needs_no_write_step(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
+    assert f"without asking: run `agentihooks plan ingest {PLAN_PATH} --ledger rig-grade-swarm`." in out

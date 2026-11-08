@@ -139,17 +139,17 @@ The count is `1` when adoption is recorded. Redis rebuilds the ACL from its temp
 
 ## Workstation tailnet fronts
 
-The adopted workstation stack can expose its ledger, hive join and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
+The adopted workstation stack can expose its ledger and Redis fronts through Tailscale. The overlay, nginx template and startup script ship with the stack under `deploy/compose`. They require the existing hive certificate and key under the adopted user's `.agentihooks/hive-tls` folder. The ledger forwards to loopback port 8765 and Redis to loopback port 6379, preserving the workstation's adopted Redis service.
 
-Start or restart the three fronts with:
+Start or restart the two fronts with:
 
 ```bash
 bash "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack/deploy/compose/start-tailnet.sh"
 ```
 
-Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address and recreates only the three fronts. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener, hive listener and advertised Redis address all use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
+Every invocation reads `tailscale ip -4`, refuses a missing or invalid tailnet address recreates only the two fronts and removes the retired hive join front. It overrides any old `SWARM_TAILNET_IP` value without rewriting the private settings. The nginx listener and advertised Redis address both use that address. Run this command after reconnecting the workstation to the tailnet; `docker restart` alone retains the container's previous address. `SWARM_STACK_HOME` selects another stack folder and `SWARM_COMPOSE_PROJECT` selects another project. Arguments such as `config --format json` replace the default startup action.
 
-The hive front mints bus credentials only with the NATS signer. It reads `AGENTIHOOKS_NATS_SIGNER` (the OpenBao record under `agentihooks/hub/`), `AGENTIHOOKS_NATS_TRUSTED_OPERATOR`, `OPENBAO_URL` and `OPENBAO_TOKEN` from the environment that runs the script, or from the stack `.env`. Without them it grants no bus credential, and a member refreshing through it keeps the bus credential it already saved.
+Hives join through the hosted join endpoint on the Anton Redis, set per hive with the chart's `workers.hiveUrl`. The workstation no longer serves hive joins on the tailnet, so no hive can mint a member on the workstation Redis.
 
 ## Diagnose or stop the stack
 

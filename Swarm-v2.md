@@ -592,6 +592,9 @@ A local exporter can cover local sessions through the same ingestion contract.
 
 `agentibridge` is fully deprecated as a deployed product; it may be inspected only to extract useful transcript turn-chunking, pgvector schema, and semantic-search logic.
 Do not retain its dispatcher, agent registry, daemon installer, OAuth server, or separate fleet lifecycle.
+The bundle catalogue replaces its agent registry: each profile's `profile.yml` `description` and `capabilities` form its agent card, read by `agentihooks agents list|show` and the MCP `agents` category (`agent_list`, `agent_show`, `agent_run`).
+A specialist runs on demand as a one-stage workflow through the agentihooks workflow runner; `agent_run` is refused inside a worker run, so runs cannot nest.
+No separate agent registry, registration service or registry database is added; a profile becomes discoverable only by shipping in the built-in profiles, a bundle, a linked profile or the package roles.
 Before extraction, inventory consumers and retain compatibility aliases only inside the replacement agentihooks surface.
 Time-limit any compatibility aliases and test that they use the replacement storage rather than the retired service.
 Preserve attribution and license notices for extracted code.
@@ -4992,7 +4995,7 @@ Baseline references: [SRC-AH-READER] [SRC-AH-MEMORY] [SRC-LEGACY-SEARCH]
 
 - Input preparation: construct the package fixture from consumer inventory containing one search caller, one obsolete dispatcher, and one dashboard metric reader.
 - Output contract: Every known caller has a target agentihooks interface or an explicit removal decision.
-- Rejection contract: Dispatch, registry, and standalone daemon features are not copied just because they share a source module.
+- Rejection contract: Dispatch, registry, and standalone daemon features are not copied just because they share a source module; a proposal that restores an agent registry beside the bundle catalogue of profile cards is rejected.
 - Recovery contract: Discovering a late consumer adds a migration item without restoring the retired architecture.
 - Mutation scope: Read and migrate historical data; do not recreate the retired service under a new name.
 - Compatibility obligation: compare the affected public behavior with the preceding accepted protocol or explicitly local compatibility path.
