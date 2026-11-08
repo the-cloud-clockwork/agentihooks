@@ -11,7 +11,6 @@ from tests.hive.test_controller_launch import setup  # noqa: F401
 
 pytestmark = pytest.mark.unit
 
-FEATURE = "hive-roll-member-drain"
 NOW = 1_793_166_000_000
 HIVE = "06db8fa06259f56a"
 OLD, NEW = "worker-hive-old", "worker-hive-new"
@@ -35,7 +34,7 @@ def _shown(client: Any) -> dict[str, Any]:
     return record
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_replacement_pod_joins_as_a_second_live_member_and_a_quiet_member_is_forgotten(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW)
@@ -51,7 +50,7 @@ def test_a_replacement_pod_joins_as_a_second_live_member_and_a_quiet_member_is_f
     assert _shown(client)["members"] == {NEW: {"heartbeat_at": NOW + registry.LIVE_MS - 4_999, "draining": "no"}}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_the_old_pod_drain_leaves_the_hive_open_while_the_replacement_takes_agents(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - 1_000)
@@ -69,7 +68,7 @@ def test_the_old_pod_drain_leaves_the_hive_open_while_the_replacement_takes_agen
     assert placement.hosts("eng", record)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_sole_or_stale_replacement_drains_the_whole_hive_as_before(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - registry.LIVE_MS - 1)
@@ -89,7 +88,7 @@ def test_a_sole_or_stale_replacement_drains_the_whole_hive_as_before(client):
     assert not placement.hosts("eng", record)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_draining_replacement_takes_no_agents_so_the_hive_drains(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - 1_000)
@@ -99,7 +98,7 @@ def test_a_draining_replacement_takes_no_agents_so_the_hive_drains(client):
     assert _shown(client)["draining"] == "yes"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_member_keeps_its_drain_across_beats_and_clears_it_only_when_it_starts_again(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - 1_000)
@@ -112,7 +111,7 @@ def test_a_member_keeps_its_drain_across_beats_and_clears_it_only_when_it_starts
     assert _shown(client)["members"][OLD] == {"heartbeat_at": NOW + 1, "draining": "no"}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_join_or_drain_check_of_an_unregistered_hive_writes_nothing(client):
     registry.join(client, "unregistered", OLD, NOW)
 
@@ -126,7 +125,7 @@ def _agent(name: str, namespace: str, task: str = "t1") -> AgentRecord:
     return AgentRecord(name, "eng", task, seat=f"{name}-seat", hive=HIVE, state="working", runtime_target=target)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_the_old_pod_drain_orders_only_its_own_agents_to_hand_off(client, monkeypatch):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - 1_000)
@@ -150,7 +149,7 @@ def test_the_old_pod_drain_orders_only_its_own_agents_to_hand_off(client, monkey
     assert _shown(client).get("draining") != "yes"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_drain_with_no_member_named_still_waits_on_every_agent_of_the_hive(client, monkeypatch):
     agents = [_agent("old@1", "boot/old"), _agent("new@1", "boot/new")]
     store = cast(
@@ -174,7 +173,7 @@ def _names(remaining: list[tuple[str, AgentRecord]]) -> list[str]:
     return [agent.name for _, agent in remaining]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_the_pod_prestop_drain_names_this_pod_as_the_leaving_member(monkeypatch):
     from scripts.hive import cli
 
@@ -190,14 +189,14 @@ def test_the_pod_prestop_drain_names_this_pod_as_the_leaving_member(monkeypatch)
     assert seen == [(HIVE, 42, OLD)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_the_member_name_is_this_host_name(monkeypatch):
     monkeypatch.setattr(registry.socket, "gethostname", lambda: "agentihooks-worker-hive-7c9f")
 
     assert registry.member_name() == "agentihooks-worker-hive-7c9f"
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_draining_member_polls_no_lane_spoke_and_waits(monkeypatch):
     polled: list[tuple] = []
     waits: list[float] = []
@@ -210,7 +209,35 @@ def test_a_draining_member_polls_no_lane_spoke_and_waits(monkeypatch):
     assert waits == [lanes.IDLE_S]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
+def test_the_daemon_first_beat_clears_its_drain_and_a_draining_member_polls_no_launch_order(client, monkeypatch):
+    from scripts.hive import daemon
+
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon.time, "time", lambda: NOW / 1000)
+    monkeypatch.setattr(daemon, "JOINED", set())
+    monkeypatch.setattr(registry, "member_name", lambda: OLD)
+    polled: list[str] = []
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: polled.append(consumer.hive))
+    registry.join(client, HIVE, NEW, NOW)
+    registry.join(client, HIVE, OLD, NOW)
+    registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping"))
+
+    daemon.beat(client, HIVE)
+
+    assert polled == [HIVE]
+    assert _shown(client)["members"][OLD] == {"heartbeat_at": NOW, "draining": "no"}
+    assert daemon.JOINED == {HIVE}
+
+    registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping"))
+    daemon.beat(client, HIVE)
+
+    assert polled == [HIVE]
+    assert _shown(client)["members"][OLD] == {"heartbeat_at": NOW, "draining": "yes"}
+
+
+@pytest.mark.feature("hive-roll-member-drain")
 def test_hive_list_names_each_member_and_whether_it_takes_agents(client, monkeypatch, capsys):
     from scripts.hive import cli
 
@@ -230,7 +257,7 @@ def test_hive_list_names_each_member_and_whether_it_takes_agents(client, monkeyp
     ]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-roll-member-drain")
 def test_admission_counts_the_agents_of_both_members_against_one_hive_cap(setup, monkeypatch):  # noqa: F811
     from scripts.hive import launch
 

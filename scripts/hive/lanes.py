@@ -7,11 +7,12 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
+from functools import partial
 from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, workstation
+from scripts.hive import account_slots, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -94,10 +95,11 @@ def run(
     taken: Iterable[str],
     wait: Callable[[float], object] = scheduled_wait,
     passes: Iterable[int] | None = None,
+    draining: Callable[[], bool] = lambda: False,
 ) -> None:
     held: dict = {}
     for _ in itertools.count() if passes is None else passes:
-        if "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
+        if draining() or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
             wait(IDLE_S)
 
 
@@ -112,7 +114,9 @@ def _loop(environ: Mapping[str, str]) -> None:
     bus = factory.open_bus(replace(BusConfig.from_environ(environ), provision=False))
     try:
         runtime = LocalHerdrRuntime(HerdrRuntime())
-        run(connect(), bus, runtime, commands.hive_id(), lanes(environ.get(EXCLUDED_ENV)))
+        store, hive = connect(), commands.hive_id()
+        draining = partial(registry.member_draining, store.redis, hive, registry.member_name())
+        run(store, bus, runtime, hive, lanes(environ.get(EXCLUDED_ENV)), draining=draining)
     finally:
         bus.close()
 
