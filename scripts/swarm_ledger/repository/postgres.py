@@ -179,14 +179,13 @@ class Pool:
         self.idle: list[Any] = []
         self.lock = threading.Condition()
         self.opened = 0
-        self.cap = 1
-        self.measured = False
+        self.cap: int | None = None
 
     def _open(self) -> Any:
         with mapped():
             raw = errors().connect(self.address, **SESSION)
             try:
-                if not self.measured:
+                if self.cap is None:
                     share = float(os.environ.get("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.1"))
                     if not 0 < share < 1:
                         raise sqlite3.OperationalError("ledger pool share must be between zero and one")
@@ -199,7 +198,6 @@ class Pool:
                         maximum, reserved = cursor.fetchone()
                     raw.rollback()
                     self.cap = max(1, min(int(maximum * share), maximum - reserved - 1))
-                    self.measured = True
             except BaseException:
                 raw.close()
                 raise
@@ -224,7 +222,7 @@ class Pool:
     def _reserve(self, deadline: float) -> Any:
         """An idle connection, or None once a slot is reserved for a new one."""
         with self.lock:
-            while not self.idle and self.opened >= self.cap:
+            while not self.idle and self.opened >= (self.cap or 1):
                 left = deadline - time.monotonic()
                 if left <= 0:
                     raise sqlite3.OperationalError("ledger database pool capacity exhausted")
@@ -235,7 +233,7 @@ class Pool:
             return None
 
     def _new(self) -> Any:
-        measuring = not self.measured
+        measuring = self.cap is None
         try:
             raw = self._open()
         except BaseException:
