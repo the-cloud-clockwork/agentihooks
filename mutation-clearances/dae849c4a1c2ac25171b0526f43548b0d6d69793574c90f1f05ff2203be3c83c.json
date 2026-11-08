@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/chunks.py:scripts.ledger_knowledge.chunks.x_chunk_ledger:430e20e3261255090064441d66807c4e862eb304d7c6597605ea5d9974f8d205": {
+    "reader": "Standards",
+    "reason": "The root overview is read only through _text, which skips a falsy field, so None and the empty string give the same chunks."
+  }
+}
