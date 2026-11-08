@@ -347,6 +347,7 @@ def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeyp
     if draining == "no":
         assert admitted is not None
         assert admitted["hive"] == "hive-a"
+        assert capsys.readouterr().err == ""
         return
     assert admitted is None
     assert rig.store.claimant(SLUG, "t1") is None
