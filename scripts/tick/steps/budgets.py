@@ -147,6 +147,7 @@ FLOORS: dict[str, Timing] = {
     "heartbeat": Timing(LIGHT_S, CRITICAL_S),
     "status publish": Timing(LIGHT_S, CRITICAL_S),
     "workflow runner": Timing(LIGHT_S, CRITICAL_S),
+    "doc items map": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from scripts.hub import lease
-from scripts.swarm import readiness, run_window
+from scripts.swarm import readiness, run_window, successor_fill
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, connect
 
@@ -88,7 +88,8 @@ class Admission:
             return None
         self.store.pend_life(slug, task_id, json.dumps([agent.execution_id, agent.generation]))
         self.store.seats.occupy(seat, name, now)
-        task = tick.primed(self.store, slug, seat, {**row, **live})
+        primed = tick.primed(self.store, slug, seat, {**row, **live})
+        task = successor_fill.task(primed, self.store.config(slug), record.lane)
         task["stack_base"] = self._stack_base(slug, task, rows)
         identity = {"execution_id": agent.execution_id, "execution_generation": agent.generation}
         avoid = self.store.failed_harness(slug, task_id)
