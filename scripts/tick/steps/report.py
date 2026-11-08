@@ -2,12 +2,14 @@
 
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from scripts.gates import progress, quiet
 from scripts.swarm import (
     bottleneck_status,
     dispatcher,
+    doc_items,
     doc_report,
     done_gate,
     ledger_events,
@@ -296,8 +298,13 @@ for _step in STEPS:
 
 
 def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Return the actions of the doc items map step, given the tick module and a reader of the pass state."""
-    return []
+    """Map the watchdog document copy onto its tasks once each time the copy changes."""
+    document = get("config").watchdog_document
+    if not document:
+        return []
+    store = get("store")
+    previous = store.redis.get(store.key(get("slug"), doc_items.MARK))
+    return doc_items.map_changed(Path(document), previous, get("doc")["tasks"], get("tools"), get("deadline"))
 
 
 registry.register(
@@ -305,8 +312,8 @@ registry.register(
         "doc items map",
         "wrapper events",
         _doc_items_map,
-        needs=frozenset(),
-        reads=frozenset(),
+        needs=frozenset({"ledger state", "drained resume"}),
+        reads=pass_domains("config", "doc"),
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"coordination", "ledger"}),
