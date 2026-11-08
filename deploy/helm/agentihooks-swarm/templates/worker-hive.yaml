@@ -101,11 +101,7 @@ spec:
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
         {{- if $root.Values.workers.rollout.enabled }}
-        {{- $stamp := $root.Values.workers.rollout.release }}
-        {{- if and (not $stamp) (eq (toString $workers.image.tag) "release") }}
-        {{- $stamp = $root.Values.workers.rollout.imageDigest }}
-        {{- end }}
-        {{- with $stamp }}
+        {{- with $root.Values.workers.rollout.release }}
         agentihooks.io/release: {{ . | quote }}
         {{- end }}
         {{- end }}

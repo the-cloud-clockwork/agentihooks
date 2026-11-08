@@ -226,27 +226,10 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.C
     stub.chmod(0o755)
     (tmp_path / "git").symlink_to(stub)
     (tmp_path / "sha256sum").symlink_to(stub)
-    registry = tmp_path / "registry"
-    registry.write_text(
-        f"#!{sys.executable}\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "if Path(sys.argv[0]).name == 'jq':\n"
-        "    sys.stdin.read()\n"
-        "    print('pull-token')\n"
-        "elif '-fsSI' in sys.argv:\n"
-        "    print('docker-content-digest: sha256:' + 'a' * 64)\n"
-        "else:\n"
-        '    print(\'{"token": "pull-token"}\')\n'
-    )
-    registry.chmod(0o755)
-    (tmp_path / "curl").symlink_to(registry)
-    (tmp_path / "jq").symlink_to(registry)
     chart = tmp_path / "tree/deploy/helm/agentihooks-swarm"
-    (chart / "ci").mkdir(parents=True)
+    chart.mkdir(parents=True)
     source = ROOT / "deploy/helm/agentihooks-swarm"
-    for name in ("values.yaml", "ci/stamp-worker-digest.sh"):
-        (chart / name).write_text((source / name).read_text())
+    (chart / "values.yaml").write_text((source / "values.yaml").read_text())
     calls = tmp_path / "calls"
     env = {
         **os.environ,
@@ -298,8 +281,6 @@ def test_the_published_chart_uses_the_release_version_and_a_separate_oci_namespa
             "oci://ghcr.io/the-cloud-clockwork/charts",
         ],
     ]
-    stamped = (tmp_path / "tree/deploy/helm/agentihooks-swarm/values.yaml").read_text()
-    assert f'    imageDigest: "sha256:{"a" * 64}"\n' in stamped
     assert "fixture" not in result.stdout + result.stderr
 
 

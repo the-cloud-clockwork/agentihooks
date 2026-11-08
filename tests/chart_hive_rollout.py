@@ -120,35 +120,10 @@ def test_the_release_stamp_annotates_only_leased_hive_pods():
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
 
-def test_a_release_tag_worker_rolls_when_the_release_digest_moves():
-    digest = "sha256:" + "a" * 64
-    stamp = f"workers.rollout.imageDigest={digest}"
-    worker = next(item for item in render("workers.image.tag=release", stamp) if item["kind"] == "Deployment")
-    assert worker["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == digest
-    for tag in ("dev", "2.17.486", "v2.17.486"):
-        worker = next(item for item in render(f"workers.image.tag={tag}", stamp) if item["kind"] == "Deployment")
+def test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest():
+    for tag in ("release", "dev", "2.17.486", "v2.17.486"):
+        worker = next(item for item in render(f"workers.image.tag={tag}") if item["kind"] == "Deployment")
         assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
-    unleased = next(
-        item
-        for item in render("workers.image.tag=release", stamp, "workers.rollout.enabled=false")
-        if item["kind"] == "Deployment"
-    )
-    assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
-    explicit = next(
-        item
-        for item in render("workers.image.tag=release", stamp, "workers.rollout.release=x1")
-        if item["kind"] == "Deployment"
-    )
-    assert explicit["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == "x1"
-
-
-def test_the_release_build_stamps_the_published_worker_digest():
-    workflow = (CHART.parents[2] / ".github/workflows/chart-release.yml").read_text()
-    stamp = workflow.index("ci/stamp-worker-digest.sh deploy/helm/agentihooks-swarm/values.yaml")
-    assert stamp < workflow.index("helm package deploy/helm/agentihooks-swarm")
-    values = yaml.safe_load((CHART / "values.yaml").read_text())
-    assert values["workers"]["rollout"]["imageDigest"] == ""
-    assert (CHART / "values.yaml").read_text().count('\n    imageDigest: ""\n') == 1
 
 
 if __name__ == "__main__":
@@ -158,6 +133,5 @@ if __name__ == "__main__":
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
-    test_a_release_tag_worker_rolls_when_the_release_digest_moves()
-    test_the_release_build_stamps_the_published_worker_digest()
+    test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
