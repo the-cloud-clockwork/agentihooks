@@ -719,6 +719,75 @@ def test_retire_goes_through_a_hive_order(remote):
     assert Orders(remote.redis).command(HIVE, order) == Ack("done", agent.runtime_target)
 
 
+@pytest.mark.feature("hive-retire-absence")
+@pytest.mark.parametrize("evidence", ["heartbeat", "member"])
+@pytest.mark.parametrize("remote", [{"launched_at": 5_000}], indirect=True)
+def test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, evidence: str
+) -> None:
+    from scripts.hive import registry
+    from scripts.hive.orders import Orders
+    from scripts.swarm import capacity
+    from scripts.swarm.cli import _retire_each
+
+    runtime, agent = remote.runtime, remote.agent
+    clock = [NOW]
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: clock[0] / 1000)
+    runtime.end = Mock(side_effect=AssertionError("remote retirement never signals a local process"))
+    _publish(remote)
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    assert runtime.retire(agent) is False
+    if evidence == "heartbeat":
+        remote.redis.delete(remote.reports.key(HIVE))
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", NOW - remote.reports.LOST_MS)
+    else:
+        remote.redis.set(
+            remote.reports.key(HIVE),
+            json.dumps({"names": ["another agent"], "observed_at": agent.launched_at + remote.reports.STARTUP_MS - 1}),
+        )
+    assert runtime.retire(agent) is False
+    assert capacity._busy(remote.store.agents("fixture"))[agent.lane] == 1
+
+    if evidence == "heartbeat":
+        clock[0] += 1
+    else:
+        remote.redis.set(
+            remote.reports.key(HIVE),
+            json.dumps({"names": ["another agent"], "observed_at": agent.launched_at + remote.reports.STARTUP_MS}),
+        )
+    assert _retire_each(remote.store, "fixture", runtime, [agent]) == []
+    assert remote.store.agents("fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert capacity._busy(remote.store.agents("fixture"))[agent.lane] == 0
+    assert agent.name not in runtime.refusals
+    runtime.end.assert_not_called()
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+
+@pytest.mark.feature("hive-retire-absence")
+def test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat(remote: SimpleNamespace) -> None:
+    from scripts.hive.orders import Consumer, Orders
+    from scripts.swarm.cli import _retire_each
+    from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
+
+    runtime, agent = remote.runtime, remote.agent
+    runtime.end = Mock(side_effect=AssertionError("remote retirement never signals a local process"))
+    _publish(remote)
+    remote.store.claim("fixture", "task", agent.name, 60000)
+    assert runtime.retire(agent) is False
+    assert runtime.retire(agent) is False
+    hive = Mock()
+    hive.terminate.return_value = Outcome("terminate", Status.OK, LOCAL)
+    assert Consumer(remote.redis, HIVE, hive).poll_commands() == 1
+    hive.terminate.assert_called_once()
+    assert _retire_each(remote.store, "fixture", runtime, [agent]) == []
+    assert remote.store.agents("fixture") == []
+    assert remote.store.claimant("fixture", "task") is None
+    assert agent.name not in runtime.refusals
+    runtime.end.assert_not_called()
+    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+
+
 def test_local_runtime_terminates_a_remote_worker_by_order(remote):
     from scripts.hive.orders import Orders
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
