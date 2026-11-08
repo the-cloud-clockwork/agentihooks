@@ -157,7 +157,7 @@ def test_a_restarted_worker_adopts_the_charted_agent_cap(redis):
     registry.update(redis, "box", ["max-agents=3"])
     registry.update(redis, "box", ["max-agents=9"])
     registry.update(redis, "box", ["excluded=qa"])
-    registry.update(redis, "box", start, keep=True)
+    assert registry.update(redis, "box", start, keep=True)["max_agents"] == 9
     restarted = registry.update(redis, "box", ["max-agents=12"])
     assert restarted == {**DEFAULT, "ephemeral": "yes", "excluded": ["qa"], "max_agents": 12}
     assert _record(redis, "box")["max_agents"] == 12
