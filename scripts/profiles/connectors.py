@@ -25,6 +25,7 @@ CODEX_ONLY = ("enabled_tools", "disabled_tools", "default_tools_approval_mode")
 CREDENTIALED = "credential-shaped literal in url, command or args"
 NO_ALLOWLIST = "Claude has no native tool allowlist; only an http server's tools can be listed"
 LIST_TIMEOUT_SECONDS = 30
+READ_TIMEOUT_SECONDS = 300
 _REFERENCE = re.compile(r"\$\{(\w+)[^}]*\}|\$(\w+)")
 
 
@@ -32,20 +33,25 @@ def path(name: str, target: str, root: Path) -> Path:
     return root / name / f"{target}.mounts.json"
 
 
-async def _list(url: str, headers: dict) -> list[str]:
+async def _list(url: str, headers: dict[str, str]) -> list[str]:
+    import httpx
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client
+    from mcp.types import PaginatedRequestParams
 
-    async with streamablehttp_client(url, headers=headers, timeout=LIST_TIMEOUT_SECONDS) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            names, cursor = [], None
-            while True:
-                page = await session.list_tools(cursor=cursor)
-                names += [tool.name for tool in page.tools]
-                cursor = page.nextCursor
-                if not cursor:
-                    return names
+    timeout = httpx.Timeout(LIST_TIMEOUT_SECONDS, read=READ_TIMEOUT_SECONDS)
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as http:
+        async with streamable_http_client(url, http_client=http) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                names: list[str] = []
+                cursor: str | None = None
+                while True:
+                    page = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+                    names += [tool.name for tool in page.tools]
+                    cursor = page.nextCursor
+                    if not cursor:
+                        return names
 
 
 def advertised(url: str, headers: dict) -> list[str]:

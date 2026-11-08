@@ -423,6 +423,26 @@
       ]
     },
     {
+      "id": "swarm-tick-spawn-reserve",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-room",
+      "behaviour": "A parallel pass holds back the end of a lane for each reserved step: every step a reserved step needs, directly or through another, runs against its lane less the reserve, and one cut there is abandoned without dropping the reserved step, so spawn still starts with its reserve when the steps before it are slow; steps spawn does not need keep the whole lane, and one of them that needs a cut step is dropped.",
+      "seam": "scripts.tick.pool.Pass reserves, scripts.tick.engine.run_graph",
+      "tests": [
+        "tests/tick/test_spawn_room.py::test_spawn_still_runs_with_its_reserve_when_the_steps_it_needs_are_slow",
+        "tests/tick/test_spawn_room.py::test_without_a_reserve_slow_needs_spend_the_lane_and_spawn_is_skipped",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_keeps_the_whole_lane",
+        "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
+        "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
+        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
+        "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
+        "tests/tick/test_spawn_room.py::test_a_shorter_critical_lane_reserves_the_same_share_for_spawn",
+        "tests/tick/test_spawn_room.py::test_a_lane_less_its_reserve_keeps_the_lane_clock",
+        "tests/tick/test_spawn_room.py::test_a_step_whose_whole_lane_ran_out_drops_its_dependents_with_its_needs_intact",
+        "tests/tick/test_spawn_room.py::test_a_need_shared_by_two_reserved_steps_holds_back_the_larger_reserve"
+      ]
+    },
+    {
       "id": "swarm-tick-territory",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h13b",
@@ -1032,7 +1052,13 @@
       "tests": [
         "tests/swarm/test_freeze.py::test_a_focus_elsewhere_holds_a_normal_task",
         "tests/swarm/test_freeze.py::test_only_a_doctor_fix_passes_a_focus_and_an_urgent_task_waits_for_it",
-        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks"
+        "tests/swarm/test_focus_budget.py::test_focused_tasks_take_the_whole_lane_before_free_tasks",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_launches_before_an_unranked_one_with_an_older_focus",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_focused_task_with_a_newer_focus_takes_the_last_free_seat",
+        "tests/swarm/test_focus_budget.py::test_focus_record_order_breaks_ties_within_one_rank_band",
+        "tests/swarm/test_focus_budget.py::test_the_focus_sort_puts_focused_tasks_ahead_of_an_unfocused_task_in_a_better_band",
+        "tests/swarm/test_focus_budget.py::test_an_urgent_dependency_of_a_focus_launches_after_an_unranked_focused_task",
+        "tests/swarm/test_focus_budget.py::test_the_launch_rank_sort_uses_the_dispatcher_band_over_the_ledger_rank"
       ]
     },
     {
@@ -1105,6 +1131,22 @@
         "tests/inbox/test_delivery.py::test_claude_gets_a_pending_item_once_at_pre_tool_use_and_it_is_delivered",
         "tests/inbox/test_delivery.py::test_codex_gets_the_item_at_post_tool_use_not_at_pre_tool_use",
         "tests/inbox/test_delivery.py::test_another_session_items_are_never_injected"
+      ]
+    },
+    {
+      "id": "hook-redis-reuse",
+      "origin": "inventory",
+      "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
+      "seam": "The hook Redis client shared by the swarm heartbeat, the inbox delivery and the gate mode reader",
+      "tests": [
+        "tests/context/test_hook_redis_reuse.py::test_one_hook_process_builds_one_redis_client_and_pings_it_once",
+        "tests/context/test_hook_redis_reuse.py::test_the_hook_client_uses_short_timeouts",
+        "tests/context/test_hook_redis_reuse.py::test_a_slow_redis_costs_the_short_timeout_once_per_process",
+        "tests/context/test_hook_redis_reuse.py::test_gate_shims_inside_the_cache_window_do_not_reach_redis",
+        "tests/context/test_hook_redis_reuse.py::test_a_refused_password_takes_the_store_hive_recovery_with_the_same_environment",
+        "tests/context/test_hook_redis_reuse.py::test_a_failed_hive_recovery_is_kept_for_the_process",
+        "tests/context/test_hook_redis_reuse.py::test_the_gate_cache_lives_under_the_agentihooks_home_named_by_swarm_and_redis",
+        "tests/context/test_hook_redis_reuse.py::test_the_gate_cache_holds_from_its_write_until_the_window_ends_and_is_rewritten"
       ]
     },
     {
@@ -1843,7 +1885,22 @@
         "tests/swarm/test_panic.py::test_no_directory_or_no_fix_reads_no_git",
         "tests/swarm/test_panic.py::test_a_detached_checkout_reads_no_origin_and_stays_frozen",
         "tests/swarm/test_panic.py::test_a_checkout_without_an_origin_stays_frozen",
-        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory"
+        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory",
+        "tests/swarm/test_panic.py::test_a_push_after_cd_into_the_fix_worktree_is_spared",
+        "tests/swarm/test_panic.py::test_a_push_without_a_session_directory_stays_frozen"
+      ]
+    },
+    {
+      "id": "panic-merged-fix-dev-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-flow",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the workflow runs whose head commit is the merge commit of a merged registered fix pull request, and still cancels the other dev push runs.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_dev_run_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit",
+        "tests/tick/test_source_control.py::test_github_change_reads_its_merge_commit"
       ]
     },
     {
@@ -1892,6 +1949,26 @@
       "tests": [
         "tests/tick/steps/test_spawn_due.py::test_spawn_due",
         "tests/tick/steps/test_dispatch_seat.py::test_dispatch_seat"
+      ]
+    },
+    {
+      "id": "brain-task-recall",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dk3",
+      "behaviour": "A session bound to a swarm task receives at session start the brain's vault search hits for the significant words of its task title, framed as recalled context and capped by the brain payload limit; no block without a bound task, a readable task, a reachable search or a hit matching half the query words.",
+      "seam": "hooks.context.brain_adapter.task_recall and inject_on_session_start",
+      "tests": [
+        "tests/context/test_task_recall.py::test_a_bound_task_recalls_brain_hits_for_its_title",
+        "tests/context/test_task_recall.py::test_hits_matching_under_half_the_query_words_are_dropped",
+        "tests/context/test_task_recall.py::test_no_recall_without_a_bound_task_and_a_matching_hit",
+        "tests/context/test_task_recall.py::test_recall_is_capped_by_the_payload_limit",
+        "tests/context/test_task_recall.py::test_session_start_injects_the_task_recall",
+        "tests/context/test_task_recall.py::test_recall_renders_the_exact_block_from_one_vault_search",
+        "tests/context/test_task_recall.py::test_the_ledger_folder_defaults_under_home",
+        "tests/context/test_task_recall.py::test_an_unbound_session_reads_no_ledger",
+        "tests/context/test_task_recall.py::test_a_task_without_a_title_searches_nothing",
+        "tests/context/test_task_recall.py::test_a_hit_matching_exactly_half_the_words_is_kept",
+        "tests/context/test_task_recall.py::test_the_payload_cap_trims_trailing_space_before_the_ellipsis"
       ]
     },
     {

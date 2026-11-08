@@ -358,7 +358,8 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, past_
         if any(a.lane != tick.MASTER for a in agents):
             return []
         return [tick._retire_master(slug, store, runtime, m, now_ms) for m in masters]
-    masters = [m for m in masters if tick.master_seats.is_lead(slug, m)]
+    retired = store.key(slug, "retired-process")
+    masters = [m for m in masters if tick.master_seats.is_lead(slug, m) and not store.redis.hexists(retired, m.name)]
     pending = tick.master_start.read(store, slug)
     if any(m.state != "finished" for m in masters) or tick.master_start.blocked(pending, now_ms):
         return []

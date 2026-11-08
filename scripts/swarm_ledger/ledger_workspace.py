@@ -18,7 +18,7 @@ FILES_SECONDS = 86400
 ENDED = ("ended", "finished")
 
 
-def folder(slug, task_id):
+def folder(slug: str, task_id: str) -> Path:
     if not all(isinstance(part, str) and PART_RE.fullmatch(part) for part in (slug, task_id)):
         raise ValueError(f"work folder needs a plain slug and task id, not {slug!r} and {task_id!r}")
     return Path.home() / ".agentihooks" / "swarm" / slug / "tasks" / task_id

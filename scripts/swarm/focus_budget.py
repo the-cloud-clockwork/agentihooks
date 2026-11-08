@@ -1,7 +1,9 @@
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from scripts.swarm import freeze, profile_first
+from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
 
@@ -23,9 +25,23 @@ def ranks(doc: dict[str, Any]) -> dict[str, int]:
     return {str(task["id"]): _rank(task, freeze.ancestry(task, graph), paths, selected, len(targets)) for task in tasks}
 
 
-def ordered(queue: list[tuple[str, dict[str, Any]]], focus: dict[str, int]) -> list[tuple[str, dict[str, Any]]]:
-    """The lane and task queue sorted by each task's focus rank, ties kept in queue order."""
-    return sorted(queue, key=lambda entry: focus[entry[1]["id"]])
+def ordered(
+    queue: list[tuple[str, dict[str, Any]]],
+    focus: dict[str, int],
+    band: Callable[[dict[str, Any]], Any] = lambda task: 0,
+    unfocused: int | None = None,
+) -> list[tuple[str, dict[str, Any]]]:
+    """The queue with focused tasks first, then by rank band, then by focus rank, ties kept in queue order."""
+    return sorted(queue, key=lambda entry: (focus[entry[1]["id"]] == unfocused, band(entry[1]), focus[entry[1]["id"]]))
+
+
+def outside(doc: dict[str, Any]) -> int:
+    """The focus rank of a task no focus record covers: the count of focus records."""
+    return sum(row["verb"] == "focus" for row in doc.get("freezes", []))
+
+
+def _hot_key(order: dict[str, int], task: dict[str, Any]) -> tuple[int, int]:
+    return ledger_rank.order(task), order[task["id"]]
 
 
 def _rank(
@@ -50,11 +66,14 @@ def select(doc: dict, ready: list, lane: str, capacity: int, running: list | Non
 def place(doc: dict, ready: list, lane: str, capacity: int, running: list, locate: Callable) -> tuple[list, list]:
     """Focused tasks take the lane's free seats first in focus queue order; free tasks fill what is left."""
     order = ranks(doc)
-    unfocused = sum(row["verb"] == "focus" for row in doc.get("freezes", []))
+    unfocused = outside(doc)
     room = max(0, capacity - sum(task.get("lane") == lane for task in running))
     normal, notes = locate([task for task in ready if order[task["id"]] == unfocused], room)
     plain = [task for task in normal if profile_first.UNRESOLVED not in task]
-    hot = sorted((task for task in ready if order[task["id"]] < unfocused), key=lambda task: order[task["id"]])
+    hot = sorted(
+        (task for task in ready if order[task["id"]] < unfocused),
+        key=partial(_hot_key, order),
+    )
     focused, refused = locate(hot, room)
     placed = [task for task in focused if profile_first.UNRESOLVED not in task]
     pending = [task for task in normal + focused if profile_first.UNRESOLVED in task]
