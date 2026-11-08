@@ -63,7 +63,7 @@ def test_a_quiet_ephemeral_hive_is_drained_and_removed_after_the_window(store: R
 def test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept(store: RedisStore) -> None:
     """The sweep marks the hive draining with its owner and reason, then removes it once its agents end."""
     _hive(store, "proof", "yes", QUIET_AT)
-    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "engineer", hive="proof", state="working")
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", hive="proof", state="working")
     store.put_agent("sw", agent)
     assert sweep.sweep(store, NOW_MS) == [
         "drained quiet ephemeral hive proof",

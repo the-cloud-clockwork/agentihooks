@@ -2,8 +2,12 @@ import io
 import json
 import re
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 SLUG = "hives-2026-10-18"
 PRINCIPALS = {"admin-token": "", "agent-token": "engineer@1"}
@@ -293,7 +297,7 @@ def test_only_the_operator_writes_hive_settings(store, token, slug, message):
     assert registry.show(store.redis, "pod") == before
 
 
-def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_one_is(store):
+def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_one_is(store: "RedisStore") -> None:
     from scripts.hive import registry
 
     for hive_id, ephemeral in (("proof", "yes"), ("lasting", "no")):
@@ -305,12 +309,16 @@ def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_o
     assert refusal(request("GET", "/api/v1/hives/proof"), store) == (404, "resource_missing", "No such hive")
 
 
-def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(store):
+def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(store: "RedisStore") -> None:
     from scripts.hive import registry
 
+    store.redis.set(
+        f"{registry.key('desk')}:sessions",
+        json.dumps({"claude:luna": 3, "interactive:claude:luna": 1, "_executions": {"claude:luna": ["e1"]}}),
+    )
     store.redis.set(f"{registry.key('pod')}:sessions", json.dumps({"claude:luna": 3}))
     desk, pod = dispatch(request("GET", token=None, slug=None), store)["data"]
-    assert (desk["agents_at"], desk["slots"][0]["agents"]) == (NOW_MS - 1000, 2)
+    assert (desk["agents_at"], desk["agents"], desk["slots"][0]["agents"]) == (NOW_MS - 1000, 2, 3)
     assert (pod["agents_at"], pod["agents"], pod["slots"][0]["agents"]) == (NOW_MS - registry.LIVE_MS - 1, 0, 0)
 
 

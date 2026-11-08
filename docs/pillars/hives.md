@@ -1228,8 +1228,24 @@ in place and moves the master to another hive.
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
-| agents | Working agents against max agents, such as `1/3`, read at the latest heartbeat (`agents_at`); a quiet row counts none. |
+| agents | Working agents against max agents, such as `1/3`: the worker sessions the hive reported at its latest heartbeat, named by the row's `agents_at`, without its interactive master sessions; a quiet row counts none. |
 | slots | One line per slot: harness, account and the sessions the hive reports on it at its latest heartbeat. |
+| master | The live master running on the hive, from any swarm, or `—`. |
+| (no header) | The move master button, which moves this ledger's master to the hive. |
+
+Placement compares its own load with max agents: the worker sessions the hive reports plus this runtime's
+launching, working or suspect non-master agents on the hive that the hive has not reported yet. The panel shows only
+what the latest heartbeat reported.
+
+- The header count reads `<live> live · <n> hives`, or `—` when the read failed.
+- The Quota header count ends with each hive's `<name> <agents>/<max agents>`, such as
+  `2 accounts · probed 40s ago · laptop 1/3 · pod-a 0/4`.
+- The panel reads `GET /api/v1/hives` at most every fifteen seconds while the Swarm tab is open. An empty table reads
+  `Reading hives…` before the first answer, `No hives registered.` when the registry is empty, and
+  `Could not read hives.` when the read failed.
+- Swarm tab redraws skip the table while one of its fields holds focus; each fresh read still redraws it.
+- The panel folds and keeps its folded state, its height and its column widths across reloads, like the other Swarm
+  tab panels.
 
 The panel lists no ephemeral hive that has been quiet for an hour.
 
@@ -1241,23 +1257,9 @@ A hive is quiet once its last heartbeat is older than an hour (`registry.QUIET_M
   registry records through the hive remove path once no agent record still runs on it.
 - A quiet hive with `ephemeral=no` raises one `quiet hive` health finding in `agentihooks swarm <slug> status`.
 - `scripts/packaging/hive-reproduce.sh` runs `agentihooks hive remove` on the member it invited when it exits;
-  `HIVE_KEEP=yes` keeps it.
-| master | The live master running on the hive, from any swarm, or `—`. |
-| (no header) | The move master button, which moves this ledger's master to the hive. |
-
-The agents figure is the placement load: worker sessions the hive reports, without its interactive master
-sessions, plus this runtime's launching, working or suspect non-master agents on the hive that the hive has not
-reported yet. Placement compares the same figure with max agents.
-
-- The header count reads `<live> live · <n> hives`, or `—` when the read failed.
-- The Quota header count ends with each hive's `<name> <agents>/<max agents>`, such as
-  `2 accounts · probed 40s ago · laptop 1/3 · pod-a 0/4`.
-- The panel reads `GET /api/v1/hives` at most every fifteen seconds while the Swarm tab is open. An empty table reads
-  `Reading hives…` before the first answer, `No hives registered.` when the registry is empty, and
-  `Could not read hives.` when the read failed.
-- Swarm tab redraws skip the table while one of its fields holds focus; each fresh read still redraws it.
-- The panel folds and keeps its folded state, its height and its column widths across reloads, like the other Swarm
-  tab panels.
+  `HIVE_KEEP=yes` keeps it. When that remove fails, the script prints the remove command to run again; the sweep
+  removes the hive only once its worker pod stops sending heartbeats.
+- A hive that never sent a heartbeat carries no time to age from, so it is neither swept nor reported.
 
 ### Editing a hive
 

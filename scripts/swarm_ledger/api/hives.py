@@ -60,6 +60,15 @@ def shown(hive: dict, now_ms: int) -> bool:
     return now_ms - hive["heartbeat_at"] <= GONE_MS
 
 
+def beaten(sessions: dict) -> int:
+    """The worker sessions a hive reported at its latest heartbeat, without its interactive master sessions."""
+    masters = sum(count for slot, count in sessions.items() if slot.startswith("interactive:"))
+    workers = sum(
+        count for slot, count in sessions.items() if slot != "_executions" and not slot.startswith("interactive:")
+    )
+    return max(0, workers - masters)
+
+
 def view(store: object, now_ms: int) -> list[dict]:
     loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
@@ -71,8 +80,7 @@ def view(store: object, now_ms: int) -> list[dict]:
         if hive["name"] == hive["id"]:
             hive["name"] = (ports.hive().auth.member(store.redis, hive["id"]) or {}).get("name") or hive["id"]
         hive["agents_at"] = hive["heartbeat_at"]
-        if not hive["live"]:
-            hive["agents"] = 0
+        hive["agents"] = beaten(sessions)
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [
             {**slot, "agents": sessions.get(f"{slot['harness']}:{slot['account']}", 0)} for slot in hive["slots"]
