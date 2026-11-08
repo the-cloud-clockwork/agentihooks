@@ -120,11 +120,12 @@ def test_transport_configuration_is_checked_before_any_network_connection(monkey
 
     async def connect(*args, **kwargs):
         assert args == ("nats://configured.example:4222",)
-        assert kwargs == {
-            "disconnected_cb": nats._disconnected,
-            "reconnected_cb": nats._reconnected,
-            **nats.connect_options(BusConfig(backend="nats", reconnect=reconnect)),
-        }
+        disconnected, reconnected = kwargs.pop("disconnected_cb"), kwargs.pop("reconnected_cb")
+        assert (disconnected.__func__, reconnected.__func__) == (
+            nats._Lifecycle.disconnected,
+            nats._Lifecycle.reconnected,
+        )
+        assert kwargs == nats.connect_options(BusConfig(backend="nats", reconnect=reconnect))
         raise ValueError("configuration captured")
 
     monkeypatch.setattr(nats.nats_client, "connect", connect)

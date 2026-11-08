@@ -469,10 +469,12 @@ def test_a_bounded_first_connect_reconnects_without_end_once_connected(
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
     options = dict(opened._nc.options)
     opened.close()
+    lifecycle = connect.call_args.kwargs["disconnected_cb"].__self__
+    assert (lifecycle.client, connect.call_args.kwargs["reconnected_cb"].__self__) == (opened._nc, lifecycle)
     connect.assert_called_once_with(
         url,
-        disconnected_cb=nats._disconnected,
-        reconnected_cb=nats._reconnected,
+        disconnected_cb=lifecycle.disconnected,
+        reconnected_cb=lifecycle.reconnected,
         allow_reconnect=False,
         max_reconnect_attempts=1,
         reconnect_time_wait=0,

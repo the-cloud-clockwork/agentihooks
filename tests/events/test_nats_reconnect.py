@@ -60,3 +60,11 @@ def test_shared_bus_reconnects_and_restores_subscriptions_after_server_restart(
             assert caplog.messages.index("NATS bus disconnected") < caplog.messages.index("NATS bus reconnected")
         finally:
             opened.close()
+
+
+def test_closing_a_shared_bus_logs_no_disconnect(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="scripts.events.nats")
+    port = nats_server.free_port()
+    with server(tmp_path / "jetstream", port):
+        nats.open_bus(BusConfig(backend="nats", url=f"nats://127.0.0.1:{port}")).close()
+    assert [record.getMessage() for record in caplog.records if record.name == "scripts.events.nats"] == []

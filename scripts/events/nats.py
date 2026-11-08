@@ -71,14 +71,20 @@ async def _unreported(error: Exception) -> None:
         _log.error("%s", error)
 
 
-async def _disconnected() -> None:
-    """Log that the shared bus connection dropped."""
-    _log.warning("NATS bus disconnected")
+@dataclass
+class _Lifecycle:
+    """Log a dropped and a restored bus connection; an intentional close logs nothing."""
 
+    client: Client | None = None
 
-async def _reconnected() -> None:
-    """Log that the shared bus connection came back."""
-    _log.info("NATS bus reconnected")
+    async def disconnected(self) -> None:
+        """Log a drop only while the client is reconnecting, since close also calls this."""
+        if self.client is not None and self.client.is_reconnecting:
+            _log.warning("NATS bus disconnected")
+
+    async def reconnected(self) -> None:
+        """Log that the shared bus connection came back."""
+        _log.info("NATS bus reconnected")
 
 
 def connect_options(config: BusConfig) -> dict[str, Any]:
@@ -475,11 +481,12 @@ class NatsStateStore:
 
 async def _first_connect(url: str, config: BusConfig) -> Client:
     """Connect within the configured first connect bound; once connected, every client reconnects without end."""
+    lifecycle = _Lifecycle()
     try:
         client = await nats_client.connect(
             url,
-            disconnected_cb=_disconnected,
-            reconnected_cb=_reconnected,
+            disconnected_cb=lifecycle.disconnected,
+            reconnected_cb=lifecycle.reconnected,
             **connect_options(config),
             **auth_options(config.credentials),
         )
@@ -487,6 +494,7 @@ async def _first_connect(url: str, config: BusConfig) -> Client:
         raise ConnectionError(
             f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
         ) from error
+    lifecycle.client = client
     client.options.update(allow_reconnect=True, max_reconnect_attempts=-1, reconnect_time_wait=RECONNECT_WAIT_S)
     return client
 
