@@ -1133,6 +1133,22 @@
       ]
     },
     {
+      "id": "hook-redis-reuse",
+      "origin": "inventory",
+      "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
+      "seam": "The hook Redis client shared by the swarm heartbeat, the inbox delivery and the gate mode reader",
+      "tests": [
+        "tests/context/test_hook_redis_reuse.py::test_one_hook_process_builds_one_redis_client_and_pings_it_once",
+        "tests/context/test_hook_redis_reuse.py::test_the_hook_client_uses_short_timeouts",
+        "tests/context/test_hook_redis_reuse.py::test_a_slow_redis_costs_the_short_timeout_once_per_process",
+        "tests/context/test_hook_redis_reuse.py::test_gate_shims_inside_the_cache_window_do_not_reach_redis",
+        "tests/context/test_hook_redis_reuse.py::test_a_refused_password_takes_the_store_hive_recovery_with_the_same_environment",
+        "tests/context/test_hook_redis_reuse.py::test_a_failed_hive_recovery_is_kept_for_the_process",
+        "tests/context/test_hook_redis_reuse.py::test_the_gate_cache_lives_under_the_agentihooks_home_named_by_swarm_and_redis",
+        "tests/context/test_hook_redis_reuse.py::test_the_gate_cache_holds_from_its_write_until_the_window_ends_and_is_rewritten"
+      ]
+    },
+    {
       "id": "inbox-confirmation",
       "origin": "inventory",
       "behaviour": "A delivered item is confirmed by the next hook event, by a read or by a close, and only for the session it was shown to.",
@@ -1868,7 +1884,22 @@
         "tests/swarm/test_panic.py::test_no_directory_or_no_fix_reads_no_git",
         "tests/swarm/test_panic.py::test_a_detached_checkout_reads_no_origin_and_stays_frozen",
         "tests/swarm/test_panic.py::test_a_checkout_without_an_origin_stays_frozen",
-        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory"
+        "tests/swarm/test_panic.py::test_the_frozen_check_reads_the_branch_in_the_given_directory",
+        "tests/swarm/test_panic.py::test_a_push_after_cd_into_the_fix_worktree_is_spared",
+        "tests/swarm/test_panic.py::test_a_push_without_a_session_directory_stays_frozen"
+      ]
+    },
+    {
+      "id": "panic-merged-fix-dev-run",
+      "origin": "regression",
+      "ordered_at": "2026-11-07",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-fix-flow",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the workflow runs whose head commit is the merge commit of a merged registered fix pull request, and still cancels the other dev push runs.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_dev_run_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit",
+        "tests/tick/test_source_control.py::test_github_change_reads_its_merge_commit"
       ]
     },
     {

@@ -134,16 +134,29 @@ def _freezes(tokens: list[str]) -> bool:
 def _frozen(tool_name: str, tool_input: dict[str, Any], cwd: str) -> str | None:
     if tool_name != "Bash":
         return None
-    from hooks.context.shell_commands import commands
+    from hooks.context.shell_commands import located
 
-    found = [tokens for tokens in commands(str(tool_input.get("command"))) if _freezes(tokens)]
+    found = [(tokens, folders) for tokens, folders in located(str(tool_input.get("command"))) if _freezes(tokens)]
     if not found:
         return None
     store = _store()
     current = None if store is None else _panic_state(store)
-    if current is None or (all(_spares(tokens) for tokens in found) and _on_fix_branch(cwd, current.fixes)):
+    if current is None or all(
+        _spares(tokens) and _on_fix_branch(_directory(cwd, folders), current.fixes) for tokens, folders in found
+    ):
         return None
     return FROZEN.format(reason=current.reason)
+
+
+def _directory(cwd: str, folders: list[str]) -> str:
+    """Return the directory a command runs in: the session directory changed by each cd before it, or an empty
+    string without a session directory."""
+    if not cwd:
+        return ""
+    here = Path(cwd)
+    for folder in folders:
+        here = here / Path(folder).expanduser()
+    return str(here)
 
 
 def _spares(tokens: list[str]) -> bool:
