@@ -3,9 +3,9 @@
 import json
 from unittest.mock import Mock
 
-import hooks.mcp.agents as agents
 import pytest
 
+import hooks.mcp.agents as agents
 from scripts.agents import cli as agents_cli
 from scripts.workflows import cli as workflow_cli
 from scripts.workflows import store
