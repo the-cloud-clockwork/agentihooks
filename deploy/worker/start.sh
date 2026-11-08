@@ -181,7 +181,8 @@ agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 set_args=(ui=no ephemeral=yes draining=no "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" \
-  "max-agents=${HIVE_MAX_AGENTS:-20}" "prefer=${HIVE_PREFER-}")
+  "prefer=${HIVE_PREFER-}")
 [[ -n "${HIVE_NAME:-}" ]] && set_args+=("name=${HIVE_NAME}")
 agentihooks hive set --keep --reason "the worker started" "$member" "${set_args[@]}"
+agentihooks hive set --reason "the chart sets the agent cap" "$member" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run

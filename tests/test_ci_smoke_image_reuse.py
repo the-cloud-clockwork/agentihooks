@@ -55,6 +55,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "stability-smoke",
     ):
         assert build < next(
             i for i, step in enumerate(steps) if f"scripts/packaging/{script}.sh" in step.get("run", "").split()
@@ -70,6 +71,7 @@ exit "$status"
         "compose-hive-smoke",
         "compose-task-smoke",
         "compose-recovery-drill",
+        "stability-smoke",
     ],
 )
 @pytest.mark.parametrize("shared", [False, True])
