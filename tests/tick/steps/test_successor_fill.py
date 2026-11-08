@@ -42,6 +42,19 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
     assert "launch_assignment" not in runtime.tasks[0]
 
 
+def test_a_filled_saved_effort_passes_the_preserved_effort_check_an_empty_one_fails() -> None:
+    from scripts.swarm import runtime
+
+    config = swarm({"eng": {"model": "sonnet-lane"}}).config("sw")
+    bounds = effort_range.bounds(config, "eng")
+    environ = {"AGENTIHOOKS_CLAUDE_EFFORT": "max"}
+    with pytest.raises(tick.SpawnError, match="saved effort is outside the current swarm range"):
+        runtime._model_args("claude", {"model": "sonnet-lane", "effort": ""}, environ, bounds, preserve=True)
+    launch = successor_fill.filled(SAVED, config, "eng")
+    flags = runtime._model_args("claude", launch, environ, bounds, preserve=True)
+    assert flags == ["--model", "sonnet-lane", "--effort", "high"]
+
+
 def test_an_automatic_lane_leaves_the_model_to_the_band_pick_and_takes_the_range_floor() -> None:
     config = swarm({"eng": {"model": "auto"}}).config("sw")
     assert successor_fill.filled(SAVED, config, "eng") == {**SAVED, "effort": "high"}
