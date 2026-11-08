@@ -1,5 +1,6 @@
 """Hive create writes each finished step with its UTC time the moment the step ends."""
 
+import calendar
 import io
 import os
 import queue
@@ -7,6 +8,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -49,7 +51,7 @@ class Flushes(io.StringIO):
         self.flushed.append(self.getvalue())
 
 
-def _lines(stream: io.BufferedReader, into: "queue.Queue[str]") -> None:
+def _lines(stream: io.BufferedReader, into: queue.Queue[str]) -> None:
     for raw in iter(stream.readline, b""):
         into.put(raw.decode())
 
@@ -90,6 +92,16 @@ def test_the_report_reads_the_clock_when_it_writes(capsys: pytest.CaptureFixture
     create.report("second", clock=lambda: next(times))
 
     assert capsys.readouterr().out == "2027-01-15T08:00:00Z first\n2027-01-15T08:01:01Z second\n"
+
+
+def test_the_report_reads_the_wall_clock_by_default(capsys: pytest.CaptureFixture[str]) -> None:
+    before = int(time.time())
+    create.report("default")
+    after = int(time.time())
+
+    stamp, line = capsys.readouterr().out.split(" ", 1)
+    assert line == "default\n"
+    assert before <= calendar.timegm(time.strptime(stamp, create.STAMP)) <= after
 
 
 def test_tools_report_by_default() -> None:
