@@ -2161,6 +2161,19 @@
         "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
         "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
       ]
+    },
+    {
+      "id": "controller-quota-after-restart",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ctl-quota-empty",
+      "behaviour": "A restarted hive controller reads each routed account's cap from the hive quota reports in Redis within one pass, and a placement wait names an account with no fresh quota reading instead of a cap of None.",
+      "seam": "scripts.swarm.capacity.hive_accounts, the hive controller runtime's quota reader and the hive launch wait text",
+      "tests": [
+        "tests/swarm/test_controller_quota_after_restart.py::test_a_restarted_controller_reads_a_fresh_cap_from_the_hive_quota_reports",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_runtime_reads_quota_from_its_store",
+        "tests/swarm/test_controller_quota_after_restart.py::test_a_missing_quota_reading_names_its_reason_in_the_placement_wait"
+      ]
     }
   ],
   "unmapped_rules": [
