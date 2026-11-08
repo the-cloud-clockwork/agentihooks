@@ -74,3 +74,9 @@ class StoreCoordination:
         if value is None:
             return bool(self._redis().delete(key))
         return bool(self._redis().set(key, str(value)))
+
+    def marked(self, name: str, *, deadline: Deadline) -> str | None:
+        """Return the value of the swarm mark name, or None when it is unset."""
+        deadline.live()
+        value: str | None = self._redis().get(self._key(name))
+        return value

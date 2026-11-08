@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.tick.deadline import Deadline
+from scripts.tick.ports.tools import Tools
 
 MARK = "doc-items-digest"
 
@@ -66,16 +68,14 @@ def digest(document: str) -> str:
     return hashlib.sha256(document.encode()).hexdigest()
 
 
-def map_changed(
-    document: Path, previous: str | None, tasks: list[dict[str, Any]], tools: Any, deadline: Any
-) -> list[str]:
-    """Map the copy at ``document`` onto ``tasks`` when its digest differs from ``previous``, write the new items
-    through the ledger port and record the digest through the coordination port; return the line naming the run."""
+def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
+    """Map the copy at ``document`` onto ``tasks`` when its digest differs from the last mapped one, write the new
+    items through the ledger port and record the digest through the coordination port; return the line naming the run."""
     if not document.is_file():
         return []
-    text = document.read_text()
+    text = document.read_text(encoding="utf-8")
     found = digest(text)
-    if found == previous:
+    if found == tools.coordination.marked(MARK, deadline=deadline):
         return []
     mapping = parse(text)
     try:

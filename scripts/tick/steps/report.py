@@ -302,9 +302,7 @@ def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
     document = get("config").watchdog_document
     if not document:
         return []
-    store = get("store")
-    previous = store.redis.get(store.key(get("slug"), doc_items.MARK))
-    return doc_items.map_changed(Path(document), previous, get("doc")["tasks"], get("tools"), get("deadline"))
+    return doc_items.map_changed(Path(document), get("doc")["tasks"], get("tools"), get("deadline"))
 
 
 registry.register(

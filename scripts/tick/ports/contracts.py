@@ -73,6 +73,8 @@ class Coordination(Protocol):
 
     def mark(self, name: str, value: object, *, deadline: Deadline) -> object: ...
 
+    def marked(self, name: str, *, deadline: Deadline) -> str | None: ...
+
 
 @runtime_checkable
 class SourceControl(Protocol):

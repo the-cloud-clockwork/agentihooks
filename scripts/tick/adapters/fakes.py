@@ -129,6 +129,9 @@ class FakeCoordination:
             deadline,
         )
 
+    def marked(self, name: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "marked", (name,), deadline)
+
 
 @dataclass
 class FakeSourceControl:
