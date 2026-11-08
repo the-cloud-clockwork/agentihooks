@@ -331,3 +331,26 @@ def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subjec
         member({"op": "admit", **ask(hive="hive-b")})
     assert len(seen) == 2
     bus.close()
+
+
+@pytest.mark.feature("hive-drain-events-admission")
+@pytest.mark.parametrize("draining", ["yes", "no"])
+def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, draining, capsys):
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, "hive-a", [f"draining={draining}"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    if draining == "no":
+        assert admitted is not None
+        assert admitted["hive"] == "hive-a"
+        return
+    assert admitted is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused"]
