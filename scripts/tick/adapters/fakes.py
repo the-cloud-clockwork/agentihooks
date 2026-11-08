@@ -129,6 +129,20 @@ class FakeCoordination:
             deadline,
         )
 
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store read and answer the ``store:<operation>`` answer."""
+        _record(self, "store_read", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store write and answer the ``store:<operation>`` answer."""
+        _record(self, "store_write", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
+
 
 @dataclass
 class FakeSourceControl:
@@ -247,6 +261,48 @@ class FakeRuntime:
     def dismiss(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
         return _record(self, "dismiss", (agent,), deadline)
 
+    def place(self, config: "SwarmConfig", lane: str, name: str, task: Mapping[str, Any], *, deadline: Deadline) -> Any:
+        return _record(self, "place", (config, lane, name, task), deadline)
+
+    def has_capacity(self, config: "SwarmConfig", *, deadline: Deadline) -> bool:
+        return _record(self, "has_capacity", (config,), deadline)
+
+    def launch_room(self, config: "SwarmConfig", *, deadline: Deadline) -> int | None:
+        return _record(self, "launch_room", (config,), deadline)
+
+    def reported(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        return _record(self, "reported", (agent,), deadline)
+
+    def placement_refusal(self, lane: str, task: Mapping[str, Any], *, deadline: Deadline) -> str:
+        return _record(self, "placement_refusal", (lane, task), deadline)
+
+    def placement(self, *, deadline: Deadline) -> object:
+        return _record(self, "placement", (), deadline)
+
+    def begin_placement(self, *, deadline: Deadline) -> None:
+        _record(self, "begin_placement", (), deadline)
+
+    def end_placement(self, *, deadline: Deadline) -> None:
+        _record(self, "end_placement", (), deadline)
+
+    def reap_name(self, name: str, *, deadline: Deadline) -> bool:
+        return _record(self, "reap_name", (name,), deadline)
+
+    def admits(self, *, deadline: Deadline) -> bool:
+        return _record(self, "admits", (), deadline)
+
+    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int, *, deadline: Deadline) -> Any:
+        return _record(self, "admit", (slug, tasks, now_ms), deadline)
+
+    def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
+        _record(self, "release_admission", (slug, task_id, reservation), deadline)
+
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str:
+        return _record(self, "held_admission", (slug, task_id), deadline)
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
+        return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
+
 
 @dataclass
 class FakeProcesses:
@@ -283,6 +339,9 @@ class FakeInbox:
         if state == "done" and reason == "done" and item_id not in self.information:
             raise InboxError("done needs an outcome naming where the work went")
         return _record(self, "close", (item_id, outcome, detail), deadline)
+
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object:
+        return _record(self, "settle_exit", (name, seat, exit_text), deadline)
 
 
 @dataclass
