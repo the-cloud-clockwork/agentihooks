@@ -1,11 +1,14 @@
 """A pass whose short ledger read times out on a large export reads it again under the export budget unless this host
 stores a view fresh enough to run from."""
 
+import io
 import os
 import threading
 import time
+import urllib.error
 from collections.abc import Iterator
 from contextlib import ExitStack
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -125,3 +128,36 @@ def test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view
         held = view.current()
         assert held is not None and held.generation == 3
     assert len(SlowExport.reads) == 2
+
+
+def _refused(code: int) -> urllib.error.HTTPError:
+    """An HTTP refusal of the export read with status ``code``."""
+    return urllib.error.HTTPError("http://ledger/export", code, "refused", Message(), io.BytesIO(b"{}"))
+
+
+@pytest.mark.feature("swarm-tick-slow-export")
+@pytest.mark.parametrize(("code", "offline"), [(500, True), (499, None)], ids=["failing", "refusing"])
+def test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass(
+    code: int, offline: bool | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, bool, float | None]] = []
+    replies: list[OSError] = [TimeoutError("timed out"), _refused(code)]
+
+    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
+        calls.append((slug, service, timeout))
+        raise replies.pop(0)
+
+    monkeypatch.setattr(cli.ledger_view, "start", start)
+    monkeypatch.setattr(cli.ledger_view, "fresh", lambda slug: False)
+    monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: view.LedgerView(3, STORED))
+    with ExitStack() as beating:
+        if offline is None:
+            with pytest.raises(urllib.error.HTTPError):
+                cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
+        else:
+            cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
+            assert OFFLINE.get() is offline
+    assert calls == [
+        ("sw", True, ledger_client.SNAPSHOT_TIMEOUT_S),
+        ("sw", True, ledger_client.EXPORT_TIMEOUT_S),
+    ]
