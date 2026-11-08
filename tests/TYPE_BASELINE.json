@@ -364,7 +364,7 @@
   "scripts/hive/bundle_origin.py": 5,
   "scripts/hive/cli.py": 104,
   "scripts/hive/config.py": 37,
-  "scripts/hive/create.py": 86,
+  "scripts/hive/create.py": 84,
   "scripts/hive/create_github.py": 21,
   "scripts/hive/create_render.py": 39,
   "scripts/hive/daemon.py": 159,
