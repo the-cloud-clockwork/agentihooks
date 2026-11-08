@@ -1,13 +1,12 @@
 """Fails when a chart version bump alone changes a rendered pod template, which rolls every pod on each release."""
 
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import yaml
-from chart_timers import ROOT, charts, values_files
+from chart_timers import ROOT, charts, render, values_files
 
 WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job"}
 PROBE_VERSION = "999.999.999"
@@ -21,12 +20,6 @@ def bumped_copy(chart: Path, into: Path) -> Path:
     meta["version"] = PROBE_VERSION
     (copy / "Chart.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
     return copy
-
-
-def render(chart: Path, values: Path | None) -> subprocess.CompletedProcess:
-    """Render the chart under a fixed release name with an optional values file."""
-    command = ["helm", "template", "pod-template-check", str(chart)] + (["-f", str(values)] if values else [])
-    return subprocess.run(command, capture_output=True, text=True)
 
 
 def pod_templates(text: str) -> dict[str, object]:
