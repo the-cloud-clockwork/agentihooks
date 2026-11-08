@@ -152,3 +152,62 @@ def test_bad_task_does_not_prevent_the_next_task(tmp_path: Path, monkeypatch: py
     actions = workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [bad, good]}, tmp_path)
     assert any("bad" in action and "missing" in action for action in actions)
     assert store.load(tmp_path / "good")["status"] == machine.RUNNING
+
+
+@pytest.mark.parametrize("stage_id", ["build", "review"])
+def test_filtered_stages_use_judge_including_the_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage_id: str
+) -> None:
+    from dataclasses import replace
+
+    from scripts.swarm import workflow_runner
+    from scripts.workflows import launchers
+
+    flow = definition()
+    flow.stages[stage_id] = replace(flow.stages[stage_id], filters=("judge-blind",))
+    monkeypatch.setattr(
+        workflow_runner.loader, "resolve", lambda repo: ({"bridge": SimpleNamespace(workflow=flow)}, [])
+    )
+    judge = Mock(return_value=StageResult("pass", {"verdict": "pass"}))
+    monkeypatch.setattr(launchers.Judge, "launch", judge)
+    row = task(tmp_path)
+    workflow_runner.initialize(row, tmp_path, tmp_path)
+    if stage_id == "review":
+        state = store.load(tmp_path)
+        state["stage"] = stage_id
+        state["outputs"] = {"build": "built"}
+        store.save(tmp_path, state)
+    inbox = Mock()
+    workflow_runner.advance_task(inbox, row, tmp_path)
+    judge.assert_called_once_with(
+        flow.stages[stage_id],
+        {"case": "Build the case", **({"build": "built"} if stage_id == "review" else {})},
+        tmp_path,
+    )
+    inbox.send.assert_not_called()
+
+
+def test_scouter_stage_uses_scout_after_claimant_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    from scripts.swarm import workflow_runner
+    from scripts.workflows import launchers
+
+    flow = definition()
+    flow.stages["review"] = replace(flow.stages["review"], profile="scouter")
+    monkeypatch.setattr(
+        workflow_runner.loader, "resolve", lambda repo: ({"bridge": SimpleNamespace(workflow=flow)}, [])
+    )
+    scout = Mock(return_value=StageResult("pass", [{"items": []}]))
+    monkeypatch.setattr(launchers.Scout, "launch", scout)
+    monkeypatch.setattr(workflow_runner.exit_checks, "check", lambda expression, outputs: True)
+    inbox = Mock()
+    row = task(tmp_path)
+    workflow_runner.advance_task(inbox, row, tmp_path)
+    result = tmp_path / "outputs" / "build" / "seat-1-0-0.json"
+    result.write_text(json.dumps({"outcome": "pass", "outputs": "built"}))
+    workflow_runner.advance_task(inbox, row, tmp_path)
+    workflow_runner.advance_task(inbox, row, tmp_path)
+    scout.assert_called_once_with(flow.stages["review"], {"case": "Build the case", "build": "built"}, tmp_path)
+    assert inbox.send.call_count == 1
+    assert store.load(tmp_path)["status"] == "passed"

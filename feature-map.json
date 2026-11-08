@@ -2110,7 +2110,14 @@
       "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",
       "seam": "scripts.tick.steps.workflows._workflow_runner registered as tick step workflow runner",
       "tests": [
-        "tests/tick/steps/test_workflow_runner.py::test_workflow_runner"
+        "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
+        "tests/swarm/test_workflow_runner.py::test_pending_head_is_delivered_once_without_consuming_attempt",
+        "tests/swarm/test_workflow_runner.py::test_head_result_advances_once_then_other_stage_uses_headless",
+        "tests/swarm/test_workflow_runner.py::test_only_claimed_workflow_tasks_run",
+        "tests/swarm/test_workflow_runner.py::test_existing_state_and_case_survive_definition_changes",
+        "tests/swarm/test_workflow_runner.py::test_bad_task_does_not_prevent_the_next_task",
+        "tests/swarm/test_workflow_runner.py::test_filtered_stages_use_judge_including_the_head",
+        "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion"
       ]
     }
   ],
