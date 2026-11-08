@@ -116,7 +116,27 @@ class SwarmSlot:
                 pass
 
 
-KINDS = {"inbox": InboxSlot, "broadcast": BroadcastSlot, "swarm": SwarmSlot, "callable": CallableSlot}
+@dataclass(frozen=True)
+class WorkflowSlot:
+    name: str
+    case: str
+
+    def record(self) -> dict:
+        return {"kind": "workflow", **asdict(self)}
+
+    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
+        from scripts.workflows import scheduled
+
+        scheduled.start(self.name, self.case, delivery_id)
+
+
+KINDS = {
+    "inbox": InboxSlot,
+    "broadcast": BroadcastSlot,
+    "swarm": SwarmSlot,
+    "workflow": WorkflowSlot,
+    "callable": CallableSlot,
+}
 
 
 def restore(record: dict) -> Slot:
