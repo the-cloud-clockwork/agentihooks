@@ -315,7 +315,13 @@ def test_each_local_only_exemption_names_a_function_that_calls_the_api():
 def test_the_reuse_factory_exemption_contains_only_command_replacements():
     for path, names in METADATA_ONLY.items():
         source = path.read_text()
-        functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+        defined = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)]
+        functions = {node.name: node for node in defined if "__mutmut_" not in node.name}
+        functions |= {
+            node.name.removeprefix("x_").removesuffix("__mutmut_orig"): node
+            for node in defined
+            if node.name.endswith("__mutmut_orig")
+        }
         for name in names:
             if path == ROOT / "scripts/ci_gate_queue.py":
                 assert name == "watcher"

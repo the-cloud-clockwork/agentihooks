@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/index.py:scripts.ledger_knowledge.index.x\u01c1KnowledgeIndex\u01c1refresh:84f954dbed0314a1a8f62752030face4b4d9deb3d8c50f8fb735766d1e162158": {
+    "reader": "Standards",
+    "reason": "SQLite parses keywords, table names and column names case insensitively, so the changed case runs the same statement with the same result."
+  }
+}

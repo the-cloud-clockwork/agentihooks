@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/index.py:scripts.ledger_knowledge.index.x\u01c1KnowledgeIndex\u01c1refresh:43684d4b7f484caa83c51ca1528b78e42ac889a8b3898050409d681d13cf0cd5": {
+    "reader": "Standards",
+    "reason": "SQLite resolves keywords, table names and column names case insensitively, so CHUNKS and KEY run the same delete."
+  }
+}

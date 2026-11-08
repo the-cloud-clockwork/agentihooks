@@ -4,6 +4,7 @@ not push while that pull request's checks run unless one is already red, since a
 import os
 import re
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from scripts.gates.base import Decision
 from scripts.gates.budget import Budget
@@ -11,6 +12,9 @@ from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.push_stop import GITHUB_RE, count, git
 from scripts.gates.subagents import READERS, SubagentBudget
 from scripts.swarm.naming import lane_of
+
+if TYPE_CHECKING:
+    from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
 OPENS = (["pr", "create"], ["pr", "ready"])
@@ -132,7 +136,7 @@ def queue_refusal(slug, url):
     )
 
 
-def never_started(pull):
+def never_started(pull: "PullRequest") -> bool:
     return (
         not pull.started and not pull.required_pending and (pull.mergeable == "CONFLICTING" or not pull.checks_pending)
     )
