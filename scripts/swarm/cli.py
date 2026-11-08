@@ -150,7 +150,7 @@ from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
-from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused, LedgerUnreachable
+from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -345,9 +345,11 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
 
 
 def _hold_stored(slug: str, exc: OSError) -> None:
-    """Hold the last good view of ledger ``slug`` for the pass and run it offline, or raise when none is stored."""
+    """Hold the last good view of ledger ``slug`` for the pass and run it offline, or leave the pass to its ledger
+    health probe when this host stores none."""
     if ledger_view.hold_stored(slug) is None:
-        raise LedgerUnreachable(f"ledger {slug}: no stored view to run from while the server is not answering") from exc
+        print(f"ledger {slug} not answering ({exc}) and no view is stored to run from", file=sys.stderr)
+        return
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
     ledger_client.OFFLINE.set(True)
 

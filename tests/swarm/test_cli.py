@@ -752,7 +752,7 @@ def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypat
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
-    unprobed = object.__new__(cli.ledger_client.LedgerClient)
+    unprobed = cli.ledger_client.LedgerClient()
     assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 

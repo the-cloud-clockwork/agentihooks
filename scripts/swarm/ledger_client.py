@@ -62,7 +62,7 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _moved(row: dict[str, Any], op: dict[str, Any]) -> bool:
     """Whether held task ``row`` fails the state or field guard of write ``op``, judged as the server judges it."""
     _ledger()
-    import ledger_tasks
+    from scripts.swarm_ledger import ledger_tasks
 
     return bool(ledger_tasks._guarded(row, op))  # pyright: ignore[reportPrivateUsage]
 
@@ -113,7 +113,7 @@ class LedgerClient:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
             if OFFLINE.get() and ops:
-                return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+                return _queued(ops, cast(Any, ledger).queue(slug, _guarded(slug, ops), service))
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc

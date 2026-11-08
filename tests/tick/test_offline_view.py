@@ -207,7 +207,7 @@ def test_an_offline_write_matching_a_held_field_is_queued(stored: Queued) -> Non
         view.hold_stored("sw")
         token = OFFLINE.set(True)
         try:
-            task = LedgerClient().update_task("sw", "t2", {"claimed_by": "e1"}, if_match={"state": "claimed"})
+            task = LedgerClient().update_task("sw", "t2", {"claimed_by": "e1"}, if_match={"claimed_by": ""})
         finally:
             OFFLINE.reset(token)
     assert task == {"id": "t2", "state": "claimed", "claimed_by": "e1"}
