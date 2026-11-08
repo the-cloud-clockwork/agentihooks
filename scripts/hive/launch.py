@@ -13,6 +13,7 @@ from scripts.hive import admission, headroom, orders, placement, placement_waits
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
+from scripts.routing.slots import account_key
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
@@ -77,6 +78,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
         }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
+        spellings = {account_key(key): key for key in reported}
         pending: dict[str, int] = {}
         recorded = 0
         for agent in agents:
@@ -84,6 +86,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
                 recorded += 1
                 if agent.state in ("launching", "working", "suspect") and agent.execution_id not in seen:
                     slot = f"{agent.harness}:{agent.account}"
+                    slot = spellings.get(account_key(slot), slot)
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
             slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
@@ -182,7 +185,7 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
         hives = equipped
     if not task.get("workstation"):
         return hives, None
-    kept = [hive for hive in hives if hive["id"] == hive_id()]
+    kept = placement.workstation_hives(hives, hive_id())
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
 
 
@@ -471,6 +474,14 @@ class HiveLaunch:
             ),
         )
 
+    def hive_refusal(self, selected: Selection) -> str:
+        hive: Any = registry.show(self.store.redis, selected.hive)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if hive is None:
+            return f"hive {selected.hive} is no longer registered"
+        if hive.get("draining") == placement.YES:
+            return f"hive {selected.hive} is draining"
+        return ""
+
     def _admitted_selection(
         self, request: SpawnRequest, accounts: frozenset[str] = frozenset()
     ) -> Selection | placement.Wait:
@@ -481,7 +492,9 @@ class HiveLaunch:
         while isinstance(selected, Selection):
             if self.user_bundle_refusal(selected):
                 return selected
-            refused = self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive)))
+            refused = self.hive_refusal(selected) or self.queue_refusal(
+                request, selected, self.store.redis.xlen(self.orders.stream(selected.hive))
+            )
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 self._journal_spill(request, selected)

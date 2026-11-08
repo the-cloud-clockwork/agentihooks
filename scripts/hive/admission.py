@@ -5,7 +5,6 @@ minute load one window after launch, so its reservation ends there."""
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from scripts.swarm.host_budget import MEMORY_PER_AGENT_MB
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -17,7 +16,7 @@ REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
 AGENT_CPU = 0.5
-AGENT_MB = MEMORY_PER_AGENT_MB
+AGENT_MB = 850
 PENDING_MS = 900_000
 LOAD_WINDOW_MS = 300_000
 JOINED = "#joined"

@@ -7,20 +7,22 @@ import os
 from collections.abc import Callable, Collection, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
+from scripts.swarm import ack_pass, ledger_client, lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
+from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
+from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
+from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
@@ -57,6 +59,8 @@ PLACED = frozenset({AGENTS, TASKS})
 
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
+PASS_DEADLINE: ContextVar[Deadline | None] = ContextVar("spawn_pass_deadline", default=None)
+OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
 
 
 def _quota_notice(tick: Any, get: Get) -> Any:
@@ -107,20 +111,34 @@ def _preempt(tick: Any, get: Get) -> Any:
 
 
 def _spawn_step(tick: Any, get: Get) -> Any:
-    config, store = get("config"), get("store")
+    config, deadline, tools = get("config"), get(DEADLINE), get("tools")
+    recording = _recording(tick, deadline)
+    store = SpawnStoreCalls(tools.coordination, recording, tools.inbox)
     if (
         config.state == "running"
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
         rows = dict(get("rows"))
-        args = tuple(rows if key == "rows" else get(key) for key in _SPAWN_KEYS)
-        with tick._placement_pass(get("runtime")):
-            found = tick.skip_refused(tick._spawn, *args)
+        runtime = SpawnRuntimeCalls(tools.runtime, recording)
+        ledger = LedgerCalls(tools.ledger, recording)
+        bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
+        args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
+        token = PASS_DEADLINE.set(deadline)
+        try:
+            with tick._placement_pass(runtime):
+                found = tick.skip_refused(tick._spawn, *args)
+        finally:
+            PASS_DEADLINE.reset(token)
         get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
         return found
     return []
+
+
+def _recording(tick: Any, deadline: Deadline) -> Deadline:
+    """Return ``deadline`` extended by the launch budget, so a task prepared before it is still recorded on the ledger."""
+    return Deadline(deadline.expires_at + tick.SPAWN_BUDGET_S, deadline.clock)
 
 
 @dataclass(frozen=True)
@@ -232,7 +250,7 @@ def _admission(runtime: Any) -> Any:
     from scripts.swarm_v2.admission import PendingAdmission
 
     gate = getattr(runtime, "admission", None)
-    return gate if isinstance(gate, PendingAdmission) else None
+    return gate if isinstance(gate, (PendingAdmission, AdmissionCalls)) else None
 
 
 def _held_back(slug: str, ledger: Any, rows: dict[str, Any], runtime: Any, task: dict[str, Any], now_ms: int) -> str:
@@ -355,7 +373,8 @@ class _LaunchClock:
 
 def _launch_room(runtime: Any, config: SwarmConfig) -> int:
     room = getattr(runtime, "launch_room", None)
-    return max(1, min(tick.SPAWN_POOL, room(config) if room else 1))
+    value = room(config) if room else None
+    return max(1, min(tick.SPAWN_POOL, 1 if value is None else value))
 
 
 def _steer(slug: str, store: Any, task: dict[str, Any], failing: str) -> dict[str, str]:
@@ -400,6 +419,13 @@ def _placement_pass(runtime: Any) -> Generator[None]:
             end()
 
 
+def _past_deadline(deadline: Deadline | None, left: int, total: int) -> list[str]:
+    """Name the ready tasks left for the next pass once ``deadline`` has expired, else nothing."""
+    if deadline is None or not deadline.expired:
+        return []
+    return [f"spawn stopped at the pass deadline, {left} of {total} ready tasks left for the next pass"]
+
+
 def _spawn(
     slug: str,
     config: SwarmConfig,
@@ -410,19 +436,27 @@ def _spawn(
     doc: dict[str, Any],
     now_ms: int,
 ) -> list[str]:
+    deadline = PASS_DEADLINE.get()
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = timing.timed(tick._held_for_master, slug, store, now_ms)
     order, actions = timing.timed(tick._spawn_order, slug, config, store, agents, rows, doc, runtime)
+    if stop := _past_deadline(deadline, len(order), len(order)):
+        return actions + stop
     actions += timing.timed(tick._block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     run = tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
     clock = tick._LaunchClock()
     batch: list[Any] = []
-    for lane, task in order:
-        stop = held or [
-            timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
-        ]
+    for index, (lane, task) in enumerate(order):
+        stop = (
+            held
+            or _past_deadline(deadline, len(order) - index, len(order))
+            or [
+                timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch))
+                or clock.spent(task, batch)
+            ]
+        )
         if any(stop):
             return actions + tick._launch_all(run, clock, batch) + stop
         at = tick.time.monotonic()
@@ -467,6 +501,8 @@ def _prepare(
 ) -> tuple[Any, list[str]]:
     slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
     rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    if ledger_client.offline():
+        return None, [f"holding {task['id']}: {OFFLINE_HOLD}"]
     task = rows[task["id"]] = dict(task)
     expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
     blocked = (
@@ -521,6 +557,8 @@ def _prepare(
             "claimed_by": name,
             "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
         }
+        if task.get("branch") in continuation.PROTECTED:
+            fields["branch"] = ""
         kind = config.lanes.get(lane, {}).get("kind", "")
         if kind not in ("", "auto") and not task.get("kind"):
             fields["kind"] = kind
@@ -671,6 +709,9 @@ def _block_unresolved(
 ) -> list[str]:
     blocked: list[str] = []
     for _, task in order:
+        if deadline := PASS_DEADLINE.get():
+            if deadline.expired:
+                break
         if profile_first.UNRESOLVED in task:
             blocked.append(tick._unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
     return blocked

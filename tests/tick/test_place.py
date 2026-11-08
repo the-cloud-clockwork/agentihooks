@@ -10,6 +10,8 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
+from scripts.tick.adapters.calls import LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
+from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import (
@@ -94,7 +96,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
 
 def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
     def skip_refused(function: Any, *args: Any) -> list[str]:
-        log.append((function, *args))
+        log.append((function, *args, *([place.PASS_DEADLINE.get()] if function == "spawn" else [])))
         return [f"ran {function if isinstance(function, str) else function.__name__}"]
 
     @contextmanager
@@ -116,6 +118,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         EVENTS_ENGINE="events",
         _placement_pass=placement_pass,
         _spawn="spawn",
+        SPAWN_BUDGET_S=60,
         _collect_acks="collect acks",
         _codex_hook_order="codex hook order",
         _ended="ended",
@@ -130,9 +133,16 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
     )
 
 
-def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def _run(
+    group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tools: Any = None
+) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
-    return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
+    ctx = Context(_State(state), Deadline.after(60.0), tools or fake_tools())
+    return actions(engine.run_group(group, ctx))
+
+
+def _store_writes(tools: Any) -> list[object]:
+    return [call.args[0] for call in tools.coordination.calls if call.operation == "store_write"]
 
 
 @pytest.fixture
@@ -268,11 +278,17 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("preempt", "sw", config, store, "doc", 7, seats),
         ("places", "tick", ROWS),
         "panic read",
-        ("enter pass", "runtime"),
-        ("spawn", "sw", config, store, "ledger", "runtime", ROWS, "doc", 7),
-        ("leave pass", "runtime"),
-        ("delete", "due key"),
+        ("enter pass", calm[7][5]),
+        ("spawn", "sw", config, calm[7][3], calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
+        ("leave pass", calm[7][5]),
     ]
+    assert isinstance(calm[7][-1], Deadline)
+    assert isinstance(calm[7][3], SpawnStoreCalls)
+    assert calm[7][3].deadline is calm[7][4].deadline
+    assert isinstance(calm[7][4], LedgerCalls)
+    assert isinstance(calm[7][5], SpawnRuntimeCalls)
+    assert calm[7][5].deadline is calm[7][4].deadline
+    assert calm[7][4].deadline.expires_at == calm[7][-1].expires_at + tick.SPAWN_BUDGET_S
     spawned = calm[7][6]
     assert spawned is not ROWS and state["box"]["rows"] == ROWS
     assert isinstance(state["box"]["rows"], MappingProxyType)
@@ -298,15 +314,25 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch)
+    tools = fake_tools()
+    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch, tools)
     assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt"]
-    assert ("delete", "due key") not in calm
+    assert _store_writes(tools) == []
 
 
 def test_a_paused_swarm_does_not_spawn(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, "paused"), monkeypatch)
+    tools = fake_tools()
+    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, "paused"), monkeypatch, tools)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert ("delete", "due key") not in calm
+    assert _store_writes(tools) == []
+
+
+def test_a_spawning_pass_clears_its_due_mark_through_the_coordination_port(
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = fake_tools()
+    _run(place.PLACEMENT, _tick(calm), _pass(calm), monkeypatch, tools)
+    assert _store_writes(tools) == ["redis.delete"]
 
 
 def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -490,3 +516,150 @@ def test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims(mon
     with pytest.raises(_ReadyRead):
         place._spawn_order("sw", config, store, [], rows, doc, SimpleNamespace())
     assert asked == [("sw", "store", rows, doc, "eng", "dispatched", "claims")]
+
+
+SPAWN_LEFT = "spawn stopped at the pass deadline, {left} of {total} ready tasks left for the next pass"
+
+
+class _Clock:
+    """A clock the test moves by hand."""
+
+    def __init__(self, now: float) -> None:
+        """Start the clock at ``now``."""
+        self.now = now
+
+    def __call__(self) -> float:
+        """Return the current reading."""
+        return self.now
+
+
+class _SpawnClock:
+    """A launch clock that never spends the launch budget."""
+
+    failing = ""
+
+    def spent(self, task: dict[str, Any], batch: list[Any]) -> None:
+        """Report the launch budget unspent."""
+        return None
+
+    def prepared(self, at: float) -> None:
+        """Ignore the preparation time."""
+
+    def charge(self, at: float, errors: list[Exception], launches: int) -> None:
+        """Ignore the launch time."""
+
+
+def _spawn_pass(monkeypatch: pytest.MonkeyPatch, clock: _Clock, step_s: float, ids: list[str]) -> list[str]:
+    """Make the spawn pass see one ready task per id, each preparation spending ``step_s`` of ``clock``."""
+    from scripts.swarm import tick
+
+    prepared: list[str] = []
+
+    def prepare(run: Any, lane: str, task: dict[str, Any], *rest: Any) -> tuple[Any, list[str]]:
+        """Record the task and spend ``step_s`` of the clock."""
+        prepared.append(task["id"])
+        clock.now += step_s
+        return SimpleNamespace(record=SimpleNamespace(name=task["id"])), []
+
+    def launch_all(run: Any, launch_clock: Any, batch: list[Any]) -> list[str]:
+        """Name the batch launched."""
+        return [f"launched {' '.join(launch.record.name for launch in batch)}"] if batch else []
+
+    order = [("eng", {"id": task_id}) for task_id in ids]
+    monkeypatch.setattr(tick, "_held_for_master", lambda slug, store, now_ms: [])
+    monkeypatch.setattr(tick, "_spawn_order", lambda *args: (order, []))
+    monkeypatch.setattr(tick, "_block_unresolved", lambda *args: [])
+    monkeypatch.setattr(tick, "_LaunchClock", _SpawnClock)
+    monkeypatch.setattr(tick, "_spawn_stop", lambda *args: "")
+    monkeypatch.setattr(tick, "_launch_room", lambda runtime, config: len(ids) + 1)
+    monkeypatch.setattr(tick, "_prepare", prepare)
+    monkeypatch.setattr(tick, "_launch_all", launch_all)
+    return prepared
+
+
+def _spawn_with(deadline: Deadline | None) -> list[str]:
+    """Run the spawn pass of swarm sw with ``deadline``."""
+    store: Any = SimpleNamespace(agents=lambda slug: [])
+    config: Any = SimpleNamespace()
+    token = place.PASS_DEADLINE.set(deadline)
+    try:
+        return place._spawn("sw", config, store, "ledger", "runtime", {}, {}, 7)
+    finally:
+        place.PASS_DEADLINE.reset(token)
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_spawn_pass_past_its_deadline_stops_and_leaves_every_task_for_the_next_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock(100.0)
+    prepared = _spawn_pass(monkeypatch, clock, 0.0, ["t1", "t2"])
+
+    actions = _spawn_with(Deadline(100.0, clock))
+
+    assert prepared == []
+    assert actions == [SPAWN_LEFT.format(left=2, total=2)]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_an_expired_spawn_pass_never_blocks_unresolved_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+
+    clock = _Clock(100.0)
+    _spawn_pass(monkeypatch, clock, 0.0, ["t1", "t2"])
+
+    def block(*args: Any) -> list[str]:
+        pytest.fail("expired spawn pass reached unresolved task writes")
+
+    monkeypatch.setattr(tick, "_block_unresolved", block)
+
+    assert _spawn_with(Deadline(100.0, clock)) == [SPAWN_LEFT.format(left=2, total=2)]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_spawn_pass_whose_deadline_expires_midway_launches_what_it_prepared_and_leaves_the_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _Clock(0.0)
+    prepared = _spawn_pass(monkeypatch, clock, 5.0, ["t1", "t2", "t3"])
+
+    actions = _spawn_with(Deadline(4.0, clock))
+
+    assert prepared == ["t1"]
+    assert actions == ["launched t1", SPAWN_LEFT.format(left=2, total=3)]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+@pytest.mark.parametrize("deadline", [Deadline(10.0, _Clock(0.0)), None])
+def test_a_spawn_pass_inside_its_deadline_prepares_every_task_with_no_stop_notice(
+    monkeypatch: pytest.MonkeyPatch, deadline: Deadline | None
+) -> None:
+    prepared = _spawn_pass(monkeypatch, _Clock(0.0), 1.0, ["t1", "t2"])
+
+    assert _spawn_with(deadline) == ["launched t1 t2"]
+    assert prepared == ["t1", "t2"]
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_the_spawn_step_hands_the_spawn_pass_its_step_deadline(
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: _tick(calm))
+    deadline = Deadline(50.0, _Clock(0.0))
+    spawn = next(step for step in place.STEPS if step.name == "spawn")
+
+    state, tools = _pass(calm), fake_tools()
+
+    spawn.run(Context(_State(state), deadline, tools))
+
+    [found] = [entry for entry in calm if isinstance(entry, tuple) and entry[0] == "spawn"]
+    ledger, runtime = found[4], found[5]
+    store = found[3]
+    assert found == ("spawn", "sw", state["config"], store, ledger, runtime, ROWS, "doc", 7, deadline)
+    assert isinstance(store, SpawnStoreCalls) and store.port is tools.coordination
+    assert store.deadline is ledger.deadline
+    assert isinstance(ledger, LedgerCalls) and ledger.port is tools.ledger
+    assert isinstance(runtime, SpawnRuntimeCalls) and runtime.port is tools.runtime
+    assert runtime.deadline is ledger.deadline
+    assert place.PASS_DEADLINE.get() is None
+    assert (ledger.deadline.expires_at, ledger.deadline.clock) == (50.0 + _tick(calm).SPAWN_BUDGET_S, deadline.clock)

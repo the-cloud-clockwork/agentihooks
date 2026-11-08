@@ -7,8 +7,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+REQUIRED = {
+    "swarm": "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev",
+    "redis": "mirror.gcr.io/library/redis:7",
+    "nats": "mirror.gcr.io/library/nats:2.15.1-alpine",
+}
+
+
 @pytest.mark.parametrize("missing", ["", "swarm", "redis", "nats"])
-def test_smoke_selects_runtime_manifests_and_keeps_missing_images_red(tmp_path, missing):
+def test_smoke_selects_runtime_manifests_and_keeps_missing_images_red(tmp_path: Path, missing: str) -> None:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "docker.log"
@@ -73,6 +80,7 @@ fi
     if missing:
         assert result.returncode != 0
         assert "runtime image: not found" in result.stderr
+        assert f"Swarm startup blocked: required image {REQUIRED[missing]} could not be pulled" in result.stderr
         assert not any(call.startswith("compose up") for call in calls)
     else:
         assert result.returncode == 0, result.stderr

@@ -584,6 +584,14 @@ def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:
     return {"slots": slots, "interactive": interactive, "repos": repositories(), "sessions": sessions, "quota": quota}
 
 
+def _process_account(processes: dict[str, dict[int, str]], harness: str, pid: int, account: str) -> str | None:
+    """The process's own spelling of the agent's account, when the process runs on that account under either."""
+    from scripts.routing.slots import account_key
+
+    running = processes.get(harness, {}).get(pid)
+    return running if running is not None and account_key(running) == account_key(account) else None
+
+
 def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, str]]) -> dict[str, list[str]]:
     from scripts.swarm import live_binding
     from scripts.swarm.store import RedisStore
@@ -604,10 +612,11 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
             identity = record.harness, record.pid
             if identity in counted or record.generation != agent.generation:
                 continue
-            if processes.get(record.harness, {}).get(record.pid) != agent.account:
+            account = _process_account(processes, record.harness, record.pid, agent.account)
+            if account is None:
                 continue
             counted.add(identity)
-            found.setdefault(f"{record.harness}:{agent.account}", []).append(record.execution_id)
+            found.setdefault(f"{record.harness}:{account}", []).append(record.execution_id)
         for agent in agents.values():
             if not agent.execution_id or (agent.hive or agent.runtime_target.get("host_id")) != local_id:
                 continue
@@ -615,10 +624,11 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
             if session is None or session.target != agent.harness:
                 continue
             identity = session.target, session.process.pid
-            if identity in counted or processes.get(session.target, {}).get(session.process.pid) != agent.account:
+            account = _process_account(processes, session.target, session.process.pid, agent.account)
+            if identity in counted or account is None:
                 continue
             counted.add(identity)
-            found.setdefault(f"{agent.harness}:{agent.account}", []).append(agent.execution_id)
+            found.setdefault(f"{agent.harness}:{account}", []).append(agent.execution_id)
     return found
 
 

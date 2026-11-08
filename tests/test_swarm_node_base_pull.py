@@ -213,12 +213,12 @@ def _base_builds(text):
 @pytest.mark.parametrize(
     ("source", "count"),
     [
-        ("docker/swarm-node/smoke.sh", 3),
+        ("docker/swarm-node/smoke.sh", 2),
         ("tests/integration/swarm_node/run_health_proof.sh", 1),
         (".github/workflows/swarm-node-image.yml", 1),
     ],
 )
-def test_every_locked_base_build_resolves_through_the_copy_context(source, count):
+def test_every_locked_base_build_resolves_through_the_copy_context(source: str, count: int) -> None:
     text = (ROOT / source).read_text()
     if source.endswith(".yml"):
         jobs = yaml.safe_load(text)["jobs"].values()
@@ -226,6 +226,11 @@ def test_every_locked_base_build_resolves_through_the_copy_context(source, count
     builds = _base_builds(text)
     assert len(builds) == count
     assert all(CONTEXT in build for build in builds)
+    if source == "docker/swarm-node/smoke.sh":
+        joined = re.sub(r"\\\n\s*", " ", text)
+        rejections = [line for line in joined.splitlines() if "docker/swarm-node/rejection.Dockerfile" in line]
+        assert len(rejections) == 2
+        assert all('docker build --network none --build-arg WORKER_IMAGE="$image"' in build for build in rejections)
 
 
 def test_dev_copies_the_locked_base_whenever_the_lock_changes():
