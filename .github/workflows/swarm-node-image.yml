@@ -60,6 +60,8 @@ jobs:
           LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/worker-layers-next,mode=max', runner.temp) || '' }}
         run: >-
           docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$GITHUB_SHA"
+          --build-arg BUILDKIT_INLINE_CACHE=1
+          --cache-from type=registry,ref=ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
           ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}
           --file docker/swarm-node/Dockerfile --tag "$CANDIDATE" .
       - name: Build the incompatible herdr fixture
