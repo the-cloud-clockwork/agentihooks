@@ -98,6 +98,8 @@ def test_a_hive_with_limit_two_two_masters_and_one_worker_admits_one_more_worker
     write_hive(setup, id="workstation", ui="yes", max_agents=2)
     root = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "workstation")
     assert (root["agents"], root["room"]) == (1, 1)
+    assert local_slots.claim(setup.store, "workstation", setup.config.slug, "task", "engineer@bbbbbb-0004", 2) == 1
+    assert "fixture/engineer@bbbbbb-0004" in setup.store.redis.hgetall(local_slots.key("workstation"))
 
 
 def test_whole_machine_occupancy_includes_pending_claims_without_excluding_any_task(setup, monkeypatch):
