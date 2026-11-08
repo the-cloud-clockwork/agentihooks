@@ -67,8 +67,9 @@ def test_each_step_line_reaches_a_pipe_before_the_next_step_is_released() -> Non
             child.stdin.write(b"go\n")
             child.stdin.flush()
             line = arrived.get(timeout=30)
-            assert STAMPED.fullmatch(line), line
-            assert STAMPED.fullmatch(line).groups() == (str(step), str(step))
+            match = STAMPED.fullmatch(line)
+            assert match is not None, line
+            assert match.groups() == (str(step), str(step))
         child.stdin.close()
         assert child.wait(timeout=30) == 0
     finally:
@@ -92,4 +93,4 @@ def test_the_report_reads_the_clock_when_it_writes(capsys: pytest.CaptureFixture
 
 
 def test_tools_report_by_default() -> None:
-    assert create.Tools(None, None, {}, "root", "redis://").out is create.report
+    assert create.Tools(mock.Mock(), mock.Mock(), {}, "root", "redis://").out is create.report
