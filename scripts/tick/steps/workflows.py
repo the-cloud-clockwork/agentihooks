@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm import workflow_runner
-
 from scripts.tick import registry
 from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, pass_domains

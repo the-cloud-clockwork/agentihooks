@@ -10,12 +10,12 @@ import yaml
 
 from scripts.inbox.store import InboxError
 from scripts.workflows import exit_checks, loader, schema
-from scripts.workflows.launchers import HeadlessProfile
-from scripts.workflows.runner import StageResult
+from scripts.workflows.runner import StageLauncher, StageResult
 
 machine: Any = import_module("scripts.workflows.machine")
 store: Any = import_module("scripts.workflows.store")
 runner: Any = import_module("scripts.workflows.runner")
+HeadlessProfile: Any = import_module("scripts.workflows.launchers").HeadlessProfile
 
 
 class PendingStage(Exception):
@@ -27,11 +27,12 @@ class SeatLauncher:
     inbox: Any
     task: dict[str, Any]
     definition: schema.Workflow
-    fallback: Any
+    fallback: StageLauncher
 
     def launch(self, stage: schema.Stage, inputs: dict[str, Any], folder: Path) -> StageResult:
         if stage.id != self.definition.head:
-            return self.fallback.launch(stage, inputs, folder)
+            fallback: Any = self.fallback
+            return fallback.launch(stage, inputs, folder)
         state = store.load(folder)
         generation = self.task.get("claim_generation", 0)
         result = folder / "outputs" / stage.id / f"seat-{generation}-{state['iterations']}-{state['visit']}.json"
