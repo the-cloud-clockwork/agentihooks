@@ -1,7 +1,7 @@
 """The member_swarms entry of the hub NATS signer record: hive invite lists each member it mints, hive scope the rest."""
 
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, nats_grant, scope
@@ -60,9 +60,9 @@ def assign(
 def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
     dropped: list[str] = []
 
-    def change(record: Mapping) -> dict:
+    def change(record: dict[str, Any]) -> dict[str, Any]:
         dropped.clear()
-        listed = dict(record.get(FIELD) or {})
+        listed: dict[str, Any] = dict(record.get(FIELD) or {})
         if member not in listed:
             return {}
         del listed[member]
@@ -70,7 +70,7 @@ def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
         return {FIELD: listed}
 
     try:
-        openbao_kv.update(bao, path, change)
+        openbao_kv.update(bao, path, change)  # pyright: ignore[reportUnknownMemberType]
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
     return bool(dropped)

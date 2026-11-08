@@ -302,11 +302,14 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
-def unlist(bao: openbao_kv.OpenBao | None, plan: Plan) -> list[str]:
+def unlist(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
+    """Drop the plan's hive from the hub signer record's member swarms, naming what it found."""
     if plan.signer_path is None:
         return [NO_SIGNER]
     if plan.dry_run:
         return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
+    if bao is None:
+        raise auth.HiveError(f"no OpenBao client to unlist {plan.hive} from {plan.signer_path}")
     if member_swarms.unassign(bao, plan.signer_path, plan.hive):
         return [f"unlisted {plan.hive} from the hub signer record {plan.signer_path}"]
     return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
@@ -431,7 +434,7 @@ def _until(
 STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
-    ("signer", lambda store, bao, plan, host: unlist(bao, plan)),
+    ("signer", unlist),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
     ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
     ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run, host.sleep, host.clock)),

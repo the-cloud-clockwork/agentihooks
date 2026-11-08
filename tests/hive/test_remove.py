@@ -602,7 +602,7 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
 
     done = remove.remove(store, bao, plan, _host(clock, Run(), tmp_path, ledger))
 
-    assert done[:3] == [
+    assert done[:4] == [
         f"drain: drained {member}: 5 agents ordered to hand off; 2 handed off: engineer@1, engineer@7; "
         "3 claims released: t2, t3, t6; 6 agents retired: ci@2, ci@6, engineer@1, engineer@3, engineer@5, engineer@7",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",

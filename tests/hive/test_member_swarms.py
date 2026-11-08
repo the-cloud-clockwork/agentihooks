@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.parse
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -11,6 +12,9 @@ from scripts.hive import auth, cli, invite, member_swarms, nats_grant, remove, s
 from scripts.swarm.store import PREFIX as SWARMS
 from tests.codex_fakes import BAO_TOKEN, BAO_URL, http_error
 from tests.hive.test_invite import RECORD, URL, Bao
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
 
@@ -134,31 +138,40 @@ def test_unassign_reports_an_openbao_failure_as_a_hive_error():
     assert str(error.value) == "OpenBao HTTP 503: sealed"
 
 
-def _unlisting(**given: bool) -> remove.Plan:
-    return remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, **given)
+def _unlisting(dry_run: bool = False) -> remove.Plan:
+    return remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, dry_run=dry_run)
+
+
+def _signer_step(bao: openbao_kv.OpenBao | None, plan: remove.Plan) -> list[str]:
+    return dict(remove.STEPS)["signer"](cast("RedisStore", None), bao, plan, remove.Host())
 
 
 def test_remove_after_create_leaves_the_signer_record_without_the_hive_and_a_second_remove_still_passes():
     fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
     bao = _bao(fake)
     member_swarms.assign(bao, SIGNER, ["m1"], ("rig",))
-    step = dict(remove.STEPS)["signer"]
-    assert step(None, bao, _unlisting(), None) == [f"unlisted m1 from the hub signer record {SIGNER}"]
+    assert _signer_step(bao, _unlisting()) == [f"unlisted m1 from the hub signer record {SIGNER}"]
     assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}
-    assert step(None, bao, _unlisting(), None) == [f"the hub signer record {SIGNER} lists no member swarms for m1"]
+    assert _signer_step(bao, _unlisting()) == [f"the hub signer record {SIGNER} lists no member swarms for m1"]
     assert fake.written == [SIGNER, SIGNER]
 
 
 def test_remove_writes_nothing_on_a_dry_run_or_without_a_hub_signer_path_and_says_which():
     fake = Bao({SIGNER: {"member_swarms": {"m1": ["rig"]}}})
-    assert remove.unlist(_bao(fake), _unlisting(dry_run=True)) == [
+    assert _signer_step(_bao(fake), _unlisting(dry_run=True)) == [
         f"would unlist m1 from the hub signer record {SIGNER}"
     ]
     unset = remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9")
-    assert remove.unlist(None, unset) == [
+    assert _signer_step(None, unset) == [
         "AGENTIHOOKS_NATS_SIGNER names no hub signer record, so no member swarms entry to unlist"
     ]
     assert fake.written == []
+
+
+def test_remove_without_an_openbao_client_names_the_hive_and_the_signer_record():
+    with pytest.raises(auth.HiveError) as error:
+        _signer_step(None, _unlisting())
+    assert str(error.value) == f"no OpenBao client to unlist m1 from {SIGNER}"
 
 
 def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, monkeypatch):
