@@ -99,7 +99,9 @@ def cluster_runners(_org: str) -> ClusterRunners:
     return ClusterRunners(sets, pods, _kubectl("nodes"), datetime.now(UTC), timedelta(seconds=NODE_BOUND_SECONDS))
 
 
-def lost_jobs(jobs: list[dict[str, Any]], runners: Container[str], now: datetime, grace: timedelta) -> list[dict[str, Any]]:
+def lost_jobs(
+    jobs: list[dict[str, Any]], runners: Container[str], now: datetime, grace: timedelta
+) -> list[dict[str, Any]]:
     return [
         job
         for job in jobs
