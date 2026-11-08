@@ -50,6 +50,7 @@ class TestMCPRegistry:
             "recall",
             "sessions",
             "culture",
+            "plans",
         }
 
     def test_the_server_serves_the_scheduler_tools(self, tools):
