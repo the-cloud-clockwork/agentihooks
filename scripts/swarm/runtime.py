@@ -1236,6 +1236,12 @@ class HerdrRuntime:
         then close the pane; the agent's name alone never selects a process. An agent whose record names no host
         and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
+            from scripts.hive.reports import LOST_MS
+
+            now_ms = int(time.time() * 1000)
+            if self.hive is not None and (self.hive.gone(agent) or self.hive.lost(agent, now_ms, LOST_MS)):
+                self.refusals.pop(agent.name, None)
+                return True
             return self._order(host, _command("retire", agent), agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)

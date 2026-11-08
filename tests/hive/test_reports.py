@@ -785,7 +785,7 @@ def test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat(remote:
     assert remote.store.claimant("fixture", "task") is None
     assert agent.name not in runtime.refusals
     runtime.end.assert_not_called()
-    assert len(remote.redis.xrange(Orders(remote.redis).commands(HIVE))) == 1
+    assert remote.redis.xrange(Orders(remote.redis).commands(HIVE)) == []
 
 
 def test_local_runtime_terminates_a_remote_worker_by_order(remote):
