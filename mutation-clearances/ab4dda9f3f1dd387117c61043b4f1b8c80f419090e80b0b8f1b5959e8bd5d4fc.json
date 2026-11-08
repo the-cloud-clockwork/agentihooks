@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundle_copy.py:scripts.profiles.bundle_copy.x_recorded:5d29463f1b30612732c1fb5ee071805da9ba09b249f6f642fb373c4828186dc0": {
+    "reader": "standards_reader",
+    "reason": "In `x_recorded`, the mutation changes only the static type argument of `typing.cast` on cast target `user`, from Path to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

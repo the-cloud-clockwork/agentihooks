@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/binding.py:scripts.profiles.binding.x_fields:907250dd39094deada1e4af9e7d493e6d2a90c28ff7c2ca11b914898a5563b9d": {
+    "reader": "standards_reader",
+    "reason": "In `x_fields`, the mutation changes only the static type argument of `typing.cast` on cast target `result`, from dict[str, Any] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

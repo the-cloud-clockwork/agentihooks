@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_rendered_root:c6aed16d9994fc5204dd71e91e64089e4b9aa62aa27cbb163f1ebb08470f6d69": {
+    "reader": "standards_reader",
+    "reason": "In x_rendered_root, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to \"XXModuleTypeXX\"); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

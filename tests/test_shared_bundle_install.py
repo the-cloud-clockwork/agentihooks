@@ -360,6 +360,24 @@ def test_the_runtime_reader_and_the_installer_agree_on_the_three_manifestos(worl
     assert [p.name for p in installed] == ["core.md", "mine.md", "team.md"]
 
 
+def test_manifestos_list_names_the_shared_bundle_entries(
+    world3: dict[str, Path],
+    clean_manifesto_env: None,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts.profiles import manifestos
+
+    _manifesto(world3["root"], "core.md", "ROOT CORE")
+    _manifesto(world3["shared"], "team.md", "SHARED TEAM")
+    _link_all(world3)
+    capsys.readouterr()
+
+    assert manifestos.main(["list"]) == 0
+
+    listed = [line.split()[0] for line in capsys.readouterr().out.splitlines()[1:]]
+    assert listed == ["core.md", "team.md"]
+
+
 def test_force_init_keeps_the_shared_link_through_a_real_install(world3, monkeypatch):
     _link_all(world3)
     monkeypatch.setattr(install, "_clean_state_dir", lambda: install.STATE_JSON.unlink())

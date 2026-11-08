@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundle_copy.py:scripts.profiles.bundle_copy.x_reuse:fa4721814e36588b6701175f6164e67e632d2fcfab9b066a512eb7c2763ec937": {
+    "reader": "standards_reader",
+    "reason": "In `x_reuse`, the mutation changes only the quoted forward-reference type-argument string passed as the first argument of a multi-line `typing.cast(...)` call, from \"list[tuple[str, ContextVar[tuple[Path, Path, str] | None], tuple[Path, Path, str]]]\", to \"list[tuple[str, contextvar[tuple[path, path, str] | none], tuple[path, path, str]]]\",; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

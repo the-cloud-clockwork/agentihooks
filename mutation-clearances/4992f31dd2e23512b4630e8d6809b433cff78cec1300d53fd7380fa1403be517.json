@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/connectors.py:scripts.profiles.connectors.x_write:4c673dab6591490c18ed9e094dbf2166ca3bc00a7857ec1f9418c8835a2bfd4b": {
+    "reader": "standards_reader",
+    "reason": "In x_write, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to \"moduletype\"); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

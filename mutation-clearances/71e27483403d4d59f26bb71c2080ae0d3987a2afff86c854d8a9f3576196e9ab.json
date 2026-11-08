@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/connectors.py:scripts.profiles.connectors.x_codex:7d1d2f89d80b2abf8cac328249a6d9197bf71c5b836b6c706f87fb64972967f4": {
+    "reader": "standards_reader",
+    "reason": "In x_codex, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

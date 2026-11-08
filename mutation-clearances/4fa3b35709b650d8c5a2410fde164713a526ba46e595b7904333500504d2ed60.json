@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundles.py:scripts.profiles.bundles.x_list_bundle:3912aba6c5a8a47b80baed98b18ecd47acbce70e982c770e16f2cf2efcd148c7": {
+    "reader": "standards_reader",
+    "reason": "In `x_list_bundle`, the mutation changes only the static type argument of `typing.cast` on cast target `_install_module()`, from \"ModuleType\" to \"moduletype\"; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}
