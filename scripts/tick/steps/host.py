@@ -1,5 +1,7 @@
 """The host steps of the tick wrapper: relay, launch slots, probes, host health, commands, phases, refresh, intent and reboot."""
 
+import sys
+import traceback
 from collections.abc import Callable
 from importlib import import_module
 from typing import Any
@@ -50,6 +52,44 @@ def raise_held(box: dict[str, Any]) -> None:
     """Raise the exception a step held, as the hand written wrapper let it escape."""
     if "raised" in box:
         raise box["raised"]
+
+
+def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
+    """Run ``call`` only when the pass holds a tick view, else skip step ``name`` this pass and log that it skipped."""
+
+    def run(cli: Any, get: Get) -> Any:
+        if get("view") is None:
+            line = f"skipped {name}: no step stored the tick view this pass"
+            print(line, file=sys.stderr)
+            return [line]
+        return call(cli, get)
+
+    return run
+
+
+def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
+    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
+    raise it again."""
+    if not any(box.get("raised") is exc for box in boxes):
+        raise exc
+    return failed_pass(exc)
+
+
+def failed_pass(exc: BaseException) -> list[str]:
+    """Log the exception a step held and return the line ending its pass as failed."""
+    traceback.print_exception(exc, file=sys.stderr)
+    return [f"pass failed: a step raised {type(exc).__name__}: {exc}"]
+
+
+def end_held(box: dict[str, Any]) -> list[str]:
+    """Raise a stop a step held in ``box``, else log the exception it held and return the line ending its pass as
+    failed, nothing when no step raised."""
+    raised = box.get("raised")
+    if raised is None:
+        return []
+    if not isinstance(raised, Exception):
+        raise raised
+    return failed_pass(raised)
 
 
 def _inbox_relay(cli: Any, get: Get) -> None:
