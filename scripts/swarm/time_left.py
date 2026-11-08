@@ -1,6 +1,10 @@
 """Each tick sends the ledger its live slots and CI median, so time left and its refresh age stay current."""
 
+import sqlite3
+from typing import Any
+
 from scripts.swarm import capacity, ci_speed, freeze
+from scripts.swarm.ledger_client import LedgerRefused
 
 WATCHED_KEPT = 100
 WATCHED_LENGTH = 2000
@@ -25,9 +29,12 @@ def focus(config, doc: dict) -> dict:
     return {key: value for key, value in (("fix_phase", freeze.fix_phase(config)), ("watched", watched)) if value}
 
 
-def refresh(slug, store, ledger, runtime, config, doc) -> list[str]:
+def refresh(slug: str, store: Any, ledger: Any, runtime: Any, config: Any, doc: dict[str, Any]) -> list[str]:
     writer = getattr(ledger, "time_left", None)
     if writer is not None:
         inputs = inputs_of(store, slug, runtime)
-        writer(slug, inputs["slots"], inputs["ci_minutes"], **focus(config, doc))
+        try:
+            writer(slug, inputs["slots"], inputs["ci_minutes"], **focus(config, doc))
+        except sqlite3.DatabaseError as exc:
+            raise LedgerRefused(f"time left write failed: {exc}") from exc
     return []
