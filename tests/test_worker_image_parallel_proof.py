@@ -179,7 +179,7 @@ def run_proof(tmp_path, failure, proof="all", driver="[]", extra=None):
     return result, calls, state, output
 
 
-def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
+def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path: Path) -> None:
     result, calls, state, output = run_proof(tmp_path, "")
     assert result.returncode == 0, result.stderr
     assert "SV2-IMG-01 passed" in result.stdout
@@ -187,7 +187,13 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
     assert (state / "scan-agentihooks-worker-rebuild-finished").exists()
     builds = [call for call in calls if call[0] == "build"]
-    assert len(builds) == 5
+    assert len(builds) == 6
+    rejections = [call for call in builds if any(value.endswith("/rejection.Dockerfile") for value in call)]
+    assert len(rejections) == 4
+    assert all(call[call.index("--network") + 1] == "none" for call in rejections)
+    assert all(
+        call[call.index("--build-arg") + 1].startswith("WORKER_IMAGE=agentihooks-worker-proof:") for call in rejections
+    )
     assert "--no-cache-filter" in builds[-1]
     assert builds[-1][builds[-1].index("--no-cache-filter") + 1] == "worker"
     runs = [call for call in calls if call[0] == "run"]
@@ -212,8 +218,10 @@ def test_a_failed_background_worker_check_keeps_the_proof_red(tmp_path, failure,
     assert calls[-1][:2] == ["image", "rm"]
 
 
-@pytest.mark.parametrize("proof,builds,runs", [("startup", 4, 6), ("rebuild", 1, 1), ("profiles", 1, 7)])
-def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, builds, runs):
+@pytest.mark.parametrize("proof,builds,runs", [("startup", 5, 6), ("rebuild", 1, 1), ("profiles", 1, 7)])
+def test_worker_proof_modes_run_only_their_independent_checks(
+    tmp_path: Path, proof: str, builds: int, runs: int
+) -> None:
     result, calls, state, output = run_proof(tmp_path, "", proof)
     assert result.returncode == 0, result.stderr
     assert len([call for call in calls if call[0] == "build"]) == builds
