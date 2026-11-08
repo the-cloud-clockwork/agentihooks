@@ -70,3 +70,35 @@ def test_each_agent_keeps_its_own_record(client: Any) -> None:
     assert all(auth.agent_member(client, token, "alpha", "engineer@1") == "m1" for token in first)
     assert all(auth.agent_member(client, token, "alpha", "engineer@2") == "m1" for token in second)
     assert all(auth.agent_member(client, token, "alpha", "engineer@1") is None for token in second)
+
+
+def test_a_remapped_ledger_drops_the_tokens_issued_under_the_old_one(client: Any) -> None:
+    store = auth._store(client)
+    old = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+    hive_state.amend(store, "ledger.d2", lambda _: "m1")
+    hive_state.amend(store, "holder.m1", lambda _: "d2")
+    new = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert hive_state.read(store, auth._agent_key("m1", "alpha", "engineer@1")) == {
+        "ledger": "d2",
+        "scope": ["alpha", "engineer@1"],
+        "tokens": [auth._digest(new)],
+    }
+    assert auth.agent_member(client, old, "alpha", "engineer@1") is None
+    assert auth.agent_member(client, new, "alpha", "engineer@1") == "m1"
+
+
+def test_a_refused_issue_removes_only_its_own_token(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = auth._store(client)
+    kept = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+    answers = iter([True, False])
+    monkeypatch.setattr(auth, "_mapped", lambda *args: next(answers))
+
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    assert hive_state.read(store, auth._agent_key("m1", "alpha", "engineer@1")) == {
+        "ledger": "d",
+        "scope": ["alpha", "engineer@1"],
+        "tokens": [auth._digest(kept)],
+    }
