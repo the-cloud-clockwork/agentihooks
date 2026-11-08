@@ -314,8 +314,8 @@ def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(s
         if argv == rules:
             return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
         if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
-            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": next(rollups)}]}
-            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+            checks = [{"name": "unit", "conclusion": next(rollups)}, {"name": "optional", "conclusion": "FAILURE"}]
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": checks}), "")
         if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
             return subprocess.CompletedProcess(argv, 0, f"{next(states)}\n", "")
         return run(argv, **kwargs)
@@ -324,6 +324,8 @@ def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(s
     done = remove.remove(store, bao, plan, _host(clock, refused, tmp_path))
 
     assert f"manifests: opened pull request {PR} deleting {', '.join(OWNED)} and merged it" in done
+    assert next(states, "read") == "read"
+    assert clock.slept == 4
     merges = [argv for argv, _ in run.calls if argv[:3] == ["gh", "pr", "merge"]]
     assert merges == [["gh", "pr", "merge", PR, "--squash"]]
 
@@ -341,11 +343,37 @@ def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(sto
             return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
         return run(argv, **kwargs)
 
+    clock = Clock(store, member, 2)
     with pytest.raises(auth.HiveError) as timed_out:
-        remove.remove(store, bao, replace(plan, merge_s=60), _host(Clock(store, member, 2), pending, tmp_path))
+        remove.remove(store, bao, replace(plan, merge_s=60), _host(clock, pending, tmp_path))
 
     assert str(timed_out.value) == (
         f"timed out after 60s waiting for pull request {PR} checks to pass; rerun hive remove to resume"
+    )
+    assert clock.slept == 6
+
+
+def test_a_removal_that_never_merges_times_out_naming_the_merge(store: Any, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def open_forever(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv == ["gh", "pr", "merge", PR, "--squash", "--auto"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
+            return subprocess.CompletedProcess(argv, 0, "OPEN\n", "")
+        return run(argv, **kwargs)
+
+    with pytest.raises(auth.HiveError) as timed_out:
+        remove.remove(store, bao, replace(plan, merge_s=30), _host(Clock(store, member, 2), open_forever, tmp_path))
+
+    assert (
+        str(timed_out.value)
+        == f"timed out after 30s waiting for pull request {PR} to merge; rerun hive remove to resume"
     )
 
 
