@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
@@ -29,6 +30,13 @@ POLL_S = 15
 COMMAND_TIMEOUT_S = 60
 NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def report(line: str, clock: Callable[[], float] = time.time) -> None:
+    """Write one hive create line to standard output, stamped with its UTC time and flushed at once."""
+    sys.stdout.write(f"{time.strftime(STAMP, time.gmtime(clock()))} {line}\n")
+    sys.stdout.flush()
 
 
 @dataclass(frozen=True)
@@ -53,7 +61,7 @@ class Tools:
     run: create_github.Run = subprocess.run
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
-    out: Callable[[str], None] = print
+    out: Callable[[str], None] = report
     state: dict = field(default_factory=dict)
 
 
@@ -274,15 +282,29 @@ def _merged(tools: Tools, options: Options) -> str:
         _save(tools)
         raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive create to open a new one")
     if found != "MERGED":
-        if not create_github.merge(tools.run, url):
-            checks = f"pull request {url} checks to pass"
-            required = create_github.required_checks(tools.run, options.repo, options.base)
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
-            create_github.squash(tools.run, url)
+        _land(tools, options, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
         )
     return f"merged {url}"
+
+
+def _land(tools: Tools, options: Options, url: str) -> None:
+    """Merge through the base's queue once its required checks pass, else by auto or squash merge."""
+    if create_github.queued(tools.run, options.repo, options.base):
+        _required(tools, options, url)
+        create_github.enqueue(tools.run, url)
+    elif not create_github.merge(tools.run, url):
+        _required(tools, options, url)
+        create_github.squash(tools.run, url)
+
+
+def _required(tools: Tools, options: Options, url: str) -> None:
+    """Wait until every check the base ruleset requires has passed, ignoring checks it does not require."""
+    required = create_github.required_checks(tools.run, options.repo, options.base)
+    if required:
+        checks = f"pull request {url} checks to pass"
+        _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
 
 
 def _settings(tools: Tools, options: Options) -> str:

@@ -100,7 +100,11 @@ def elsewhere(redis: "Redis", harness: str, now: float, own: str) -> dict[str, i
     for slot, count in LaunchSlots(redis).counts(seen).items():
         if slot.startswith(f"{harness}:"):
             slots[slot] = slots.get(slot, 0) + count
-    return {slot.split(":", 1)[1]: count for slot, count in slots.items()}
+    held: dict[str, int] = {}
+    for slot, count in slots.items():
+        account = slot.split(":", 1)[1].replace("-", "_")
+        held[account] = held.get(account, 0) + count
+    return held
 
 
 def held_elsewhere(harness: str, now: float, own: str) -> dict[str, int]:

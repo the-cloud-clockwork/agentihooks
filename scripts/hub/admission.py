@@ -57,7 +57,13 @@ class Admission:
         return self._claim(slug, request, view.rows)
 
     def _placeable(self, row: dict[str, Any], hive: str) -> bool:
-        """A workstation task, a task pinned to another hive or one needing what the hive lacks is never admitted."""
+        """A draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
+        never admitted."""
+        from scripts.hive import placement, registry
+
+        record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        if record.get("draining") == placement.YES:
+            return False
         return readiness.placeable(row, hive, readiness.declared(self.store, hive))
 
     def _claim(self, slug: str, request: dict, rows: dict) -> dict | None:

@@ -11,6 +11,17 @@
       ]
     },
     {
+      "id": "hive-drain-events-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1896",
+      "behaviour": "The hub refuses an events admission request from a hive whose registry record is draining, such as a hive stopping for a release, before any claim, execution, seat or ledger write.",
+      "seam": "Admission.admit for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -476,10 +487,10 @@
         "tests/tick/test_spawn_ports.py::test_the_ledger_facade_comments_through_the_port_with_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
-        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect"
-        ,"tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks"
-        ,"tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires"
-        ,"tests/tick/steps/test_spawn.py::test_spawn"
+        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
+        "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
+        "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
+        "tests/tick/steps/test_spawn.py::test_spawn"
       ]
     },
     {
@@ -2171,6 +2182,17 @@
         "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
         "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
         "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
+      ]
+    },
+    {
+      "id": "hive-overrun-progress",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1761",
+      "behaviour": "An overrun report quotes the latest progress published by the execution hive, matching the ledger workspace view even when the workstation folder is empty or stale.",
+      "seam": "Overrun inbox reports and published ledger workspace progress",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_remote_overrun_quotes_the_same_progress_as_the_ledger"
       ]
     }
   ],

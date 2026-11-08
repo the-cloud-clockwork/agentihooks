@@ -1,0 +1,6 @@
+{
+  "scripts/hive/launch.py:scripts.hive.launch.x_loaded_hives:cba03fc5c295261b141177325b58bc83e3d5ae9e9f2cd6ee56400d160496c574": {
+    "reader": "standards_reader",
+    "reason": "When the default applies no reported key matches the account under either spelling, so reported.get is 0 for the real slot and for None and unclaimed clamps to 0 for both. Pending keys only feed the hive agents sum, so merging unreported slots under None leaves the total unchanged; only a negative report count, which the daemon never writes, could tell them apart."
+  }
+}
