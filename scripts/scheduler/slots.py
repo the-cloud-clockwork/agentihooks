@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
 from types import FunctionType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
@@ -121,10 +121,10 @@ class WorkflowSlot:
     name: str
     case: str
 
-    def record(self) -> dict:
-        return {"kind": "workflow", **asdict(self)}
+    def record(self) -> dict[str, str]:
+        return {"kind": "workflow", "name": self.name, "case": self.case}
 
-    def deliver(self, event: dict, delivery_id: str, state: "StateStore") -> None:
+    def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
         from scripts.workflows import scheduled
 
         scheduled.start(self.name, self.case, delivery_id)
@@ -139,7 +139,7 @@ KINDS = {
 }
 
 
-def restore(record: dict) -> Slot:
+def restore(record: dict[str, Any]) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
     return KINDS[kind](**fields)

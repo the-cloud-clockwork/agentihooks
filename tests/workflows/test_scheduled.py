@@ -2,6 +2,7 @@ import inspect
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -111,6 +112,6 @@ def test_the_workflow_slot_delivers_through_start(monkeypatch: pytest.MonkeyPatc
     started = []
     monkeypatch.setattr(scheduled, "start", lambda *args: started.append(args) or True)
 
-    assert slots.WorkflowSlot("tiny", "/case.md").deliver({"owner": "me"}, "entry-1:slot-1", None) is None
+    assert slots.WorkflowSlot("tiny", "/case.md").deliver({"owner": "me"}, "entry-1:slot-1", cast(Any, None)) is None
 
     assert started == [("tiny", "/case.md", "entry-1:slot-1")]
