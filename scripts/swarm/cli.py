@@ -66,7 +66,7 @@ from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
@@ -198,7 +198,7 @@ from scripts.tick.adapters.coordination import StoreCoordination
 from scripts.tick.adapters.github import GitHubSourceControl
 from scripts.tick.adapters.host import local_host
 from scripts.tick.adapters.inbox import StoreInbox
-from scripts.tick.adapters.ledger import ClientLedger, resource_client
+from scripts.tick.adapters.ledger import ClientLedger, PassLedger, resource_client
 from scripts.tick.adapters.llm import ApiLlm
 from scripts.tick.adapters.metrics import SpoolMetrics
 from scripts.tick.adapters.processes import PassProcesses
@@ -469,6 +469,8 @@ class _Wrapper:
         deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
         runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
         self.state["runtime"] = runtime
+        if tools := PASS_TOOLS.get():
+            cast(Any, tools.runtime).legacy = runtime
         return True
 
     def _watch(self) -> bool:
@@ -543,7 +545,7 @@ class _PassSpool:
         self._box.append_many(batches, checkpoint)
 
 
-def _pass_tools(store: RedisStore, slug: str, owner: str) -> Tools:
+def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
 
     swarm: Any = store
@@ -553,10 +555,10 @@ def _pass_tools(store: RedisStore, slug: str, owner: str) -> Tools:
         return next((record for record in swarm.agents(slug) if record.name == name), None)
 
     return Tools(
-        ledger=ClientLedger(slug, resource_client(slug, service=True)),
+        ledger=ClientLedger(slug, resource_client(slug, service=True)) if ledger is None else PassLedger(slug, ledger),
         coordination=StoreCoordination(store, slug, owner),
         source_control=GitHubSourceControl("", Path.cwd(), "dev"),
-        runtime=RouterRuntime(routed(os.environ).router, agent),
+        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime),
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),
@@ -605,7 +607,7 @@ def run_tick(
     failed: Exception | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
-        beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner)))
+        beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
         beating.enter_context(
             pool.running(
                 mode=store.config(slug).tick_mode,

@@ -10,6 +10,7 @@ from typing import Any, cast
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
+from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
@@ -512,8 +513,16 @@ def _session_models(slug: Any, store: Any) -> Any:
 
 
 def _reap_step(tick: Any, get: Get) -> Any:
+    tools, deadline = get("tools"), get(DEADLINE)
     return tick.skip_refused(
-        _reap, get("slug"), get("store"), get("ledger"), get("runtime"), get("rows"), get("now_ms"), get(DEADLINE)
+        _reap,
+        get("slug"),
+        get("store"),
+        LedgerCalls(tools.ledger, deadline),
+        RuntimeCalls(tools.runtime, deadline),
+        get("rows"),
+        get("now_ms"),
+        deadline,
     )
 
 

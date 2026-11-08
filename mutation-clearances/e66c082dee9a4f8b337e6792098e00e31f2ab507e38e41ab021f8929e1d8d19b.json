@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x\u01c1_Wrapper\u01c1_fence:9944a86e05c016b88828928203826ef57eb5cc6911250ffe47771dac34137226": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns its second argument unchanged and does not inspect or enforce its first argument. Replacing Any with None changes only the discarded type hint; both expressions select the same tools.runtime object and assign the identical runtime to its legacy attribute. No observable runtime output changes."
+  }
+}
