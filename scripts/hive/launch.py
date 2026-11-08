@@ -471,6 +471,14 @@ class HiveLaunch:
             ),
         )
 
+    def hive_refusal(self, selected: Selection) -> str:
+        hive = registry.show(self.store.redis, selected.hive)
+        if hive is None:
+            return f"hive {selected.hive} is no longer registered"
+        if hive.get("draining") == placement.YES:
+            return f"hive {selected.hive} is draining"
+        return ""
+
     def _admitted_selection(
         self, request: SpawnRequest, accounts: frozenset[str] = frozenset()
     ) -> Selection | placement.Wait:
@@ -481,7 +489,9 @@ class HiveLaunch:
         while isinstance(selected, Selection):
             if self.user_bundle_refusal(selected):
                 return selected
-            refused = self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive)))
+            refused = self.hive_refusal(selected) or self.queue_refusal(
+                request, selected, self.store.redis.xlen(self.orders.stream(selected.hive))
+            )
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 self._journal_spill(request, selected)

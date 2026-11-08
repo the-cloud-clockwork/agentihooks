@@ -8,9 +8,8 @@ from scripts.swarm.tick import ACK_LATER
 from scripts.swarm_v2.runtime.base import Status
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
 
-pytestmark = pytest.mark.feature("hive-drain-launch-placement")
 
-
+@pytest.mark.feature("hive-drain-launch-placement")
 @pytest.mark.parametrize("removed", [False, True])
 @pytest.mark.parametrize("spare", [False, True])
 def test_a_cached_launch_skips_a_hive_that_started_draining_or_was_removed(
