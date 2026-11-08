@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import uuid4
 
-from scripts.swarm import lease
+from scripts.swarm import lease, timing
 from scripts.swarm_ledger.api.client import ResourceClient
-from scripts.swarm import timing
 from scripts.tick.deadline import Deadline
 
 __all__ = ["ClientLedger", "resource_client"]
