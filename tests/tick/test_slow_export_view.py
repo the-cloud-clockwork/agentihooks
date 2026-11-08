@@ -59,7 +59,11 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), SlowExport)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
-    ledger = SimpleNamespace(base=lambda slug: base, credentials=lambda slug, service: {}, REQUEST_TIMEOUT=SHORT_S)
+    ledger = SimpleNamespace(
+        base=lambda slug: base if slug == "sw" else "http://127.0.0.1:9",
+        credentials=lambda slug, service: {},
+        REQUEST_TIMEOUT=SHORT_S,
+    )
     monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
     monkeypatch.setattr(ledger_client, "SNAPSHOT_TIMEOUT_S", SHORT_S)
     monkeypatch.setattr(ledger_client, "EXPORT_TIMEOUT_S", LONG_S, raising=False)
@@ -105,3 +109,19 @@ def test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read(server: P
         held = view.current()
         assert held is not None and held.generation == 3
     assert len(SlowExport.reads) == 1
+
+
+@pytest.mark.feature("swarm-tick-slow-export")
+def test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view(
+    server: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ledger_client, "EXPORT_TIMEOUT_S", SHORT_S)
+    api.write_export_file(server, 3, STORED)
+    past = time.time() - view.FRESH_VIEW_S - 60
+    os.utime(server, (past, past))
+    with ExitStack() as beating:
+        cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
+        assert OFFLINE.get() is True
+        held = view.current()
+        assert held is not None and held.generation == 3
+    assert len(SlowExport.reads) == 2
