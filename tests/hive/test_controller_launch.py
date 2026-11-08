@@ -104,6 +104,17 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     )
 
 
+@pytest.mark.feature("controller-quota-after-restart")
+def test_a_placement_wait_names_an_account_with_no_fresh_quota_reading(setup):
+    from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts = [Account("claude", "account", "UNKNOWN", 5, None, None)]
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: account 5 sessions, no fresh quota reading"
+    )
+
+
 def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     from scripts.hive.placement import Wait
 

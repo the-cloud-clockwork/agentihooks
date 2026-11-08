@@ -25,6 +25,8 @@ def empty_pod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **kwargs: {})
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    monkeypatch.setattr("scripts.routing.reservation._store", lambda environ: None)
+    monkeypatch.setattr("scripts.routing.reservation.current", lambda harness, environ: None)
 
 
 def _report(redis: Any, hive: str, sessions: int, used: int) -> None:
@@ -78,10 +80,12 @@ def test_the_hive_controller_runtime_reads_quota_from_its_store(redis: Any) -> N
 
 
 @pytest.mark.feature("controller-quota-after-restart")
-def test_a_missing_quota_reading_names_its_reason_in_the_placement_wait() -> None:
-    from scripts.hive.launch import seat_text
+def test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows(redis: Any) -> None:
+    from unittest.mock import Mock
 
-    unread = capacity.Account("claude", "one", "UNKNOWN", 5, None, None)
-    read = capacity.Account("claude", "two", "FULL", 6, 40, 40, 6)
-    assert seat_text(unread) == "one 5 sessions, no fresh quota reading"
-    assert seat_text(read) == "two 6 sessions of 6"
+    from scripts.swarm.runtime import HerdrRuntime
+
+    _report(redis, "remote", 1, 20)
+    herdr = HerdrRuntime(choose=Mock(side_effect=AssertionError("the rotation must not read the pod cache")))
+    herdr.quota_accounts = capacity.hive_accounts(redis)
+    assert herdr._rotation("", {}) == ("claude", "rotation")
