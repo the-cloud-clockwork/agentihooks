@@ -12,7 +12,7 @@ import pytest
 from scripts import openbao_kv
 from scripts.handoff import transfers
 from scripts.handoff.transfers import first_next
-from scripts.hive import auth, cli, create, machine, registry, remove
+from scripts.hive import auth, cli, create, create_github, create_render, machine, registry, remove
 from scripts.hive.placement import choose, place_master
 from scripts.inbox.seats import SeatRegistry
 from scripts.inbox.store import InboxStore
@@ -32,8 +32,23 @@ TREE = [
     "k8s/manifests/agentihooks-hive-anton-2/hive.yaml",
 ]
 OWNED = [TREE[0], TREE[2], TREE[3]]
+TEMPLATE = (
+    "# One worker hive.\n"
+    "#@ file: k8s/argocd/apps/${name}.yaml\nkind: Application\n"
+    "#@ file: k8s/values-overlays/${name}/values.yaml\nhive: ${name}\n"
+    "#@ file: k8s/manifests/${name}/hive.yaml\nkind: ExternalSecret\n"
+    "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nkind: Service\n"
+)
+TEMPLATE_READ = [
+    "gh",
+    "api",
+    "-H",
+    create_github.RAW,
+    f"repos/the-cloud-clockwork/antoncore/contents/{create_render.TEMPLATE_PATH}?ref=dev",
+]
 READS = [
     list(machine.LIST),
+    TEMPLATE_READ,
     ["gh", "api", "repos/the-cloud-clockwork/antoncore/git/trees/dev?recursive=1", "--jq", remove.TREE],
 ]
 
@@ -137,6 +152,8 @@ class Run:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.machines), "")
         if argv[:2] == ["herdr", "machine"] and argv[2] == "remove":
             self.machines = [saved for saved in self.machines if saved["id"] != argv[3]]
+        if argv == TEMPLATE_READ:
+            return subprocess.CompletedProcess(argv, 0, TEMPLATE, "")
         if argv[:2] == ["gh", "api"] and argv[2].endswith("?recursive=1"):
             return subprocess.CompletedProcess(argv, 0, "".join(f"{path}\n" for path in self.tree), "")
         if argv[:3] == ["gh", "pr", "create"]:
@@ -266,7 +283,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     repo, message = "the-cloud-clockwork/antoncore", "Remove worker hive anton-9\n\nOpened by agentihooks hive remove."
     posted = ["--input", "-", "--jq", ".sha"]
     assert [argv for argv, _ in run.calls if argv[0] == "gh"] == [
-        READS[1],
+        *READS[1:],
         ["gh", "pr", "list", "-R", repo, "--head", "remove-anton-9", "--state", "all", "--json", "url,state"]
         + ["--jq", '[.[] | select(.state != "CLOSED")][0].url // ""'],
         ["gh", "api", f"repos/{repo}/git/ref/heads/dev", "--jq", ".object.sha"],
@@ -298,7 +315,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
         f"member: {member} holds no member credential",
         "herdr: herdr holds no machine anton-9",
         f"registry: deleted 0 registry records of {member}",
-        "manifests: the-cloud-clockwork/antoncore dev holds no manifests of agentihooks-hive-anton-9",
+        "manifests: the-cloud-clockwork/antoncore dev holds no manifests of hive anton-9",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
     ]
     assert _written(store, tmp_path) == before
@@ -331,17 +348,153 @@ def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_
     ]
 
 
-def test_a_refused_auto_merge_asks_for_a_merge_once_checks_pass(store, tmp_path):
+def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(store: Any, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
+    rollups = iter(["PENDING", "SUCCESS"])
+    states = iter(["OPEN", "MERGED"])
+    rules = ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev", "--jq", create_github.REQUIRED]
 
-    def refused(argv, **kwargs):
-        if argv[:3] == ["gh", "pr", "merge"]:
+    def refused(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv == ["gh", "pr", "merge", PR, "--squash", "--auto"]:
             return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv == rules:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
+            checks = [{"name": "unit", "conclusion": next(rollups)}, {"name": "optional", "conclusion": "FAILURE"}]
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"statusCheckRollup": checks}), "")
+        if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
+            return subprocess.CompletedProcess(argv, 0, f"{next(states)}\n", "")
         return run(argv, **kwargs)
 
-    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), refused, tmp_path))
+    clock = Clock(store, member, 2)
+    done = remove.remove(store, bao, plan, _host(clock, refused, tmp_path))
 
-    assert f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; merge it once its checks pass" in done
+    assert f"manifests: opened pull request {PR} deleting {', '.join(OWNED)} and merged it" in done
+    assert next(states, "read") == "read"
+    assert clock.slept == 4
+    merges = [argv for argv, _ in run.calls if argv[:3] == ["gh", "pr", "merge"]]
+    assert merges == [["gh", "pr", "merge", PR, "--squash"]]
+
+
+def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(store: Any, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def pending(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv[:4] == ["gh", "pr", "view", PR]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": None}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        return run(argv, **kwargs)
+
+    clock = Clock(store, member, 2)
+    with pytest.raises(auth.HiveError) as timed_out:
+        remove.remove(store, bao, replace(plan, merge_s=60), _host(clock, pending, tmp_path))
+
+    assert str(timed_out.value) == (
+        f"timed out after 60s waiting for pull request {PR} checks to pass; rerun hive remove to resume"
+    )
+    assert clock.slept == 6
+
+
+def test_a_removal_that_never_merges_times_out_naming_the_merge(store: Any, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def open_forever(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv == ["gh", "pr", "merge", PR, "--squash", "--auto"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
+            return subprocess.CompletedProcess(argv, 0, "OPEN\n", "")
+        return run(argv, **kwargs)
+
+    with pytest.raises(auth.HiveError) as timed_out:
+        remove.remove(store, bao, replace(plan, merge_s=30), _host(Clock(store, member, 2), open_forever, tmp_path))
+
+    assert (
+        str(timed_out.value)
+        == f"timed out after 30s waiting for pull request {PR} to merge; rerun hive remove to resume"
+    )
+
+
+@pytest.mark.parametrize("label", ["swarm-hive-003", "gpu-1"])
+def test_remove_lists_exactly_the_manifests_hive_create_wrote(label: str) -> None:
+    written = sorted(create_render.render(TEMPLATE, create_render.Hive(label, "r", 2222, "worker-001", "10.0.0.1")))
+    neighbours = [f"k8s/argocd/apps/{label}0.yaml", f"k8s/manifests/{label}-old/hive.yaml", "k8s/manifests/x/a.yaml"]
+    run = Run(tree=[*neighbours, *written])
+    plan = remove.Plan("m", label, f"k8s/agentihooks-hive-{label}", dry_run=True)
+
+    lines = remove.unmanifest(plan, run)
+
+    assert lines == [
+        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(written)} "
+        "and merge it once its checks pass"
+    ]
+    assert [argv for argv, _ in run.calls] == READS[1:]
+
+
+def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
+    old = [
+        "k8s/manifests/agentihooks-hive-anton-2/hive.yaml",
+        "k8s/argocd/apps/agentihooks-hive-anton-2.yaml",
+        "k8s/values-overlays/agentihooks-hive-anton-2/values.yaml",
+    ]
+    run = Run(tree=[*TREE, *old[1:]])
+
+    lines = remove.unmanifest(remove.Plan("m", "anton-2", "k8s/agentihooks-hive-anton-2", dry_run=True), run)
+
+    assert lines == [
+        "would open a pull request into the-cloud-clockwork/antoncore dev deleting "
+        f"{', '.join(old)} and merge it once its checks pass"
+    ]
+
+
+def test_a_removal_pull_request_closed_unmerged_fails_at_once(store: Any, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def closed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ["gh", "pr", "merge"] and "--auto" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, "[]\n", "")
+        if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
+            return subprocess.CompletedProcess(argv, 0, "CLOSED\n", "")
+        return run(argv, **kwargs)
+
+    clock = Clock(store, member, 2)
+    with pytest.raises(auth.HiveError) as stopped:
+        remove.remove(store, bao, plan, _host(clock, closed, tmp_path))
+
+    assert str(stopped.value) == f"pull request {PR} was closed without merging; rerun hive remove to open a new one"
+    assert clock.slept == 2
+
+
+def test_a_removal_with_failed_checks_names_hive_remove(store: Any, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def failed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv[:4] == ["gh", "pr", "view", PR]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "FAILURE"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        return run(argv, **kwargs)
+
+    with pytest.raises(auth.HiveError) as stopped:
+        remove.remove(store, bao, plan, _host(Clock(store, member, 2), failed, tmp_path))
+
+    assert str(stopped.value) == f"pull request {PR} has failed checks: unit; fix them and rerun hive remove"
 
 
 def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_off(store, tmp_path):
@@ -391,7 +544,8 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
         f"registry: would delete 3 registry records of {member}",
         "registry: would release the hive name anton-9 of node worker-009",
         "registry: would delete the hive create state of anton-9",
-        f"manifests: would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(OWNED)}",
+        f"manifests: would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(OWNED)} "
+        "and merge it once its checks pass",
         "openbao: would delete OpenBao secret/k8s/agentihooks-hive-anton-9",
         "dry run of hive remove anton-9: nothing written",
     ]
