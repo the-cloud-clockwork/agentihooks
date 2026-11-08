@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -20,6 +21,7 @@ def hive(hive_id, live, **fields):
         "excluded": [],
         "prefer": {"eng": 1},
         "max_agents": 4,
+        "cap": None,
         "agents": 1,
         "slots": [{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6, "agents": 1}],
         "master": None,
@@ -30,7 +32,7 @@ def hive(hive_id, live, **fields):
 
 HIVES = [
     hive("desk", True, master={"slug": "rig", "name": "master@rig-1"}, agents=2),
-    hive("pod", True, ui="no", excluded=["master", "qa"], prefer={}, max_agents=2, agents=0),
+    hive("pod", True, ui="no", excluded=["master", "qa"], prefer={}, max_agents=2, cap=2, agents=0),
     hive("lab", False, ephemeral="yes", agents=0),
 ]
 
@@ -233,3 +235,41 @@ def test_the_hives_table_fits_its_box_at_1920(hives_page):
     page = hives_page()
     scroll = page.tab.eval_on_selector("#hives-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] <= scroll[1]
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap(hives_page: Any) -> None:
+    page = hives_page()
+    rows = page.table("swarm-hives")
+    assert [row[5].lower() for row in rows] == ["auto", "cap", "auto"]
+    assert [value for field, value in fields(page, "desk") if field == "max_agents"] == ["4"]
+    assert [value for field, value in fields(page, "pod") if field == "max_agents"] == ["2"]
+    title = page.tab.locator("#hive-pod td").nth(5).locator("span").first.get_attribute("title")
+    assert title == "capped at 2"
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_clearing_max_agents_writes_auto(hives_page: Any) -> None:
+    page = hives_page()
+    box = page.tab.locator('#hive-pod [data-hive-field="max_agents"]')
+    box.fill("")
+    box.press("Enter")
+    wait_for(page, lambda: page.patches)
+    assert page.patches == [("pod", {"max_agents": "auto"}, None, "__LEDGER_SLUG__")]
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling(browser: Any) -> None:
+    page = HivesPage(browser, status(), 1920)
+    page.hives = [listed for listed in page.hives if listed["id"] != "lab"]
+    page.hives.append(hive("lab", True, ui="no", max_agents=0, cap=None, unread=True, agents=0))
+    page.tab.reload()
+    try:
+        page.tab.locator("#swarm-hives tr#hive-lab").wait_for(timeout=3000)
+        box = page.tab.locator('#hive-lab [data-hive-field="max_agents"]')
+        assert (box.input_value(), box.get_attribute("placeholder")) == ("", "unknown")
+        assert page.table("swarm-hives")[2][5].lower() == "auto"
+        assert page.table("swarm-hives")[2][6] == "0/?"
+        assert page.errors == []
+    finally:
+        page.context.close()

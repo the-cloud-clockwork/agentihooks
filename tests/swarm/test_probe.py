@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -169,7 +170,7 @@ STORE = Store()
 
 @pytest.fixture
 def live(monkeypatch):
-    from scripts.hive import join_report, registry
+    from scripts.hive import headroom, join_report, registry
     from scripts.swarm import commands, local_slots, publish
     from scripts.swarm.health import merge_stall
 
@@ -184,6 +185,7 @@ def live(monkeypatch):
     monkeypatch.setattr(
         registry, "show", lambda redis, hive: {"max_agents": 6} if (redis, hive) == (STORE.redis, "root") else None
     )
+    monkeypatch.setattr(headroom, "read", lambda redis, hive, now_ms: None)
     monkeypatch.setattr(
         join_report, "read", lambda redis, agent: reports.get(agent.name, {}) if redis is STORE.redis else {}
     )
@@ -238,6 +240,29 @@ def test_run_counts_root_agents_only_on_the_root_hive(live, monkeypatch):
         False,
         "unread: SwarmError: counted only on the root hive, this host is pod",
     )
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_an_uncapped_unread_root_counts_against_the_swarm_local_limit(
+    live: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import headroom, registry
+    from scripts.swarm import local_slots
+
+    asked: list[tuple[object, str, int]] = []
+
+    def read(redis: object, hive: str, now_ms: int) -> None:
+        asked.append((redis, hive, now_ms))
+
+    monkeypatch.setattr(registry, "show", lambda redis, hive: {"max_agents": None})
+    monkeypatch.setattr(headroom, "read", read)
+    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: (7, 0))
+    store: Any = STORE
+    found = probe.run(store, "s", live, NOW, Thresholds(task_list_reads_min=20.0))
+    assert found[5] == Probe(
+        "workstation agents at or under the root cap", True, "7 running, root cap 20, swarm local limit 20"
+    )
+    assert asked == [(STORE.redis, "root", NOW)]
 
 
 def test_run_reports_each_unreadable_invariant_as_a_fail(monkeypatch):
