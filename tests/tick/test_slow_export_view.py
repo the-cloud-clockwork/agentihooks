@@ -47,7 +47,7 @@ class SlowExport(BaseHTTPRequestHandler):
         time.sleep(PAUSE_S)
         self.wfile.write(body[half:])
 
-    def log_message(self, *args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         """Keep the test output quiet."""
 
 
