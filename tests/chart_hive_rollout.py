@@ -144,7 +144,9 @@ def test_no_swarm_pod_template_carries_the_chart_version() -> None:
         text=True,
         check=True,
     ).stdout
-    documents = [d for d in yaml.safe_load_all(rendered) if d] + render("workers.node=node-one", "hiveStorage.default.homes=/homes")
+    documents = [d for d in yaml.safe_load_all(rendered) if d] + render(
+        "workers.node=node-one", "hiveStorage.default.homes=/homes"
+    )
     owned = [d for d in documents if d["metadata"].get("labels", {}).get("app.kubernetes.io/name") == CHART.name]
     workloads = [d for d in owned if "template" in d.get("spec", {})]
     assert {d["kind"] for d in workloads} >= {"Deployment", "StatefulSet", "Job"}
