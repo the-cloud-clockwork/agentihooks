@@ -83,9 +83,9 @@ def _kill(pod: dict[str, Any]) -> str | None:
 
 def killed(lost: list[dict[str, Any]], runners: Container[str]) -> str:
     """Return the kill reasons of the lost jobs' runner pods as a reason suffix, empty when none is known."""
-    kills = runners.kills if isinstance(runners, ClusterRunners) else {}
+    kills: dict[str, str] = runners.kills if isinstance(runners, ClusterRunners) else {}
     named = [f"{job['name']} {kills[job['runner_name']]}" for job in lost if job["runner_name"] in kills]
-    return f"; runner pod killed: {', '.join(named)}" if named else ""
+    return f"; runner pod ended: {', '.join(named)}" if named else ""
 
 
 def _kubectl(*args: str) -> list[dict[str, Any]]:
@@ -209,7 +209,7 @@ def assess(
     runners = source(repo.split("/")[0])
     lost = lost_jobs(jobs, cast(set[str], runners), datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
-    return stuck, reason + killed(lost, runners), jobs
+    return stuck, reason + (killed(lost, runners) if stuck else ""), jobs
 
 
 def report(run: dict[str, Any], action: str, reason: str) -> dict[str, Any]:

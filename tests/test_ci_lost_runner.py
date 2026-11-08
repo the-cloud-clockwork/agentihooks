@@ -825,22 +825,39 @@ def oom_cluster() -> ci_lost_runner.ClusterRunners:
     return cluster(pods=[CLUSTER["pods"][0], pod], now=datetime.now(UTC))
 
 
-def test_a_lost_runner_killed_for_memory_names_the_kill_in_its_log_line(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_sleep: list[float]
-) -> None:
+def oom_report(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], run: dict[str, object]
+) -> dict[str, object]:
     pages = {
-        RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
+        RUNS: [json.dumps(run), json.dumps(run), json.dumps({**run, "status": "completed"})],
         JOBS: [lines({**CLUSTER["job"], "name": "Gate — Required", "started_at": ago(0.1)}, gate())] * 2,
     }
     monkeypatch.setattr(ci_lost_runner, "_api", Api(pages))
     monkeypatch.setattr(ci_lost_runner, "cluster_runners", lambda _org: oom_cluster())
     monkeypatch.chdir(ROOT)
     assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--cluster"]) == 0
-    report = json.loads(capsys.readouterr().out)
+    return json.loads(capsys.readouterr().out)
+
+
+def test_a_lost_runner_killed_for_memory_names_the_kill_in_its_rerun_log_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_sleep: list[float]
+) -> None:
+    report = oom_report(monkeypatch, capsys, RUN)
     assert report["action"] == "rerun"
     assert report["reason"] == (
-        "runner lost on Gate — Required; runner pod killed: Gate — Required OOMKilled exit 137; "
+        "runner lost on Gate — Required; runner pod ended: Gate — Required OOMKilled exit 137; "
         "first attempt lost its runner"
+    )
+
+
+def test_a_lost_runner_killed_for_memory_names_the_kill_in_its_cancel_log_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_sleep: list[float]
+) -> None:
+    report = oom_report(monkeypatch, capsys, {**RUN, "run_attempt": 2})
+    assert report["action"] == "cancel"
+    assert report["reason"] == (
+        "runner lost on Gate — Required; runner pod ended: Gate — Required OOMKilled exit 137; "
+        "attempt 2 lost its runner again"
     )
 
 
