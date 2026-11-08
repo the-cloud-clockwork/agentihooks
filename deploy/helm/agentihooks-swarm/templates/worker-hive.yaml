@@ -103,7 +103,7 @@ spec:
         {{- if $root.Values.workers.rollout.enabled }}
         {{- $stamp := $root.Values.workers.rollout.release }}
         {{- if and (not $stamp) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" (toString $workers.image.tag))) }}
-        {{- $stamp = $root.Chart.Version }}
+        {{- $stamp = $root.Values.workers.rollout.imageDigest }}
         {{- end }}
         {{- with $stamp }}
         agentihooks.io/release: {{ . | quote }}

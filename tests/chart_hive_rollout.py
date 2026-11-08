@@ -108,8 +108,7 @@ def test_a_drain_that_consumes_the_rollout_budget_is_refused():
 
 def test_the_release_stamp_annotates_only_leased_hive_pods():
     image = "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:2.17.471"
-    pinned = "workers.image.tag=2.17.471"
-    unstamped = next(item for item in render(pinned) if item["kind"] == "Deployment")
+    unstamped = next(item for item in render() if item["kind"] == "Deployment")
     assert "agentihooks.io/release" not in unstamped["spec"]["template"]["metadata"]["annotations"]
     stamped = next(item for item in render(f"workers.rollout.release={image}") if item["kind"] == "Deployment")
     assert stamped["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == image
@@ -121,20 +120,36 @@ def test_the_release_stamp_annotates_only_leased_hive_pods():
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
 
-def test_a_floating_worker_tag_rolls_on_each_release_chart():
-    version = yaml.safe_load((CHART / "Chart.yaml").read_text())["version"]
+def test_a_floating_worker_tag_rolls_on_each_release_image():
+    digest = "sha256:" + "a" * 64
+    stamp = f"workers.rollout.imageDigest={digest}"
     for tag in ("release", "dev"):
-        worker = next(item for item in render(f"workers.image.tag={tag}") if item["kind"] == "Deployment")
-        assert worker["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == version
+        worker = next(item for item in render(f"workers.image.tag={tag}", stamp) if item["kind"] == "Deployment")
+        assert worker["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == digest
     for tag in ("2.17.486", "v2.17.486"):
-        worker = next(item for item in render(f"workers.image.tag={tag}") if item["kind"] == "Deployment")
+        worker = next(item for item in render(f"workers.image.tag={tag}", stamp) if item["kind"] == "Deployment")
         assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
     unleased = next(
         item
-        for item in render("workers.image.tag=release", "workers.rollout.enabled=false")
+        for item in render("workers.image.tag=release", stamp, "workers.rollout.enabled=false")
         if item["kind"] == "Deployment"
     )
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
+    explicit = next(
+        item
+        for item in render("workers.image.tag=release", stamp, "workers.rollout.release=x1")
+        if item["kind"] == "Deployment"
+    )
+    assert explicit["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == "x1"
+
+
+def test_the_release_build_stamps_the_published_worker_digest():
+    workflow = (CHART.parents[2] / ".github/workflows/chart-release.yml").read_text()
+    stamp = workflow.index("ci/stamp-worker-digest.sh deploy/helm/agentihooks-swarm/values.yaml")
+    assert stamp < workflow.index("helm package deploy/helm/agentihooks-swarm")
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+    assert values["workers"]["rollout"]["imageDigest"] == ""
+    assert (CHART / "values.yaml").read_text().count('\n    imageDigest: ""\n') == 1
 
 
 if __name__ == "__main__":
@@ -144,5 +159,6 @@ if __name__ == "__main__":
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
-    test_a_floating_worker_tag_rolls_on_each_release_chart()
+    test_a_floating_worker_tag_rolls_on_each_release_image()
+    test_the_release_build_stamps_the_published_worker_digest()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
