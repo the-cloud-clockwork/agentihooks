@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from nats.js.errors import BucketNotFoundError
 
-from scripts import session_bands
+from scripts import session_bands, updater
 from scripts.hive import account_slots, daemon, registry
 
 pytestmark = pytest.mark.unit
@@ -1028,6 +1028,7 @@ def test_cli_help_describes_run_and_install():
 
 
 def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.2")
     monkeypatch.setattr(
         daemon,
         "observe",
@@ -1059,7 +1060,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "capabilities": [],
         "heartbeat_at": record["heartbeat_at"],
         "beat_at": record["beat_at"],
-        "version": "",
+        "version": "1.4.2",
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
 
@@ -2218,3 +2219,24 @@ def test_a_herdr_read_error_leaves_the_beat_running(monkeypatch):
     monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
     monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=herdr_gc.HerdrError("socket gone")))
     assert daemon.close_dead_tabs(set()) == []
+
+
+@pytest.mark.feature("hive-release-report")
+def test_each_beat_reports_the_release_the_hive_runs(redis, monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {
+            "slots": [],
+            "interactive": {"claude": "", "codex": ""},
+            "repos": [],
+            "sessions": {},
+            "quota": {},
+        },
+    )
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.2")
+    daemon.beat(redis, "machine")
+    assert registry.show(redis, "machine")["version"] == "1.4.2"
+    monkeypatch.setattr(updater, "installed_version", lambda: "1.4.3")
+    daemon.beat(redis, "machine")
+    assert registry.show(redis, "machine")["version"] == "1.4.3"

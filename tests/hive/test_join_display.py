@@ -172,3 +172,38 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
         if row["name"] not in (remote.name, pod.name):
             placed.setdefault(row["hive"], set()).add(row["name"])
     assert placed == {hive: set(names) for hive, names in listed.items()}
+
+
+@pytest.mark.feature("hive-release-report")
+def test_hive_list_prints_the_release_each_hive_runs(store, capsys, monkeypatch):
+    from scripts.hive import cli, registry
+
+    monkeypatch.setattr(
+        registry,
+        "hives",
+        lambda client: [
+            {
+                "id": "worker",
+                "name": "worker",
+                "heartbeat_at": 1000,
+                "excluded": [],
+                "ui": "no",
+                "max_agents": 1,
+                "version": "1.4.2",
+            },
+            {
+                "id": "old",
+                "name": "old",
+                "heartbeat_at": 1000,
+                "excluded": [],
+                "ui": "no",
+                "max_agents": 1,
+                "version": "",
+            },
+        ],
+    )
+    cli._list()
+    headers = [line for line in capsys.readouterr().out.splitlines() if not line.startswith("  ")]
+    assert [line.split("\t")[0] for line in headers] == ["worker", "old"]
+    assert headers[0].endswith("\trelease=1.4.2")
+    assert headers[1].endswith("\trelease=unknown")
