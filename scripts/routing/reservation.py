@@ -188,8 +188,9 @@ local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 local seen, used, previous = {}, 0, nil
 local spellings = {slot}
-local slug = (string.gsub(slot, '%-', '_'))
-if slug ~= slot then spellings[2] = slug end
+for _, spelling in ipairs({(string.gsub(slot, '%-', '_')), (string.gsub(slot, '_', '-'))}) do
+    if spelling ~= slot then spellings[#spellings + 1] = spelling end
+end
 for hive, heartbeat in pairs(cjson.decode(ARGV[8])) do
     local key = ARGV[6] .. ':hive:' .. hive
     local sessions = redis.call('GET', key .. ':sessions')

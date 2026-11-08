@@ -412,3 +412,19 @@ def test_held_elsewhere_merges_dashed_and_underscore_spellings_under_the_token_s
     assert LaunchSlots(redis).reserve("codex:two-y", "starting", 9, 1000)
     assert aggregate.elsewhere(redis, "claude", 100, "own") == {"one_x": 4}
     assert aggregate.elsewhere(redis, "codex", 100, "own") == {"two_y": 2}
+
+
+@pytest.mark.parametrize(("reported", "slot"), [("claude:one_x", "claude:one-x"), ("claude:one-x", "claude:one_x")])
+def test_a_launch_reservation_counts_hive_sessions_reported_under_either_spelling(
+    redis: Any, reported: str, slot: str
+) -> None:
+    import time
+
+    from scripts.routing.reservation import LaunchSlots
+
+    registry.update(redis, "far", ["max-agents=8"])
+    registry.beat(redis, "far", {"heartbeat_at": int(time.time() * 1000)})
+    redis.set(f"{registry.key('far')}:sessions", json.dumps({reported: 2}))
+    slots = LaunchSlots(redis)
+    assert slots.reserve(slot, "next", 3, 1000)
+    assert not slots.reserve(slot, "full", 3, 1000)

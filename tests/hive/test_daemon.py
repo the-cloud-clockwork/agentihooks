@@ -1,6 +1,7 @@
 import json
 import threading
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -1871,7 +1872,9 @@ def test_named_execution_discovery_requires_a_local_matching_process(redis, monk
 
 
 @pytest.mark.parametrize("harness", ["claude", "codex"])
-def test_a_dashed_agent_account_counts_once_under_its_underscore_process_slug(redis, monkeypatch, harness):
+def test_a_dashed_agent_account_counts_once_under_its_underscore_process_slug(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
     from hooks.proc import Process
     from scripts import terminate_agent
     from scripts.routing import aggregate, reservation
