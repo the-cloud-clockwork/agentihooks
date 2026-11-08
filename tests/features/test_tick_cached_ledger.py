@@ -42,8 +42,11 @@ class Proxy:
         threading.Thread(target=self._accept, args=(listener,), daemon=True).start()
 
     def stop(self) -> None:
-        """Close the listener so connections are refused."""
+        """Shut the listener down and close it so connections are refused; a bare close leaves the accept thread
+        holding the socket open for one more connection."""
         if self.listener is not None:
+            with contextlib.suppress(OSError):
+                self.listener.shutdown(socket.SHUT_RDWR)
             self.listener.close()
             self.listener = None
 
