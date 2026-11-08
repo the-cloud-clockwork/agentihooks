@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from scripts.swarm import lease
 from scripts.swarm_ledger.api.client import ResourceClient
+from scripts.swarm import timing
 from scripts.tick.deadline import Deadline
 
 __all__ = ["ClientLedger", "resource_client"]
@@ -150,7 +151,7 @@ class PassLedger:
         guard: dict[str, object] = {"if_state": if_state} if if_state else {}
         if if_match is not None:
             guard["if_match"] = if_match
-        row: dict[str, Any] = self.client.update_task(self.slug, task_id, fields, **guard)
+        row: dict[str, Any] = timing.timed(self.client.update_task, self.slug, task_id, fields, **guard)
         return row
 
     def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:

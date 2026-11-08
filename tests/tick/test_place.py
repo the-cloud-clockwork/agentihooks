@@ -539,11 +539,11 @@ def _spawn_pass(monkeypatch: pytest.MonkeyPatch, clock: _Clock, step_s: float, i
         """Record the task and spend ``step_s`` of the clock."""
         prepared.append(task["id"])
         clock.now += step_s
-        return task["id"], []
+        return SimpleNamespace(record=SimpleNamespace(name=task["id"])), []
 
     def launch_all(run: Any, launch_clock: Any, batch: list[Any]) -> list[str]:
         """Name the batch launched."""
-        return [f"launched {' '.join(batch)}"] if batch else []
+        return [f"launched {' '.join(launch.record.name for launch in batch)}"] if batch else []
 
     order = [("eng", {"id": task_id}) for task_id in ids]
     monkeypatch.setattr(tick, "_held_for_master", lambda slug, store, now_ms: [])
