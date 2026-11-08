@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from scripts import terminate_agent
 from scripts.swarm import local_slots
 from scripts.swarm.store import AgentRecord, SwarmConfig
@@ -81,6 +83,21 @@ def test_root_hive_reports_all_local_lane_processes_against_its_limit(setup, mon
     assert root["agents"] == 1
     assert root["room"] == 0
     assert "max agents" in root["refusal"]
+
+
+def test_a_hive_with_limit_two_two_masters_and_one_worker_admits_one_more_worker(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import launch
+    from scripts.swarm import commands
+    from tests.hive.test_controller_launch import write_hive
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    rows = [session("master 1 · fixture"), session("master-bbbbbb-0002"), session("engineer@bbbbbb-0003")]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: rows)
+    write_hive(setup, id="workstation", ui="yes", max_agents=2)
+    root = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "workstation")
+    assert (root["agents"], root["room"]) == (1, 1)
 
 
 def test_whole_machine_occupancy_includes_pending_claims_without_excluding_any_task(setup, monkeypatch):

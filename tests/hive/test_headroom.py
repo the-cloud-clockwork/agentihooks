@@ -264,6 +264,22 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     )
 
 
+def test_hive_list_shows_workers_against_the_limit_without_masters(
+    redis: "Redis", monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import join_report
+
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 40_000)
+    monkeypatch.setattr(cli, "_local_agents", lambda *_: {"box": ["master 1 · fixture", "engineer@aaaaaa-0002"]})
+    reports = [{"agent": name} for name in ("master@aaaaaa-0001", "master-aaaaaa-0003", "ci@aaaaaa-0004")]
+    monkeypatch.setattr(join_report, "live", lambda *_: reports)
+    monkeypatch.setattr(join_report, "summary", lambda report: report["agent"])
+    registry.update(redis, "box", ["ui=no", "max-agents=4"])
+    assert cli.main(["list"]) == 0
+    assert "\tworkers=2 of 4\t" in capsys.readouterr().out.splitlines()[0]
+
+
 POD_LIMITS = {
     "memory.max": "6606028800\n",
     "memory.current": "1048576000\n",
