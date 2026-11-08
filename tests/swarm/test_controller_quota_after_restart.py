@@ -119,3 +119,24 @@ def test_the_rotation_keeps_the_quota_rows_its_pass_already_read() -> None:
     herdr.quota_accounts = Mock(side_effect=AssertionError("the pass rows must not be read again"))
     herdr._quota_accounts = [capacity.Account("claude", "one", "OPEN", 0, 80, 80, 6)]
     assert herdr._rotation("", {}) == ("claude", "rotation")
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_the_hive_controller_keeps_a_quota_reader_the_deployment_set(redis: Any) -> None:
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmConfig
+    from scripts.swarm_v2.runtime.routed import hive_controller, routed
+
+    store = RedisStore(redis)
+    config = SwarmConfig("fixture", "agentihooks", 1, 1)
+    store.create(config)
+    held = lease.acquire(store, config.slug, "controller")
+    assert held is not None
+    runtime = routed({})
+
+    def fleet(environ: dict[str, str], now: float, refresh: bool = False) -> list[capacity.Account]:
+        """The deployment's own quota reader."""
+        return []
+
+    runtime.herdr_runtime.quota_accounts = fleet
+    assert hive_controller(runtime, store, config.slug, held).herdr_runtime.quota_accounts is fleet

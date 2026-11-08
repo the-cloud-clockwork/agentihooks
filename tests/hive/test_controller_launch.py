@@ -37,6 +37,7 @@ def setup():
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
+    herdr.quota_accounts = None
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
@@ -102,6 +103,20 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait(
         "no Codex account has room after hive sessions: "
     )
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_placement_before_the_pass_reads_quota_uses_the_runtime_reader(setup):
+    from unittest.mock import Mock, patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    setup.herdr.quota_accounts = Mock(return_value=rows)
+    with patch.object(launch.capacity, "accounts", side_effect=AssertionError("the pod cache must not be read")):
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert setup.herdr.quota_accounts.call_args.kwargs == {"refresh": False}
 
 
 @pytest.mark.feature("controller-quota-after-restart")

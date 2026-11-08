@@ -2175,7 +2175,9 @@
         "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows",
         "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_without_a_probe",
         "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_keeps_the_quota_rows_its_pass_already_read",
-        "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading"
+        "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
+        "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
       ]
     }
   ],
