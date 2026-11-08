@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wall_clock.py:scripts.ci_wall_clock.x_main:82d7bb61bb64dc2910fddba92f66374890ef67063665bd86582b4659fd4ede41": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

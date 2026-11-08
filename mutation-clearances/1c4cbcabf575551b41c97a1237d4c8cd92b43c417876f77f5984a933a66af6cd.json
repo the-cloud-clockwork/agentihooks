@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_shards.py:scripts.ci_gate_shards.x_watch:f9eafc4591632d4af3d3f8b782c9bcf52cac91e800146b0330bbed9c568072c3": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

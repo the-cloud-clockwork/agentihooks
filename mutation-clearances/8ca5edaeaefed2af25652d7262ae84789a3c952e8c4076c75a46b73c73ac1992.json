@@ -1,0 +1,6 @@
+{
+  "scripts/claude_quota_balancer.py:scripts.claude_quota_balancer.x__window_from_data:8de4e23700e85aaaf3c82403271efc29e3f878f7c24b807051769342805ba6ce": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

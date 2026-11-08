@@ -7,6 +7,7 @@ import subprocess
 import time
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from scripts.ci_mutation.stats_dependencies import CONTEXT, SHARED
 
@@ -20,7 +21,7 @@ BUDGET = 300.0
 TIMEOUT = 120
 
 
-def api(path: str, binary: bool = False, deadline: float = math.inf):
+def api(path: str, binary: bool = False, deadline: float = math.inf) -> Any:
     left = min(TIMEOUT, deadline - time.monotonic())
     if left <= 0:
         raise subprocess.TimeoutExpired(["gh", "api", path], 0)
@@ -55,7 +56,7 @@ def harvest(number: int, folder: Path, taken: set[str], deadline: float = math.i
     for row in runs:
         artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100", deadline=deadline)["artifacts"]
         found = [item for item in artifacts if item["name"].startswith(ARTIFACT) and not item["expired"]]
-        written, pointers = 0, set()
+        written, pointers = 0, set[str]()
         try:
             for item in sorted(found, key=lambda item: item["id"]):
                 archive = api(f"actions/artifacts/{item['id']}/zip", binary=True, deadline=deadline)
@@ -95,7 +96,7 @@ def size(folder: Path) -> int:
 def prune(folder: Path) -> int:
     marker = folder / CONTEXT
     context = marker.read_text().strip() if marker.is_file() else None
-    kept = set()
+    kept: set[str] = set()
     for pointer in folder.glob("*.index"):
         if record := usable(folder, pointer, context):
             kept.add(record.name)
@@ -104,7 +105,7 @@ def prune(folder: Path) -> int:
     for record in folder.glob("*.json"):
         if record.name not in kept:
             record.unlink()
-    shared = set()
+    shared: set[str] = set()
     for name in kept:
         stored = json.loads((folder / name).read_text())
         shared.update(f"{ref}{SHARED}" for ref in [stored.get("inputs"), *stored.get("dependencies", {}).values()])
@@ -124,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     deadline = time.monotonic() + BUDGET
     pulls = merged_pulls(args.folder, args.head, args.before)
     taken: set[str] = set()
-    written, skipped = 0, []
+    written, skipped = 0, list[int]()
     for number in reversed(pulls):
         try:
             written += harvest(number, args.folder, taken, deadline)

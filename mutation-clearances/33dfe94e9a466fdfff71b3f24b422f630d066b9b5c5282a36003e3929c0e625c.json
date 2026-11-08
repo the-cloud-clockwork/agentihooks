@@ -1,0 +1,6 @@
+{
+  "scripts/ci_branch_lanes.py:scripts.ci_branch_lanes.x_cancel:884d26ae8f4e7e413182326d3b4ffcee9162cf8920348994d13eab54f1be63c7": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

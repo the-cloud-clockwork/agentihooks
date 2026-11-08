@@ -1,0 +1,6 @@
+{
+  "scripts/codex_quota.py:scripts.codex_quota.x__window:5332c8c2d250bb0c94b8cfb82e0a1683d05f6f5b8aedae816dc171de93160846": {
+    "reader": "standards_reader",
+    "reason": "minutes is read only in minutes <= FIVE_HOUR_MINUTES (300), and both 0 and 1 map to five_hour."
+  }
+}

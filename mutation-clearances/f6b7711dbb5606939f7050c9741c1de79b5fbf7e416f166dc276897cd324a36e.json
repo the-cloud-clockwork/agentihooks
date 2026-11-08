@@ -1,0 +1,6 @@
+{
+  "scripts/claude_login.py:scripts.claude_login.x_master:748524c8eb98a5a4d50caef52ad630ba57cdef41f083ad908a0dfe63620558e2": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

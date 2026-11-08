@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize:3eada26fb778e609ae0f3288b265cbfd519927bb9efa8c4955009c506f328989": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) is return val on CPython 3.12 and never reads typ, so replacing its first argument with None, another string, or a builtin or typing expression already in scope changes no output and cannot raise."
+  }
+}

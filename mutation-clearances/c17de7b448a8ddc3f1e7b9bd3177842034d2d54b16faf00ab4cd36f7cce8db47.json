@@ -1,0 +1,6 @@
+{
+  "scripts/ci_semgrep_floors.py:scripts.ci_semgrep_floors.x_fixture_errors:8ce1015d98717a6ca6de1da96eab0f89aa31ca81526156e99cf8df4716f13b62": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

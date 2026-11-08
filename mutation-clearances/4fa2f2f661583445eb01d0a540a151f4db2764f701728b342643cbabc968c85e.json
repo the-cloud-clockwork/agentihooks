@@ -1,0 +1,6 @@
+{
+  "scripts/codex_app_server_probe.py:scripts.codex_app_server_probe.x_late_approval:d92bc5de16b8e3d52fd409fbf6981d36a733534a366b131b8ed81353d0d1a6b0": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

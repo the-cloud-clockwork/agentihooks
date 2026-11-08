@@ -9,6 +9,7 @@ import zipfile
 import zlib
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 
@@ -128,7 +129,7 @@ def gate_steps(
     summary: bool = False,
     docs: bool = False,
     watcher_loss: bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if selected or queue_tier:
         run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
@@ -169,7 +170,7 @@ def gate_steps(
     ] + (summary_steps() if summary else [])
 
 
-def inline_mutation(steps: list[dict]) -> list[dict]:
+def inline_mutation(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     run = (
         aggregation["run"]
@@ -184,7 +185,7 @@ def inline_mutation(steps: list[dict]) -> list[dict]:
     return [{**aggregation, "env": env, "run": run}, *rest]
 
 
-def lost_rerun(steps: list[dict]) -> list[dict]:
+def lost_rerun(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     run = aggregation["run"]
     for old, new in LOST_RERUN:
@@ -192,19 +193,19 @@ def lost_rerun(steps: list[dict]) -> list[dict]:
     return [{**aggregation, "run": run}, *rest]
 
 
-def postgres_required(steps: list[dict]) -> list[dict]:
+def postgres_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     return [{**aggregation, "run": aggregation["run"].replace(*POSTGRES_REQUIRED)}, *rest]
 
 
-def typing_required(steps: list[dict]) -> list[dict]:
+def typing_required(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     run = aggregation["run"].replace('"lint", ', '"lint", "type-gate", ')
     run = run.replace('.key == "lint" or ', '.key == "type-gate" or .key == "lint" or ')
     return [{**aggregation, "run": run}, *rest]
 
 
-def test_only_sonar(steps: list[dict]) -> list[dict]:
+def test_only_sonar(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     run = aggregation["run"]
     for old, new in TEST_ONLY_SONAR:
@@ -212,16 +213,16 @@ def test_only_sonar(steps: list[dict]) -> list[dict]:
     return [{**aggregation, "run": run}, *rest]
 
 
-def summary_steps() -> list[dict]:
+def summary_steps() -> list[dict[str, Any]]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
 
 
-def pipefail_summary(steps: list[dict]) -> list[dict]:
+def pipefail_summary(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
 
 
-def retried_summary(steps: list[dict]) -> list[dict]:
-    retried = []
+def retried_summary(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    retried: list[dict[str, Any]] = []
     for step in steps:
         uses = step.get("uses")
         if not (uses and uses.startswith("actions/download-artifact@")):
@@ -244,7 +245,7 @@ def retried_summary(steps: list[dict]) -> list[dict]:
     return retried
 
 
-def selection_diagnostic(steps: list[dict]) -> list[dict]:
+def selection_diagnostic(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     prefix = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
 if [[ "$selection" == failure || "$selection" == cancelled ]]; then
@@ -255,26 +256,26 @@ fi
     return [{**aggregation, "run": prefix + aggregation["run"]}, *rest]
 
 
-def forwarded_stats(steps: list[dict]) -> list[dict]:
+def forwarded_stats(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     [aggregation, *rest] = steps
     return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
 
 
-def reuse_job() -> dict:
+def reuse_job() -> dict[str, Any]:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 
 
-def duration_provenance_steps() -> list[dict]:
+def duration_provenance_steps() -> list[dict[str, Any]]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
 
 
-def retried_duration_provenance_steps() -> list[dict]:
+def retried_duration_provenance_steps() -> list[dict[str, Any]]:
     steps = duration_provenance_steps()
     steps[-1]["uses"] = "./provenance-grader/.github/actions/retry-upload"
     return steps
 
 
-def paged_reuse_job() -> dict:
+def paged_reuse_job() -> dict[str, Any]:
     job = reuse_job()
     [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]
     fetch["run"] = fetch["run"].replace(
@@ -284,35 +285,35 @@ def paged_reuse_job() -> dict:
     return job
 
 
-def retried_reuse_job() -> dict:
+def retried_reuse_job() -> dict[str, Any]:
     job = paged_reuse_job()
     [publish] = [step for step in job["steps"] if step.get("name") == "Publish protected tested tree evidence"]
     publish["uses"] = "./.github/actions/retry-upload"
     return job
 
 
-def _git(*args):
+def _git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
-def _revision(ref):
+def _revision(ref: str) -> str:
     if subprocess.run(["git", "cat-file", "-e", ref], capture_output=True).returncode:
         _git("fetch", "--no-tags", "origin", ref)
     return _git("rev-parse", ref)
 
 
-def _resolved(ref, suffix):
+def _resolved(ref: str, suffix: str) -> str | None:
     try:
         return _git("rev-parse", f"{_revision(ref)}{suffix}")
     except subprocess.CalledProcessError:
         return None
 
 
-def _lines(path):
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+def _lines(path: Path) -> list[dict[str, Any]]:
+    return [cast("dict[str, Any]", json.loads(line)) for line in path.read_text().splitlines() if line.strip()]
 
 
-def _snapshot(args):
+def _snapshot(args: argparse.Namespace) -> dict[str, Any]:
     base, head = _revision(args.base), _revision(args.head)
     grader = _git("rev-parse", "HEAD")
     if args.event == "pull_request":
@@ -334,23 +335,26 @@ def _snapshot(args):
     }
 
 
-def _matrix(job):
+def _matrix(job: dict[str, Any]) -> int:
     matrix = job.get("strategy", {}).get("matrix")
     if not isinstance(matrix, dict):
         return 1
-    axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
+    axes = {key: values for key, values in cast("dict[str, Any]", matrix).items() if key not in {"include", "exclude"}}
     if any(not isinstance(values, list) for values in axes.values()):
         return 1
     rows = [dict(pairs) for pairs in itertools.product(*([(key, value) for value in axes[key]] for key in axes))]
     rows = [
         row
         for row in rows
-        if not any(all(row.get(key) == value for key, value in item.items()) for item in matrix.get("exclude", []))
+        if not any(
+            all(row.get(key) == value for key, value in item.items())
+            for item in cast("dict[str, Any]", matrix).get("exclude", [])
+        )
     ]
-    return len(rows) + len(matrix.get("include", []))
+    return len(rows) + len(cast("dict[str, Any]", matrix).get("include", []))
 
 
-def _passed(workflow, jobs):
+def _passed(workflow: dict[str, Any], jobs: list[dict[str, Any]]) -> bool:
     definitions = workflow["jobs"]
     gate = definitions["gate-required"]
     required = gate["needs"]
@@ -378,11 +382,11 @@ def _passed(workflow, jobs):
     return True
 
 
-def _digest(record):
+def _digest(record: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _authenticated(folder, record, jobs, producer="reuse"):
+def _authenticated(folder: Path, record: dict[str, Any], jobs: list[dict[str, Any]], producer: str = "reuse") -> bool:
     attestations = [job for job in jobs if job["name"] == producer and job["conclusion"] == "success"]
     if len(attestations) != 1:
         return False
@@ -391,7 +395,7 @@ def _authenticated(folder, record, jobs, producer="reuse"):
     return digests == [_digest(record)]
 
 
-def _proof(path):
+def _proof(path: Path) -> dict[str, Any]:
     with zipfile.ZipFile(path) as archive:
         entry = archive.getinfo("provenance.json")
         if entry.file_size > 65536:
@@ -399,11 +403,11 @@ def _proof(path):
         record = json.loads(archive.read(entry))
     if not isinstance(record, dict):
         raise ValueError("The source metadata is not an object")
-    return record
+    return cast("dict[str, Any]", record)
 
 
-def _differs(expected, actual, prefix=""):
-    keys = []
+def _differs(expected: dict[str, Any], actual: dict[str, Any], prefix: str = "") -> list[str]:
+    keys: list[str] = []
     for key in sorted(set(expected) | set(actual)):
         if isinstance(expected.get(key), dict) and isinstance(actual.get(key), dict):
             keys += _differs(expected[key], actual[key], f"{prefix}{key}.")
@@ -412,7 +416,7 @@ def _differs(expected, actual, prefix=""):
     return keys
 
 
-def _published(artifacts, run):
+def _published(artifacts: list[dict[str, Any]], run: dict[str, Any]) -> str | None:
     if any(item["name"].startswith("reused-branch-") for item in artifacts):
         return "it reused tests from earlier runs of its pull request"
     name = f"required-tree-{run['run_attempt']}"
@@ -421,7 +425,9 @@ def _published(artifacts, run):
     return None
 
 
-def _refusal(args, current, workflow, run):
+def _refusal(
+    args: argparse.Namespace, current: dict[str, Any], workflow: dict[str, Any], run: dict[str, Any]
+) -> str | None:
     for key, value in (("event", "pull_request"), ("status", "completed"), ("conclusion", "success")):
         if run[key] != value:
             return f"{key} is {run[key]}"
@@ -462,7 +468,7 @@ def _refusal(args, current, workflow, run):
     return None
 
 
-def _find(args, current):
+def _find(args: argparse.Namespace, current: dict[str, Any]) -> dict[str, Any] | None:
     if _git("rev-parse", f"{current['commit']}:.github") != current["inputs"]["workflow"]:
         print("No reuse: the queue tree changes workflow files")
         return None

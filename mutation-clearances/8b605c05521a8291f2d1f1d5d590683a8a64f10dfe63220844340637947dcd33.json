@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wiring.py:scripts.ci_wiring.x_load:4314cd313681511f3455393525083c95aed75b61988a9e59b61c65587439f860": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}

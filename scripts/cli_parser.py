@@ -1,32 +1,38 @@
 import argparse
 from collections.abc import Iterable
 from difflib import get_close_matches
-from typing import NoReturn
+from typing import Any, NoReturn, cast
 
 
 class ArgumentParser(argparse.ArgumentParser):
-    def add_subparsers(self, **kwargs) -> argparse._SubParsersAction:
+    def add_subparsers(self, **kwargs: Any) -> "argparse._SubParsersAction[ArgumentParser]":
         kwargs.setdefault("title", "commands")
         kwargs.setdefault("metavar", "COMMAND")
-        return super().add_subparsers(**kwargs)
+        return cast('argparse._SubParsersAction["ArgumentParser"]', super().add_subparsers(**kwargs))
 
     def _known_options(self) -> set[str]:
         choices = set(self._option_string_actions)
         for action in self._actions:
             if isinstance(action, argparse._SubParsersAction):
-                for parser in action.choices.values():
+                sub = cast('argparse._SubParsersAction["ArgumentParser"]', action)
+                for parser in sub.choices.values():
                     choices.update(parser._known_options())
         return choices
 
-    def _parse_optional(self, arg_string: str):
-        result = super()._parse_optional(arg_string)
+    def _parse_optional(
+        self, arg_string: str
+    ) -> list[tuple[argparse.Action | None, str, str | None, str | None]] | None:
+        result = cast(
+            "tuple[argparse.Action | None, str, str | None, str | None] | list[tuple[argparse.Action | None, str, str | None, str | None]] | None",
+            super()._parse_optional(arg_string),
+        )
         if result is not None:
             option = result[0] if isinstance(result, list) else result
             choices = self._known_options()
             name = arg_string.split("=")[0]
             if option[0] is None and not any(flag.startswith(name) for flag in choices):
                 self.unknown("option", name, choices)
-        return result
+        return cast(list[tuple[argparse.Action | None, str, str | None, str | None]] | None, result)
 
     def _check_value(self, action: argparse.Action, value: str) -> None:
         if action.choices is not None and value not in action.choices and not action.option_strings:
