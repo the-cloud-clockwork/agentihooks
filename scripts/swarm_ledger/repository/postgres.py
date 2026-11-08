@@ -180,12 +180,13 @@ class Pool:
         self.lock = threading.Condition()
         self.opened = 0
         self.cap = 1
+        self.measured = False
 
-    def _open(self, measure: bool) -> Any:
+    def _open(self) -> Any:
         with mapped():
             raw = errors().connect(self.address, **SESSION)
             try:
-                if measure:
+                if not self.measured:
                     share = float(os.environ.get("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.1"))
                     if not 0 < share < 1:
                         raise sqlite3.OperationalError("ledger pool share must be between zero and one")
@@ -198,6 +199,7 @@ class Pool:
                         maximum, reserved = cursor.fetchone()
                     raw.rollback()
                     self.cap = max(1, min(int(maximum * share), maximum - reserved - 1))
+                    self.measured = True
             except BaseException:
                 raw.close()
                 raise
@@ -219,8 +221,8 @@ class Pool:
             self.opened -= 1
             self.lock.notify()
 
-    def _reserve(self, deadline: float) -> tuple[Any, bool]:
-        """An idle connection, or None with a slot reserved for a new one and whether that one measures the server."""
+    def _reserve(self, deadline: float) -> Any:
+        """An idle connection, or None once a slot is reserved for a new one."""
         with self.lock:
             while not self.idle and self.opened >= self.cap:
                 left = deadline - time.monotonic()
@@ -228,17 +230,18 @@ class Pool:
                     raise sqlite3.OperationalError("ledger database pool capacity exhausted")
                 self.lock.wait(timeout=left)
             if self.idle:
-                return self.idle.pop(), False
+                return self.idle.pop()
             self.opened += 1
-            return None, self.opened == 1
+            return None
 
-    def _new(self, measure: bool) -> Any:
+    def _new(self) -> Any:
+        measuring = not self.measured
         try:
-            raw = self._open(measure)
+            raw = self._open()
         except BaseException:
             self._release()
             raise
-        if measure:
+        if measuring:
             with self.lock:
                 self.lock.notify_all()
         return raw
@@ -246,12 +249,12 @@ class Pool:
     def take(self) -> Any:
         """A live connection: an idle one that answers, else a new one in a slot reserved under the lock."""
         deadline = time.monotonic() + 5
-        raw, measure = self._reserve(deadline)
+        raw = self._reserve(deadline)
         while raw is not None and not self._alive(raw):
             raw.close()
             self._release()
-            raw, measure = self._reserve(deadline)
-        return raw if raw is not None else self._new(measure)
+            raw = self._reserve(deadline)
+        return raw if raw is not None else self._new()
 
     def give(self, raw: Any) -> None:
         try:

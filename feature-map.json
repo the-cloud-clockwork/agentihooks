@@ -2087,6 +2087,7 @@
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_failed_connect_returns_its_reserved_slot",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_only_the_first_connection_measures_the_server_and_reuse_checks_liveness",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_closed_idle_connection_is_replaced_and_frees_its_slot",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_dead_idle_connection_keeps_the_checkout_deadline",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_giving_back_a_closed_connection_frees_exactly_its_slot",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_takers_wait_for_the_first_connection_to_measure_the_server",
         "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",

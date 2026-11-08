@@ -199,6 +199,25 @@ def test_a_closed_idle_connection_is_replaced_and_frees_its_slot(raws: list[Raw]
 
 
 @pytest.mark.feature("ledger-pool-liveness")
+def test_a_dead_idle_connection_keeps_the_checkout_deadline(raws: list[Raw], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.01")
+    pool = postgres.Pool("database")
+    first = pool.take()
+    pool.give(first)
+
+    def taken_meanwhile(raw: Any) -> bool:
+        pool.opened += 1
+        return False
+
+    clock = iter((0.0, 5.0))
+    monkeypatch.setattr(pool, "_alive", taken_meanwhile)
+    monkeypatch.setattr(postgres.time, "monotonic", lambda: next(clock))
+    with pytest.raises(postgres.sqlite3.OperationalError, match="^ledger database pool capacity exhausted$"):
+        pool.take()
+    assert first.closed and pool.opened == 1
+
+
+@pytest.mark.feature("ledger-pool-liveness")
 def test_giving_back_a_closed_connection_frees_exactly_its_slot(raws: list[Raw]) -> None:
     pool = postgres.Pool("database")
     first, second, third = pool.take(), pool.take(), pool.take()
