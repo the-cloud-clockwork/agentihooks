@@ -3,7 +3,7 @@ inspection calls (live names, bindings, refusals, status, conversations) stay on
 
 import os
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm import lease, ledger_client
 from scripts.swarm.pane import PaneObservation
@@ -110,9 +110,8 @@ def hive_controller(runtime: RoutedRuntime, store: RedisStore, slug: str, held: 
     from scripts.hive.reports import Reports
     from scripts.swarm import capacity
 
-    redis = cast(Any, store.redis)
-    runtime.herdr_runtime.hive = Reports(redis)
-    runtime.herdr_runtime.quota_accounts = capacity.hive_accounts(redis)
+    runtime.herdr_runtime.hive = Reports(store.redis)
+    runtime.herdr_runtime.quota_accounts = capacity.hive_accounts(store)
     hive = HiveLaunch(store, slug, held, runtime.herdr_runtime)
     router = RuntimeRouter(
         [*runtime.router.runtimes.values(), hive],

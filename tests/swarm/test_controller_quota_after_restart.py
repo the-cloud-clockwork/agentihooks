@@ -9,6 +9,7 @@ import pytest
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import registry
 from scripts.swarm import capacity
+from scripts.swarm.store import RedisStore
 
 NOW = 1000.0
 
@@ -54,7 +55,7 @@ def _report(redis: Any, hive: str, sessions: int, used: int, now: float = NOW) -
 @pytest.mark.feature("controller-quota-after-restart")
 def test_a_restarted_controller_reads_a_fresh_cap_from_the_hive_quota_reports(redis: Any) -> None:
     _report(redis, "remote", 5, 20)
-    rows = capacity.hive_accounts(redis)({}, NOW, refresh=False)
+    rows = capacity.hive_accounts(RedisStore(redis))({}, NOW, refresh=False)
     (row,) = [row for row in rows if row.harness == "claude"]
     assert (row.name, row.sessions, row.observed_at) == ("one", 5, NOW - 5)
     assert row.cap is not None and row.cap > row.sessions
@@ -64,7 +65,7 @@ def test_a_restarted_controller_reads_a_fresh_cap_from_the_hive_quota_reports(re
 @pytest.mark.feature("controller-quota-after-restart")
 def test_the_hive_controller_runtime_reads_quota_from_its_store(redis: Any) -> None:
     from scripts.swarm import lease
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.store import SwarmConfig
     from scripts.swarm_v2.runtime.routed import RoutedRuntime, hive_controller, routed
 
     store = RedisStore(redis)
@@ -89,5 +90,32 @@ def test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows(redi
 
     _report(redis, "remote", 1, 20, time.time())
     herdr = HerdrRuntime(choose=Mock(side_effect=AssertionError("the rotation must not read the pod cache")))
-    herdr.quota_accounts = capacity.hive_accounts(redis)
+    herdr.quota_accounts = capacity.hive_accounts(RedisStore(redis))
+    assert herdr._rotation("", {}) == ("claude", "rotation")
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_the_rotation_reads_the_hive_reports_without_a_probe() -> None:
+    from unittest.mock import Mock
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    row = capacity.Account("claude", "one", "OPEN", 0, 80, 80, 6)
+    herdr = HerdrRuntime(choose=Mock(side_effect=AssertionError("the rotation must not read the pod cache")))
+    reader = Mock(return_value=[row])
+    herdr.quota_accounts = reader
+    assert herdr._rotation("", {"fixture": "scope"}) == ("claude", "rotation")
+    assert reader.call_args.args[0] == {"fixture": "scope"}
+    assert reader.call_args.kwargs == {"refresh": False}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_the_rotation_keeps_the_quota_rows_its_pass_already_read() -> None:
+    from unittest.mock import Mock
+
+    from scripts.swarm.runtime import HerdrRuntime
+
+    herdr = HerdrRuntime(choose=Mock(side_effect=AssertionError("the rotation must not read the pod cache")))
+    herdr.quota_accounts = Mock(side_effect=AssertionError("the pass rows must not be read again"))
+    herdr._quota_accounts = [capacity.Account("claude", "one", "OPEN", 0, 80, 80, 6)]
     assert herdr._rotation("", {}) == ("claude", "rotation")
