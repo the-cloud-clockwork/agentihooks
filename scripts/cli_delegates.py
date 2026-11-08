@@ -9,7 +9,7 @@ DELEGATED_CLIS = {
     "trace": "scripts.trace_cli",
     "deps": "scripts.deps_preflight",
     "quota": "scripts.agents_quota",
-    "plan": "scripts.swarm_ledger.plan_read",
+    "plan": "scripts.plans.cli",
     "workflow": "scripts.workflows.cli",
     "headless": "scripts.headless.cli",
     "hive": "scripts.hive.cli",
