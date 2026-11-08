@@ -523,3 +523,30 @@ def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store,
     assert marks == ["controller-hive"]
     assert 0 < store.redis.pttl(store.key("proof", "controller-host")) <= lease.ttl_ms()
     assert lease.acquire(store, "proof", "controller-hive").owner == "controller-hive"
+
+
+def test_the_lease_is_held_through_the_shared_database_with_the_ledger_server_unreachable(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm_ledger import ledger_route
+    from scripts.swarm_ledger.repository import postgres
+
+    def unreachable(slug: str, action: str, fields: dict | None = None) -> None:
+        raise lease.LeaseUnavailable("hosted controller lease is unavailable: timed out")
+
+    monkeypatch.setenv(postgres.URL, "postgresql://swarm@db.example/swarm_ledger")
+    monkeypatch.setattr(lease, "_remote", unreachable)
+    monkeypatch.setattr(lease, "now_ms", lambda saved: 1000)
+
+    with ledger_route.scoped("sw", "http://127.0.0.1:9"):
+        held = lease.acquire(store, "sw", "home")
+        assert held == lease.Lease("home", 1, 1000 + lease.ttl_ms())
+        assert lease.current(store, "sw") == held
+        lease.require_epoch(store, "sw", 1)
+        assert lease.renew(store, "sw", held) == held
+        assert lease.fenced(store, "sw", held, lambda doc: doc.update(leader_changes=9) or "done") == "done"
+        moved = lease.transfer(store, "sw", "home", 1, 1)
+        assert moved.epoch == 2
+        assert lease.release(store, "sw", moved) is True
+    assert fencing.read(store, "sw")["lease"] is None
+    assert fencing.read(store, "sw")["epoch"] == 2
