@@ -124,7 +124,8 @@
         "tests/tick/test_slow_export_view.py::test_a_stale_stored_view_is_read_again_under_the_export_budget",
         "tests/tick/test_slow_export_view.py::test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read",
         "tests/tick/test_slow_export_view.py::test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view",
-        "tests/tick/test_slow_export_view.py::test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass"
+        "tests/tick/test_slow_export_view.py::test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass",
+        "tests/tick/test_slow_export_view.py::test_a_stored_view_is_fresh_only_until_its_age_reaches_the_limit"
       ]
     },
     {

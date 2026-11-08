@@ -115,6 +115,21 @@ def test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read(server: P
 
 
 @pytest.mark.feature("swarm-tick-slow-export")
+def test_a_stored_view_is_fresh_only_until_its_age_reaches_the_limit(
+    server: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = 1_000_000.0
+    api.write_export_file(server, 3, STORED)
+    os.utime(server, (written, written))
+    now = [written + view.FRESH_VIEW_S - 1]
+    monkeypatch.setattr(view.time, "time", lambda: now[0])
+    assert view.fresh("sw") is True
+    now[0] = written + view.FRESH_VIEW_S
+    assert view.fresh("sw") is False
+    assert view.fresh("other") is False
+
+
+@pytest.mark.feature("swarm-tick-slow-export")
 def test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view(
     server: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -138,7 +153,7 @@ def _refused(code: int) -> urllib.error.HTTPError:
 @pytest.mark.feature("swarm-tick-slow-export")
 @pytest.mark.parametrize(("code", "offline"), [(500, True), (499, None)], ids=["failing", "refusing"])
 def test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass(
-    code: int, offline: bool | None, monkeypatch: pytest.MonkeyPatch
+    code: int, offline: bool | None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     calls: list[tuple[str, bool, float | None]] = []
     replies: list[OSError] = [TimeoutError("timed out"), _refused(code)]
@@ -157,6 +172,7 @@ def test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass(
         else:
             cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
             assert OFFLINE.get() is offline
+            assert f"ledger sw not answering (HTTP Error {code}: refused)" in capsys.readouterr().err
     assert calls == [
         ("sw", True, ledger_client.SNAPSHOT_TIMEOUT_S),
         ("sw", True, ledger_client.EXPORT_TIMEOUT_S),
