@@ -2126,7 +2126,8 @@
         "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion",
         "tests/tick/steps/test_workflow_runner.py::test_tick_passes_claimed_snapshot_to_runner",
         "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
-        "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline"
+        "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
+        "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
       ]
     }
   ],

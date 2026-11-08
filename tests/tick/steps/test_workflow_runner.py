@@ -36,11 +36,11 @@ def test_tick_passes_claimed_snapshot_to_runner() -> None:
     values = {
         "doc": {
             "tasks": [
-                task,
                 {**task, "kind": "code"},
                 {**task, "done": True},
                 {**task, "state": "open"},
                 {**task, "claimed_by": ""},
+                task,
             ]
         },
         "config": SimpleNamespace(repo="/proof/repo"),
@@ -59,3 +59,12 @@ def test_tick_passes_claimed_snapshot_to_runner() -> None:
     with pytest.raises(TimeoutError, match="tool deadline expired"):
         found.call(None, values.__getitem__)
     assert len(tools.host.calls) == 1
+
+
+@pytest.mark.feature("swarm-workflow-runner")
+def test_tick_without_task_collection_starts_no_jobs() -> None:
+    from scripts.tick.steps import CallStep
+
+    found = {step.name: step for step in registry.steps()}["workflow runner"]
+    assert isinstance(found, CallStep)
+    assert found.call(None, {"doc": {}}.__getitem__) == []
