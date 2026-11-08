@@ -124,7 +124,7 @@ def cmd_balance_master_account(tokens: list[str], clear: bool = False, now: floa
     return 0
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     balance_p = sub.add_parser(
         "balance", help="One table for every Claude and Codex account, without launching anything"
     )

@@ -3,11 +3,14 @@ import json
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from scripts.ci_runner_trust import ACTORS, validate_actors
 
 
-def audit(approved: list[str], collaborators: list[dict], installations: list[dict]) -> dict:
+def audit(
+    approved: list[str], collaborators: list[dict[str, Any]], installations: list[dict[str, Any]]
+) -> dict[str, Any]:
     approved = validate_actors(approved)
     names = sorted({entry["login"] for entry in collaborators})
     if not {actor for actor in approved if not actor.endswith("[bot]")} <= set(names):
@@ -26,21 +29,25 @@ def _api(endpoint: str) -> object:
     return json.loads(result.stdout)
 
 
-def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict], list[dict]]:
-    collaborators = []
+def inventory(repo: str, api: Callable[[str], object] = _api) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    collaborators: list[dict[str, Any]] = []
     page = 1
     while True:
         entries = api(f"repos/{repo}/collaborators?page={page}&per_page=100")
         if not isinstance(entries, list):
             raise ValueError("collaborator inventory incomplete")
+        entries = cast("list[dict[str, Any]]", entries)
         collaborators.extend(entries)
         if len(entries) < 100:
             break
         page += 1
-    installations = []
+    installations: list[dict[str, Any]] = []
     page = 1
     while True:
         result = api(f"orgs/{repo.split('/')[0]}/installations?page={page}&per_page=100")
+        if not isinstance(result, dict):
+            raise ValueError("app installation inventory incomplete")
+        result = cast(dict[str, Any], result)
         entries = result["installations"]
         installations.extend(entries)
         if len(entries) < 100:
