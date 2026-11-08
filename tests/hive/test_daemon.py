@@ -2222,7 +2222,7 @@ def test_a_herdr_read_error_leaves_the_beat_running(monkeypatch):
 
 
 @pytest.mark.feature("hive-release-report")
-def test_each_beat_reports_the_release_the_hive_runs(redis, monkeypatch):
+def test_each_beat_reports_the_release_the_hive_runs(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         daemon,
         "observe",

@@ -384,7 +384,7 @@ def _list() -> None:
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}\trelease={record.get('version') or 'unknown'}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

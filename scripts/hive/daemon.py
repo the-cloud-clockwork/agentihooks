@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, github_app_cli, master_claude_login, session_bands
+from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -64,6 +64,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     fields = {name: report[name] for name in ("slots", "interactive", "repos")}
     fields["master_login"] = {"claude": master_claude_login.signed_in()}
     fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
+    fields["version"] = updater.installed_version()
     beat_ms = int(time.time() * 1000)
     fields["heartbeat_at"] = beat_ms
     registry.beat(redis, local_id, fields)
