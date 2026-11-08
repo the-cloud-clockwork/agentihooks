@@ -14,7 +14,7 @@ from importlib import import_module
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm import ack_pass, lost_runner, quota_notice, time_left
+from scripts.swarm import ack_pass, ledger_client, lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -60,6 +60,7 @@ PLACED = frozenset({AGENTS, TASKS})
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
 PASS_DEADLINE: ContextVar[Deadline | None] = ContextVar("spawn_pass_deadline", default=None)
+OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
 
 
 def _quota_notice(tick: Any, get: Get) -> Any:
@@ -495,6 +496,8 @@ def _prepare(
 ) -> tuple[Any, list[str]]:
     slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
     rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    if ledger_client.offline():
+        return None, [f"holding {task['id']}: {OFFLINE_HOLD}"]
     task = rows[task["id"]] = dict(task)
     expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
     blocked = (
@@ -549,6 +552,8 @@ def _prepare(
             "claimed_by": name,
             "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
         }
+        if task.get("branch") in continuation.PROTECTED:
+            fields["branch"] = ""
         kind = config.lanes.get(lane, {}).get("kind", "")
         if kind not in ("", "auto") and not task.get("kind"):
             fields["kind"] = kind

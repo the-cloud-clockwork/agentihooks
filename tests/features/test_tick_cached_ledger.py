@@ -1,4 +1,5 @@
-"""A tick pass against a real ledger server behind a proxy that is made slow or stopped keeps launching."""
+"""A tick pass against a real ledger server behind a proxy that is made slow or stopped holds its launches until
+their claims can land, then claims and launches once the server answers."""
 
 import contextlib
 import socket
@@ -109,7 +110,7 @@ def _roomy(
 @pytest.mark.wall_clock
 @pytest.mark.feature("swarm-tick-cached-ledger")
 @pytest.mark.parametrize("fault", ["slow", "stopped"])
-def test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped(
+def test_a_tick_holds_launches_while_the_ledger_is_slow_or_stopped_and_claims_before_launching(
     fault: str, swarm: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name, value in swarm.ledger.env.items():
@@ -131,12 +132,13 @@ def test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopp
     actions = cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
     took = time.monotonic() - started
     assert took < tick_watch.PASS_S, (took, actions)
+    assert runtime.spawned == [], actions
+    assert store.claimant(slug, TASK) is None
+    proxy.heal()
+    actions = cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
     launched = [(lane, task) for lane, _, task in runtime.spawned]
     assert launched == [("eng", TASK)], actions
     name = runtime.spawned[0][1]
-    assert store.claimant(slug, TASK) == name
-    proxy.heal()
-    cli.run_tick(store, slug, ledger=ledger, runtime=runtime)
     task = ledger.task(slug, TASK)
     assert task is not None
     assert (task["state"], task["claimed_by"]) == ("claimed", name)
