@@ -81,8 +81,11 @@ def _step(watch: Watch, mail: Mail, agent: AgentRecord, mark: dict[str, Any]) ->
     return [_report(watch, mail, agent, minutes)]
 
 
-def _steps(slug, task):
-    lines = ledger_workspace.tails(slug, task).get("latest_progress", "").splitlines()
+def _steps(mail: Mail, task: str) -> str:
+    copy = ledger_workspace.published(mail.store, mail.slug, mail.doc).get(task)
+    if copy is None:
+        copy = ledger_workspace.tails(mail.slug, task)
+    lines = copy.get("latest_progress", "").splitlines()
     return "; ".join(line.strip() for line in lines if line.strip()) or NO_STEPS
 
 
@@ -93,7 +96,7 @@ def _report(watch: Watch, mail: Mail, agent: AgentRecord, minutes: int) -> str:
         agent=agent.name,
         minutes=minutes,
         task=agent.task,
-        steps=_steps(watch.slug, agent.task),
+        steps=_steps(mail, agent.task),
     )
     mail.inbox.send(SENDER, address, text, ref=f"{watch.slug}:{KEY}:{agent.task}", task=agent.task)
     return f"overrun: told {address} that {agent.name} has run {minutes} minutes on task {agent.task}"

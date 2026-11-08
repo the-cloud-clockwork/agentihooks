@@ -79,7 +79,7 @@ def _progress(lines):
 
 @pytest.mark.feature("hive-overrun-progress")
 @pytest.mark.parametrize("local", ["", "stale workstation step\n"])
-def test_remote_overrun_quotes_the_same_progress_as_the_ledger(local: str) -> None:
+def test_remote_overrun_quotes_the_same_progress_as_the_ledger(local: str, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
     from scripts.swarm import commands
@@ -95,7 +95,8 @@ def test_remote_overrun_quotes_the_same_progress_as_the_ledger(local: str) -> No
         hive="remote",
         runtime_target={"host_id": "remote"},
     )
-    swarm = Swarm(task={"workspace": str(ledger_workspace.folder(SLUG, "t1"))}, agent=agent)
+    swarm = Swarm(task={"workspace": str(ledger_workspace.folder(SLUG, "t1"))})
+    monkeypatch.setattr(swarm.store, "agents", lambda slug: [agent])
     expected = {
         "latest_progress": "hive step seven\nhive step eight\nhive step nine",
         "latest_proof": "hive check green",
