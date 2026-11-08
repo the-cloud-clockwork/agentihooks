@@ -30,6 +30,7 @@ import sys
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from scripts.targets._common import (
     LEGACY_MCP_SERVER_NAMES,
@@ -286,7 +287,7 @@ def _codex_http(name: str, spec: dict) -> dict:
     return entry
 
 
-def codex_mcp_entry(name: str, spec: dict) -> tuple[dict | None, str]:
+def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
         return None, "credential-shaped literal in url, command or args"
