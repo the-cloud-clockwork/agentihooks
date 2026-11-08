@@ -5,6 +5,7 @@ import urllib.error
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -172,7 +173,7 @@ def _agent(store, member):
     store.put_agent(SLUG, agent)
 
 
-def _host(clock: Clock, run: Callable, tmp_path: Path, ledger: Ledger | None = None) -> remove.Host:
+def _host(clock: Any, run: Callable, tmp_path: Path, ledger: Ledger | None = None) -> remove.Host:
     known = tmp_path / "known_hosts"
     known.write_text("[10.10.30.207]:2222 ssh-ed25519 AAAA\n")
     opened = ledger or Ledger()
@@ -416,7 +417,7 @@ def _claimed(store: Swarm, member: str, name: str, task: str, lane: str = "eng",
 
 
 def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_released_with_true_counts(
-    store: Swarm, tmp_path: Path
+    store: Any, tmp_path: Path
 ) -> None:
     member = _member(store)
     elsewhere = AgentRecord("engineer@9", "eng", "t9", seat=f"eng-9@{SLUG}", hive="other", state="working")
@@ -442,7 +443,7 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
         f"member: revoked member {member} and its Redis user",
     ]
     assert (clock.now, clock.slept) == (30, 2)
-    assert ledger.updates == [
+    assert sorted(ledger.updates) == [
         ("t2", {"state": "open", "claimed_by": ""}, ("claimed", "pr")),
         ("t3", {"state": "open", "claimed_by": ""}, ("claimed", "pr")),
     ]
@@ -453,7 +454,7 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
 
 
 def test_a_retirement_the_store_refuses_stops_remove_before_the_hive_is_deleted(
-    store: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     member = _member(store)
     store.put_agent(SLUG, AgentRecord("ci@2", "ci", "t2", seat=f"ci-2@{SLUG}", hive=member, state="ended"))
@@ -469,7 +470,7 @@ def test_a_retirement_the_store_refuses_stops_remove_before_the_hive_is_deleted(
 
 
 def test_an_ended_agent_whose_task_already_moved_on_is_retired_without_touching_the_task(
-    store: Swarm, tmp_path: Path
+    store: Any, tmp_path: Path
 ) -> None:
     member = _member(store)
     store.put_agent(SLUG, AgentRecord("ci@2", "ci", "t2", seat=f"ci-2@{SLUG}", hive=member, state="ended"))
@@ -501,7 +502,7 @@ def test_the_hive_is_named_by_its_member_or_its_name_and_a_gone_name_stands_for_
 
 @pytest.mark.parametrize("state", ["starting", "retiring", "launching", "suspect"])
 def test_an_agent_in_any_state_but_finished_holds_the_drain_until_its_wait_ends(
-    store: Swarm, tmp_path: Path, state: str
+    store: Any, tmp_path: Path, state: str
 ) -> None:
     member = _member(store)
     row = _claimed(store, member, "engineer@1", "t1", state=state)

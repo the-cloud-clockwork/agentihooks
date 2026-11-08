@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
 from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from scripts.inbox.store import InboxStore
-    from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import AgentRecord, RedisStore
 
 FINISHED = "finished"
@@ -77,7 +76,15 @@ class Plan:
     dry_run: bool = False
 
 
-def ledger_client() -> "LedgerClient":
+class TaskLedger(Protocol):
+    """The ledger reads and writes hive remove needs to reopen a released task."""
+
+    def task(self, slug: str, task_id: str) -> dict[str, Any] | None: ...
+
+    def update_task(self, slug: str, task_id: str, fields: dict[str, str], *, if_state: tuple[str, ...]) -> object: ...
+
+
+def ledger_client() -> TaskLedger:
     """The ledger client hive remove reopens released tasks through."""
     from scripts.swarm.ledger_client import LedgerClient
 
@@ -92,7 +99,7 @@ class Host:
     wall: Callable[[], float] = time.time
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
     home: Path = field(default_factory=registry.home)
-    ledger: Callable[[], "LedgerClient"] = ledger_client
+    ledger: Callable[[], TaskLedger] = ledger_client
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
@@ -115,13 +122,14 @@ def _sole(redis: "Redis", hive: str, name: str) -> str:
     return hive
 
 
+def on_hive(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
+    """Every agent record placed on ``hive``, with its swarm, in any state."""
+    slugs: list[str] = store.slugs()
+    return [(slug, agent) for slug in slugs for agent in store.agents(slug) if agent.hive == hive]
+
+
 def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [
-        (slug, agent)
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-        if agent.hive == hive and agent.state not in ENDED
-    ]
+    return [(slug, agent) for slug, agent in on_hive(store, hive) if agent.state not in ENDED]
 
 
 def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
@@ -138,7 +146,9 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
             ["draining=yes"],
             drain=registry.Drain(registry.drain_owner(), "hive remove", deadline_at),
         )
-    inbox, ordered, seen = InboxStore(store.redis), {}, {}
+    inbox = InboxStore(store.redis)
+    ordered: dict[tuple[str, str], str] = {}
+    seen: dict[tuple[str, str], "AgentRecord"] = {}
     deadline = host.clock() + plan.wait_s
     still: list[tuple[str, "AgentRecord"]] = []
     while remaining := hosted(store, plan.hive):
@@ -165,26 +175,28 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
 def release(store: "RedisStore", hive: str, host: Host) -> tuple[list[str], list[str]]:
     """Release every claim an agent on ``hive`` still holds without a handoff and reopen its ledger task, then retire
     every unfinished agent on the hive; return the released tasks and the retired agents."""
-    released, retired, ledger = [], [], None
-    for slug in store.slugs():
-        for agent in store.agents(slug):
-            if agent.hive != hive or agent.state == FINISHED:
-                continue
-            if agent.task and not _handed(store, slug, agent):
-                ledger = ledger or host.ledger()
-                if _release_claim(store, ledger, slug, agent):
-                    released.append(agent.task)
-            if not store.drop_agent(slug, agent.name):
-                raise auth.HiveError(f"{agent.name} on hive {hive} kept its record; run remove again")
-            retired.append(agent.name)
+    released: list[str] = []
+    retired: list[str] = []
+    ledger: TaskLedger | None = None
+    for slug, agent in on_hive(store, hive):
+        if agent.state == FINISHED:
+            continue
+        if agent.task and not _handed(store, slug, agent):
+            ledger = ledger or host.ledger()
+            if _release_claim(store, ledger, slug, agent):
+                released.append(agent.task)
+        if not store.drop_agent(slug, agent.name):
+            raise auth.HiveError(f"{agent.name} on hive {hive} kept its record; run remove again")
+        retired.append(agent.name)
     return sorted(released), sorted(retired)
 
 
-def _release_claim(store: "RedisStore", ledger: "LedgerClient", slug: str, agent: "AgentRecord") -> bool:
+def _release_claim(store: "RedisStore", ledger: TaskLedger, slug: str, agent: "AgentRecord") -> bool:
     """Refund and release the claim ``agent`` holds and reopen its ledger task; return whether it held either."""
     row = ledger.task(slug, agent.task) or {}
     reopen = row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name
-    held = store.claimant(slug, agent.task) == agent.name
+    holder: str | None = store.claimant(slug, agent.task)
+    held = holder == agent.name
     if reopen or held:
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     store.release(slug, agent.task, agent.name)
