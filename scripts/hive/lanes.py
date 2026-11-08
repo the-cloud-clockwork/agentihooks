@@ -7,7 +7,6 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
-from functools import partial
 from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
@@ -87,6 +86,12 @@ def run_once(store, bus, runtime, hive: str, taken: Iterable[str], timeout_ms: i
     return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive, taken, held)]
 
 
+def draining(store: Any, hive: str) -> bool:
+    """True while this pod's member of hive takes no new agents; a store without Redis has no members."""
+    redis = getattr(store, "redis", None)
+    return redis is not None and registry.member_draining(redis, hive, registry.member_name())
+
+
 def run(
     store,
     bus,
@@ -95,11 +100,10 @@ def run(
     taken: Iterable[str],
     wait: Callable[[float], object] = scheduled_wait,
     passes: Iterable[int] | None = None,
-    draining: Callable[[], bool] = lambda: False,
 ) -> None:
     held: dict = {}
     for _ in itertools.count() if passes is None else passes:
-        if draining() or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
+        if draining(store, hive) or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
             wait(IDLE_S)
 
 
@@ -114,9 +118,7 @@ def _loop(environ: Mapping[str, str]) -> None:
     bus = factory.open_bus(replace(BusConfig.from_environ(environ), provision=False))
     try:
         runtime = LocalHerdrRuntime(HerdrRuntime())
-        store, hive = connect(), commands.hive_id()
-        draining = partial(registry.member_draining, store.redis, hive, registry.member_name())
-        run(store, bus, runtime, hive, lanes(environ.get(EXCLUDED_ENV)), draining=draining)
+        run(connect(), bus, runtime, commands.hive_id(), lanes(environ.get(EXCLUDED_ENV)))
     finally:
         bus.close()
 

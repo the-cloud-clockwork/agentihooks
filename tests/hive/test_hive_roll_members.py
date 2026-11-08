@@ -200,13 +200,31 @@ def test_the_member_name_is_this_host_name(monkeypatch):
 def test_a_draining_member_polls_no_lane_spoke_and_waits(monkeypatch):
     polled: list[tuple] = []
     waits: list[float] = []
-    monkeypatch.setattr(lanes, "run_once", lambda *args: polled.append(args) or ["started"])
+    asked: list[tuple] = []
     state = iter([True, False])
+    monkeypatch.setattr(lanes, "run_once", lambda *args: polled.append(args) or ["started"])
+    monkeypatch.setattr(lanes, "draining", lambda store, hive: asked.append((store, hive)) or next(state))
 
-    lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(2), draining=lambda: next(state))
+    lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(2))
 
     assert len(polled) == 1
     assert waits == [lanes.IDLE_S]
+    assert asked == [("store", "hive"), ("store", "hive")]
+
+
+@pytest.mark.feature("hive-roll-member-drain")
+def test_the_lane_drain_gate_reads_this_pods_member_and_a_store_without_redis_is_never_draining(client, monkeypatch):
+    registry.join(client, HIVE, OLD, NOW - 5_000)
+    registry.join(client, HIVE, NEW, NOW - 1_000)
+    registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping"))
+    store = SimpleNamespace(redis=client)
+
+    monkeypatch.setattr(registry, "member_name", lambda: OLD)
+    assert lanes.draining(store, HIVE) is True
+    monkeypatch.setattr(registry, "member_name", lambda: NEW)
+    assert lanes.draining(store, HIVE) is False
+    monkeypatch.setattr(registry, "member_name", lambda: OLD)
+    assert lanes.draining("store", HIVE) is False
 
 
 @pytest.mark.feature("hive-roll-member-drain")
