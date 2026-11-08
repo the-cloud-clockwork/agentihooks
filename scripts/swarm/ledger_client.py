@@ -41,6 +41,18 @@ def _accepted(slug, state):
         raise LedgerUnreachable(f"ledger {slug}: the server is not answering, the post waits in the local outbox")
 
 
+def _offline(slug: str, ops: list[dict[str, Any]] | None = None) -> bool:
+    """True when the tick pass runs from its stored view and ``ops`` are writes to queue in the local outbox; a read
+    then raises LedgerUnreachable at once, so a slow or stopped ledger server costs the pass nothing more."""
+    from scripts.tick import view
+
+    if not view.offline():
+        return False
+    if not ops:
+        raise LedgerUnreachable(f"ledger {slug}: the pass runs from its stored view while the server is not answering")
+    return True
+
+
 def _ledger():
     if str(LEDGER_DIR) not in sys.path:
         sys.path.insert(0, str(LEDGER_DIR))
@@ -71,6 +83,8 @@ class LedgerClient:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
+        if _offline(slug, ops):
+            return ledger.queue(slug, ops, service)
         try:
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
@@ -91,6 +105,7 @@ class LedgerClient:
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
+        _offline(slug)
         return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
 
     def state(self, slug):
@@ -157,6 +172,12 @@ class LedgerClient:
         if if_match is not None:
             guard["if_match"] = if_match
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
+        if "queued" in state:
+            from scripts.tick import view
+
+            held = view.current()
+            row = held.read("tasks", task_id) if held is not None else None
+            return {**(row if isinstance(row, dict) else {"id": task_id}), **fields}
         return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
 
     def rename_agent(self, slug, old, new):

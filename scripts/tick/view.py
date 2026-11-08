@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm.ledger_client import LedgerClient, LedgerUnreachable
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 
 __all__ = [
@@ -34,6 +34,7 @@ __all__ = [
     "freeze",
     "frozen_views",
     "holding",
+    "offline",
     "refreshed",
     "start",
     "view_file",
@@ -127,6 +128,32 @@ class Held:
 
 
 HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
+OFFLINE: ContextVar[list[bool] | None] = ContextVar("tick_ledger_offline", default=None)
+SNAPSHOT_TIMEOUT_S = 3.0
+
+
+def offline() -> bool:
+    """True while the pass runs from its stored view because the ledger server is slow or not answering."""
+    return bool(OFFLINE.get())
+
+
+def stored_view(slug: str, path: Path) -> LedgerView:
+    """The last good view of ledger ``slug`` stored at ``path``, or LedgerUnreachable when no pass stored one."""
+    stored = read_export_file(path)
+    if stored is None:
+        raise LedgerUnreachable(f"ledger {slug}: the server is not answering and no earlier pass stored its view")
+    return LedgerView(*stored)
+
+
+def _offline(slug: str, view: LedgerView, exc: BaseException) -> LedgerView:
+    """Mark the pass offline and return ``view``, the last good view it runs from until the pass ends."""
+    flag = OFFLINE.get()
+    if flag is None:
+        OFFLINE.set([True])
+    else:
+        flag[:] = [True]
+    print(f"ledger {slug} is not answering ({exc}); the pass runs from its view at {view.generation}", file=sys.stderr)
+    return view
 
 
 def wrote() -> None:
@@ -172,27 +199,49 @@ def reads(ledger: object) -> bool:
 
 
 def start(slug: str, service: bool) -> LedgerView | None:
-    """Patch the stored view of this swarm's ledger with one delta read and hold it for the rest of the pass;
-    hold nothing when the ledger server refuses named parts because it predates them."""
+    """Patch the stored view of this swarm's ledger with one delta read bound by ``SNAPSHOT_TIMEOUT_S`` and hold it
+    for the rest of the pass; hold the stored view and mark the pass offline when the server is slow or not
+    answering; hold nothing when the ledger server refuses named parts because it predates them."""
     from scripts.scheduler import service as scheduler
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    client = ResourceClient(base, ledger.credentials(slug, service), SNAPSHOT_TIMEOUT_S)
     path = view_file(base, slug, scheduler.runtime_dir())
+    kept: list[LedgerView] = []
 
     def refresh() -> LedgerView:
-        """The held view patched with one delta read."""
-        return refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+        """The held view patched with one delta read, or the last view held once the server stopped answering."""
+        if offline() and kept:
+            return kept[0]
+        try:
+            fresh = refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500 or not kept:
+                raise
+            fresh = _offline(slug, kept[0], exc)
+        except OSError as exc:
+            if not kept:
+                raise
+            fresh = _offline(slug, kept[0], exc)
+        kept[:] = [fresh]
+        return fresh
 
     try:
         view = refresh()
     except urllib.error.HTTPError as exc:
-        if exc.code != 400:
+        if exc.code == 400:
+            print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
+            view = None
+        elif exc.code >= 500:
+            view = _offline(slug, stored_view(slug, path), exc)
+        else:
             raise
-        print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
-        view = None
+    except OSError as exc:
+        view = _offline(slug, stored_view(slug, path), exc)
+    if view is not None:
+        kept[:] = [view]
     CURRENT.set(view)
     HELD.set(None if view is None else Held(view, refresh))
     REFRESH.set(None if view is None else (slug, refresh))
@@ -220,9 +269,11 @@ def holding() -> Generator[None]:
     """Hold no view on entry and drop whatever view the block started on exit, even when the block is left from
     another thread's context than the one that entered it."""
     current_token, refresh_token, held_token = CURRENT.set(None), REFRESH.set(None), HELD.set(None)
+    offline_token = OFFLINE.set([])
     try:
         yield
     finally:
+        _reset(OFFLINE, offline_token)
         _reset(HELD, held_token)
         _reset(REFRESH, refresh_token)
         _reset(CURRENT, current_token)

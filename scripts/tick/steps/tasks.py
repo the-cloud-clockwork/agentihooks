@@ -14,7 +14,7 @@ from scripts.swarm import (
     promotion_watch,
     release_wait,
 )
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerRefused, LedgerUnreachable
 from scripts.tick import registry, steps, view
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.records import RevisionConflict
@@ -94,6 +94,8 @@ def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
             return call(tick, get)
         except Left:
             return []
+        except LedgerUnreachable as exc:
+            return [f"skipped, {exc}"]
         except (Exception, SystemExit) as exc:
             box[RAISED] = exc
             return []
