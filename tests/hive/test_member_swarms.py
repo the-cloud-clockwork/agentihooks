@@ -156,6 +156,24 @@ def test_remove_after_create_leaves_the_signer_record_without_the_hive_and_a_sec
     assert fake.written == [SIGNER, SIGNER]
 
 
+def test_hive_remove_after_create_unlists_the_hive_and_a_second_hive_remove_still_passes(monkeypatch):
+    for name in ("drain", "revoke", "unregister", "unmanifest", "unbank"):
+        monkeypatch.setattr(remove, name, lambda *args: [])
+    monkeypatch.setattr(remove.machine, "forget", lambda *args: [])
+    fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
+    bao = _bao(fake)
+    member_swarms.assign(bao, SIGNER, ["m1"], ("rig",))
+    store = cast("RedisStore", None)
+    assert remove.remove(store, bao, _unlisting(), remove.Host()) == [
+        f"signer: unlisted m1 from the hub signer record {SIGNER}"
+    ]
+    assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}
+    assert remove.remove(store, bao, _unlisting(), remove.Host()) == [
+        f"signer: the hub signer record {SIGNER} lists no member swarms for m1"
+    ]
+    assert fake.written == [SIGNER, SIGNER]
+
+
 def test_remove_writes_nothing_on_a_dry_run_or_without_a_hub_signer_path_and_says_which():
     fake = Bao({SIGNER: {"member_swarms": {"m1": ["rig"]}}})
     assert _signer_step(_bao(fake), _unlisting(dry_run=True)) == [
