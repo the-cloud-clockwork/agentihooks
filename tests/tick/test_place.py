@@ -10,7 +10,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import LedgerCalls, SpawnRuntimeCalls
+from scripts.tick.adapters.calls import LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
 from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -133,9 +133,16 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
     )
 
 
-def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
+def _run(
+    group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tools: Any = None
+) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
-    return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0), fake_tools())))
+    ctx = Context(_State(state), Deadline.after(60.0), tools or fake_tools())
+    return actions(engine.run_group(group, ctx))
+
+
+def _store_writes(tools: Any) -> list[object]:
+    return [call.args[0] for call in tools.coordination.calls if call.operation == "store_write"]
 
 
 @pytest.fixture
@@ -272,11 +279,12 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("places", "tick", ROWS),
         "panic read",
         ("enter pass", calm[7][5]),
-        ("spawn", "sw", config, store, calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
+        ("spawn", "sw", config, calm[7][3], calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
         ("leave pass", calm[7][5]),
-        ("delete", "due key"),
     ]
     assert isinstance(calm[7][-1], Deadline)
+    assert isinstance(calm[7][3], SpawnStoreCalls)
+    assert calm[7][3].deadline is calm[7][4].deadline
     assert isinstance(calm[7][4], LedgerCalls)
     assert isinstance(calm[7][5], SpawnRuntimeCalls)
     assert calm[7][5].deadline is calm[7][4].deadline
@@ -306,15 +314,25 @@ def test_a_panic_holds_preempt_and_spawn(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_spawn_waits_until_the_tick_places(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch)
+    tools = fake_tools()
+    found = _run(place.PLACEMENT, _tick(calm, places=False), _pass(calm), monkeypatch, tools)
     assert found == ["ran rank_writes", "ran bottleneck remedy", "ran preempt"]
-    assert ("delete", "due key") not in calm
+    assert _store_writes(tools) == []
 
 
 def test_a_paused_swarm_does_not_spawn(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
-    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, "paused"), monkeypatch)
+    tools = fake_tools()
+    found = _run(place.PLACEMENT, _tick(calm), _pass(calm, "paused"), monkeypatch, tools)
     assert found == ["ran rank_writes", "ran bottleneck remedy"]
-    assert ("delete", "due key") not in calm
+    assert _store_writes(tools) == []
+
+
+def test_a_spawning_pass_clears_its_due_mark_through_the_coordination_port(
+    calm: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = fake_tools()
+    _run(place.PLACEMENT, _tick(calm), _pass(calm), monkeypatch, tools)
+    assert _store_writes(tools) == ["redis.delete"]
 
 
 def test_a_held_exception_skips_every_placement_step(calm: list[Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -636,7 +654,10 @@ def test_the_spawn_step_hands_the_spawn_pass_its_step_deadline(
 
     [found] = [entry for entry in calm if isinstance(entry, tuple) and entry[0] == "spawn"]
     ledger, runtime = found[4], found[5]
-    assert found == ("spawn", "sw", state["config"], state["store"], ledger, runtime, ROWS, "doc", 7, deadline)
+    store = found[3]
+    assert found == ("spawn", "sw", state["config"], store, ledger, runtime, ROWS, "doc", 7, deadline)
+    assert isinstance(store, SpawnStoreCalls) and store.port is tools.coordination
+    assert store.deadline is ledger.deadline
     assert isinstance(ledger, LedgerCalls) and ledger.port is tools.ledger
     assert isinstance(runtime, SpawnRuntimeCalls) and runtime.port is tools.runtime
     assert runtime.deadline is ledger.deadline
