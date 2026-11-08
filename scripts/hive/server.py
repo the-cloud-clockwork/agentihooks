@@ -75,7 +75,7 @@ def _reply(exc: auth.HiveError) -> str:
     """The refusal text a caller sees; a store refusal's own text goes to the server log only."""
     if not isinstance(exc, auth.StoreRefused):
         return str(exc)
-    print(f"hive endpoint refused a refresh: {exc}", file=sys.stderr, flush=True)
+    print(f"hive endpoint refused a refresh: {exc}", file=sys.stderr)
     return exc.reply
 
 
