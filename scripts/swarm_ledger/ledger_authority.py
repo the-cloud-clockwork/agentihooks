@@ -26,7 +26,7 @@ def connect(environ=None):
     return ports.swarm().store.connect(environ)
 
 
-def agent_token(admin, slug, name):
+def agent_token(admin: str, slug: str, name: str) -> str:
     return hmac.new(admin.encode(), f"{slug}\n{name}".encode(), hashlib.sha256).hexdigest()
 
 
@@ -100,6 +100,15 @@ def credential_caller(headers: Mapping[str, str], admin: str, slug: str) -> str 
     if not secret:
         return None
     return agent if _same(token, agent_token(secret, slug, agent)) else None
+
+
+def page_credential(slug: str) -> str:
+    """The ledger's page credential outside edge mode, the operator's local credential; edge mode never reads it."""
+    if environ.get("SWARM_AUTH_MODE") == "edge":
+        return ""
+    from scripts.swarm_ledger import storage
+
+    return storage.default().token(slug) or ""
 
 
 def access_operator(assertion) -> bool:

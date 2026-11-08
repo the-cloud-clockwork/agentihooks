@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/replacement.py:scripts.swarm_v2.kubernetes.replacement.x\u01c1Replacements\u01c1_launch:229a900c12fc1f7a3798171916b25e18865694715204a74d493502a971505457": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "typing.cast returns its second argument unchanged; changing its type argument from Any to None changes no runtime output."
+  }
+}

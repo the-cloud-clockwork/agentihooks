@@ -57,6 +57,12 @@ def test_ask_defaults_to_the_swarm_ledger_and_five_hits(tmp_path: Path, capsys: 
     assert (reader.slugs, answer["ledger_slug"], len(answer["hits"])) == (["own"], "own", 5)
 
 
+def test_ask_returns_at_most_the_given_limit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    reader = Reader({"notes": [{"id": f"n{i}", "text": "shared"} for i in range(7)]})
+    assert run(["ask", "shared", "--ledger", "rig", "--limit", "2"], {"AGENTIHOOKS_HOME": str(tmp_path)}, reader) == 0
+    assert len(json.loads(capsys.readouterr().out)["hits"]) == 2
+
+
 def test_a_command_is_required(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit):
         cli.main([], {}, Reader(), lambda: 0.0)
@@ -64,7 +70,9 @@ def test_a_command_is_required(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_refresh_prints_its_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert run(["refresh", "--ledger", "rig"], {"AGENTIHOOKS_HOME": str(tmp_path)}, Reader()) == 0
+    reader = Reader()
+    assert run(["refresh", "--ledger", "rig"], {"AGENTIHOOKS_HOME": str(tmp_path)}, reader) == 0
+    assert reader.slugs == ["rig"]
     assert json.loads(capsys.readouterr().out) == {
         "ledger_slug": "rig",
         "added": 3,
