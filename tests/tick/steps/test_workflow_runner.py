@@ -21,23 +21,41 @@ def test_workflow_runner() -> None:
 
 
 @pytest.mark.feature("swarm-workflow-runner")
-def test_tick_passes_claimed_snapshot_to_runner(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pathlib import Path
+def test_tick_passes_claimed_snapshot_to_runner() -> None:
     from types import SimpleNamespace
-    from unittest.mock import Mock
 
-    from scripts.tick.steps import CallStep, pass_domains, workflows
+    from scripts.tick.adapters.fakes import FakeHost, fake_tools
+    from scripts.tick.deadline import Deadline
+    from scripts.tick.steps import CallStep, pass_domains
 
-    advance = Mock(return_value=["workflow advanced"])
-    monkeypatch.setattr(workflows.workflow_runner, "advance_tasks", advance)
-    inbox = object()
-    doc = {"tasks": [{"kind": "workflow", "state": "claimed"}]}
-    config = Mock(return_value=SimpleNamespace(repo="/proof/repo"))
-    values = {"inbox": inbox, "slug": "proof", "doc": doc, "store": SimpleNamespace(config=config)}
+    task = {"id": "work", "kind": "workflow", "state": "claimed", "claimed_by": "engineer", "done": False}
+    tools = fake_tools()
+    assert isinstance(tools.host, FakeHost)
+    tools.host.answers["run"] = True
+    deadline = Deadline.after(5)
+    values = {
+        "doc": {
+            "tasks": [
+                task,
+                {**task, "kind": "code"},
+                {**task, "done": True},
+                {**task, "state": "open"},
+                {**task, "claimed_by": ""},
+            ]
+        },
+        "config": SimpleNamespace(repo="/proof/repo"),
+        "tools": tools.for_effects(frozenset({"host"})),
+        "deadline": deadline,
+    }
     found = {step.name: step for step in registry.steps()}["workflow runner"]
     assert isinstance(found, CallStep)
-    assert found.call(None, values.__getitem__) == ["workflow advanced"]
-    advance.assert_called_once_with(inbox, "proof", doc, Path("/proof/repo"))
-    config.assert_called_once_with("proof")
+    assert found.call(None, values.__getitem__) == ["workflow work started"]
+    assert len(tools.host.calls) == 1
+    assert tools.host.calls[0].args == ({"job": "workflow", "task": task, "repo": "/proof/repo"},)
+    assert tools.host.calls[0].deadline is deadline
     assert found.needs == frozenset({"planning and phase pass", "ledger state"})
-    assert found.reads == pass_domains("inbox", "slug", "doc", "store")
+    assert found.reads == pass_domains("doc", "config")
+    values["deadline"] = Deadline.after(-1)
+    with pytest.raises(TimeoutError, match="tool deadline expired"):
+        found.call(None, values.__getitem__)
+    assert len(tools.host.calls) == 1

@@ -23,12 +23,12 @@ def definition() -> schema.Workflow:
                     "intent": "Prove tick advancement",
                     "head": "build",
                     "max_iterations": 2,
-                    "exit": "review.pass",
+                    schema.EXIT: "review.pass",
                     "on_exhausted": "block",
                 },
                 "stages": {
                     "build": {"profile": "engineer", "input": ["case"], "next": {"pass": "review"}},
-                    "review": {"profile": "judge", "input": ["build"], "next": {"pass": "exit", "retry": "build"}},
+                    "review": {"profile": "judge", "input": ["build"], "next": {"pass": schema.EXIT, "retry": "build"}},
                 },
             }
         )
