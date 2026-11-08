@@ -465,7 +465,9 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
     assert publish["run"] == 'bash deploy/worker/release-hive.sh "$IMAGE" "$RELEASE" "$LATEST" "$GITHUB_SHA"\n'
 
 
-def release_hive(tmp_path, *, version, candidate="not found", latest="true"):
+def release_hive(
+    tmp_path: Path, *, version: str, candidate: str = "not found", latest: str = "true", newest: str = "v2.1.7"
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -477,12 +479,21 @@ def release_hive(tmp_path, *, version, candidate="not found", latest="true"):
         '  echo "ERROR: $4: $answer" >&2; exit 1\nfi\n'
     )
     (tools / "docker").chmod(0o755)
+    (tools / "git").write_text(
+        '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$GIT_LOG"\n'
+        '[[ "$1 $2 $3 $4" == "ls-remote --tags --refs origin" ]] || exit 2\n'
+        '[[ "$FAKE_NEWEST" == unreachable ]] && { echo "fatal: unable to access origin" >&2; exit 128; }\n'
+        'for tag in v2.1.6 v2.1.7 v2.1.7rc1 "$FAKE_NEWEST" v2.1.10-beta; do printf "%040d\\trefs/tags/%s\\n" 0 "$tag"; done\n'
+    )
+    (tools / "git").chmod(0o755)
     env = {
         **os.environ,
         "PATH": f"{tools}:{os.environ['PATH']}",
         "COMMAND_LOG": str(log),
+        "GIT_LOG": str(tmp_path / "git"),
         "FAKE_VERSION": version,
         "FAKE_CANDIDATE": candidate,
+        "FAKE_NEWEST": newest,
     }
     result = subprocess.run(
         ["bash", str(ROOT / "deploy/worker/release-hive.sh"), "registry/hive", "v2.1.7", latest, "abc123"],
@@ -532,6 +543,33 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
         *(release if latest == "true" else []),
         "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123",
     ]
+
+
+@pytest.mark.parametrize("newest", ["v2.1.8", "v2.1.10", "v3.0.0"])
+@pytest.mark.parametrize("candidate", ["not found", "published"])
+def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_version(
+    tmp_path: Path, newest: str, candidate: str
+) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate=candidate, newest=newest)
+    assert result.returncode == 0, result.stderr
+    assert all(":release " not in command for command in commands)
+    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
+    assert f"the newest release is {newest}, not v2.1.7" in result.stdout
+    assert (tmp_path / "git").read_text().splitlines() == ["git ls-remote --tags --refs origin"]
+
+
+def test_a_release_the_image_job_did_not_name_latest_reads_no_tags(tmp_path: Path) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", latest="false")
+    assert result.returncode == 0, result.stderr
+    assert not (tmp_path / "git").exists()
+    assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
+
+
+def test_a_failed_newest_release_read_fails_before_moving_any_tag(tmp_path: Path) -> None:
+    result, commands = release_hive(tmp_path, version="not found", candidate="published", newest="unreachable")
+    assert result.returncode != 0
+    assert "unable to access" in result.stderr
+    assert all("imagetools create" not in command for command in commands)
 
 
 @pytest.mark.parametrize(("version", "candidate"), [("unauthorized", "not found"), ("not found", "unauthorized")])
