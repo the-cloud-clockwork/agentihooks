@@ -1,5 +1,6 @@
 import dataclasses
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -136,15 +137,42 @@ def test_a_new_visit_resets_the_stage_count():
     assert state["runs"]["build"] == 1
 
 
-def test_a_free_text_stage_exit_ends_the_stage_when_the_stub_says_yes():
+def test_a_free_text_stage_exit_ends_the_stage_when_the_stub_says_yes() -> None:
     definition = simple(head="scout")
     check = answers(True)
-    state = machine.advance(definition, machine.start(definition), "scout", "retry", {"points": 3}, check)
+    state = machine.advance(definition, machine.start(definition), "scout", "pass", {"points": 3}, check)
 
     assert check.calls == [("every point of the case has cited evidence", {"points": 3})]
     assert state["stage"] == "evidence-verdict"
     assert state["iterations"] == 0
     assert state["notes"] is None
+
+
+@pytest.mark.parametrize("outcome", ["retry", "enhance"])
+@pytest.mark.parametrize("visit", [1, 2])
+def test_a_nonpassing_stage_never_consults_its_exit_check(outcome: str, visit: int) -> None:
+    definition = simple(head="scout")
+    check = Mock(return_value=True)
+    current = definition.stages["scout"]
+
+    result = machine.stage_outcome(current, visit, outcome, [{"status": "ok"}, {"status": "retry"}], check)
+
+    check.assert_not_called()
+    assert result == (None if visit < current.iterations else outcome)
+
+
+def test_a_stage_with_a_retried_run_stays_open_despite_an_accepting_exit_check() -> None:
+    definition = simple(head="scout")
+    check = Mock(return_value=True)
+    outputs = [{"status": "ok"}, {"status": "retry"}]
+
+    state = machine.advance(definition, machine.start(definition), "scout", "retry", outputs, check)
+
+    check.assert_not_called()
+    assert state["stage"] == "scout"
+    assert state["status"] == "running"
+    assert state["visit"] == 1
+    assert state["outputs"]["scout"] == outputs
 
 
 def test_a_free_text_stage_exit_that_says_no_runs_the_stage_again():

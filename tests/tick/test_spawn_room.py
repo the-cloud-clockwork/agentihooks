@@ -160,6 +160,25 @@ def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier(
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
+def test_spawn_starts_when_its_needs_are_cut_while_a_step_it_does_not_need_still_runs() -> None:
+    release, seen = Event(), []
+    steps = (
+        Step("collect", "agents", _stuck(release)),
+        Step("intent check", "agents", _stuck(release)),
+        Step("reap", "agents", needs=frozenset({"collect"})),
+        Step("spawn", "place", _left(seen), frozenset({"reap"})),
+    )
+    try:
+        with pool.running(workers=4, critical_s=1.0, reserves={"spawn": 0.6}):
+            records = {record.name: record for record in engine.run_graph(steps, _ctx())}
+    finally:
+        release.set()
+    assert records["reap"].skipped
+    assert records["spawn"].outcome == engine.OK
+    assert len(seen) == 1 and 0.3 < seen[0] <= 0.6
+
+
+@pytest.mark.feature("swarm-tick-spawn-reserve")
 def test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn() -> None:
     with pool.running() as found:
         assert dict(found.reserves) == {"spawn": budgets.CRITICAL_S - budgets.SPAWN_START_S}

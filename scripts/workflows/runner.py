@@ -20,7 +20,7 @@ class StageResult:
 
 
 class StageLauncher(Protocol):
-    def launch(self, stage: Stage, inputs: dict, folder: Path) -> StageResult: ...
+    def launch(self, stage: Stage, inputs: dict[str, Any], folder: Path) -> StageResult: ...
 
 
 @dataclass(frozen=True)

@@ -184,8 +184,8 @@ def ledger_doc(files: list[Path]) -> dict:
 
 
 def page_html() -> str:
-    values = {"TOKEN": "", "PAGE": "0" * 12, "SLUG": "artifact-sanity", "PORT": "9", "TITLE": "Artifact sanity"}
-    return re.sub(r"__LEDGER_(TOKEN|PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], SHELL.read_text())
+    values = {"PAGE": "0" * 12, "SLUG": "artifact-sanity", "PORT": "9", "TITLE": "Artifact sanity"}
+    return re.sub(r"__LEDGER_(PAGE|SLUG|PORT|TITLE)__", lambda m: values[m.group(1)], SHELL.read_text())
 
 
 def assets() -> dict[str, Path]:

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_session:ffb6c55b96808145f6bcf356ad543a6587cf1fa0d57c8b4a269bd36277365828": {
+    "reader": "standards_reader",
+    "reason": "Changes only the case of the Origin name read from self.headers; post_session is reached only through do_POST, where self.headers is an http.client.HTTPMessage whose get matches names case insensitively, so no output changes."
+  }
+}
