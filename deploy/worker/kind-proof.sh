@@ -69,9 +69,25 @@ else
   worker_image=local/worker-base:dev
   docker build -f docker/swarm-node/Dockerfile -t "$worker_image" .
 fi
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" --output "type=image,name=$image,push=true,unpack=false" .
+hive_layers=()
+if [[ -n ${HIVE_LAYER_CACHE:-} ]]; then
+  if [[ -f $HIVE_LAYER_CACHE/index.json ]]; then
+    hive_layers+=(--cache-from "type=local,src=$HIVE_LAYER_CACHE")
+  fi
+  if [[ ${HIVE_LAYER_CACHE_HIT:-} != true ]]; then
+    hive_layers+=(--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed")
+  fi
+fi
+docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" \
+  --build-arg AGENTIHOOKS_SOURCE=local "${hive_layers[@]}" --output "type=image,name=$image,push=true,unpack=false" .
 docker image inspect --format '{{.Id}}' "$image" > "$out/image.txt"
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
+if [[ -n ${HIVE_LAYER_CACHE:-} && -d $HIVE_LAYER_CACHE.next ]]; then
+  if [[ -d $HIVE_LAYER_CACHE ]]; then
+    rm -r -- "${HIVE_LAYER_CACHE:?}"
+  fi
+  mv "$HIVE_LAYER_CACHE.next" "$HIVE_LAYER_CACHE"
+fi
 wait "$cluster_pid"
 in_pod() {
   kubectl run "$1" --image="$image" --restart=Never --attach --rm --quiet --pod-running-timeout=120s --overrides="$(python3 -c '

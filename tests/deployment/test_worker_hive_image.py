@@ -129,7 +129,7 @@ def test_kind_proof_builds_the_checkout_and_reuses_layers_without_skipping_the_p
     assert '"${hive_layers[@]}"' in hive
     proof = PROOF.read_text()
     assert '--cache-from "type=local,src=$HIVE_LAYER_CACHE"' in proof
-    assert '--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max"' in proof
+    assert '--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed"' in proof
     steps = hive_jobs()["kind"]["steps"]
     restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
     save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
