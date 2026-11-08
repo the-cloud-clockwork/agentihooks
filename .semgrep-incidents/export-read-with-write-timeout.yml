@@ -3,9 +3,8 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A full ledger export read runs under the 10 second request timeout meant for writes and small reads. On
-      8 November from 21:03 UTC the rig-grade-swarm export was about 41 MB and every controller pass timed out
-      reading it, so no launch claim could land. Read a full export under EXPORT_TIMEOUT.
+      A full ledger export read runs under the 10 second request timeout meant for writes and small reads, and a
+      large export never finishes inside it. Read a full export under EXPORT_TIMEOUT.
     paths:
       include:
         - /scripts/
@@ -13,3 +12,28 @@ rules:
     pattern-either:
       - pattern: ResourceClient($BASE, $CREDENTIALS, REQUEST_TIMEOUT).request($SLUG, "export", ...)
       - pattern: ResourceClient($BASE, $CREDENTIALS, $LEDGER.REQUEST_TIMEOUT).request($SLUG, "export", ...)
+  - id: view-start-without-export-retry
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The tick view is read under the short snapshot timeout and a timeout falls straight to the stored view, so a
+      full export after a restart or a stale view never fits and no pass ever stores a view. Hand a failed short
+      read to _read_long_or_hold_stored, which reads again under EXPORT_TIMEOUT_S.
+    paths:
+      include:
+        - /scripts/swarm/cli.py
+        - export-read-with-write-timeout.py
+    patterns:
+      - pattern: |
+          try:
+              ...
+              $VIEW.start($SLUG, $SERVICE, $CLIENT.SNAPSHOT_TIMEOUT_S)
+              ...
+          except OSError as $EXC:
+              ...
+      - pattern-not: |
+          try:
+              ...
+          except OSError as $EXC:
+              ...
+              _read_long_or_hold_stored(...)
