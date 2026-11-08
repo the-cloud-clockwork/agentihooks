@@ -64,7 +64,7 @@ shutil.rmtree(sys.argv[1])
 PY
 }
 trap cleanup EXIT
-trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2' ERR
+trap 'status=$?; echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $status)" >&2; if [[ "$BASH_COMMAND" == "docker build "* ]]; then tail -n 40 "$output/build.log" "$output/rebuild.log" >&2 2>/dev/null || true; fi' ERR
 
 bash "$context/docker/swarm-node/scan.sh" --pull-scanner > "$output/scanner-pull.log" 2>&1 &
 scanner_pid=$!
