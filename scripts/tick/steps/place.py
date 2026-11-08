@@ -58,7 +58,6 @@ PLACED = frozenset({AGENTS, TASKS})
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
 OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
-UNNAMED_BRANCHES = frozenset({"", "dev", "main", "master", "v1"})
 
 
 def _quota_notice(tick: Any, get: Get) -> Any:
@@ -525,8 +524,8 @@ def _prepare(
             "claimed_by": name,
             "workspace": str(timing.timed(ledger_workspace.scaffold, slug, task, doc)),
         }
-        if task.get("branch", "") in UNNAMED_BRANCHES:
-            fields["branch"] = plain(name)
+        if not task.get("branch") or task["branch"] in continuation.PROTECTED:
+            fields["branch"] = "" if lives else plain(name)
         kind = config.lanes.get(lane, {}).get("kind", "")
         if kind not in ("", "auto") and not task.get("kind"):
             fields["kind"] = kind
