@@ -604,7 +604,9 @@
       "seam": "the tick view step in scripts.tick.steps.host with its budget from scripts.tick.steps.budgets, and the wrapper pass in scripts.swarm.cli.run_tick",
       "tests": [
         "tests/tick/test_late_view.py::test_the_view_budget_covers_the_measured_ledger_read",
-        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running"
+        "tests/tick/test_late_view.py::test_a_late_view_keeps_events_metrics_and_heartbeat_running",
+        "tests/tick/test_late_view.py::test_an_abandoned_view_skips_the_stall_watch_and_the_pass_ends",
+        "tests/tick/test_late_view.py::test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs"
       ]
     },
     {
