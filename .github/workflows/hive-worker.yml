@@ -55,10 +55,25 @@ jobs:
             sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
           fi
           kind version
+      - name: Restore the worker hive image layers
+        id: layers
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/worker-hive-layers
+          key: worker-hive-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('deploy/worker/Dockerfile', 'deploy/worker/Dockerfile.dockerignore', 'pyproject.toml') }}
+          restore-keys: worker-hive-layers-${{ runner.os }}-${{ runner.arch }}-
       - name: Build the worker image while kind starts, then prove registration and order acknowledgement
         env:
           AGENTIHOOKS_REF: ${{ github.sha }}
+          HIVE_LAYER_CACHE: ${{ runner.temp }}/worker-hive-layers
+          HIVE_LAYER_CACHE_HIT: ${{ steps.layers.outputs.cache-hit }}
         run: bash deploy/worker/kind-proof.sh
+      - name: Save the worker hive image layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/worker-hive-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Retain proof output
         if: always()
         uses: ./.github/actions/retry-upload
