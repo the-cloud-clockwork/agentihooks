@@ -1485,7 +1485,7 @@ def probe_command(store, args):
         print(found.line())
 
 
-def cmd_status(store, args):
+def cmd_status(store: RedisStore, args: argparse.Namespace) -> None:
     if args.json:
         store.config(args.slug)
         print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
@@ -1516,8 +1516,12 @@ def cmd_status(store, args):
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
+    from scripts.hive.launch import live_hives
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
+    record: dict[str, Any] = capacity.read(store, config.slug)
+    host: dict[str, Any] = record.get("host") or {}
+    held += admission.view_lines(live_hives(store), {"host room": host.get("room")})
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1604,6 +1608,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.hive import admission, launch
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1614,15 +1619,23 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
+    scaled: dict[str, Any] = decision or {}
+    host: dict[str, Any] = scaled["host"]
+    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    others: dict[str, int | None] = {"quota seats": capacity.quota_seats(inputs), "host room": host["room"]}
+    admitted = admission.view_lines(hives, others)
     if args.json:
+        rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+        shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
         print(
             json.dumps(
-                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision, **slots}, indent=2
+                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **scaled, **slots, **shown},
+                indent=2,
             )
         )
         return
     local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
-    print("\n".join([*autoscale_lines(config, decision), *local]))
+    print("\n".join([*autoscale_lines(config, decision), *local, *admitted]))
 
 
 def cmd_names(store, args):

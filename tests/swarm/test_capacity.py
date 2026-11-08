@@ -2190,6 +2190,41 @@ def test_the_autoscale_command_prints_exact_output_for_an_unknown_swarm(tmp_path
     assert (parsed.fixture, parsed.json) == ("", False)
 
 
+def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(capsys, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: None)
+    readings = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
+    inputs = capacity.fixture_inputs(readings)
+    monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
+    hives = [
+        {"id": "anton", "room": 0, "limit": "cpu: load high", "refusal": "cpu: load high"},
+        {"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"},
+    ]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    assert capacity.quota_seats(inputs) == 10
+    unknown = SwarmConfig("new", "", max_eng=0, max_ci=0)
+    _, decision = capacity.autoscaled(unknown, inputs, capacity.tick_host(inputs))
+    binding = "binding limit hive admission, room 0: hive anton cpu: load high; hive workstation max agents: 6 of 6"
+    cli.main(["new", "autoscale"])
+    assert capsys.readouterr().out.splitlines() == [
+        *cli.autoscale_lines(unknown, decision),
+        "hive anton  admission room 0  cpu: load high",
+        "hive workstation  admission room 0  max agents: 6 of 6",
+        binding,
+    ]
+    cli.main(["new", "autoscale", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["hive_admission"] == [
+        {"hive": "anton", "room": 0, "limit": "cpu: load high"},
+        {"hive": "workstation", "room": 0, "limit": "max agents: 6 of 6"},
+    ]
+    assert shown["binding"] == binding
+
+
 def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path, monkeypatch):
     from scripts.swarm import runtime as module
 

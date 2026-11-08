@@ -107,11 +107,19 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)
+        hive["limit"] = f"{found.reason}: {found.detail}"
         if hive["prefer"]:
             ranked = admission.capped(admission.room(reading, pending=held, first=True), used, hive["max_agents"])
             hive[placement.FIRST_ROOM] = ranked.room
             hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
+
+
+def live_hives(store: RedisStore) -> list[dict[str, Any]]:
+    """The loaded hives whose heartbeat is live."""
+    now = lease.now_ms(store)
+    loaded: list[dict[str, Any]] = loaded_hives(store)
+    return [hive for hive in loaded if registry.live(hive, now)]
 
 
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:

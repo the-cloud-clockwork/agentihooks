@@ -464,6 +464,13 @@ def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
     return max(0, host["room"] - spent(host["granted_at"]))
 
 
+def quota_seats(inputs: ScaleInputs) -> int:
+    """The free quota seats autoscale places against, warned accounts and API keys left out."""
+    warned: dict[tuple[str, str], Any] = inputs.warned
+    free: dict[str, int] = _placeable(_open(inputs.observations, warned))
+    return sum(free.values())
+
+
 def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
     if config.scaling != AUTO_SCALING:
         return config, None

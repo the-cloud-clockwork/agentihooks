@@ -116,6 +116,24 @@ def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup,
     assert hives["remote"]["room"] == 3
 
 
+def test_each_loaded_hive_names_its_admission_limit_and_live_hives_drop_stale_ones(setup, monkeypatch):
+    from scripts.hive import launch, registry
+    from scripts.swarm import commands, lease
+    from tests.hive.test_controller_launch import write_hive
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    write_hive(setup, id="workstation", ui="yes", max_agents=1)
+    local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 1)
+    write_hive(setup, id="stale", heartbeat_at=lease.now_ms(setup.store) - 2 * registry.LIVE_MS)
+    hives = {row["id"]: row for row in launch.loaded_hives(setup.store)}
+    assert hives["remote"]["limit"] == (
+        "ram: 22550 of 100000 MB available, 850 MB per agent, fits 3 more under the 80 percent line"
+    )
+    assert hives["workstation"]["limit"] == hives["workstation"]["refusal"] != ""
+    assert sorted(row["id"] for row in launch.live_hives(setup.store)) == ["remote", "workstation"]
+
+
 def test_each_claim_journals_the_agent_names_it_counted(setup, monkeypatch, capsys):
     from scripts.swarm import lease
 

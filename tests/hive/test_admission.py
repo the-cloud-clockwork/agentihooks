@@ -260,6 +260,49 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
     )
 
 
+def hive_row(name, room, limit, refusal=""):
+    return {"id": name, "room": room, "limit": limit, "refusal": refusal}
+
+
+def test_hive_lines_name_each_hive_room_and_its_limit():
+    hives = [hive_row("anton", 2, "ram: fits 2 more"), hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    assert admission.hive_lines(hives) == [
+        "hive anton  admission room 2  ram: fits 2 more",
+        "hive vm  admission room 0  cpu: busy",
+    ]
+
+
+def test_binding_names_hive_admission_and_each_refusal_when_no_hive_has_room():
+    hives = [
+        hive_row("anton", 0, "cpu: load high", "cpu: load high"),
+        hive_row("workstation", 0, "max agents: 6 of 6", "max agents: 6 of 6"),
+        hive_row("vm", 0, "disk: low", "disk: low"),
+    ]
+    others = {"quota seats": 9, "host room": 4, "unknown": None}
+    assert admission.binding(hives, others) == (
+        "binding limit hive admission, room 0: hive anton cpu: load high; "
+        "hive workstation max agents: 6 of 6; hive vm disk: low"
+    )
+    assert admission.binding(hives, {"host room": 0}) == admission.binding(hives, {})
+
+
+def test_binding_names_the_smallest_room_when_hives_have_room():
+    hives = [hive_row("anton", 2, "ram: fits 2"), hive_row("vm", 3, "cpu: fits 3")]
+    assert admission.binding(hives, {"quota seats": 9, "host room": 4}) == "binding limit host room, room 4"
+    assert admission.binding(hives, {"quota seats": 1, "host room": None}) == "binding limit quota seats, room 1"
+    assert admission.binding(hives, {"quota seats": 9}) == "binding limit hive admission, room 5"
+    assert admission.binding(hives, {"quota seats": 5}) == "binding limit hive admission, room 5"
+
+
+def test_view_lines_join_hive_lines_and_the_binding_line_and_stay_empty_without_hives():
+    hives = [hive_row("vm", 0, "cpu: busy", "cpu: busy")]
+    assert admission.view_lines(hives, {"host room": 3}) == [
+        "hive vm  admission room 0  cpu: busy",
+        "binding limit hive admission, room 0: hive vm cpu: busy",
+    ]
+    assert admission.view_lines([], {"host room": 3}) == []
+
+
 def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
     from scripts.hive import placement_waits
     from scripts.swarm import cli, status
