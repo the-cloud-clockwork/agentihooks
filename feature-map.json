@@ -3317,6 +3317,22 @@
         "tests/codex_session/test_attach.py::test_a_viewer_whose_seat_moved_on_is_stopped",
         "tests/codex_session/test_attach.py::test_a_connected_record_whose_server_process_died_stops_the_viewer"
       ]
+    },
+    {
+      "id": "hub-import-core",
+      "origin": "operator",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
+      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
+        "tests/profiles/test_hub_import.py::test_settings_remove_absolute_paths_but_keep_environment_references",
+        "tests/profiles/test_hub_import.py::test_dry_run_reports_the_same_files_without_writing",
+        "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
+        "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
+        "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
+        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them"
+      ]
     }
   ],
   "unmapped_rules": [
