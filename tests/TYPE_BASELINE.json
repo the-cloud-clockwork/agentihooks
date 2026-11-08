@@ -51,7 +51,7 @@
   "hooks/context/inbox_delivery.py": 59,
   "hooks/context/injection_trace.py": 96,
   "hooks/context/kubectl_mutation_guard.py": 31,
-  "hooks/context/ledger_decision.py": 58,
+  "hooks/context/ledger_decision.py": 53,
   "hooks/context/ledger_request.py": 50,
   "hooks/context/local_test_guard.py": 52,
   "hooks/context/master_coding.py": 9,

@@ -14,7 +14,7 @@ cleanup() {
     kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
     kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
-  kill ${init_pid:-} ${tools_pid:-} 2>/dev/null || true
+  kill ${init_pid:-} ${tools_pid:-} ${browser_pid:-} 2>/dev/null || true
   docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
   kind delete cluster --name "$cluster"
 }
@@ -90,6 +90,8 @@ in_pod init 'agentihooks init --profile engineer && grep -qx "<!-- profile: engi
 init_pid=$!
 in_pod tools 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(getent passwd worker | cut -d: -f7)" = /bin/bash && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' &
 tools_pid=$!
+in_pod browser 'cd "$(mktemp -d)" && npm install --no-save --no-audit --no-fund playwright@1.65.0 >/dev/null && npx playwright install --only-shell chromium >/dev/null && node -e "const {chromium} = require(\"playwright\"); (async () => { const browser = await chromium.launch(); const page = await browser.newPage({viewport: {width: 1920, height: 1080}}); await page.goto(\"about:blank\"); const size = await page.evaluate(() => [innerWidth, innerHeight].join(\" by \")); await browser.close(); if (size !== \"1920 by 1080\") throw new Error(size); console.log(\"headless browser loaded about:blank at \" + size); })().catch((error) => { console.error(error); process.exit(1); });"' &
+browser_pid=$!
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -139,6 +141,7 @@ printf '%s' "$member_env" | kubectl create secret generic hive-member --from-fil
 unset member_env
 wait "$init_pid"
 wait "$tools_pid"
+wait "$browser_pid"
 sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
   --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=localhost:5001/agentihooks-hive-worker \
