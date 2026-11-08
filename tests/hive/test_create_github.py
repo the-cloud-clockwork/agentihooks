@@ -115,6 +115,17 @@ def test_squash_merges_without_auto():
     assert run.calls == [["gh", "pr", "merge", PR, "--squash"]]
 
 
+def test_the_merge_queue_reads_and_mutation_are_exactly_these() -> None:
+    assert create_github.QUEUED == 'any(.[]; .type == "merge_queue")'
+    assert create_github.PULL == (
+        "query($url: URI!) { resource(url: $url) { ... on PullRequest { id headRefOid mergeQueueEntry { id } } } }"
+    )
+    assert create_github.ENQUEUE == (
+        "mutation($id: ID!, $head: GitObjectID!) "
+        "{ enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } } }"
+    )
+
+
 def _tree_run(answer):
     calls = []
 
