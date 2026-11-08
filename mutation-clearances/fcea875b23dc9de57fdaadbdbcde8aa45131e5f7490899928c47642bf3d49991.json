@@ -1,0 +1,6 @@
+{
+  "scripts/tick/adapters/ledger.py:scripts.tick.adapters.ledger.x\u01c1PassLedger\u01c1update_task:cd4e93602eadbeb6b7cf1bf25366731fe7d0dc789b9d4bc546ec89ee16bae064": {
+    "reader": "standards-reader",
+    "reason": "typing.cast returns timing.timed unchanged; replacing its type argument with None changes no runtime behavior."
+  }
+}

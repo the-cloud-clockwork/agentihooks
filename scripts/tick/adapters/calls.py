@@ -60,3 +60,6 @@ class LedgerCalls:
 
     def question(self, slug: str, text: str, by: str, op_id: str) -> None:
         self.port.question(text, by, op_id, deadline=self.deadline)
+
+    def comment(self, slug: str, task_id: str, text: str, by: str) -> None:
+        self.port.comment(task_id, text, by, deadline=self.deadline)
