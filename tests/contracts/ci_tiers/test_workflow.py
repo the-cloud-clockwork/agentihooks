@@ -31,6 +31,8 @@ PULL_REQUEST = (
         "mutation-plan",
         "mutation-stats",
         "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
         "mutation-shard",
         "mutation",
         "writer-lock",
@@ -44,6 +46,8 @@ PROMOTION = (
         "mutation-plan",
         "mutation-stats",
         "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
         "mutation-shard",
         "mutation",
         "lint",
@@ -68,6 +72,7 @@ PROMOTION = (
     "writer-lock",
     "ledger-load",
     "hierarchy-cpu",
+    "tick-pattern-tree",
     "kind-due",
     "helm-kind",
     "stage-budget",
@@ -126,6 +131,8 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
                     sonar="run",
+                    probe="true",
+                    probe_shards="[0, 1]",
                 ),
             )
             del pending[name]
@@ -190,6 +197,8 @@ def test_main_pull_requests_keep_their_nonmutation_checks() -> None:
         "mutation-plan",
         "mutation-stats",
         "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
         "mutation-shard",
         "mutation",
     }

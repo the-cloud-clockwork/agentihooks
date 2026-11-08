@@ -1,0 +1,6 @@
+{
+  "scripts/targets/claude_target.py:scripts.targets.claude_target.x__pop_path:e26cb8813e64c4400c19ab8eee26ee486ae86f587435de5b58134e4e718952f0": {
+    "reader": "engineer",
+    "reason": "chain[index - 1].pop(path[index - 1], None) drops its default. chain[index] was built as chain[index - 1].get(path[index - 1]) and confirmed a dict at build time, so path[index - 1] is always a key of chain[index - 1] when this pop runs, and no earlier loop iteration touches chain[index - 1] (each iteration only pops from its own index). The default is never exercised; the result is identical for every input."
+  }
+}

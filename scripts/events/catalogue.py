@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.events.envelope import Envelope
 
@@ -47,6 +48,6 @@ def refusal(event: Envelope) -> str | None:
     return None
 
 
-def filled(entity: str, item: dict) -> dict:
-    """The item with each catalogued field it lacks set to its default; present values are kept."""
-    return {**DEFAULTS[entity], **item}
+def filled(entity: str, item: dict[str, Any]) -> dict[str, Any]:
+    """The item's catalogued fields, each one it lacks set to its default; fields outside the catalogue are left out."""
+    return {"id": item["id"], **{key: item.get(key, default) for key, default in DEFAULTS[entity].items()}}

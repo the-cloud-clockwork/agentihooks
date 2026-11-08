@@ -1,0 +1,6 @@
+{
+  "scripts/ledger_knowledge/index.py:scripts.ledger_knowledge.index.x\u01c1HashEmbedder\u01c1_vector:457e2891a90947ea1dac1ea5db27e3324963a3cc989ef8f1ea46713f94d1c21f": {
+    "reader": "Standards",
+    "reason": "Every count is scaled by the same factor and the vector is then divided by its norm, so adding two instead of one gives the same unit vector."
+  }
+}

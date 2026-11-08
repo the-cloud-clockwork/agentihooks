@@ -9,10 +9,11 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from scripts import agent_choice, front_door_route, master_claude_login
 from scripts.handoff import envelope
@@ -138,13 +139,16 @@ def _lane_default(lane, agent, chosen, config=None):
     return model_pick.ModelPick(_set(chosen.get("model")) or model, chosen.get("effort"))
 
 
-def herdr_call(args):
+def herdr_call(args: list[str]) -> dict[str, Any]:
+    """Run one herdr command, holding a host herdr slot so at most six run at once."""
     from scripts.herdr_host import _cli, binary
+    from scripts.tick import pool
 
-    if args[:2] == ["pane", "read"]:
-        done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
-        return {"text": done.stdout}
-    return _cli(args, dict(os.environ))
+    with pool.limit("herdr"):
+        if args[:2] == ["pane", "read"]:
+            done = subprocess.run([binary(), *args], capture_output=True, text=True, timeout=30, check=True)
+            return {"text": done.stdout}
+        return _cli(args, dict(os.environ))
 
 
 def herdr_target(name):
@@ -381,7 +385,7 @@ class HerdrRuntime:
         now: float,
         demand: dict | None = None,
         requirements: dict | None = None,
-        refresh: bool = True,
+        refresh: bool = False,
     ) -> dict:
         from scripts.swarm import capacity
 
@@ -591,12 +595,19 @@ class HerdrRuntime:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         return agent, reason
 
-    def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
+    def _profile_decision(
+        self,
+        config: SwarmConfig,
+        lane: str,
+        task: dict,
+        saved: dict,
+        relaunch: dict,
+        environ: dict,
+        hosted: Collection[str] = (),
+    ) -> profile_choice.ProfileDecision:
         decision = profile_choice.kept(task, saved, relaunch)
         if decision is None:
-            decision = timing.call(
-                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
-            )
+            decision = timing.call(profile_choice.choose, config, lane, task, environ, hosted)
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or self._bundle_revision())
@@ -709,7 +720,7 @@ class HerdrRuntime:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
-        decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
+        decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
@@ -1220,17 +1231,29 @@ class HerdrRuntime:
             return False
         return proc.returncode == 0
 
-    def retire(self, agent, homes=()):
+    def retire(self, agent: AgentRecord, homes: Sequence[Path] = ()) -> bool:
         """End the launch process recorded at spawn with its group and every process from the task's scratch homes,
-        then close the pane; the agent's name alone never selects a process."""
+        then close the pane; the agent's name alone never selects a process. An agent whose record names no host
+        and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
             return self._order(host, _command("retire", agent), agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)
+        if self._listed_elsewhere(agent.name):
+            return self.reap_name(agent.name)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
         if not pid and (launch := launches.find(agent.name, self.home)) is not None:
             return self.retire_process(agent, launch.pid, homes, launch.start_time)
         return self.retire_process(agent, pid, homes)
+
+    def _listed_elsewhere(self, name: str) -> bool:
+        """True when no local session holds the name and another hive's report lists it."""
+        from scripts.swarm.commands import hive_id
+        from scripts.terminate_agent import sessions
+
+        if self.hive is None or any(s.name == name for s in sessions()):
+            return False
+        return self.hive.holder(name) not in ("", hive_id())
 
     def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
         found = None
@@ -1335,19 +1358,22 @@ class HerdrRuntime:
     def refusal(self, agent):
         return self.refusals.get(agent.name, {"process": 0, "refusal": "unknown"})
 
-    def reap_name(self, name):
+    def reap_name(self, name: str) -> bool:
         from scripts.hive.orders import CommandOrder, Orders
+        from scripts.swarm.commands import hive_id
         from scripts.terminate_agent import sessions
 
         held = [s.process.pid for s in sessions() if s.name == name]
-        host = "" if held or self.hive is None else self.hive.holder(name)
-        if not host:
+        hive = self.hive
+        host = "" if held or hive is None else hive.holder(name)
+        if hive is None or host in ("", hive_id()):
             carrying = [pid for pid in held if _carries(pid, name)]
             return not self.reap(carrying).refusal and len(carrying) == len(held)
-        order = CommandOrder(f"reap:{name}", "reap", name=name)
+        identity = ",".join(hive.executions_of(host, name))
+        order = CommandOrder(f"reap:{name}:{identity}" if identity else f"reap:{name}", "reap", name=name)
         reaped = self._order(host, order, name)
         if reaped:
-            Orders(self.hive.redis).forget(host, order.id)
+            Orders(hive.redis).forget(host, order.id)
         return reaped
 
     def pane_tail(self, pane_id, lines):

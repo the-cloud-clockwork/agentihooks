@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable, Collection, Mapping
 
-from scripts import session_bands
+from scripts import quota_state, session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
 from scripts.swarm import quota_handoff
 from scripts.swarm.capacity import Account, offered
@@ -39,6 +39,12 @@ class SecretKeys:
         return frozenset(key for key in data if KEY.fullmatch(key))
 
 
+def draining(harness: str, five: float | None, week: float | None) -> bool:
+    """In a swarm an account takes no new hive agent once its week is at or under ten percent left, or, for Claude,
+    its five hour window at or under five percent."""
+    return quota_state.draining(week) or (harness != "codex" and quota_state.draining(five, session_bands.HANDOFF_FIVE))
+
+
 class AccountRoute:
     """An unobserved key keeps the launch cap; an observed key's quota band can only lower it."""
 
@@ -51,11 +57,13 @@ class AccountRoute:
     ) -> None:
         self.keys, self.quota, self.held, self.harness = keys, quota, held, harness
 
-    def _row(self, key: str, cap: int, sessions: int, now: float) -> Account:
+    def _row(self, key: str, cap: int, sessions: int, now: float, limit: int | None) -> Account:
         reading = self.quota.reading(key, self.harness)
         if reading.state == UNKNOWN:
             return Account(self.harness, key, OPEN, sessions, None, None, cap)
-        banded = min(cap, self.quota.cap(key, self.harness))
+        drained = draining(self.harness, reading.five_left, reading.week_left)
+        band = self.quota.cap(key, self.harness)
+        banded = 0 if drained else band if limit is None else min(limit, band)
         latest = self.quota.latest(key, self.harness)
         return Account(
             self.harness,
@@ -71,7 +79,12 @@ class AccountRoute:
 
     def rows(self, cap: int, now: float) -> list[Account]:
         held = self.held()
-        return [self._row(key, cap, held.get(key, 0), now) for key in sorted(self.keys())]
+        return [self._row(key, cap, held.get(key, 0), now, cap) for key in sorted(self.keys())]
+
+    def banded_rows(self, cap: int, now: float) -> list[Account]:
+        """Each observed key at its quota band alone; an unobserved key falls back to ``cap``."""
+        held = self.held()
+        return [self._row(key, cap, held.get(key, 0), now, None) for key in sorted(self.keys())]
 
     def seats(self, cap: int, predecessor: tuple[str, str] | None = None) -> list[session_bands.Seat]:
         rows = self.rows(cap, self.quota.clock() / 1000)
@@ -90,12 +103,30 @@ class AccountRoute:
         return None if seat is None else seat.account
 
 
+class HarnessRoutes:
+    """One account route per harness: capacity rows from every harness, a launch account from its own harness."""
+
+    def __init__(self, routes: Mapping[str, AccountRoute]) -> None:
+        self.routes = routes
+
+    def rows(self, cap: int, now: float) -> list[Account]:
+        return [row for route in self.routes.values() for row in route.rows(cap, now)]
+
+    def banded_rows(self, cap: int, now: float) -> list[Account]:
+        return [row for route in self.routes.values() for row in route.banded_rows(cap, now)]
+
+    def choose(self, cap: int, planned: str | None, predecessor: tuple[str, str] | None, harness: str) -> str | None:
+        route = self.routes.get(harness)
+        return None if route is None else route.choose(cap, planned, predecessor)
+
+
 class FleetAccounts:
     """The deployed controller's quota capacity rows, read like ``capacity.accounts`` but from the approved keys, the
     fleet quota observations and the fleet reservations, never from local tokens or the local process table."""
 
-    def __init__(self, route: AccountRoute, cap: int) -> None:
+    def __init__(self, route: AccountRoute | HarnessRoutes, cap: int) -> None:
         self.route, self.cap = route, cap
 
     def __call__(self, environ: Mapping[str, str], now: float, refresh: bool) -> list[Account]:
-        return self.route.rows(self.cap, now)
+        """An observed account offers its quota band alone; the launch cap bounds only Kubernetes workers."""
+        return self.route.banded_rows(self.cap, now)

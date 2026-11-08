@@ -1,5 +1,6 @@
 import argparse
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -66,12 +67,24 @@ def _comment_step(root: Path, revision: str, grade: Path) -> list[tuple[str, lis
     return [("Python comments", [sys.executable, "-I", str(grader), "--base", str(snapshot), "--head", str(root)])]
 
 
+def _snapshot_sources(root: Path, merge_base: str, grade: Path) -> None:
+    """Write each merge base source file the size allowlist names into ``grade``, so the grader can match a moved unit."""
+    entries = json.loads((grade / ALLOWLIST).read_text())
+    for path in sorted({key.rpartition("::")[0] or key for key in entries}):
+        shown = subprocess.run(["git", "-C", str(root), "show", f"{merge_base}:{path}"], capture_output=True, text=True)
+        if shown.returncode == 0:
+            target = grade / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(shown.stdout)
+
+
 def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
     merge_base = _git(root, "merge-base", base, "HEAD")
     for name in (ALLOWLIST, GRADER):
         target = grade / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_git(root, "show", f"{merge_base}:{name}") + "\n")
+    _snapshot_sources(root, merge_base, grade)
     python = sys.executable
     steps = [
         ("ruff check", [python, "-m", "ruff", "check", *LINTED]),

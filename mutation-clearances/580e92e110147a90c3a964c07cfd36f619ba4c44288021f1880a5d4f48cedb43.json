@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/pool.py:scripts.swarm_v2.kubernetes.pool.x\u01c1WorkerPool\u01c1__call__:43347482ed023929a51c21468973343bbc6d4816cac67a35f3340cdff57852a1": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "Initial empty pods and None both credit zero usage in _quota. Required pod listing replaces that initial value before _pool; otherwise the undeclared pool returns immediately."
+  }
+}

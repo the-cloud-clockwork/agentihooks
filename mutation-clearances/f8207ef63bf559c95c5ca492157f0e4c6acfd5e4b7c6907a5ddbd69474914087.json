@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__bundle:abe67f37ce209179c73890cdd1979d04a3811234e349d4047cb4841f00fa1b52": {
+    "reader": "standards_reader",
+    "reason": "In x__bundle, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to \"XXModuleTypeXX\"); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

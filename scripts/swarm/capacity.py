@@ -8,7 +8,7 @@ from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
-from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, account_key
 from scripts.swarm import autoscale, freeze, host_budget, master_pin
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.ledger_client import pass_state
@@ -75,11 +75,12 @@ def _known(environ: dict) -> set[str]:
     return filed | set(account_sessions.token_accounts(environ).values())
 
 
-def _claude(environ: dict, now: float) -> list[Account]:
+def _claude(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
-    fresh, _ = tokens.results(environ, now)
-    observed.update({result.account: (now, result) for result in fresh})
+    if refresh:
+        fresh, _ = tokens.results(environ, now)
+        observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = _known(environ)
@@ -191,7 +192,7 @@ def _global(environ: dict, now: float) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], row["account"]) in refused:
+        if (row["harness"], account_key(f"{row['account']}")) in refused:
             cap = 0
         rows.append(
             Account(
@@ -218,15 +219,22 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
     }
-    return {(balancer.HARNESS, account) for account, result in latest.items() if balancer.refused(result)}
+    return {(balancer.HARNESS, account_key(account)) for account, result in latest.items() if balancer.refused(result)}
+
+
+def probe(environ: dict[str, str], now: float) -> list[Account]:
+    """Probe stale Claude credentials and Codex readings, writing the caches a pass reads without ``refresh``."""
+    return _claude(environ, now, True) + _codex(environ, now, True)
 
 
 def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
-    """Every account with its band cap; ``refresh`` probes stale Codex readings, which costs a Codex request."""
+    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs."""
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
+        _global(environ, now)
+        if aggregate.enabled(environ)
+        else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
     store = reservation._store(environ)
     for harness in LABELS:
@@ -254,7 +262,11 @@ def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | N
         return rows
     key = f"{ROOT}:reserved-closed:{held.harness}:{held.slug}"
     index = next(
-        (i for i, row in enumerate(rows) if (row.harness, row.name) == (held.harness, held.slug) and row.kind != API),
+        (
+            i
+            for i, row in enumerate(rows)
+            if row.harness == held.harness and account_key(row.name) == account_key(held.slug) and row.kind != API
+        ),
         None,
     )
     if index is None:
@@ -482,11 +494,13 @@ def ready_work(
     return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
 
 
-def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleInputs:
+def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:
+    """The tick's own scale inputs: ready work less fresh placement refusals, quota without a refresh, live agents."""
     from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
+    ready, _ = placement_ready(store, slug, ready, now_ms)
     observations = accounts(environ, now_ms / 1000, refresh=False)
     thresholds = quota_handoff.Thresholds.from_env(environ)
     warned = {
@@ -501,6 +515,12 @@ def live_inputs(slug: str, store, ledger, environ: dict, now_ms: int) -> ScaleIn
 
         host = deployed.worker_host(environ, slug)
     return ScaleInputs(observations, agents, demand, host, read(store, slug), warned, spent, now_ms)
+
+
+def tick_host(inputs: ScaleInputs) -> dict[str, Any] | None:
+    """The host room the tick last granted, so a preview autoscales on the room the tick spawns against."""
+    stored = inputs.previous.get("host") or {}
+    return stored if stored.get("room") is not None and "granted_at" in stored else None
 
 
 def spawn_counter(store: RedisStore, now_ms: int) -> Callable[[int], int]:
@@ -638,13 +658,17 @@ def placement_ready(
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     from scripts.hive import placement_waits
 
-    refused = placement_waits.read(store, slug)
+    refused: dict[str, dict[str, Any]] = placement_waits.read(store, slug)
     eligible, actions = {}, []
     for lane, tasks in ready.items():
         eligible[lane] = []
         for task in tasks:
             wait = refused.get(task["id"])
-            if wait and wait["lane"] == lane and now_ms - wait["seen_at"] < placement_waits.FRESH_MS:
+            if (
+                wait
+                and wait["lane"] == lane
+                and now_ms - wait.get("seen_at", wait["started_at"]) < placement_waits.FRESH_MS
+            ):
                 actions.append(f"capacity skipped {lane} task {task['id']}: fresh placement refusal: {wait['reason']}")
             else:
                 eligible[lane].append(task)

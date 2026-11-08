@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__stamp:6df7eb4c8d799cbbb771ee5d620735a501e2d36a0645cb1a40b9af05caaf0ab2": {
+    "reader": "standards_reader",
+    "reason": "In x__stamp, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}

@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import hashlib
 import json
 import os
@@ -1681,17 +1682,18 @@ def test_selected_legs_size_workers_by_the_container_cpu_quota():
     assert "-n auto" not in run
 
 
-def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_only_for_the_grader():
+def test_selected_legs_check_out_only_the_graded_commit_and_fetch_dev_on_every_leg() -> None:
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     checkouts = [step for step in steps if step.get("uses", "").startswith("actions/checkout")]
     assert [checkout["with"] for checkout in checkouts] == [{"ref": "${{ github.sha }}", "fetch-depth": 1}]
     fetch = _selected_step("Fetch the protected grader's dev head")
-    assert fetch["if"] == "steps.collection.outcome == 'success'"
+    assert "if" not in fetch
     names = [step.get("name") for step in steps]
     assert (
         names.index("Wait for the early collection")
         < names.index(fetch["name"])
         < names.index("Adopt the reused tests from the protected grader")
+        < names.index("Run the selected tests")
     )
 
 
@@ -1997,7 +1999,7 @@ def test_credential_parameters_have_readable_timing_identifiers():
     ]
 
 
-def test_tests_mutation_refines_shards_and_merges_split_units():
+def test_tests_mutation_refines_shards_and_merges_split_units() -> None:
     jobs = _mutation_workflow()["jobs"]
     refine, shard, merged = jobs["mutation-refine"], jobs["mutation-shard"], jobs["mutation"]
     assert refine["needs"] == ["mutation-plan", "mutation-stats", "admission"]
@@ -2012,7 +2014,8 @@ def test_tests_mutation_refines_shards_and_merges_split_units():
     assert upload["with"]["name"] == "mutation-measured-plan"
     assert upload["with"]["path"] == ".mutation-stats/plan.json"
     assert shard["strategy"]["matrix"]["shard"] == (
-        "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+        "${{ fromJSON(needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards"
+        " || needs.mutation-plan.outputs.shards) }}"
     )
     assert "needs.mutation-refine.result == 'success'" in shard["if"]
     names = [step.get("name") for step in shard["steps"]]
@@ -2020,23 +2023,268 @@ def test_tests_mutation_refines_shards_and_merges_split_units():
     assert plan["with"]["name"] == "mutation-measured-plan"
     assert plan["with"]["path"] == ".mutation-stats"
     assert names.index("Download the measured mutation plan") < names.index("Mutate changed Python files")
-    assert merged["needs"] == ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "admission"]
+    assert merged["needs"] == [
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "mutation-shard",
+        "admission",
+    ]
     assert "strategy" not in merged
     steps = {step.get("name"): step for step in merged["steps"]}
     assert steps["Download every mutation shard report"]["with"]["pattern"] == "mutation-report-*"
     assert "--prefix mutation-report- --shards" in steps["Merge the shard reports"]["run"]
     assert steps["Merge the shard reports"]["env"]["SHARDS"] == (
-        "${{ needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards }}"
+        "${{ needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards"
+        " || needs.mutation-plan.outputs.shards }}"
     )
     finish = steps["Fail when a shard did not finish"]
     assert "needs.mutation-shard.result != 'success'" in finish["if"]
     assert "exit 1" in finish["run"]
 
 
+def test_tests_mutation_carries_kill_memory_to_the_next_plan() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    restore = "Restore the tests that killed this branch's earlier mutants"
+    key = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"
+    for name, before in (
+        ("mutation-refine", "Refine mutation shards from measured statistics"),
+        ("mutation-shard", "Mutate changed Python files"),
+        ("mutation", "Merge the shard reports"),
+    ):
+        names = [step.get("name") for step in jobs[name]["steps"]]
+        step = jobs[name]["steps"][names.index(restore)]
+        assert step["uses"] == "actions/cache/restore@v4"
+        assert step["with"] == {"path": ".mutation-stats/killers", "key": key, "restore-keys": prefix}
+        assert step["env"] == {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"}
+        assert names.index(restore) < names.index(before)
+    shard = {step.get("name"): step for step in jobs["mutation-shard"]["steps"]}
+    forwarded = "needs.mutation-plan.outputs.forwarded != 'true'"
+    assert shard[restore]["if"] == forwarded
+    assert "if" not in {step.get("name"): step for step in jobs["mutation-refine"]["steps"]}[restore]
+    collect = shard["Collect the tests that killed mutants"]
+    assert collect["if"] == f"always() && {forwarded}"
+    assert "find .mutation-gate -path '*/killers/*' -type f -exec cp {} .mutation-killers/ \\;" in collect["run"]
+    for workflow in (".github/workflows/test.yml", ".github/workflows/mutation-preflight.yml"):
+        source = (_ROOT / workflow).read_text()
+        assert "killers" in source and "cp -t" not in source
+    upload = shard["Upload the tests that killed mutants"]
+    assert upload["if"] == f"always() && {forwarded}"
+    assert upload["with"]["name"] == "mutation-killers-${{ matrix.shard }}"
+    assert upload["with"]["path"] == ".mutation-killers/"
+    merged = [step.get("name") for step in jobs["mutation"]["steps"]]
+    steps = {step.get("name"): step for step in jobs["mutation"]["steps"]}
+    assert steps[restore]["if"] == forwarded
+    download = steps["Download the tests that killed mutants"]
+    assert download["if"] == forwarded
+    assert download["continue-on-error"] is True
+    retry = steps["Download the tests that killed mutants, attempt 2"]
+    assert retry["if"] == "steps.download-the-tests-that-killed-mutants.outcome == 'failure'"
+    assert retry["with"] == download["with"]
+    assert download["with"] == {
+        "pattern": "mutation-killers-*",
+        "path": ".mutation-stats/killers",
+        "merge-multiple": True,
+    }
+    keep = steps["Keep the tests that killed mutants for this branch's next plan"]
+    assert keep["uses"] == "actions/cache/save@v4"
+    assert keep["with"] == {"path": ".mutation-stats/killers", "key": key}
+    assert keep["if"] == "${{ !cancelled() && " + forwarded + " && hashFiles('.mutation-stats/killers/*') != '' }}"
+    assert merged.index(download["name"]) < merged.index(keep["name"]) < merged.index("Merge the shard reports")
+
+
+def _preflight_seed_steps() -> dict:
+    return {step.get("name"): step for step in _mutation_workflow()["jobs"]["mutation-refine"]["steps"]}
+
+
+def test_tests_mutation_seeds_the_first_plan_from_the_branch_preflight_kill_memory() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    names = [step.get("name") for step in jobs["mutation-refine"]["steps"]]
+    steps = _preflight_seed_steps()
+    mint = steps["Mint the token that reads the branch preflight kill memory"]
+    find = steps["Seed the kill memory from the branch preflight"]
+    keep = steps["Keep the branch preflight kill memory for this run's shards"]
+    assert not [name for name in names if "Download the branch preflight" in str(name)]
+    order = [
+        "Restore the tests that killed this branch's earlier mutants",
+        mint["name"],
+        find["name"],
+        keep["name"],
+        "Refine mutation shards from measured statistics",
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert mint["id"] == "app-token"
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["if"] == (
+        "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        " && hashFiles('.mutation-stats/killers/*') == ''"
+    )
+    assert {key: value for key, value in mint["with"].items() if key.startswith("permission-")} == {
+        "permission-actions": "read"
+    }
+    assert mint["continue-on-error"] is True
+    assert find["if"] == "steps.app-token.outcome == 'success'"
+    assert find["continue-on-error"] is True
+    assert find["env"] == {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "HEAD": "${{ github.event.pull_request.head.sha }}",
+        "BRANCH": "${{ github.head_ref }}",
+    }
+    assert keep["uses"] == "actions/cache/save@v4"
+    assert keep["if"] == "steps.preflight.outputs.id != '' && hashFiles('.mutation-stats/killers/*') != ''"
+    assert keep["continue-on-error"] is True
+    assert find["timeout-minutes"] == 3
+    prefix = "mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-"
+    assert keep["with"] == {
+        "path": ".mutation-stats/killers",
+        "key": prefix + "${{ github.run_id }}-${{ github.run_attempt }}-preflight",
+    }
+    for name in ("mutation-shard", "mutation"):
+        restore = next(step for step in jobs[name]["steps"] if step.get("name") == order[0])
+        assert restore["with"]["restore-keys"] == prefix
+
+
+@pytest.mark.parametrize(
+    ("same", "kept", "failures", "chosen"),
+    [
+        (["41"], {"41": 2, "42": 3}, 0, "41"),
+        (["41"], {"41": 0, "42": 3}, 0, "42"),
+        ([], {"42": 1}, 0, "42"),
+        (["41"], {}, 0, ""),
+        (["41"], {"41": -1, "42": 2}, 0, "42"),
+        (["41"], {"41": 2}, 1, "41"),
+        (["41"], {"41": 2}, 2, ""),
+    ],
+    ids=[
+        "same-head",
+        "same-head-without-memory",
+        "newest-on-branch",
+        "none",
+        "artifact-listing-fails",
+        "download-fails-once",
+        "download-fails-twice",
+    ],
+)
+def test_the_preflight_lookup_prefers_the_same_head_then_the_newest_branch_run(
+    tmp_path: Path, same: list[str], kept: dict[str, int], failures: int, chosen: str
+) -> None:
+    seed = _preflight_seed_steps()["Seed the kill memory from the branch preflight"]
+    done = "completed"
+    branch = [{"id": 43, "head_branch": "topic", "status": "in_progress"}] + [
+        {"id": int(run), "head_branch": "topic", "status": done} for run in ("42", "41", "40")
+    ]
+    head = [
+        {"id": 44, "head_branch": "topic", "status": "in_progress"},
+        *({"id": int(run), "head_branch": "topic", "status": done} for run in same),
+        {"id": 7, "head_branch": "other", "status": done},
+    ]
+    kept = {"43": 5, "44": 5, **kept}
+    responses = {
+        "head_sha=abc": {"workflow_runs": head},
+        "branch=topic": {"workflow_runs": branch},
+        **{
+            f"runs/{run}/artifacts": None
+            if count < 0
+            else {
+                "artifacts": [{"name": f"mutation-killers-{shard}", "expired": False} for shard in range(count)]
+                + [{"name": "mutation-killers-9", "expired": True}, {"name": "mutation-report-0", "expired": False}]
+            }
+            for run, count in kept.items()
+        },
+    }
+    (tmp_path / "responses.json").write_text(json.dumps(responses))
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "gh").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -o pipefail\n"
+        'if [[ "$1" == run ]]; then\n'
+        '  echo "download $3 $5 $7" >> "$CALLS"\n'
+        '  echo x >> "$ATTEMPTS"\n'
+        '  (( $(wc -l < "$ATTEMPTS") > FAILURES )) || exit 1\n'
+        '  mkdir -p "$9/mutation-killers-0" "$9/mutation-killers-1"\n'
+        '  echo "killer of $3" > "$9/mutation-killers-0/a"\n'
+        '  echo "killer of $3" > "$9/mutation-killers-1/a"\n'
+        '  echo "cost of $3" > "$9/mutation-killers-1/b.cost"\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "$2" >> "$CALLS"\n'
+        "python3 -c 'import json, sys\n"
+        "url = sys.argv[1]\n"
+        "found = [body for key, body in json.load(open(sys.argv[2])).items() if key in url]\n"
+        "if found and found[0] is None: sys.exit(1)\n"
+        'print(json.dumps(found[0] if found else {"artifacts": [], "workflow_runs": []}))\' "$2" "$RESPONSES"'
+        ' | jq -r "$4"\n'
+    )
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" >> "$SLEPT"\n')
+    for stub in ("gh", "sleep"):
+        (binary / stub).chmod(0o755)
+    output = tmp_path / "output"
+    work = tmp_path / "work"
+    work.mkdir()
+    result = subprocess.run(
+        ["bash", "-e", "-c", seed["run"]],
+        cwd=work,
+        env={
+            **os.environ,
+            "PATH": f"{binary}:{os.environ['PATH']}",
+            "CALLS": str(tmp_path / "calls"),
+            "ATTEMPTS": str(tmp_path / "attempts"),
+            "FAILURES": str(failures),
+            "SLEPT": str(tmp_path / "slept"),
+            "RESPONSES": str(tmp_path / "responses.json"),
+            "RUNNER_TEMP": str(tmp_path / "runner"),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_REPOSITORY": "o/r",
+            "HEAD": "abc",
+            "BRANCH": "topic",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) is (failures < 2), result.stderr
+    assert (output.read_text() if output.exists() else "") == (f"id={chosen}\n" if chosen else "")
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert calls[:2] == [
+        "repos/o/r/actions/workflows/mutation-preflight.yml/runs?head_sha=abc&event=push&per_page=20",
+        "repos/o/r/actions/workflows/mutation-preflight.yml/runs?branch=topic&event=push&per_page=20",
+    ]
+    assert not {"runs/7/artifacts", "runs/43/artifacts", "runs/44/artifacts"} & {
+        call.removeprefix("repos/o/r/actions/").partition("?")[0] for call in calls
+    }
+    killers = work / ".mutation-stats/killers"
+    if failures:
+        assert (tmp_path / "slept").read_text() == "30\n"
+    else:
+        assert not (tmp_path / "slept").exists()
+    if chosen:
+        assert calls[-1] == f"download {chosen} o/r mutation-killers-*"
+        assert {path.name: path.read_text() for path in killers.iterdir()} == {
+            "a": f"killer of {chosen}\n",
+            "b.cost": f"cost of {chosen}\n",
+        }
+        assert f"2 kill memory files of Mutation preflight run {chosen}" in result.stdout
+    else:
+        assert not killers.exists()
+    if not chosen and not failures:
+        assert "No Mutation preflight run of topic kept kill memory" in result.stdout
+        assert not [call for call in calls if call.startswith("download")]
+
+
 def test_mutation_job_runs_independently_and_keeps_its_evidence():
     spec = _mutation_workflow()
     job = spec["jobs"]["mutation-shard"]
-    assert job["needs"] == ["mutation-plan", "mutation-stats", "mutation-refine", "admission"]
+    assert job["needs"] == [
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "admission",
+    ]
     assert job["timeout-minutes"] == 26
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout"))
@@ -2144,7 +2392,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         ),
         (
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') && (needs.mutation-replan.result == 'success' || needs.mutation-probe.result == 'skipped') }}",
         ),
     )
     assert (
@@ -2187,7 +2435,8 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert mutation["strategy"] == {
         "fail-fast": False,
         "matrix": {
-            "shard": "${{ fromJSON(needs.mutation-refine.outputs.shards || needs.mutation-plan.outputs.shards) }}"
+            "shard": "${{ fromJSON(needs.mutation-replan.outputs.shards || needs.mutation-refine.outputs.shards"
+            " || needs.mutation-plan.outputs.shards) }}"
         },
     }
     for name in ("Mutate changed Python files", "Mutate dispatched Python files"):
@@ -2216,7 +2465,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ),
         (
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') && (needs.mutation-refine.result == 'success' || needs.mutation-refine.result == 'skipped' && needs.mutation-plan.outputs.stats_parts == '[0]') && (needs.mutation-replan.result == 'success' || needs.mutation-probe.result == 'skipped') }}",
         ),
     )
     assert stats["strategy"] == {
@@ -2229,6 +2478,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "Download the reused preflight report",
         "Download every part's test stats cache",
         "Download the measured mutation plan",
+        "Download the probed mutation plan",
     )
     setup = [
         step
@@ -2240,6 +2490,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
                 "Check for merged test stats",
                 "Check out the protected mutation grader",
                 "Grade the shard report from the protected grader",
+                "Restore the tests that killed this branch's earlier mutants",
+                "Collect the tests that killed mutants",
             )
         )
         and step.get("with", {}).get("path") != ".mutation-stats-cache"
@@ -2312,6 +2564,23 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+def test_the_inline_statistics_shard_downloads_the_branch_preflight_kill_memory_before_it_mutates() -> None:
+    jobs = _mutation_workflow()["jobs"]
+    plan = jobs["mutation-plan"]["steps"]
+    upload = next(step for step in plan if step.get("with", {}).get("name") == "mutation-stats-killers")
+    assert upload["with"]["path"] == ".mutation-killers-restored/"
+    stats = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in stats]
+    download = stats[names.index("Download the branch preflight kill memory")]
+    assert download["with"] == {"pattern": "mutation-stats-killers", "path": ".mutation-stats", "merge-multiple": True}
+    assert download["if"] == stats[names.index("Mutate the only shard in the statistics job")]["if"]
+    assert names.index(download["name"]) < names.index("Mutate the only shard in the statistics job")
+    shard = jobs["mutation-shard"]["steps"]
+    shared = next(step for step in shard if step.get("name") == "Download the shared mutation stats")
+    assert fnmatch.fnmatch("mutation-stats-killers", shared["with"]["pattern"])
+    assert shared["with"]["path"] == ".mutation-stats"
 
 
 def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
@@ -2429,7 +2698,9 @@ def _planner_imports(path: Path) -> set[str]:
                     and node.level == 0
                     and node.module.split(".")[0] in ("scripts", "tests")
                 }
-            else:
+            elif not (
+                isinstance(child, ast.If) and isinstance(child.test, ast.Name) and child.test.id == "TYPE_CHECKING"
+            ):
                 pending.append(child)
     return found
 
@@ -2530,6 +2801,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
         "needs.mutation-refine.result == 'success'",
+        "needs.mutation-replan.result == 'success'",
     )
     for job in (stats, mutation):
         guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
@@ -2555,7 +2827,15 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard", "mutation"} == set(local)
+    assert {
+        "mutation-plan",
+        "mutation-stats",
+        "mutation-refine",
+        "mutation-probe",
+        "mutation-replan",
+        "mutation-shard",
+        "mutation",
+    } == set(local)
     for name in ("mutation-refine", "mutation"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]

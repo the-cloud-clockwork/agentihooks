@@ -32,7 +32,7 @@ def exchange(headers: Mapping[str, str], slug: str) -> dict:
     The issuer keeps verifying today's credentials whatever AGENTIHOOKS_AUTH_LEGACY says: that switch governs the
     services that verify signed tokens, and this exchange is how a legacy holder obtains one.
     """
-    principal = authority.credential_caller(headers, "", slug)
+    principal = authority.credential_caller(headers, authority.page_credential(slug), slug)
     if principal is None and authority.controller_credential(headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:

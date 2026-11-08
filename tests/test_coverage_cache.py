@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import pytest
 from coverage import CoverageData
@@ -6,9 +7,12 @@ from coverage import CoverageData
 from tests import coverage_baseline as cache
 from tests import coverage_ratchet as ratchet
 
+pytestmark = pytest.mark.timeout(30, method="signal")
+
 
 @pytest.fixture
-def measured(tmp_path, monkeypatch):
+def measured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    monkeypatch.setattr(ratchet, "_cpus", lambda: 1)
     monkeypatch.setattr(cache, "_git", lambda repo, revision: "tree" if revision.endswith("^{tree}") else "base")
     monkeypatch.setattr(ratchet, "git", lambda *args, **kwargs: "tree" if args[-1].endswith("^{tree}") else "base")
     monkeypatch.setattr("tests.coverage_history._show", lambda repo, commit: lambda path: "one\ntwo\nthree\n")

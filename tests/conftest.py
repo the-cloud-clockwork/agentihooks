@@ -10,9 +10,10 @@ import sys
 import tempfile
 import time
 import zlib
-from collections.abc import Iterator
+from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -47,6 +48,13 @@ _real_connect_ex = socket.socket.connect_ex
 
 def _is_redis(address):
     return isinstance(address, tuple) and address[1:2] == (REDIS_PORT,)
+
+
+def _store_client(environ: MutableMapping[str, str] | None = None) -> Any:
+    """Reach the swarm Redis through the store client that tests patch, in place of the hook process client."""
+    from scripts.swarm import store
+
+    return store.redis_client(environ)
 
 
 def _refuse_redis_connect(sock, address):
@@ -304,6 +312,8 @@ def _isolate_real_user_paths(
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
     monkeypatch.setattr("hooks.context.operator_words._SHARED", [])
+    monkeypatch.setattr("scripts.swarm.hook_redis.client", _store_client)
+    monkeypatch.setattr("scripts.gates.modes.CACHE_S", 0)
     monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
     for _prefixed in (
         "hooks._redis._KEY_PREFIX",
@@ -543,9 +553,10 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
-    monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "schedule", lambda caller: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "")
     monkeypatch.setattr(timer, "guard", lambda binary: True)
+    monkeypatch.setattr(timer, "hosts_work", lambda: True)
 
 
 @pytest.fixture(autouse=True)
@@ -742,3 +753,13 @@ def _package_conditions_offline(tmp_path, monkeypatch):
         ], probed
 
     monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)
+
+
+@pytest.fixture(autouse=True)
+def _real_daemon_hive_id() -> None:
+    """Rebind the hive daemon's hive_id to the real one, which a first import under a stub may have captured."""
+    if "scripts.hive.daemon" in sys.modules:
+        from scripts.hive import daemon
+        from scripts.swarm import commands
+
+        daemon.hive_id = commands.hive_id

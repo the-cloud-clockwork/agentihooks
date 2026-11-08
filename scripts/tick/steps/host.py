@@ -18,24 +18,29 @@ from scripts.swarm import (
 )
 from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
-from scripts.tick.steps import CallStep, Left
+from scripts.tick import view as ledger_view
+from scripts.tick.engine import SLOW
+from scripts.tick.steps import CallStep, Left, pass_domains
+from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
+JUDGING = "judging"
 
 
-def held(call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], Any]:
-    """Run ``call`` with the swarm command module, skipping once a step held an exception and holding the one it raises."""
+def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
+    """Run ``call`` with the swarm command module, skipping once a step held an exception in the pass value ``box``
+    and holding the one it raises there."""
 
     def run(tick: Any, get: Get) -> Any:
-        box = get("box")
-        if "raised" in box:
+        found = get(box)
+        if "raised" in found:
             return []
         try:
             return call(import_module("scripts.swarm.cli"), get)
-        except Left:
+        except (Left, ledger_client.LedgerOffline):
             return []
         except (Exception, SystemExit) as exc:
-            box["raised"] = exc
+            found["raised"] = exc
             return []
 
     return run
@@ -65,10 +70,14 @@ def _hive_ledger(cli: Any, get: Get) -> None:
 
 def _ledger_health(cli: Any, get: Get) -> None:
     ledger, slug = get("ledger"), get("slug")
-    if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-        slug,
-        cli.now_ms(),
-        lambda: isinstance(ledger.metadata(slug), dict),  # pyright: ignore[reportUnknownMemberType]
+    if (
+        isinstance(ledger, ledger_client.LedgerClient)
+        and not outage.ledger_health(
+            slug,
+            cli.now_ms(),
+            lambda: isinstance(ledger.metadata(slug), dict),  # pyright: ignore[reportUnknownMemberType]
+        )
+        and ledger_view.stored(slug) is None
     ):
         get("box")["stop"] = ["Ledger health probe failed"]
 
@@ -108,13 +117,24 @@ def _urgent_hold(cli: Any, get: Get) -> None:
     timing.call(urgent_hold.observe, get("store"), get("slug"), get("doc"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
+def _dependency_audit(cli: Any, get: Get) -> None:
+    from scripts.swarm.health import ordering_dependencies
+
+    timing.call(ordering_dependencies.observe, get("store"), get("slug"), get("doc"))  # pyright: ignore[reportUnknownMemberType]
+
+
 def _phase_passes(cli: Any, get: Get) -> Any:
     return cli._phase_steps(get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"))
 
 
+def _planning_after_phase(cli: Any, get: Get) -> Any:
+    return cli._planning_after_phase(get("inbox"), get("store"), get("slug"), get("ledger"), get("box"))
+
+
 def _intent_check(cli: Any, get: Get) -> None:
-    get("box")["judged"] = cli._intent_pass(
-        get("inbox"), get("store"), get("slug"), get("doc"), get("ledger"), get("config")
+    judging = get(JUDGING)
+    judging["judged"] = cli._intent_pass(
+        get("inbox"), get("store"), get("slug"), judging["doc"], get("ledger"), judging["config"]
     )
 
 
@@ -122,17 +142,17 @@ def _reboot_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(reboot.boot_pass, get("slug"), get("store"), get("ledger"), get("runtime"), cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
 
 
-def _tick_call(cli: Any, get: Get) -> Any:
-    runtime = get("runtime") or cli.routed(herdr=cli.HerdrRuntime())
-    return timing.call(cli.tick, get("slug"), get("store"), get("ledger"), runtime, cli.now_ms())  # pyright: ignore[reportUnknownMemberType]
-
-
 def _outbox_migration(cli: Any, get: Get) -> None:
     timing.call(delivery.migrate_outbox, get("store"), get("slug"), get("inbox"))  # pyright: ignore[reportUnknownMemberType]
 
 
+def listed(store: Any, slug: str) -> list[Any]:
+    """Return the agents of swarm ``slug`` that have not finished, as the page relay stores them for the pass."""
+    return [a for a in timing.call(store.agents, slug) if a.state != "finished"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
 def _page_relay(cli: Any, get: Get) -> None:
-    agents = [a for a in timing.call(get("store").agents, get("slug")) if a.state != "finished"]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    agents = listed(get("store"), get("slug"))
     get("box")["agents"] = agents
     cli.skip_refused(delivery.relay_to_page, get("inbox"), get("slug"), agents, get("ledger"))  # pyright: ignore[reportUnknownMemberType]
 
@@ -143,25 +163,38 @@ def _tick_view(cli: Any, get: Get) -> None:
 
 
 STEPS = (
-    CallStep("inbox relay", "wrapper probes", 10, held(_inbox_relay)),
-    CallStep("launch slots", "wrapper probes", 20, held(_launch_slots)),
-    CallStep("outage probes", "wrapper probes", 30, held(_outage_probes)),
-    CallStep("hive ledger", "wrapper probes", 40, held(_hive_ledger)),
-    CallStep("ledger health", "wrapper probes", 50, held(_ledger_health)),
-    CallStep("host pressure", "wrapper health", 10, held(_host_pressure)),
-    CallStep("ledger watchdog", "wrapper health", 20, held(_ledger_watchdog)),
-    CallStep("ledger probe", "wrapper health", 30, held(_ledger_probe)),
-    CallStep("prompt backlog", "wrapper health", 40, held(_prompt_backlog)),
-    CallStep("command runner", "wrapper commands", 10, held(_command_runner)),
-    CallStep("urgent hold", "wrapper phases", 10, held(_urgent_hold)),
-    CallStep("planning and phase pass", "wrapper phases", 20, held(_phase_passes)),
-    CallStep("refresh job", "wrapper refresh", 10, held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", 10, held(_intent_check)),
-    CallStep("reboot pass", "wrapper reboot", 10, held(_reboot_pass)),
-    CallStep("tick call", "wrapper reboot", 20, held(_tick_call)),
-    CallStep("outbox migration", "wrapper relay", 10, held(_outbox_migration)),
-    CallStep("page relay", "wrapper relay", 20, held(_page_relay)),
-    CallStep("tick view", "wrapper view", 10, held(_tick_view)),
+    CallStep("inbox relay", "wrapper probes", held(_inbox_relay)),
+    CallStep("launch slots", "wrapper probes", held(_launch_slots)),
+    CallStep("outage probes", "wrapper probes", held(_outage_probes)),
+    CallStep("hive ledger", "wrapper probes", held(_hive_ledger), lane=SLOW),
+    CallStep("ledger health", "wrapper probes", held(_ledger_health), writes=pass_domains("stop")),
+    CallStep("host pressure", "wrapper health", held(_host_pressure), lane=SLOW),
+    CallStep("ledger watchdog", "wrapper health", held(_ledger_watchdog), lane=SLOW),
+    CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
+    CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
+    CallStep("command runner", "wrapper commands", held(_command_runner)),
+    CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
+    CallStep(
+        "dependency audit",
+        "wrapper phases",
+        held(_dependency_audit),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CallStep.lane,
+        effects=frozenset(),
+        feature="swarm-ordering-dependency-audit",
+    ),
+    WriteStep("planning and phase pass", "wrapper phases", held(_phase_passes), writes=frozenset({PHASES})),
+    CallStep(
+        "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
+    ),
+    CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
+    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged")),
+    CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
+    CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
+    CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
+    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view")),
 )
 
 for _step in STEPS:

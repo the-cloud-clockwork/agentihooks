@@ -367,6 +367,21 @@ agentihooks recall eval golden.json                                           # 
 
 ---
 
+## `agentihooks knowledge`
+
+Ask one ledger what it is and how it is evolving. The ledger is chunked by structure (ledger, phase, task, question, follow up, note, proof, comment), each chunk keeps its parent, and only new or changed chunks are embedded into a per ledger index under the agentihooks home. The default embedder counts hashed words, so matching is lexical. An `ask` refreshes the index first when its last refresh is two minutes old or more, so an added task is searchable within minutes.
+
+```bash
+agentihooks knowledge ask "merge queue priority" --limit 5   # summary, recent changes, hits with their parent chain
+agentihooks knowledge refresh                                # embed what changed now
+```
+
+`--ledger` defaults to `AGENTIHOOKS_SWARM`. Each hit carries its parents, nearest first, so a task hit names its phase and a comment hit names its task and phase.
+
+`AGENTIHOOKS_KNOWLEDGE_EMBEDDER` chooses the embedder: `hash` (default) or `semantic`, which matches by meaning, so a question worded differently from a task still finds it. `semantic` calls an OpenAI-compatible embeddings endpoint named by `AGENTIHOOKS_KNOWLEDGE_EMBED_URL` (HTTPS, or HTTP on loopback), `AGENTIHOOKS_KNOWLEDGE_EMBED_MODEL`, `AGENTIHOOKS_KNOWLEDGE_EMBED_DIMENSION` and `AGENTIHOOKS_KNOWLEDGE_EMBED_TOKEN`, sending at most 32 texts per request and ranking by cosine. A provider outage exits 1 with the reason. Each embedder and model keeps its own index file, so switching rebuilds rather than mixing vectors.
+
+---
+
 ## `agentihooks claude` / `agenti`
 
 Launch Claude Code on one of the `AH_CC_TOKEN_<slug>` accounts, with
@@ -491,6 +506,32 @@ agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/e
 Arguments after `--` pass through to the harness. A refusal exits 2 with
 `agentihooks select-profile: <reason>` and fails a pending launch report. Home
 checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.md).
+
+---
+
+## `agentihooks headless run`
+
+Run one full rendered profile unattended on Claude Code or codex-cli and print
+one JSON object with `status`, `output`, `session`, `exit_code`, `transcript`
+and `run_dir`. Exits 0 only when `status` is `ok`.
+
+```bash
+agentihooks headless run engineer --input 'Reply with JSON whose answer is the word pong.'
+agentihooks headless run engineer --input prompt.md --schema schema.json --harness codex --tier low --timeout 600 --out runs/codex
+```
+
+| Flag | Meaning |
+|---|---|
+| `PROFILE` | Profile to run |
+| `--input TEXT\|FILE` | Prompt text, or a file holding it (required) |
+| `--schema FILE` | JSON schema file the output must match |
+| `--harness auto\|claude\|codex` | Harness (default `auto`: `AGENTIHOOKS_TARGET`, else `claude`) |
+| `--out DIR` | Run folder (default `<AGENTIHOOKS_HOME>/headless/<UTC stamp>-<8 hex>`) |
+| `--tier high\|low`, `--effort` | Model tier (default `high`) and effort (default `medium`) |
+| `--timeout SECONDS` | Kill the run after this many seconds (default `1800`) |
+
+Statuses, run folder, tiers, worker mode and troubleshooting:
+[Headless profile runs](headless-run.md).
 
 ---
 

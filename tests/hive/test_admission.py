@@ -485,12 +485,29 @@ def test_the_load_window_is_five_minutes():
     assert (admission.LOAD_WINDOW_MS, admission.JOINED) == (300_000, "#joined")
 
 
-def test_a_first_ranked_hive_ignores_cpu_load_below_the_memory_line():
+def test_a_first_ranked_hive_refuses_on_saturated_cpu_below_the_memory_line() -> None:
+    found = admission.room(reading(cpus=16, load5=28.7, available_mb=19 * GB, total_mb=64 * GB), first=True)
+    assert found == admission.Room(
+        0,
+        admission.CPU,
+        "five minute load 28.70 on 16 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line",
+    )
+
+
+def test_a_first_ranked_hive_takes_the_lower_of_its_cpu_and_memory_room() -> None:
     found = admission.room(reading(cpus=16, load5=12.1, available_mb=19 * GB, total_mb=64 * GB), first=True)
     assert found == admission.Room(
-        9,
-        admission.RAM,
-        "19456 of 65536 MB available, 71 percent used, 700 MB per agent, fits 9 more under the 80 percent line",
+        1,
+        admission.CPU,
+        "five minute load 12.10 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line",
+    )
+
+
+def test_a_first_ranked_hive_refuses_on_saturated_pod_cpu() -> None:
+    measured = reading(pod_available_mb=15000, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
+    found = admission.room(measured, first=True)
+    assert admission.refusal(found) == (
+        "cpu: pod load 8.00 on a 4 CPU limit, 0.5 CPU per agent, fits 0 more under the 80 percent line"
     )
 
 
@@ -516,16 +533,16 @@ def test_a_first_ranked_hive_refuses_at_eighty_percent_host_memory():
     )
 
 
-def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory():
-    measured = reading(pod_available_mb=3900, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
+def test_a_first_ranked_hive_refuses_at_eighty_percent_pod_memory() -> None:
+    measured = reading(pod_available_mb=3900, pod_total_mb=19600, pod_cpus=4, pod_load=1.0)
     found = admission.room(measured, first=True)
     assert admission.refusal(found) == (
         "ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line"
     )
 
 
-def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory():
-    measured = reading(pod_available_mb=5000, pod_total_mb=19600, pod_cpus=4, pod_load=8.0)
+def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory() -> None:
+    measured = reading(pod_available_mb=5000, pod_total_mb=19600, pod_cpus=4, pod_load=1.0)
     found = admission.room(measured, pending=7, first=True)
     assert found == admission.Room(
         0,
@@ -545,11 +562,46 @@ def test_a_first_ranked_hive_still_refuses_below_the_disk_floor_and_without_a_re
     assert admission.room(None, first=True).reason == admission.MISSING
 
 
-def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial():
-    measured = {"cpus": 4, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
+def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial() -> None:
+    measured = {"cpus": 16, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
     found = admission.room(measured, first=True)
     assert found == admission.Room(
         7,
         admission.RAM,
         "pod 9000 of 19600 MB available, 55 percent used, 700 MB per agent, fits 7 more under the 80 percent line",
     )
+
+
+def test_a_high_load_average_with_low_cpu_used_still_admits_launches() -> None:
+    found = admission.room(reading(cpus=16, load5=10.9, used_cpus=4.34))
+    assert found == admission.Room(
+        16,
+        admission.CPU,
+        "4.34 of 16 CPUs used, five minute load 10.90 on 16 CPUs, 0.5 CPU per agent, "
+        "fits 16 more under the 80 percent line",
+    )
+    assert admission.room(reading(cpus=16, load5=13.0, used_cpus=6.3)).room == 13
+
+
+def test_used_cpu_refuses_a_busy_node_whatever_its_load_average() -> None:
+    found = admission.room(reading(cpus=8, load5=0.5, used_cpus=6.2))
+    assert (found.room, found.reason) == (0, admission.CPU)
+    assert admission.room(reading(cpus=4, load5=0.0, used_cpus=2.1, total_mb=10**6, available_mb=10**6)).room == 2
+
+
+def test_used_cpu_room_counts_pending_launches() -> None:
+    found = admission.room(reading(cpus=16, load5=0.0, used_cpus=4.0), pending=3)
+    assert (found.room, found.reason) == (14, admission.CPU)
+    assert found.detail.endswith("0.5 CPU per agent with 3 pending launches, fits 14 more under the 80 percent line")
+
+
+def test_the_load_average_guard_binds_only_once_used_cpu_reaches_the_swarm_share() -> None:
+    found = admission.room(reading(cpus=16, load5=13.0, used_cpus=6.4))
+    assert found == admission.Room(
+        0,
+        admission.CPU,
+        "6.40 of 16 CPUs used, five minute load 13.00 on 16 CPUs with CPU used at or above the 40 percent swarm share, "
+        "fits 0 more",
+    )
+    assert admission.room(reading(cpus=16, load5=12.8, used_cpus=6.4)).room == 12
+    assert admission.room(reading(cpus=16, load5=12.81, used_cpus=6.39)).room == 12

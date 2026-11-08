@@ -1,0 +1,1 @@
+The fleet red notice, lost runner and time left steps run on the tick's slow lane so the critical chain no longer waits for them, and every step abandoned with writes beyond its own actions journals a swarm_tick_step_abandoned line naming its budget and those write domains.

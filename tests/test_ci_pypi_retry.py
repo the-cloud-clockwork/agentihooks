@@ -245,7 +245,17 @@ def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job)
 def _mutation_installs():
     installs = {}
     for workflow, names in (
-        ("test.yml", ("mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard")),
+        (
+            "test.yml",
+            (
+                "mutation-plan",
+                "mutation-stats",
+                "mutation-refine",
+                "mutation-probe",
+                "mutation-replan",
+                "mutation-shard",
+            ),
+        ),
         ("mutation-preflight.yml", None),
     ):
         jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
@@ -263,6 +273,8 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
         ("test.yml", "mutation-plan"),
         ("test.yml", "mutation-stats"),
         ("test.yml", "mutation-refine"),
+        ("test.yml", "mutation-probe"),
+        ("test.yml", "mutation-replan"),
         ("test.yml", "mutation-shard"),
         ("mutation-preflight.yml", "plan"),
         ("mutation-preflight.yml", "touched-tests"),
@@ -283,7 +295,9 @@ def test_every_mutation_dependency_install_runs_uv_through_the_retry():
             )
 
 
-@pytest.mark.parametrize("job", ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-shard"])
+@pytest.mark.parametrize(
+    "job", ["mutation-plan", "mutation-stats", "mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"]
+)
 def test_mutation_jobs_take_the_retry_helper_from_the_workflow_revision(job):
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
     names = [step.get("name") for step in steps]

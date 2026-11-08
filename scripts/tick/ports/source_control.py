@@ -38,6 +38,7 @@ class ChangeState:
     body: str = ""
     draft: bool = False
     head_repository: str = ""
+    merge_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,8 @@ class RollupCheck:
 
 @dataclass(frozen=True)
 class OpenChange:
+    """An open pull request and its newest commit's checks, empty also when the reader may not see them."""
+
     url: str
     checks: tuple[RollupCheck, ...]
 
@@ -77,6 +80,7 @@ class RepositoryRun:
     branch: str | None
     event: str
     status: str
+    head_sha: str = ""
 
 
 @dataclass(frozen=True)

@@ -28,7 +28,7 @@ DEFAULT = {
     "heartbeat_at": 0,
     "version": "",
 }
-HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": [], "max_agents": 10}
+HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": [], "max_agents": 15}
 
 
 @pytest.fixture

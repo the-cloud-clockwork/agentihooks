@@ -1,0 +1,1 @@
+The tick engine records every step run in a tick records stream, and the tick report prints each step's late share, abandoned, held, skipped and dropped write counts and the critical lane end of each pass.

@@ -24,6 +24,7 @@ from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
 from scripts.swarm_v2 import masters
+from scripts.tick import pool
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 
@@ -489,7 +490,8 @@ def views(
 
 def _graphql(query: str, source: SourceControl, **variables: str) -> dict[str, Any]:
     try:
-        result = _graph_body(query, source, variables)
+        with pool.limit("github"):
+            result = _graph_body(query, source, variables)
         errors = result.get("errors", [])
         data = result["data"]
         if not isinstance(data, dict):

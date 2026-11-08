@@ -1077,7 +1077,9 @@ def _inject_after_tool(payload: dict) -> None:
 def _swarm_heartbeat(state: str, prompt: str | None = None, payload: dict | None = None) -> None:
     try:
         from hooks.context.swarm_heartbeat import beat, heard, report
+        from scripts.swarm.safety_nudge import record
 
+        record(os.environ)
         beat(state)
         if prompt is not None:
             heard(prompt)
@@ -2379,7 +2381,7 @@ def on_stop(payload: dict) -> None:
         log("handed-off session close failed", {"error": str(e)})
 
 
-def on_subagent_start(payload: dict) -> None:
+def on_subagent_start(payload: dict[str, Any]) -> None:
     """Handle SubagentStart event — wire the brain through to subagents.
 
     Mirrors on_session_start brain logic so dispatched subagents get:
@@ -2395,6 +2397,9 @@ def on_subagent_start(payload: dict) -> None:
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     agent_type = payload.get("agent_type", "unknown")
     _KNOWN_SUBAGENT_IDS.add(agent_id)
+    from hooks.lifecycle import helpers
+
+    helpers.begin(payload)
     log(
         "Subagent started",
         {
@@ -2452,12 +2457,15 @@ def on_subagent_start(payload: dict) -> None:
         log("broadcast subagent_start failed", {"error": str(e)})
 
 
-def on_subagent_stop(payload: dict) -> None:
+def on_subagent_stop(payload: dict[str, Any]) -> None:
     """Handle SubagentStop event — capture brain markers from subagent output."""
     agent_id = payload.get("agent_id") or payload.get("session_id", "")
     transcript_path = payload.get("agent_transcript_path") or payload.get("transcript_path", "")
     last_msg = payload.get("last_assistant_message", "")
     log("Subagent stopped", {"agent_id": agent_id})
+    from hooks.lifecycle import helpers
+
+    helpers.end(payload)
 
     try:
         from hooks.config import BRAIN_WRITER_ENABLED

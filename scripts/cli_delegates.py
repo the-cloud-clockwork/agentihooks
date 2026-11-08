@@ -5,6 +5,7 @@ DELEGATED_CLIS = {
     "agents": "scripts.agents.cli",
     "msg": "scripts.inbox.cli",
     "recall": "scripts.recall.cli",
+    "knowledge": "scripts.ledger_knowledge.cli",
     "trace": "scripts.trace_cli",
     "deps": "scripts.deps_preflight",
     "quota": "scripts.agents_quota",
@@ -24,6 +25,7 @@ DELEGATED_CLIS = {
     "cron": "scripts.scheduler.cli:cron",
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
+    "safety-nudge": "scripts.swarm.safety_nudge",
 }
 
 

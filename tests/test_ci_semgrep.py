@@ -92,10 +92,10 @@ def test_feature_fixture_command_runs_recursively():
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
 
-def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
-    steps = _jobs()["feature-tests"]["steps"]
-    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
-    assert any(step.get("run") == 'python -m pip install semgrep==1.177.0 "pyyaml>=6.0"' for step in steps)
+def test_no_semgrep_job_runs_the_head_feature_map_validator() -> None:
+    steps = [step for job in _jobs().values() for step in job.get("steps", [])]
+    assert not any("scripts.feature_map" in step.get("run", "") for step in steps)
+    assert any(step.get("run") == "python -m pip install semgrep==1.177.0" for step in steps)
 
 
 def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -> None:
@@ -109,7 +109,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
         {"pattern": '["gh", ...]'},
         {"pattern": "scripts.tick.adapters.github.command(...)"},
     ]
-    assert rule["paths"]["include"] == ["/scripts/swarm/**", "*.test.py"]
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "/scripts/tick/**", "*.test.py"]
     allowed = json.loads((_ROOT / ".semgrep/source-control-allowlist.json").read_text())
     assert rule["paths"]["exclude"] == allowed
     assert "/scripts/tick/adapters/github.py" in allowed
@@ -127,6 +127,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert "/scripts/swarm/ci_speed.py" not in allowed
     assert "/scripts/swarm/mutation_wait.py" not in allowed
     assert "/scripts/swarm/ledger_events.py" not in allowed
+    assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
 
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
@@ -162,6 +163,12 @@ def test_charts_run_the_chart_timer_guard():
     steps = _jobs()["charts"]["steps"]
     assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
+
+
+def test_charts_render_every_pod_template_at_two_chart_versions():
+    runs = [step.get("run") for step in _jobs()["charts"]["steps"]]
+    assert "python tests/ci_charts/chart_pod_templates.py" in runs
+    assert (_ROOT / "tests/ci_charts/chart_pod_templates.py").is_file()
 
 
 def test_charts_grade_the_guard_rules_against_the_base_floors():

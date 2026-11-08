@@ -98,17 +98,20 @@ def test_the_task_list_wins_over_the_role_default(bundle):
 def test_choice_refuses_an_overlay_the_role_cannot_wear(bundle, monkeypatch, task, message):
     monkeypatch.setattr(profile_choice, "installed", lambda name: True)
     with pytest.raises(profile_choice.ProfileUnresolved) as refused:
-        profile_choice.choose("sw", "eng", {}, {"id": "t1", "profile": "engineer", **task}, {}, {})
+        profile_choice.choose(
+            store.SwarmConfig("sw", "repo", 1, 1), "eng", {"id": "t1", "profile": "engineer", **task}, {}
+        )
     assert str(refused.value) == f"task t1 overlays are refused: {message}"
 
 
 def test_profile_choice_returns_the_overlays_the_agent_wears(bundle, monkeypatch):
     monkeypatch.setattr(profile_choice, "installed", lambda name: True)
     task = {"id": "t1", "profile": "engineer"}
-    decision = profile_choice.choose("sw", "eng", {}, task, {}, {"engineer": ["tuner", "trader"]})
+    worn = store.SwarmConfig("sw", "repo", 1, 1, overlays={"engineer": ["tuner", "trader"]})
+    decision = profile_choice.choose(worn, "eng", task, {})
     assert decision.overlays == ("trader", "tuner")
     assert decision.record()["overlays"] == ["trader", "tuner"]
-    assert profile_choice.choose("sw", "eng", {}, task, {}).overlays == ()
+    assert profile_choice.choose(store.SwarmConfig("sw", "repo", 1, 1), "eng", task, {}).overlays == ()
 
 
 def test_available_lists_each_bundle_overlay_with_the_roles_it_wears(bundle):
