@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/profile_choice.py:scripts.swarm.profile_choice.x_choose:67a8f748b79c0dac17478a84c5c5b7035b721ba5078ccedd062c16e16ed4fd4c": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "Changing the missing config.overlays fallback from {} to None preserves overlays.chosen output: absent task overlays return () for either false default, and explicit task overlays select task['overlays'] without reading defaults. Ruled equivalent against CI run 42431172528 at e65939951."
+  }
+}
