@@ -285,8 +285,9 @@ def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
     held = _digest(token)
     key = _agent_key(member_id, slug, name)
-    hive_state.amend(store, key, partial(_with_token, digest=cast(str, digest), slug=slug, name=name, held=held))
-    if not _mapped(redis, store, digest, member_id):
+    ledger = cast(str, digest)
+    hive_state.amend(store, key, partial(_with_token, digest=ledger, slug=slug, name=name, held=held))
+    if not _mapped(redis, store, ledger, member_id):
         hive_state.amend(store, key, partial(_without_token, held=held))
         raise HiveError("Hive membership was revoked")
     return token
