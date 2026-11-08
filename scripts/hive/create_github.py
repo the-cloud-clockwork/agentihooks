@@ -16,6 +16,12 @@ OPEN_LIMIT = 1000
 TRUNCATED = "truncated"
 TREE = f'if .truncated then "{TRUNCATED}" else .tree[].path end'
 REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
+QUEUED = 'any(.[]; .type == "merge_queue")'
+PULL = "query($url: URI!) { resource(url: $url) { ... on PullRequest { id headRefOid mergeQueueEntry { id } } } }"
+ENQUEUE = (
+    "mutation($id: ID!, $head: GitObjectID!) "
+    "{ enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } } }"
+)
 
 
 def gh(run: Run, argv: list[str], body: dict | None = None, cwd: str | None = None) -> str:
@@ -117,6 +123,19 @@ def merge(run: Run, url: str) -> bool:
 
 def required_checks(run: Run, repo: str, base: str) -> list[str]:
     return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", REQUIRED]))
+
+
+def queued(run: Run, repo: str, base: str) -> bool:
+    """Whether the base branch ruleset lands pull requests through a merge queue."""
+    return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", QUEUED])) is True
+
+
+def enqueue(run: Run, url: str) -> None:
+    """Put the pull request into its base's merge queue at its current head, once."""
+    pull = json.loads(gh(run, ["api", "graphql", "-f", f"query={PULL}", "-f", f"url={url}", "--jq", ".data.resource"]))
+    if pull["mergeQueueEntry"]:
+        return
+    gh(run, ["api", "graphql", "-f", f"query={ENQUEUE}", "-f", f"id={pull['id']}", "-f", f"head={pull['headRefOid']}"])
 
 
 def checks_passed(run: Run, url: str, required: Sequence[str] = (), command: str = "hive create") -> bool:

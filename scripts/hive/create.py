@@ -274,15 +274,29 @@ def _merged(tools: Tools, options: Options) -> str:
         _save(tools)
         raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive create to open a new one")
     if found != "MERGED":
-        if not create_github.merge(tools.run, url):
-            checks = f"pull request {url} checks to pass"
-            required = create_github.required_checks(tools.run, options.repo, options.base)
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
-            create_github.squash(tools.run, url)
+        _land(tools, options, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
         )
     return f"merged {url}"
+
+
+def _land(tools: Tools, options: Options, url: str) -> None:
+    """Merge through the base's queue once its required checks pass, else by auto or squash merge."""
+    if create_github.queued(tools.run, options.repo, options.base):
+        _required(tools, options, url)
+        create_github.enqueue(tools.run, url)
+    elif not create_github.merge(tools.run, url):
+        _required(tools, options, url)
+        create_github.squash(tools.run, url)
+
+
+def _required(tools: Tools, options: Options, url: str) -> None:
+    """Wait until every check the base ruleset requires has passed, ignoring checks it does not require."""
+    required = create_github.required_checks(tools.run, options.repo, options.base)
+    if required:
+        checks = f"pull request {url} checks to pass"
+        _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
 
 
 def _settings(tools: Tools, options: Options) -> str:
