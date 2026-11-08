@@ -73,7 +73,7 @@ def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
         openbao_kv.update(bao, path, change)  # pyright: ignore[reportUnknownMemberType]
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
-    return bool(dropped)
+    return member in dropped
 
 
 def backfill(redis: "Redis", bao: openbao_kv.OpenBao, path: str, named: Iterable[str]) -> str:
