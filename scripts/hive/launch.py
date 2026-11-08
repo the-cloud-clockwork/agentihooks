@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
@@ -118,7 +118,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
 def live_hives(store: RedisStore) -> list[dict[str, Any]]:
     """The loaded hives whose heartbeat is live."""
     now = lease.now_ms(store)
-    loaded: list[dict[str, Any]] = loaded_hives(store)
+    loaded = cast(list[dict[str, Any]], loaded_hives(store))
     return [hive for hive in loaded if registry.live(hive, now)]
 
 

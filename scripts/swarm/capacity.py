@@ -2,7 +2,7 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
@@ -464,10 +464,9 @@ def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
     return max(0, host["room"] - spent(host["granted_at"]))
 
 
-def quota_seats(inputs: ScaleInputs) -> int:
+def quota_seats(observations: list[Account], warned: dict[tuple[str, str], Any]) -> int:
     """The free quota seats autoscale places against, warned accounts and API keys left out."""
-    warned: dict[tuple[str, str], Any] = inputs.warned
-    free: dict[str, int] = _placeable(_open(inputs.observations, warned))
+    free = cast(dict[str, int], _placeable(_open(observations, warned)))
     return sum(free.values())
 
 

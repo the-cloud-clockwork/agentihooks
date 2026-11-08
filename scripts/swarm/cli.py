@@ -157,6 +157,7 @@ from scripts.swarm.status import (
     agent_hive,
     auto_snapshot,
     findings,
+    hive_admission,
     live_agents,
     status_report,
     task_counts,
@@ -1516,12 +1517,9 @@ def cmd_status(store: RedisStore, args: argparse.Namespace) -> None:
     held = spawn_holds(store, args.slug) + failed_panes.status_lines(store, args.slug)
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
-    from scripts.hive.launch import live_hives
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
-    record: dict[str, Any] = capacity.read(store, config.slug)
-    host: dict[str, Any] = record.get("host") or {}
-    held += admission.view_lines(live_hives(store), {"host room": host.get("room")})
+    held += hive_admission(store, config.slug)["lines"]
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1622,7 +1620,10 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     scaled: dict[str, Any] = decision or {}
     host: dict[str, Any] = scaled["host"]
     hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
-    others: dict[str, int | None] = {"quota seats": capacity.quota_seats(inputs), "host room": host["room"]}
+    others: dict[str, int | None] = {
+        "quota seats": capacity.quota_seats(inputs.observations, cast(dict[tuple[str, str], Any], inputs.warned)),
+        "host room": host["room"],
+    }
     admitted = admission.view_lines(hives, others)
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]

@@ -292,6 +292,20 @@ def agent_hive(agent: AgentRecord) -> str:
     return agent.hive or reports.host(agent) or (hive_id() if agent.runtime_backend == "local" else "")
 
 
+def hive_admission(store: RedisStore, slug: str) -> dict[str, Any]:
+    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    from scripts.hive.launch import live_hives
+    from scripts.swarm import capacity
+
+    hives = live_hives(store)
+    record: dict[str, Any] = capacity.read(store, slug)
+    host: dict[str, Any] = record.get("host") or {}
+    seats = capacity.quota_seats(capacity.accounts(dict(os.environ), time.time(), refresh=False), {})
+    others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
+    rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+
+
 def status_report(
     store: RedisStore,
     slug: str,
@@ -366,6 +380,7 @@ def status_report(
         "bottleneck": bottleneck.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now_ms()),
         "admission": admission.counts(placement_waits.read(store, slug)),
+        "hive_admission": hive_admission(store, slug),
         "gates": [{**row, "kind": modes.label(row["kind"])} for row in gate_log.decisions(slug)],
         "gate_modes": {name: modes.label(mode) for name, mode in catalog.current(config.gates).items()},
         "master_affinity": affinity.report(store, slug, config, store.agents(slug)),
