@@ -100,8 +100,14 @@ spec:
         app.kubernetes.io/component: worker-hive{{ $suffix }}
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
-        {{- if and $root.Values.workers.rollout.enabled $root.Values.workers.rollout.release }}
-        agentihooks.io/release: {{ $root.Values.workers.rollout.release | quote }}
+        {{- if $root.Values.workers.rollout.enabled }}
+        {{- $stamp := $root.Values.workers.rollout.release }}
+        {{- if and (not $stamp) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" (toString $workers.image.tag))) }}
+        {{- $stamp = $root.Chart.Version }}
+        {{- end }}
+        {{- with $stamp }}
+        agentihooks.io/release: {{ . | quote }}
+        {{- end }}
         {{- end }}
     spec:
       {{- include "swarm.podSecurity" $root | nindent 6 }}
