@@ -258,7 +258,9 @@ stdout. `run`, `resume` and `status` print the saved state:
 | `definition`, `harness` | The workflow as loaded at `run`, and the harness every stage uses |
 
 A refusal prints `{"error": "<reason>"}` instead.
-A failed classifier run is the exception: see [Limitations](#limitations).
+
+A classifier run that fails raises a traceback instead of `{"error": ...}`;
+see [Limitations](#limitations).
 
 ### Exit codes
 
