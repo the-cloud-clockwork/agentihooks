@@ -19,7 +19,7 @@ from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls
+from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
@@ -110,16 +110,18 @@ def _preempt(tick: Any, get: Get) -> Any:
 
 
 def _spawn_step(tick: Any, get: Get) -> Any:
-    config, store = get("config"), get("store")
+    config, deadline, tools = get("config"), get(DEADLINE), get("tools")
+    recording = _recording(tick, deadline)
+    store = SpawnStoreCalls(tools.coordination, recording)
     if (
         config.state == "running"
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
-        rows, deadline, tools = dict(get("rows")), get(DEADLINE), get("tools")
-        recording = _recording(tick, deadline)
+        rows = dict(get("rows"))
         runtime = SpawnRuntimeCalls(tools.runtime, recording)
-        bound = {"rows": rows, "ledger": LedgerCalls(tools.ledger, recording), "runtime": runtime}
+        ledger = LedgerCalls(tools.ledger, recording)
+        bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
         args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
         token = PASS_DEADLINE.set(deadline)
         try:

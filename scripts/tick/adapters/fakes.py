@@ -129,6 +129,20 @@ class FakeCoordination:
             deadline,
         )
 
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store read and answer the ``store:<operation>`` answer."""
+        _record(self, "store_read", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Record a store write and answer the ``store:<operation>`` answer."""
+        _record(self, "store_write", (operation, tuple(args), dict(kwargs)), deadline)
+        return self.answers.get(f"store:{operation}")
+
 
 @dataclass
 class FakeSourceControl:

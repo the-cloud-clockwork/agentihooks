@@ -30,13 +30,14 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
         ),
     ),
     "coordination": (
-        frozenset([Coordination.read.__name__, Coordination.capacity.__name__]),
+        frozenset([Coordination.read.__name__, Coordination.capacity.__name__, Coordination.store_read.__name__]),
         frozenset(
             [
                 Coordination.lease.__name__,
                 Coordination.lock.__name__,
                 Coordination.configure.__name__,
                 Coordination.mark.__name__,
+                Coordination.store_write.__name__,
             ]
         ),
     ),

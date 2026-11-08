@@ -1,13 +1,13 @@
 """Bind tick tool ports to a step deadline for legacy reap helpers."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm.store import AgentRecord, SwarmConfig
+from scripts.swarm.store import PREFIX, AgentRecord, SwarmConfig
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports import Ledger, Runtime
+from scripts.tick.ports import Coordination, Ledger, Runtime
 
 
 @dataclass(frozen=True)
@@ -91,6 +91,96 @@ class SpawnRuntimeCalls(RuntimeCalls):
     @property
     def admission(self) -> AdmissionCalls | None:
         return AdmissionCalls(self.port, self.deadline) if self.port.admits(deadline=self.deadline) else None
+
+
+_STORE_GROUPS = frozenset({"redis", "seats", "memory", "culture", "execution_registry", "names"})
+_STORE_READS = frozenset(
+    {
+        "agents",
+        "claims",
+        "config",
+        "earlier_lives",
+        "execution",
+        "execution_occupants",
+        "failed_harness",
+        "handoff",
+        "handoff_envelope",
+        "handoff_seat",
+        "launches",
+        "slugs",
+        "culture.get",
+        "execution_registry.agents",
+        "execution_registry.get",
+        "execution_registry.occupants",
+        "execution_registry.records",
+        "memory.learned",
+        "memory.recaps",
+        "seats.key",
+        "seats.occupant",
+        "seats.seat_of",
+        *(
+            f"redis.{command}"
+            for command in (
+                "exists",
+                "get",
+                "hexists",
+                "hget",
+                "hgetall",
+                "hmget",
+                "llen",
+                "lrange",
+                "mget",
+                "pttl",
+                "scard",
+                "sismember",
+                "smembers",
+                "ttl",
+                "xlen",
+                "zcount",
+                "zrange",
+                "zscore",
+            )
+        ),
+    }
+)
+
+
+def _store_operation(port: Coordination, deadline: Deadline, path: str) -> Callable[..., Any]:
+    if path.rsplit(".", 1)[-1].startswith("_"):
+        raise AttributeError(path)
+    send = port.store_read if path in _STORE_READS else port.store_write
+
+    def operation(*args: Any, **kwargs: Any) -> Any:
+        return send(path, args, kwargs, deadline=deadline)
+
+    operation.__module__, operation.__qualname__ = "scripts.swarm.store", f"RedisStore.{path}"
+    return operation
+
+
+@dataclass(frozen=True)
+class _StoreGroup:
+    port: Coordination
+    deadline: Deadline
+    name: str
+
+    def __getattr__(self, name: str) -> Callable[..., Any]:
+        return _store_operation(self.port, self.deadline, f"{self.name}.{name}")
+
+
+@dataclass(frozen=True)
+class SpawnStoreCalls:
+    """The swarm store the spawn helpers call, every read and write a coordination port operation bound to the deadline."""
+
+    port: Coordination
+    deadline: Deadline
+
+    def key(self, slug: str, *parts: str) -> str:
+        return ":".join((PREFIX, slug, *parts))
+
+    def __getattr__(self, name: str) -> Any:
+        if name in _STORE_GROUPS:
+            return _StoreGroup(self.port, self.deadline, name)
+        return _store_operation(self.port, self.deadline, name)
 
 
 @dataclass(frozen=True)

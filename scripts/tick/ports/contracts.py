@@ -73,6 +73,14 @@ class Coordination(Protocol):
 
     def mark(self, name: str, value: object, *, deadline: Deadline) -> object: ...
 
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any: ...
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any: ...
+
 
 @runtime_checkable
 class SourceControl(Protocol):
