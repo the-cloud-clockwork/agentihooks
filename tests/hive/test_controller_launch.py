@@ -894,7 +894,7 @@ def write_hive(setup, **changes):
     publish_room(setup.store, hive["id"], hive["max_agents"])
 
 
-NO_RAM = "ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+NO_RAM = "ram: 20000 of 100000 MB available, 850 MB per agent, fits 0 more under the 80 percent line"
 
 
 def publish_room(store, hive_id, room):
@@ -1762,7 +1762,7 @@ def test_pending_admission_reservations_count_against_hive_room(setup):
         admission.reserve(setup.store.redis, "remote", f"fixture/eng-{index}", 3)
     assert setup.launcher.select(setup.config, "eng", {"id": "next"}) == Wait(
         "no hive for eng has room: remote "
-        "ram: 22100 of 100000 MB available, 700 MB per agent with 3 pending launches, "
+        "ram: 22550 of 100000 MB available, 850 MB per agent with 3 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     assert setup.launcher.hives()[0]["room"] == 0
@@ -2257,7 +2257,7 @@ def test_a_launch_that_loses_the_last_room_to_a_concurrent_reservation_waits_on_
     assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
     assert setup.launcher.reserve_room(request, selected) == (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     admission.release(setup.store.redis, "remote", "fixture/other")
@@ -2273,7 +2273,7 @@ def test_a_spawn_refused_at_reservation_records_the_wait_and_returns_the_reason(
     monkeypatch.setattr(admission, "reserve", lambda *args, **kwargs: (False, 1))
     refused = (
         "no hive for eng has room: remote "
-        "ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line"
     )
     result = setup.launcher.spawn(request_for(setup))
