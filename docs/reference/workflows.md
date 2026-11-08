@@ -141,7 +141,7 @@ writes every default out.)
 | `intent` | required | One line saying what the workflow is for |
 | `head` | required | First stage; every stage must be reachable from it |
 | `exit` | required | When the workflow passes: `<stage>.pass`, or a condition in plain words (see [Exit conditions](#exit-conditions)) |
-| `max_iterations` | `3` | The run ends `exhausted` on this many `retry` and `enhance` edges, so one fewer loop edge leads on to its target |
+| `max_iterations` | `3` | `retry` and `enhance` edges counted per run; the edge that reaches this number is not followed and ends the run `exhausted` |
 | `on_exhausted` | `block` | `block`, `escalate` or `keep-best`; recorded as `action` in an exhausted run |
 
 Stage keys:
@@ -218,10 +218,10 @@ saved and launches nothing.
 | Plain words as the workflow `exit` | A stage outcome is `pass` and a low tier headless classifier judges the condition true over every stage's outputs so far |
 | Plain words as a stage `exit` | The classifier judges the condition true over that stage's outputs |
 
-The classifier is one sealed headless run per check, two when the first reply
-does not match its schema, at low tier and low
-effort. It ignores `--harness`: it runs on `AGENTIHOOKS_TARGET`, else Claude,
-and falls back to Claude when Codex refuses the route.
+The classifier is one sealed headless run per check at low tier and low
+effort, two when the first reply does not match its schema. It ignores
+`--harness`: it runs on `AGENTIHOOKS_TARGET`, else Claude, and falls back to
+Claude when Codex refuses the route.
 
 ## Run folder
 
