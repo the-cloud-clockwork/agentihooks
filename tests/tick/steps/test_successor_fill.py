@@ -33,7 +33,8 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
     tick.tick("sw", held, tasks(("t1", "eng")), runtime, now_ms=1_000)
     launch = runtime.tasks[0]["handoff_envelope"]["launch"]
     assert launch["model"] == "sonnet-lane"
-    assert effort_range.rank("high") <= effort_range.rank(launch["effort"]) <= effort_range.rank("xhigh")
+    assert launch["effort"] in effort_range.EFFORTS["claude"][2:4]
+    assert launch["effort"] == "high"
     assert {key: launch[key] for key in ("profile", "harness", "account")} == {
         "profile": "engineer",
         "harness": "claude",
