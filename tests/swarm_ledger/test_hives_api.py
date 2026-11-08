@@ -239,7 +239,7 @@ def test_settings_become_registry_pairs():
     ("body", "message"),
     [
         ({"prefer": {"master": 1}}, "prefer names master, a role this hive excludes"),
-        ({"max_agents": 0}, "max-agents must be a positive whole number, not '0'"),
+        ({"max_agents": -1}, "max-agents must be a whole number, not '-1'"),
         ({"excluded": ["bad name"]}, "excluded takes lane roles or profiles, not 'bad name'"),
     ],
 )
