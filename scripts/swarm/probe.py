@@ -3,7 +3,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.store import SwarmError
 
@@ -114,6 +114,15 @@ def task_list_reads(read: Callable[[], object], limits: Thresholds, clock: Calla
     )
 
 
+def root_ceiling(redis: Any, now_ms: int, local: int) -> int:
+    """The root hive's agent ceiling, or the swarm local limit when it has neither a cap nor a reading."""
+    from scripts.hive import ceiling, headroom, registry
+
+    record: Any = registry.show(redis, ROOT)
+    top = ceiling.shown(record["max_agents"], headroom.read(redis, ROOT, now_ms))
+    return local if top is None else top
+
+
 def workstation(running: int, cap: int, local: int) -> Probe:
     return Probe(
         "workstation agents at or under the root cap",
@@ -178,7 +187,7 @@ def run(
         here = hive_id()
         if here != ROOT:
             raise SwarmError(f"counted only on the {ROOT} hive, this host is {here}")
-        cap = registry.show(store.redis, ROOT)["max_agents"]
+        cap = root_ceiling(store.redis, now_ms, config.local_max_agents)
         return [workstation(local_slots.occupancy(store, ROOT)[0], cap, config.local_max_agents)]
 
     def released() -> list[Probe]:
