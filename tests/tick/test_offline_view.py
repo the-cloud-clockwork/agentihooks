@@ -1,5 +1,6 @@
 """A tick pass whose ledger server is slow or down runs from the last good view this host stored."""
 
+import contextvars
 import io
 import urllib.error
 from contextlib import ExitStack
@@ -261,8 +262,8 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
         held = view.start("sw", False)
         assert OFFLINE.get() is False
         view.wrote()
-        assert view.current() is held
-        assert OFFLINE.get() is True
+        assert contextvars.copy_context().run(view.current) is held
+        assert ledger_client.offline() is True
         view.wrote()
         with pytest.raises(urllib.error.HTTPError):
             view.current()

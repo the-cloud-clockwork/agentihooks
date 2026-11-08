@@ -46,6 +46,13 @@ OFFLINE_READ = "the pass runs from its last good view while the server is slow o
 SNAPSHOT_TIMEOUT_S = 3.0
 
 
+def offline() -> bool:
+    """Whether the pass runs from its last good view, set at its start or by any step that saw the server stop."""
+    from scripts.tick import view
+
+    return OFFLINE.get() or view.offline()
+
+
 def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """``ops``, refused as the server would refuse them when a task write's guard fails against the held view."""
     from scripts.tick import view
@@ -109,10 +116,11 @@ class LedgerClient:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
         service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
-        if OFFLINE.get() and not ops:
+        held_offline = offline()
+        if held_offline and not ops:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
-            if OFFLINE.get() and ops:
+            if held_offline and ops:
                 return _queued(ops, cast(Any, ledger).queue(slug, _guarded(slug, ops), service))
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
@@ -132,7 +140,7 @@ class LedgerClient:
         return state
 
     def _resource(self, slug: str, path: str, collection: bool = False) -> Any:
-        if OFFLINE.get():
+        if offline():
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
         return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)

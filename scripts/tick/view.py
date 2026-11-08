@@ -128,6 +128,7 @@ class Held:
     view: LedgerView
     renew: Callable[[], LedgerView]
     stale: bool = False
+    offline: bool = False
 
 
 HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
@@ -137,6 +138,12 @@ def wrote() -> None:
     """Mark the held view stale after a ledger write, so the next step reads a fresh view."""
     if (held := HELD.get()) is not None:
         held.stale = True
+
+
+def offline() -> bool:
+    """Whether the held view's server stopped answering in any step of this pass."""
+    held = HELD.get()
+    return held is not None and held.offline
 
 
 def current() -> LedgerView | None:
@@ -211,10 +218,9 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
         except urllib.error.HTTPError:
             raise
         except OSError:
-            from scripts.swarm.ledger_client import OFFLINE
-
-            OFFLINE.set(True)
-            return HELD.get().view  # pyright: ignore[reportOptionalMemberAccess]
+            held: Held = HELD.get()  # pyright: ignore[reportAssignmentType]
+            held.offline = True
+            return held.view
 
     return renew
 
