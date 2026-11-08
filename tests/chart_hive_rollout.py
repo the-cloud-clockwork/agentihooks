@@ -130,7 +130,9 @@ def test_a_floating_worker_tag_rolls_on_each_release_chart():
         worker = next(item for item in render(f"workers.image.tag={tag}") if item["kind"] == "Deployment")
         assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
     unleased = next(
-        item for item in render("workers.image.tag=release", "workers.rollout.enabled=false") if item["kind"] == "Deployment"
+        item
+        for item in render("workers.image.tag=release", "workers.rollout.enabled=false")
+        if item["kind"] == "Deployment"
     )
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
