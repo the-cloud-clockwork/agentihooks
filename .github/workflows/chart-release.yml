@@ -42,7 +42,7 @@ jobs:
         run: |
           version="${RELEASE#v}"
           sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
-          bash deploy/helm/agentihooks-swarm/ci/stamp-worker-digest.sh deploy/helm/agentihooks-swarm/values.yaml ghcr.io/the-cloud-clockwork/agentihooks-hive-worker "$version"
+          bash deploy/helm/agentihooks-swarm/ci/stamp-worker-digest.sh deploy/helm/agentihooks-swarm/values.yaml ghcr.io/the-cloud-clockwork/agentihooks-hive-worker release
           helm package deploy/helm/agentihooks-swarm --version "$version" --app-version "$version" --destination "$RUNNER_TEMP/chart"
 
       - name: Upload the packaged chart

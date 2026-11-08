@@ -120,13 +120,12 @@ def test_the_release_stamp_annotates_only_leased_hive_pods():
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
 
-def test_a_floating_worker_tag_rolls_on_each_release_image():
+def test_a_release_tag_worker_rolls_when_the_release_digest_moves():
     digest = "sha256:" + "a" * 64
     stamp = f"workers.rollout.imageDigest={digest}"
-    for tag in ("release", "dev"):
-        worker = next(item for item in render(f"workers.image.tag={tag}", stamp) if item["kind"] == "Deployment")
-        assert worker["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == digest
-    for tag in ("2.17.486", "v2.17.486"):
+    worker = next(item for item in render("workers.image.tag=release", stamp) if item["kind"] == "Deployment")
+    assert worker["spec"]["template"]["metadata"]["annotations"]["agentihooks.io/release"] == digest
+    for tag in ("dev", "2.17.486", "v2.17.486"):
         worker = next(item for item in render(f"workers.image.tag={tag}", stamp) if item["kind"] == "Deployment")
         assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
     unleased = next(
@@ -159,6 +158,6 @@ if __name__ == "__main__":
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
-    test_a_floating_worker_tag_rolls_on_each_release_image()
+    test_a_release_tag_worker_rolls_when_the_release_digest_moves()
     test_the_release_build_stamps_the_published_worker_digest()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
