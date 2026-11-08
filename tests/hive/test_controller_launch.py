@@ -37,6 +37,7 @@ def setup():
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
+    herdr.quota_accounts = None
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
     launcher.opening = lambda request: f"opening for {request.name}"
@@ -101,6 +102,45 @@ def test_codex_assignment_waits_for_its_own_placement_chain(setup):
     config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
     assert setup.launcher.select(config, "eng", {"id": "task"}) == Wait(
         "no Codex account has room after hive sessions: "
+    )
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_placement_before_the_pass_reads_quota_uses_the_runtime_reader(setup):
+    from unittest.mock import Mock, patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    setup.herdr.quota_accounts = Mock(return_value=rows)
+    with patch.object(launch.capacity, "accounts", side_effect=AssertionError("the pod cache must not be read")):
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert setup.herdr.quota_accounts.call_args.kwargs == {"refresh": False}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_placement_without_a_runtime_reader_reads_the_hive_reports(setup):
+    from unittest.mock import patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    del setup.herdr.quota_accounts
+    with patch.object(launch.capacity, "accounts", return_value=rows) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert accounts.call_args.kwargs == {"refresh": False, "redis": setup.store.redis}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
+def test_a_placement_wait_names_an_account_with_no_fresh_quota_reading(setup):
+    from scripts.hive.placement import Wait
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_accounts = [Account("claude", "account", "UNKNOWN", 5, None, None)]
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no Claude account has room after hive sessions: account 5 sessions, no fresh quota reading"
     )
 
 
@@ -1560,7 +1600,7 @@ def test_initial_placement_reads_global_account_reports_without_a_credential_pro
         patch.object(launch.capacity, "accounts", return_value=rows) as accounts,
     ):
         assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
-    accounts.assert_called_once_with(environ, now / 1000, refresh=False)
+    accounts.assert_called_once_with(environ, now / 1000, refresh=False, redis=setup.store.redis)
 
 
 def test_placement_shares_accounts_in_a_pass_and_rereads_in_the_next_pass(setup):

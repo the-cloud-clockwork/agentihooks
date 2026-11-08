@@ -137,6 +137,7 @@ BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
 REMOTE_READ_PAUSE = 0.5
 REQUEST_TIMEOUT = 10
+EXPORT_TIMEOUT = 30
 TALK_OPS = ("answer", "add_item", "relay")
 TASK_LISTS = {"group": ("task_group", "members", "group_members"), "split": ("task_split", "halves", "split")}
 CREDENTIAL_REFUSED = '"Missing or wrong ledger credential"'
@@ -255,7 +256,7 @@ def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        return ResourceClient(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
+        return ResourceClient(base(slug), credentials(slug, service), EXPORT_TIMEOUT).request(slug, "export", {})[
             "data"
         ]
 

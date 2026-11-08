@@ -120,6 +120,12 @@ def test_the_release_stamp_annotates_only_leased_hive_pods():
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
 
+def test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest():
+    for tag in ("release", "dev", "2.17.486", "v2.17.486"):
+        worker = next(item for item in render(f"workers.image.tag={tag}") if item["kind"] == "Deployment")
+        assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -127,4 +133,5 @@ if __name__ == "__main__":
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
+    test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")

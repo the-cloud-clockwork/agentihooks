@@ -532,7 +532,10 @@ class HerdrRuntime:
             return eligible[0], f"fallthrough: {agent} has no placeable quota seats"
         raise SpawnError(self._quota_refusal(agent, None if fixed else agent_choice.AGENTS), "unavailable")
 
-    def _rotation(self, requested, environ, prefer=()):
+    def _rotation(self, requested: str, environ: dict[str, str], prefer: Sequence[str] = ()) -> tuple[str, str]:
+        """(agent, reason) from the pass quota rows, read through ``quota_accounts`` when the pass has none yet."""
+        if not requested and not hasattr(self, "_quota_accounts") and self.quota_accounts is not None:
+            self._quota_accounts = self.quota_accounts(environ, time.time(), refresh=False)
         if requested or not hasattr(self, "_quota_accounts"):
             return self.choose(requested, environ)
         from scripts.swarm.capacity import offered, pick
@@ -1236,6 +1239,15 @@ class HerdrRuntime:
         then close the pane; the agent's name alone never selects a process. An agent whose record names no host
         and that only another hive lists is reaped by that hive."""
         if host := self.remote(agent):
+            from typing import cast
+
+            from scripts.hive.reports import LOST_MS, Reports
+
+            now_ms = int(time.time() * 1000)
+            hive = cast(Reports | None, self.hive)
+            if hive is not None and (hive.gone(agent) or hive.lost(agent, now_ms, LOST_MS)):
+                cast(dict[str, object], self.refusals).pop(agent.name, None)
+                return True
             return self._order(host, _command("retire", agent), agent.name)
         if live_binding.managed(agent):
             return self._retire_managed(agent)

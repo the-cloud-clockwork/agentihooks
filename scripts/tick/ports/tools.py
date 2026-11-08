@@ -30,13 +30,21 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
         ),
     ),
     "coordination": (
-        frozenset([Coordination.read.__name__, Coordination.capacity.__name__]),
+        frozenset(
+            [
+                Coordination.read.__name__,
+                Coordination.capacity.__name__,
+                Coordination.store_read.__name__,
+                Coordination.marked.__name__,
+            ]
+        ),
         frozenset(
             [
                 Coordination.lease.__name__,
                 Coordination.lock.__name__,
                 Coordination.configure.__name__,
                 Coordination.mark.__name__,
+                Coordination.store_write.__name__,
             ]
         ),
     ),
@@ -78,6 +86,13 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.live_names.__name__,
                 Runtime.observe.__name__,
                 Runtime.refusal.__name__,
+                Runtime.has_capacity.__name__,
+                Runtime.launch_room.__name__,
+                Runtime.reported.__name__,
+                Runtime.placement_refusal.__name__,
+                Runtime.placement.__name__,
+                Runtime.admits.__name__,
+                Runtime.held_admission.__name__,
             ]
         ),
         frozenset(
@@ -88,11 +103,21 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.name_pane.__name__,
                 Runtime.resume.__name__,
                 Runtime.dismiss.__name__,
+                Runtime.place.__name__,
+                Runtime.begin_placement.__name__,
+                Runtime.end_placement.__name__,
+                Runtime.reap_name.__name__,
+                Runtime.admit.__name__,
+                Runtime.release_admission.__name__,
+                Runtime.activate_admission.__name__,
             ]
         ),
     ),
     "processes": (frozenset([Processes.scan.__name__]), frozenset()),
-    "inbox": (frozenset([Inbox.read.__name__]), frozenset([Inbox.send.__name__, Inbox.close.__name__])),
+    "inbox": (
+        frozenset([Inbox.read.__name__]),
+        frozenset([Inbox.send.__name__, Inbox.close.__name__, Inbox.settle_exit.__name__]),
+    ),
     "llm": (frozenset(), frozenset([Llm.classify.__name__])),
     "metrics": (frozenset(), frozenset([Metrics.emit.__name__])),
     "host": (frozenset([Host.read.__name__]), frozenset([Host.run.__name__])),
