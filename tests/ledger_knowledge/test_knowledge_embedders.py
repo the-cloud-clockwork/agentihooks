@@ -1,3 +1,4 @@
+import hashlib
 import json
 import socket
 import threading
@@ -144,7 +145,7 @@ def test_each_embedder_names_its_own_index_file(server: str) -> None:
     first = embedders.choose(semantic_environ(server)).name
     other_model = embedders.choose(semantic_environ(server, AGENTIHOOKS_KNOWLEDGE_EMBED_MODEL="other")).name
     other_dimension = embedders.choose(semantic_environ(server, AGENTIHOOKS_KNOWLEDGE_EMBED_DIMENSION="8")).name
-    assert first.startswith("semantic-")
+    assert first == "semantic-" + hashlib.sha256(f"{MODEL}\n4".encode()).hexdigest()[:12]
     assert len({first, other_model, other_dimension, "hash"}) == 4
     assert first == embedders.choose(semantic_environ(server)).name
 
