@@ -137,6 +137,34 @@ def test_a_bound_pod_is_never_judged_by_the_unbound_window(store: RedisStore) ->
 
 
 @pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_the_unbound_window_starts_under_the_swarm_unbound_key(store: RedisStore) -> None:
+    agent = _unbound(store, "t1")
+
+    assert not agents._unbound_past_window(SLUG, store, agent, NOW)
+    assert store.redis.hget(store.key(SLUG, "unbound-since"), agent.name) == str(NOW)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_an_attempt_whose_pod_has_a_uid_is_never_past_the_unbound_window(store: RedisStore) -> None:
+    agent = _unbound(store, "t1")
+    started = replace(agent, runtime_target={**agent.runtime_target, "pod_uid": "uid-1"})
+
+    assert not agents._unbound_past_window(SLUG, store, agent, NOW)
+    assert not agents._unbound_past_window(SLUG, store, started, LATER)
+    assert agents._unbound_past_window(SLUG, store, agent, LATER)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_an_attempt_outside_kubernetes_is_never_past_the_unbound_window(store: RedisStore) -> None:
+    agent = _unbound(store, "t1")
+
+    assert not agents._unbound_past_window(SLUG, store, agent, NOW)
+    assert not agents._unbound_past_window(SLUG, store, replace(agent, runtime_backend="herdr"), LATER)
+    assert not agents._unbound_past_window(SLUG, store, replace(agent, state="working"), LATER)
+    assert agents._unbound_past_window(SLUG, store, agent, LATER)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
 def test_a_finished_master_retires_after_its_handoff_when_its_pane_is_out_of_reach(store: RedisStore) -> None:
     seat = f"{MASTER}@{SLUG}"
     old = AgentRecord("master@1-0640", MASTER, MASTER, seat=seat, state="finished", started_at=1, pane_id="w:p1")

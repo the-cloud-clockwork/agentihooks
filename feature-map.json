@@ -2019,7 +2019,10 @@
         "tests/tick/steps/test_reap_ended_executions.py::test_a_finished_master_with_no_successor_keeps_retrying",
         "tests/tick/steps/test_reap_ended_executions.py::test_only_a_finished_master_counts_as_handed_on",
         "tests/tick/steps/test_reap_ended_executions.py::test_a_later_agent_in_another_seat_does_not_hand_a_master_on",
-        "tests/tick/steps/test_reap_ended_executions.py::test_a_seat_peer_started_at_the_same_time_does_not_hand_a_master_on"
+        "tests/tick/steps/test_reap_ended_executions.py::test_a_seat_peer_started_at_the_same_time_does_not_hand_a_master_on",
+        "tests/tick/steps/test_reap_ended_executions.py::test_the_unbound_window_starts_under_the_swarm_unbound_key",
+        "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_has_a_uid_is_never_past_the_unbound_window",
+        "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_outside_kubernetes_is_never_past_the_unbound_window"
       ]
     }
   ],
