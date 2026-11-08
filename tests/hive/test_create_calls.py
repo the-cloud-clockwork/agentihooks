@@ -143,6 +143,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
             MESSAGE,
         ],
         ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"],
+        ["gh", "api", f"repos/{REPO}/rules/branches/dev", "--jq", create_github.QUEUED],
         ["gh", "pr", "merge", PR, "--squash", "--auto"],
         ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"],
         list(machine.LIST),
@@ -235,6 +236,7 @@ def _merge_calls(run):
 
 def test_a_refused_auto_merge_waits_for_checks_then_squash_merges(world):
     world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate"]
     world.run.checks = [
         [{"__typename": "CheckRun", "name": "Gate", "status": "QUEUED", "conclusion": ""}],
         [{"__typename": "CheckRun", "name": "Gate", "status": "COMPLETED", "conclusion": "SUCCESS"}],
@@ -255,6 +257,7 @@ def test_a_refused_auto_merge_waits_for_checks_then_squash_merges(world):
 
 def test_a_failed_check_stops_the_create_without_merging(world):
     world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate"]
     world.run.checks = [[{"__typename": "StatusContext", "context": "Gate", "state": "FAILURE"}]]
     with pytest.raises(auth.HiveError, match=f"pull request {PR} has failed checks: Gate;"):
         create.create(world.tools, create.Options(timeout_s=60))
@@ -275,8 +278,61 @@ def test_a_failed_check_the_base_does_not_require_still_merges(world):
     assert f"hive create {NAME}: merge: merged {PR}" in world.lines
 
 
+QUEUE_READ = ["gh", "api", "graphql", "-f", f"query={create_github.PULL}", "-f", f"url={PR}", "--jq", ".data.resource"]
+ENQUEUE = ["gh", "api", "graphql", "-f", f"query={create_github.ENQUEUE}", "-f", "id=PR_node", "-f", "head=headsha"]
+REQUIRED_PASSED = {"__typename": "CheckRun", "name": "Gate — Required", "status": "COMPLETED", "conclusion": "SUCCESS"}
+REQUIRED_RUNNING = {"__typename": "CheckRun", "name": "Gate — Required", "status": "IN_PROGRESS", "conclusion": ""}
+OPTIONAL_FAILED = {"__typename": "CheckRun", "name": "Gate — Protected", "status": "COMPLETED", "conclusion": "FAILURE"}
+
+
+def test_a_base_without_required_checks_waits_on_no_check_and_squash_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[OPTIONAL_FAILED]]
+    create.create(world.tools, create.Options(timeout_s=60))
+    assert ROLLUP not in world.run.calls
+    assert ["gh", "pr", "merge", PR, "--squash"] in world.run.calls
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_a_queued_base_enqueues_once_the_required_checks_pass_despite_a_failed_optional_check(world):
+    world.run.queued = True
+    world.run.required = ["Gate — Required"]
+    world.run.checks = [[REQUIRED_RUNNING, OPTIONAL_FAILED], [REQUIRED_PASSED, OPTIONAL_FAILED]]
+    create.create(world.tools, create.Options(timeout_s=60))
+    assert not world.run.named("gh", "pr", "merge")
+    merging = [argv for argv in world.run.calls if argv in (ROLLUP, QUEUE_READ, ENQUEUE, STATE)]
+    assert merging == [STATE, ROLLUP, ROLLUP, QUEUE_READ, ENQUEUE, STATE]
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_a_pull_request_already_in_the_queue_is_not_enqueued_again(world):
+    world.run.queued = True
+    world.run.entry = {"id": "MQE_1"}
+    with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} to merge; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert QUEUE_READ in world.run.calls
+    assert ENQUEUE not in world.run.calls
+
+
+def test_a_rerun_after_a_checks_timeout_resumes_the_same_member_and_pull_request(world):
+    world.run.queued = True
+    world.run.required = ["Gate — Required"]
+    world.run.checks = [[REQUIRED_RUNNING, OPTIONAL_FAILED]]
+    with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} checks to pass; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    world.run.checks = [[REQUIRED_PASSED, OPTIONAL_FAILED]]
+
+    assert create.create(world.tools, create.Options(timeout_s=60)) == f"hive {NAME} is live in herdr as {TARGET}"
+    assert invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID] == member
+    assert len(world.run.named("gh", "pr", "create")) == 1
+    assert world.run.calls.count(ENQUEUE) == 1
+    assert f"hive create {NAME}: invite: kept hive member {member}" in " ".join(world.lines)
+
+
 def test_checks_that_never_pass_time_out_naming_them(world):
     world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate"]
     world.run.checks = [[]]
     with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} checks to pass; rerun hive create"):
         create.create(world.tools, create.Options(timeout_s=0))
