@@ -81,8 +81,8 @@ def test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once(tmp_path:
         f"mapped watchdog doc items of {copy}: 3 items on 2 tasks, updated t1, t2"
     ]
     assert [(call.operation, call.args) for call in _ledger(values).calls] == [
-        ("update_task", ("t1", {"doc_items": ["3 Range item.", "1 First item."]})),
-        ("update_task", ("t2", {"doc_items": ["3 Range item."]})),
+        ("update_task", ("t1", {"doc_items": ["3 Range item.", "1 First item."]}, (), None)),
+        ("update_task", ("t2", {"doc_items": ["3 Range item."]}, (), None)),
     ]
     assert _coordination(values) == [
         ("marked", (doc_items.MARK,)),
@@ -100,8 +100,8 @@ def test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once(tmp_path:
         f"mapped watchdog doc items of {copy}: 4 items on 2 tasks, updated t1, t2"
     ]
     assert [call.args for call in _ledger(changed).calls] == [
-        ("t1", {"doc_items": ["3 Range item.", "1 First item."]}),
-        ("t2", {"doc_items": ["3 Range item.", "4 New item."]}),
+        ("t1", {"doc_items": ["3 Range item.", "1 First item."]}, (), None),
+        ("t2", {"doc_items": ["3 Range item.", "4 New item."]}, (), None),
     ]
     assert _coordination(changed)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy.read_text())))
 
