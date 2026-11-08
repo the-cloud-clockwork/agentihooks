@@ -159,3 +159,44 @@ def test_a_finished_master_with_no_successor_keeps_retrying(store: RedisStore) -
     assert _reap(store, _Ledger(), {}, old, NOW) == [f"could not retire {old.name}, retrying next tick"]
     assert _reap(store, _Ledger(), {}, old, LATER) == [f"could not retire {old.name}, retrying next tick"]
     assert old.name in {a.name for a in store.agents(SLUG)}
+
+
+def _failed_since(store: RedisStore, name: str) -> None:
+    """Record a refused retire for ``name`` that began at ``NOW``."""
+    tick.retire_watch.failed(store, SLUG, name, {"process": 0, "refusal": "no herdr server is running"}, NOW)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_only_a_finished_master_counts_as_handed_on(store: RedisStore) -> None:
+    seat = f"{MASTER}@{SLUG}"
+    working = AgentRecord("master@1-0640", MASTER, MASTER, seat=seat, state="working", started_at=1)
+    successor = AgentRecord("master@1-0688", MASTER, MASTER, seat=seat, state="working", started_at=2)
+    store.put_agent(SLUG, working)
+    store.put_agent(SLUG, successor)
+    _failed_since(store, working.name)
+
+    assert not agents._handed_on(SLUG, store, working, LATER)
+    assert agents._handed_on(SLUG, store, replace(working, state="finished"), LATER)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_a_later_agent_in_another_seat_does_not_hand_a_master_on(store: RedisStore) -> None:
+    old = AgentRecord("master@1-0640", MASTER, MASTER, seat=f"{MASTER}@{SLUG}", state="finished", started_at=1)
+    engineer = AgentRecord("eng@1-0700", "eng", "t1", seat=f"eng-1@{SLUG}", state="working", started_at=2)
+    store.put_agent(SLUG, old)
+    store.put_agent(SLUG, engineer)
+    _failed_since(store, old.name)
+
+    assert not agents._handed_on(SLUG, store, old, LATER)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_a_seat_peer_started_at_the_same_time_does_not_hand_a_master_on(store: RedisStore) -> None:
+    seat = f"{MASTER}@{SLUG}"
+    old = AgentRecord("master@1-0640", MASTER, MASTER, seat=seat, state="finished", started_at=1)
+    peer = AgentRecord("master@1-0641", MASTER, MASTER, seat=seat, state="working", started_at=1)
+    store.put_agent(SLUG, old)
+    store.put_agent(SLUG, peer)
+    _failed_since(store, old.name)
+
+    assert not agents._handed_on(SLUG, store, old, LATER)
