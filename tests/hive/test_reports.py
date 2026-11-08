@@ -1143,7 +1143,9 @@ def test_the_hive_controller_reads_hive_reports_from_its_store(remote):
     assert remote.runtime.hive.redis is remote.redis
 
 
-def test_the_hive_controller_reads_account_quota_from_the_hive_reports(remote, monkeypatch):
+def test_the_hive_controller_reads_account_quota_from_the_hive_reports(
+    remote: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.routing import aggregate
     from scripts.swarm import capacity, lease
     from scripts.swarm_v2.runtime.routed import hive_controller, routed
@@ -1154,7 +1156,10 @@ def test_the_hive_controller_reads_account_quota_from_the_hive_reports(remote, m
         "seven_day": {"used": 27, "resets_at": 600},
     }
     record = {"harness": "claude", "account": "a", "kind": "subscription", "sessions": 5, "quota": quota}
-    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    from scripts import claude_quota_balancer as balancer
+
+    monkeypatch.setattr(aggregate, "swarm_current", lambda now, environ: {"claude:a": record})
+    monkeypatch.setattr(balancer, "cached_observations", lambda environ=None: [])
     held = lease.acquire(remote.store, "fixture", "controller")
     placed = hive_controller(routed(environ={}, herdr=remote.runtime), remote.store, "fixture", held)
     assert remote.runtime.quota_accounts is capacity.hive_accounts

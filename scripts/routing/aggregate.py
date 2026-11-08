@@ -73,6 +73,13 @@ def current(now: float) -> dict[str, dict]:
     return {} if redis is None else read(redis, now)
 
 
+def swarm_current(now: float, environ: Mapping[str, str]) -> dict[str, dict]:
+    """Live hive rows read from the swarm store's Redis, the one a hive controller holds even without ``REDIS_URL``."""
+    from scripts.swarm.store import redis_client
+
+    return read(redis_client(dict(environ)), now)
+
+
 def counts(harness: str, now: float) -> dict[str, int]:
     """Sessions per account under its AH_CC_TOKEN_ slug spelling, the name session and quota readers look up."""
     return {

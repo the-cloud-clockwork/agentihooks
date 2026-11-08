@@ -172,12 +172,13 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
-def _global(environ: dict, now: float) -> list[Account]:
+def _global(environ: dict, now: float, hives: bool = False) -> list[Account]:
     from scripts.routing import aggregate
 
     refused = _refused(environ)
     rows = []
-    for row in aggregate.current(now).values():
+    found = aggregate.swarm_current(now, environ) if hives else aggregate.current(now)
+    for row in found.values():
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
@@ -230,12 +231,12 @@ def probe(environ: dict[str, str], now: float) -> list[Account]:
 def accounts(environ: dict, now: float, refresh: bool = True, hives: bool = False) -> list[Account]:
     """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
 
-    ``hives`` reads the live hive quota reports whatever the runtime backend.
+    ``hives`` reads the live hive quota reports in the swarm store whatever the runtime backend.
     """
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _global(environ, now)
+        _global(environ, now, hives)
         if hives or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
@@ -247,7 +248,10 @@ def accounts(environ: dict, now: float, refresh: bool = True, hives: bool = Fals
 
 
 def hive_accounts(environ: dict[str, str], now: float, refresh: bool = True) -> list[Account]:
-    """Every account from the live hive quota reports in the shared store, the readings a hive controller places from."""
+    """Every account from the live hive quota reports in the swarm store, which a hive controller places from.
+
+    ``refresh`` is accepted for the ``quota_accounts`` reader signature; hive reports are never probed here.
+    """
     return accounts(environ, now, refresh, hives=True)
 
 

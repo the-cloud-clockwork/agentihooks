@@ -2419,7 +2419,7 @@ def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypat
     )
 
 
-def test_hive_accounts_read_the_hive_quota_reports_without_a_runtime_backend(monkeypatch):
+def test_hive_accounts_read_the_hive_quota_reports_without_a_runtime_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.routing import aggregate
 
     quota = {
@@ -2428,14 +2428,19 @@ def test_hive_accounts_read_the_hive_quota_reports_without_a_runtime_backend(mon
         "seven_day": {"used": 27, "resets_at": 600},
     }
     record = {"harness": "claude", "account": "a", "kind": "subscription", "sessions": 5, "quota": quota}
-    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    from scripts.swarm import store
+
+    shared = object()
+    monkeypatch.setattr(store, "redis_client", lambda environ=None: shared)
+    monkeypatch.setattr(aggregate, "read", lambda redis, now: {"claude:a": record} if redis is shared else {})
+    monkeypatch.setattr(aggregate, "current", lambda now: {})
     monkeypatch.setattr(balancer, "cached_observations", lambda environ=None: [])
     assert not aggregate.enabled({})
     (row,) = capacity.hive_accounts({}, 100, refresh=False)
     assert (row.harness, row.name, row.state, row.sessions, row.cap) == ("claude", "a", "OPEN", 5, 8)
 
 
-def test_a_placement_names_a_missing_quota_reading_instead_of_a_none_cap():
+def test_a_placement_names_a_missing_quota_reading_instead_of_a_none_cap() -> None:
     rows = [
         capacity.Account("claude", "a", "UNKNOWN", 5, None, None),
         capacity.Account("claude", "b", "OPEN", 2, 90, 80, 8),

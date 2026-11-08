@@ -347,7 +347,8 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         if rows is None:
             if self._quota_accounts is None:
-                self._quota_accounts = capacity.hive_accounts(dict(os.environ), now / 1000, refresh=False)
+                read = self.herdr.quota_accounts or capacity.hive_accounts
+                self._quota_accounts = read(dict(os.environ), now / 1000, refresh=False)
             rows = self._quota_accounts
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         if lane == "master" and not task.get("route_kind"):
