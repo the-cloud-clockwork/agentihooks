@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.730 · 2026-11-08
+
+### 2026-11-08 · fa42cf6f2616 · #10090 · @nestorcolt
+
+**Serve agents over MCP: list, show and a one-stage run**
+
+This change exposes agents over MCP so external tools can discover and invoke them without shelling out to the CLI. `agent_list` and `agent_show` mirror the existing `agents list`/`show` profile cards, while `agent_run` drives a one-stage workflow for a given profile and input, either waiting for the result or detaching a background `workflow resume` process and returning the running state immediately. To keep things safe, `agent_run` refuses to start inside an existing worker run, preventing nested executions. The registry test now names the new `agents` category, completing the planned MCP slice.
+
+### 2026-11-08 · 14a535038561 · #10083 · @agenticore-app
+
+**Accept operator plan authorship, record plan source and quiet plan relays**
+
+This change lets the operator credential upload plan artifacts specifically, while every other operator artifact type remains refused, closing a gap in authorship control. It also lets plan_add carry an optional source record—harness, session, path, sha256—so you can trace where a plan actually came from, with validation enforced in the ledger and API schemas. Finally, operator_mail.relay now skips operator "added" events on plans and slices, preventing a flood of mail to the master every time an operator ingests a plan.
+
 ## v2.17.729 · 2026-11-08
 
 ### 2026-11-08 · 70b6a9438eff · #10081 · @agenticore-app
