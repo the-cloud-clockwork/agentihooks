@@ -119,7 +119,7 @@ def required_checks(run: Run, repo: str, base: str) -> list[str]:
     return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", REQUIRED]))
 
 
-def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
+def checks_passed(run: Run, url: str, required: Sequence[str] = (), command: str = "hive create") -> bool:
     rollup = json.loads(gh(run, ["pr", "view", url, "--json", "statusCheckRollup"]))["statusCheckRollup"] or []
     results = [
         (check.get("name") or check.get("context"), check.get("conclusion") or check.get("state")) for check in rollup
@@ -128,9 +128,7 @@ def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
         results = [(name, _best([result for found, result in results if found == name])) for name in required]
     failed = [name for name, result in results if result not in (*PASSED, *WAITING)]
     if failed:
-        raise auth.HiveError(
-            f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun hive create"
-        )
+        raise auth.HiveError(f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun {command}")
     return bool(results) and all(result in PASSED for _, result in results)
 
 

@@ -3,6 +3,7 @@ import json
 import subprocess
 import urllib.error
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -300,13 +301,13 @@ def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_
     ]
 
 
-def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(store, tmp_path):
+def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(store: Swarm, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
     rollups = iter(["PENDING", "SUCCESS"])
     states = iter(["OPEN", "MERGED"])
     rules = ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev", "--jq", create_github.REQUIRED]
 
-    def refused(argv, **kwargs):
+    def refused(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if argv == ["gh", "pr", "merge", PR, "--squash", "--auto"]:
             return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
         if argv == rules:
@@ -326,10 +327,10 @@ def test_a_refused_auto_merge_waits_for_the_required_checks_then_squash_merges(s
     assert merges == [["gh", "pr", "merge", PR, "--squash"]]
 
 
-def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(store, tmp_path):
+def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(store: Swarm, tmp_path: Path) -> None:
     member, run, bao, plan = _removal(store, tmp_path)
 
-    def pending(argv, **kwargs):
+    def pending(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         if argv[:3] == ["gh", "pr", "merge"]:
             return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
         if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
@@ -348,7 +349,7 @@ def test_a_removal_whose_checks_never_pass_times_out_naming_its_pull_request(sto
 
 
 @pytest.mark.parametrize("label", ["swarm-hive-003", "gpu-1"])
-def test_remove_lists_exactly_the_manifests_hive_create_wrote(label):
+def test_remove_lists_exactly_the_manifests_hive_create_wrote(label: str) -> None:
     written = sorted(create_render.render(TEMPLATE, create_render.Hive(label, "r", 2222, "worker-001", "10.0.0.1")))
     neighbours = [f"k8s/argocd/apps/{label}0.yaml", f"k8s/manifests/{label}-old/hive.yaml", "k8s/manifests/x/a.yaml"]
     run = Run(tree=[*neighbours, *written])
@@ -363,15 +364,62 @@ def test_remove_lists_exactly_the_manifests_hive_create_wrote(label):
     assert [argv for argv, _ in run.calls] == READS[1:]
 
 
-def test_remove_still_finds_the_prefixed_layout_of_older_hives():
-    run = Run(tree=TREE)
+def test_remove_still_finds_the_prefixed_layout_of_older_hives() -> None:
+    old = [
+        "k8s/argocd/apps/agentihooks-hive-anton-2.yaml",
+        "k8s/manifests/agentihooks-hive-anton-2/hive.yaml",
+        "k8s/values-overlays/agentihooks-hive-anton-2/values.yaml",
+    ]
+    run = Run(tree=[*TREE, *old[::2]])
 
     lines = remove.unmanifest(remove.Plan("m", "anton-2", "k8s/agentihooks-hive-anton-2", dry_run=True), run)
 
     assert lines == [
         "would open a pull request into the-cloud-clockwork/antoncore dev deleting "
-        "k8s/manifests/agentihooks-hive-anton-2/hive.yaml and merge it once its checks pass"
+        f"{', '.join([old[1], old[0], old[2]])} and merge it once its checks pass"
     ]
+
+
+def test_a_removal_pull_request_closed_unmerged_fails_at_once(store: Swarm, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def closed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ["gh", "pr", "merge"] and "--auto" in argv:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, "[]\n", "")
+        if argv == ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "SUCCESS"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        if argv == ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]:
+            return subprocess.CompletedProcess(argv, 0, "CLOSED\n", "")
+        return run(argv, **kwargs)
+
+    clock = Clock(store, member, 2)
+    with pytest.raises(auth.HiveError) as stopped:
+        remove.remove(store, bao, plan, _host(clock, closed, tmp_path))
+
+    assert str(stopped.value) == f"pull request {PR} was closed without merging; rerun hive remove to open a new one"
+    assert clock.slept == 2
+
+
+def test_a_removal_with_failed_checks_names_hive_remove(store: Swarm, tmp_path: Path) -> None:
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def failed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        if argv[:3] == ["gh", "api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
+            return subprocess.CompletedProcess(argv, 0, '["unit"]\n', "")
+        if argv[:4] == ["gh", "pr", "view", PR]:
+            rollup = {"statusCheckRollup": [{"name": "unit", "conclusion": "FAILURE"}]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rollup), "")
+        return run(argv, **kwargs)
+
+    with pytest.raises(auth.HiveError) as stopped:
+        remove.remove(store, bao, plan, _host(Clock(store, member, 2), failed, tmp_path))
+
+    assert str(stopped.value) == f"pull request {PR} has failed checks: unit; fix them and rerun hive remove"
 
 
 def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_off(store, tmp_path):

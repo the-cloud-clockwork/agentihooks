@@ -323,17 +323,23 @@ def unmanifest(
     if create_github.merge(run, url):
         return [f"opened pull request {url} deleting {listed}; it merges once its checks pass"]
     required = create_github.required_checks(run, plan.repo, plan.base)
-    waits = (sleep, clock, plan.merge_s)
-    _until(waits, f"pull request {url} checks to pass", lambda: create_github.checks_passed(run, url, required))
+    checks = f"pull request {url} checks to pass"
+    _until(sleep, clock, plan.merge_s, checks, lambda: create_github.checks_passed(run, url, required, "hive remove"))
     create_github.squash(run, url)
-    _until(waits, f"pull request {url} to merge", lambda: create_github.pr_state(run, url) == "MERGED")
+    _until(sleep, clock, plan.merge_s, f"pull request {url} to merge", lambda: _merged(run, url))
     return [f"opened pull request {url} deleting {listed} and merged it"]
 
 
+def _merged(run: Callable[..., subprocess.CompletedProcess], url: str) -> bool:
+    state = create_github.pr_state(run, url)
+    if state == "CLOSED":
+        raise auth.HiveError(f"pull request {url} was closed without merging; rerun hive remove to open a new one")
+    return state == "MERGED"
+
+
 def _until(
-    waits: tuple[Callable[[float], None], Callable[[], float], int], what: str, check: Callable[[], bool]
+    sleep: Callable[[float], None], clock: Callable[[], float], limit_s: int, what: str, check: Callable[[], bool]
 ) -> None:
-    sleep, clock, limit_s = waits
     deadline = clock() + limit_s
     while not check():
         if clock() >= deadline:
