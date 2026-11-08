@@ -1,7 +1,7 @@
 """A hive's agent ceiling: its own reported memory, swap and load under the host room rule, bounded by a set cap."""
 
 import json
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -88,14 +88,14 @@ def test_a_reading_without_agents_counts_none_running() -> None:
 
 
 @pytest.fixture
-def redis():
+def redis() -> Any:
     import fakeredis
 
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
 @pytest.mark.feature("hive-agent-ceiling")
-def test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one(redis) -> None:
+def test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one(redis: Any) -> None:
     assert registry.update(redis, "box", ["ui=no"])["max_agents"] is None
     assert registry.update(redis, "head", ["ui=yes"])["max_agents"] is None
     assert registry.update(redis, "box", ["max-agents=6"])["max_agents"] == 6
@@ -106,7 +106,7 @@ def test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one(redis) -> None:
 
 
 @pytest.mark.feature("hive-agent-ceiling")
-def test_placement_reads_the_computed_ceiling_and_keeps_the_cap(redis, monkeypatch) -> None:
+def test_placement_reads_the_computed_ceiling_and_keeps_the_cap(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     per = host_budget.MEMORY_PER_AGENT_MB

@@ -376,7 +376,7 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3 (cap 3)\texcluded=qa\theadroom=missing\n"
-        "pod\tstale\tui=no\tmax-agents=0 (auto)\texcluded=eng\theadroom=missing\n"
+        "pod\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng\theadroom=missing\n"
     )
 
 
@@ -423,7 +423,9 @@ def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=0 (auto)\texcluded=eng,ci\theadroom=missing\n"
+    assert (
+        capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng,ci\theadroom=missing\n"
+    )
 
 
 @pytest.fixture

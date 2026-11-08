@@ -180,7 +180,9 @@ def run(
             raise SwarmError(f"counted only on the {ROOT} hive, this host is {here}")
         redis = cast("Any", store.redis)
         stored = cast("int | None", registry.show(redis, ROOT)["max_agents"])
-        cap = ceiling.ceiling(stored, cast("dict[str, Any] | None", headroom.read(redis, ROOT, now_ms)))
+        reading = cast("dict[str, Any] | None", headroom.read(redis, ROOT, now_ms))
+        unread = stored is None and ceiling.computed(reading) is None
+        cap = config.local_max_agents if unread else ceiling.ceiling(stored, reading)
         return [workstation(local_slots.occupancy(store, ROOT)[0], cap, config.local_max_agents)]
 
     def released() -> list[Probe]:

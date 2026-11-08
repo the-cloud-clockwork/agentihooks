@@ -384,7 +384,8 @@ def _list() -> None:
         room = headroom.summary(reading)
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
         stored = cast("int | None", record["max_agents"])
-        top = ceiling.ceiling(stored, reading)
+        unread = stored is None and ceiling.computed(reading) is None
+        top = "unknown" if unread else ceiling.ceiling(stored, reading)
         cap = registry.AUTO if stored is None else f"cap {stored}"
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top} ({cap})\texcluded={excluded}\t{room}"

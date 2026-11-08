@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -237,7 +238,7 @@ def test_the_hives_table_fits_its_box_at_1920(hives_page):
 
 
 @pytest.mark.feature("hive-agent-ceiling")
-def test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap(hives_page):
+def test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap(hives_page: Any) -> None:
     page = hives_page()
     rows = page.table("swarm-hives")
     assert [row[5].lower() for row in rows] == ["auto", "cap", "auto"]
@@ -248,7 +249,7 @@ def test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap(hive
 
 
 @pytest.mark.feature("hive-agent-ceiling")
-def test_clearing_max_agents_writes_auto(hives_page):
+def test_clearing_max_agents_writes_auto(hives_page: Any) -> None:
     page = hives_page()
     box = page.tab.locator('#hive-pod [data-hive-field="max_agents"]')
     box.fill("")

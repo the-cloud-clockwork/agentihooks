@@ -266,7 +266,7 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
         "box\tstale\tui=no\tmax-agents=0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tmax-agents=0 (auto)\texcluded=master\theadroom=missing\n"
+        "old\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=master\theadroom=missing\n"
     )
 
 
