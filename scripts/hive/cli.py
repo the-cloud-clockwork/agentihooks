@@ -187,7 +187,7 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, machine, remove
+    from scripts.hive import invite, machine, member_swarms, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
@@ -207,6 +207,7 @@ def _remove(args: argparse.Namespace) -> list[str]:
         wait_s=args.wait,
         signer=_signer(),
         dry_run=args.dry_run,
+        signer_path=member_swarms.signer_path(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
 
@@ -378,6 +379,16 @@ def _workers(reported: dict[str, list[dict[str, Any]]], local: dict[str, list[st
     return sum(not local_slots.is_master(name) for name in names)
 
 
+def _ceiling_columns(record: Any, reading: Any) -> tuple[str, str]:
+    """The hive list's max agents column, the ceiling and how it is set, and its headroom column."""
+    from scripts.hive import ceiling, headroom
+
+    cap = record["max_agents"]
+    top = ceiling.shown(cap, reading)
+    marked = registry.AUTO if cap is None else f"cap {cap}"
+    return f"{'unknown' if top is None else top} ({marked})", headroom.summary(reading)
+
+
 def _list() -> None:
     from scripts.hive import headroom, join_report
 
@@ -391,12 +402,12 @@ def _list() -> None:
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
-        room = headroom.summary(headroom.read(redis, record["id"], now))
+        top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
         workers = _workers(reported, local, record)
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tworkers={workers} of {record['max_agents']}\texcluded={excluded}\t{room}"
+            f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

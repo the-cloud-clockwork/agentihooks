@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, create_render, hive_state, machine, nats_grant, registry
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    hive_state,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -61,6 +71,7 @@ MANIFESTS = (
     "k8s/manifests/{release}/",
     "k8s/values-overlays/{release}/",
 )
+NO_SIGNER = f"{nats_grant.SIGNER_ENV} names no hub signer record, so no member swarms entry to unlist"
 MEMBER_ID = re.compile("[0-9a-f]{16}")
 TREE = 'if .truncated then error("the tree listing is truncated") else .tree[] | select(.type == "blob") | .path end'
 
@@ -76,6 +87,7 @@ class Plan:
     merge_s: int = create.Options.timeout_s
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
+    signer_path: str | None = None
 
 
 class TaskLedger(Protocol):
@@ -290,6 +302,19 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
+def unlist(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
+    """Drop the plan's hive from the hub signer record's member swarms, naming what it found."""
+    if plan.signer_path is None:
+        return [NO_SIGNER]
+    if plan.dry_run:
+        return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
+    if bao is None:
+        raise auth.HiveError(f"no OpenBao client to unlist {plan.hive} from {plan.signer_path}")
+    if member_swarms.unassign(bao, plan.signer_path, plan.hive):
+        return [f"unlisted {plan.hive} from the hub signer record {plan.signer_path}"]
+    return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
+
+
 def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     nodes = sorted(node for node, name in redis.hgetall(machine.MACHINES).items() if name == plan.label)
     state = home / create.STATE_FILE
@@ -409,6 +434,7 @@ def _until(
 STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
+    ("signer", unlist),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
     ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
     ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run, host.sleep, host.clock)),

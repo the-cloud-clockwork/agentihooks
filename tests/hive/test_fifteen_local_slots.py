@@ -36,9 +36,9 @@ def test_new_and_legacy_swarms_allow_fifteen_local_workers(store: RedisStore) ->
 def test_headed_hive_and_swarm_defaults_allow_fifteen_slots(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     hive = registry.update(store.redis, "workstation", ["ui=yes"])
-    assert hive["max_agents"] == 15
+    assert hive["max_agents"] is None
     assert local_slots.maximum(store, "workstation", 50) == 15
-    assert registry.update(store.redis, "remote", ["ui=no"])["max_agents"] == 20
+    assert registry.update(store.redis, "remote", ["ui=no"])["max_agents"] is None
 
 
 @pytest.mark.parametrize(("local", "hive", "ceiling", "expected"), [(7, 15, 50, 7), (15, 6, 50, 6), (15, 15, 4, 4)])

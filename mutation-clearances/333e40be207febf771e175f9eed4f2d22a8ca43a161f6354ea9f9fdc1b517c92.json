@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁretire:5b5eb143331d0800fc2c78788b56bf908de63ae42fbe41ce4ae6533c9a29ccfd": {
+    "reader": "standards_reader",
+    "reason": "Replacing the type argument Reports | None with None in typing.cast changes only static typing. typing.cast returns self.hive unchanged and performs no runtime type check; the None guard and both Reports method calls therefore receive the identical object and produce identical runtime output."
+  }
+}
