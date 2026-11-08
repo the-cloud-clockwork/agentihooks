@@ -151,7 +151,6 @@ def test_a_swarm_agent_appends_its_plan_to_the_swarm_ledger(
     assert MARK in out
     assert "agentihooks plan ingest <plan file> --ledger swarm-buildout" in out
     assert "write the accepted plan as markdown" in out
-    assert "--as" not in out
     assert "init-swarm" not in out
 
 

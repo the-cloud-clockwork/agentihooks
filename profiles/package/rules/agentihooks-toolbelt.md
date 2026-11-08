@@ -90,9 +90,9 @@ investigate/refactor wording are never themselves a reason to create one.
 
 A session already bound to a ledger or swarm keeps its ledger duties. A hook
 tells a bound session, once per session, when it accepts a plan: the directive
-names its own ledger, so append the plan there as new phases with
-`agentihooks ledger --slug <slug> --as <name> plan phases <file>`, never a new
-swarm, and do not implement the plan in this session.
+names its own ledger, so ingest the plan there with
+`agentihooks plan ingest <plan file> --ledger <slug>`, never a new swarm, and
+do not implement the plan in this session. Planner seats get no directive.
 
 ## Swarms and ledgers
 
