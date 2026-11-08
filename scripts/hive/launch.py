@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
@@ -62,7 +62,7 @@ class _Placing:
 ROOM_DETAILS = {"reason": "", "detail": ""}
 
 
-def loaded_hives(store: RedisStore) -> list[dict]:
+def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
     """Every registered hive with the worker agents it runs or is launching.
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
@@ -117,8 +117,8 @@ def loaded_hives(store: RedisStore) -> list[dict]:
 
 def live_hives(store: RedisStore) -> list[dict[str, Any]]:
     """The loaded hives whose heartbeat is live."""
+    loaded = loaded_hives(store)
     now = lease.now_ms(store)
-    loaded = cast(list[dict[str, Any]], loaded_hives(store))
     return [hive for hive in loaded if registry.live(hive, now)]
 
 

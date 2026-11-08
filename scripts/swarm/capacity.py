@@ -2,7 +2,7 @@ import json
 import sys
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
@@ -421,7 +421,7 @@ def _open(observations: list[Account], warned: dict) -> list[Account]:
     return [row for row in observations if (row.harness, row.name) not in warned]
 
 
-def _placeable(rows: list[Account]) -> dict:
+def _placeable(rows: list[Account]) -> dict[str, int]:
     return {
         h: sum(free_seats(row) for row in rows if row.harness == h and row.kind != API) for h in ("claude", "codex")
     }
@@ -466,8 +466,12 @@ def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
 
 def quota_seats(observations: list[Account], warned: dict[tuple[str, str], Any]) -> int:
     """The free quota seats autoscale places against, warned accounts and API keys left out."""
-    free = cast(dict[str, int], _placeable(_open(observations, warned)))
-    return sum(free.values())
+    return sum(_placeable(_open(observations, warned)).values())
+
+
+def inputs_seats(inputs: ScaleInputs) -> int:
+    """The free quota seats of the autoscale inputs, their warned accounts left out."""
+    return quota_seats(inputs.observations, inputs.warned)
 
 
 def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dict[tuple[str, str], Any]:
@@ -480,7 +484,9 @@ def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dic
     }
 
 
-def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
+def autoscaled(
+    config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
+) -> tuple[SwarmConfig, dict[str, Any] | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)

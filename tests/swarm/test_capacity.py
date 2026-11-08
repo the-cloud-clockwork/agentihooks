@@ -2226,6 +2226,26 @@ def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(ca
     assert shown["binding"] == binding
 
 
+def test_the_live_autoscale_command_names_quota_seats_or_host_room_when_hives_have_room(capsys, monkeypatch):
+    from scripts.hive import launch
+    from scripts.swarm import cli
+
+    store = _store()
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: None)
+    hives = [{"id": "anton", "room": 20, "limit": "ram: fits 20 more", "refusal": ""}]
+    monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
+    roomy = {**_readings(), "host": {"load1": 0, "cpus": 8, "available_mb": 64000, "agents": 0}}
+    monkeypatch.setattr(capacity, "live_inputs", lambda slug, found, ledger, environ, now: inputs)
+    inputs = capacity.fixture_inputs(roomy)
+    cli.main(["new", "autoscale"])
+    assert capsys.readouterr().out.splitlines()[-1] == "binding limit quota seats, room 10"
+    inputs = capacity.fixture_inputs(_readings())
+    cli.main(["new", "autoscale", "--json"])
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["host"]["room"], shown["binding"]) == (0, "binding limit host room, room 0")
+
+
 def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):
     from scripts.hive import launch
     from scripts.swarm import cli
@@ -2233,7 +2253,9 @@ def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_hos
     store = _store()
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": {"room": 4}}))
     observed = [account(cap=6), account("warned", cap=6, left=1)]
-    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed if not refresh else [])
+    monkeypatch.setattr(
+        capacity, "accounts", lambda env, now, refresh=True: observed if refresh is False and now > 0 else []
+    )
     hives = [{"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"}]
     monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
     assert cli.hive_admission(store, "sw") == {

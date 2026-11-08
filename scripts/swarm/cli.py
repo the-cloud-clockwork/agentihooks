@@ -1633,20 +1633,24 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
-    scaled = cast(dict[str, Any], decision)
-    host: dict[str, Any] = scaled["host"]
+    host: dict[str, Any] = (decision or {})["host"]
     hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
     admitted: list[str] = []
     if hives:
-        warned = cast(dict[tuple[str, str], Any], inputs.warned)
-        seats = capacity.quota_seats(inputs.observations, warned)
+        seats = capacity.inputs_seats(inputs)
         admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
         print(
             json.dumps(
-                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **scaled, **slots, **shown},
+                {
+                    "scaling": config.scaling,
+                    "applied": config.scaling == AUTO_SCALING,
+                    **(decision or {}),
+                    **slots,
+                    **shown,
+                },
                 indent=2,
             )
         )
