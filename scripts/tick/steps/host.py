@@ -6,8 +6,6 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 
-from redis.exceptions import RedisError
-
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     delivery,
@@ -72,20 +70,27 @@ def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], A
 def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
     """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
     raise it again."""
+    from redis.exceptions import RedisError
+
     if isinstance(exc, RedisError) or not any(box.get("raised") is exc for box in boxes):
         raise exc
     return failed_pass(exc)
 
 
 def failed_pass(exc: BaseException) -> list[str]:
-    """Log the exception a step held and return the line ending its pass as failed."""
+    """Log the exception a step held, record its pass as an error and return the line ending the pass as failed."""
     traceback.print_exception(exc, file=sys.stderr)
+    record = timing.PASS.get()
+    if record is not None:
+        record["outcome"] = "error"
     return [f"pass failed: a step raised {type(exc).__name__}: {exc}"]
 
 
 def end_held(box: dict[str, Any]) -> list[str]:
     """Raise a stop a step held in ``box``, else log the exception it held and return the line ending its pass as
     failed, nothing when no step raised."""
+    from redis.exceptions import RedisError
+
     raised = box.get("raised")
     if raised is None:
         return []
