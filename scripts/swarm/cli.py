@@ -331,13 +331,16 @@ def _bin_stop(store, slug, ledger, runtime):
 def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     """Hold the pass's ledger view until beating closes, started with one delta read under a short timeout when the
     client reads it; a slow or stopped server leaves the pass on the last good view this host stored, writing to
-    the outbox and refusing fresh reads."""
+    the outbox and refusing fresh reads, and an address the credential may not travel to leaves it unheld for its
+    ledger health probe."""
     beating.enter_context(ledger_view.holding())
     if not ledger_view.reads(ledger):
         return
     beating.callback(ledger_client.OFFLINE.set, False)
     try:
         ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
+    except ledger_link.Cleartext as exc:
+        print(f"ledger {slug} view not held: {exc}", file=sys.stderr)
     except OSError as exc:
         if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
             raise
