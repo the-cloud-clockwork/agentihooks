@@ -123,7 +123,8 @@ def test_an_abandoned_view_skips_the_stall_watch_and_the_pass_ends(
         return lambda url: None
 
     def stall_pass(watch: Any, doc: dict[str, Any]) -> list[str]:
-        watched.append(watch.view("https://github.com/o/r/pull/1"))
+        watched.append(watch.view)
+        watch.view("https://github.com/o/r/pull/1")
         return []
 
     step = next(step for step in host.STEPS if step.name == "tick view")
