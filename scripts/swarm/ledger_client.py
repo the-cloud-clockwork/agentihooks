@@ -55,6 +55,13 @@ def offline() -> bool:
     return OFFLINE.get() or view.offline()
 
 
+def slow() -> bool:
+    """Whether the read that left the pass on its last good view only timed out, so its writes are still sent first."""
+    from scripts.tick import view
+
+    return SLOW.get() or view.slow()
+
+
 def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """``ops``, refused as the server would refuse them when a task write's guard fails against the held view."""
     from scripts.tick import view
@@ -128,7 +135,7 @@ class LedgerClient:
         if held_offline and not ops:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
-            if held_offline and ops and not SLOW.get():
+            if held_offline and ops and not slow():
                 return _offline_write(ledger, slug, ops, service)
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:

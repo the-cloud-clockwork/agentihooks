@@ -37,6 +37,7 @@ class Ledger(BaseHTTPRequestHandler):
     """Answer an export read slowly, pausing mid body, and a write at once."""
 
     exports: list[str] = []
+    pause: float = PAUSE_S
     writes: list[Any] = []
 
     def do_POST(self) -> None:
@@ -46,7 +47,7 @@ class Ledger(BaseHTTPRequestHandler):
             Ledger.writes.append(sent)
             return self._send(orjson.dumps({"tasks": []}), pause=0)
         Ledger.exports.append("started")
-        self._send(orjson.dumps({"generation": GENERATION, "data": STATE}), pause=PAUSE_S)
+        self._send(orjson.dumps({"generation": GENERATION, "data": STATE}), pause=Ledger.pause)
         Ledger.exports.append("ended")
 
     def _send(self, body: bytes, pause: float) -> None:
@@ -108,7 +109,7 @@ def ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
     monkeypatch.setattr(ledger_client, "SNAPSHOT_TIMEOUT_S", SHORT_S)
     monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
     api.write_export_file(view.view_file(base, "sw", tmp_path), 3, STORED)
-    Ledger.exports, Ledger.writes = [], []
+    Ledger.exports, Ledger.writes, Ledger.pause = [], [], PAUSE_S
     try:
         yield fake
     finally:
@@ -199,3 +200,29 @@ def test_a_pass_whose_server_refused_the_connection_queues_writes_without_sendin
     assert Ledger.writes == []
     assert ledger.queued == [("sw", [OP], True)]
     assert ledger_client.SLOW.get() is False
+
+
+@pytest.mark.feature("swarm-tick-slow-export-write")
+def test_a_write_after_a_mid_pass_view_read_timed_out_is_still_sent(ledger: SimpleNamespace) -> None:
+    second = {**OP, "id": "c2"}
+    Ledger.pause = 0
+    with ExitStack() as beating:
+        cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
+        assert OFFLINE.get() is False
+        Ledger.pause = PAUSE_S
+        LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
+        held = view.current()
+        assert held is not None and held.generation == GENERATION
+        assert view.offline() is True
+        assert view.slow() is True
+        LedgerClient(service=True)._call("sw", [second])  # pyright: ignore[reportPrivateUsage]
+    assert Ledger.writes == [[OP], [second]]
+    assert ledger.queued == []
+
+
+@pytest.mark.feature("swarm-tick-slow-export-write")
+def test_only_a_timeout_marks_a_failed_read_slow() -> None:
+    assert view.timed_out(TimeoutError("timed out")) is True
+    assert view.timed_out(urllib.error.URLError(TimeoutError("timed out"))) is True
+    assert view.timed_out(urllib.error.URLError(ConnectionRefusedError("refused"))) is False
+    assert view.timed_out(ConnectionResetError("reset")) is False

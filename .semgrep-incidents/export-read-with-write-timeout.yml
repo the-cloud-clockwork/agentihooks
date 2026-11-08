@@ -43,7 +43,7 @@ rules:
     message: >-
       A ledger write in a pass that runs from its last good view is queued in the outbox without being sent, so a
       server that is only slow while it serves a full export to another client never takes a controller write.
-      Queue without sending only when SLOW is unset, and queue after a send only when that send went unanswered.
+      Queue without sending only when slow() is false, and queue after a send only when that send went unanswered.
     paths:
       include:
         - /scripts/swarm/ledger_client.py
@@ -56,7 +56,7 @@ rules:
           - pattern: $LEDGER.queue(...)
           - pattern: _offline_write(...)
       - pattern-not-inside: |
-          if <... SLOW.get() ...>:
+          if <... slow() ...>:
               ...
       - pattern-not-inside: |
           if <... unreachable ...>:

@@ -351,15 +351,10 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
         _read_long_or_hold_stored(slug, ledger, exc)
 
 
-def _timed_out(exc: OSError) -> bool:
-    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
-    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
-
-
 def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
     """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
     stores no view fresh enough to run from, else hold the stored view."""
-    if _timed_out(exc) and not ledger_view.fresh(slug):
+    if ledger_view.timed_out(exc) and not ledger_view.fresh(slug):
         try:
             ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
             return
@@ -378,7 +373,7 @@ def _hold_stored(slug: str, exc: OSError) -> None:
         return
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
     ledger_client.OFFLINE.set(True)
-    ledger_client.SLOW.set(_timed_out(exc))
+    ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):

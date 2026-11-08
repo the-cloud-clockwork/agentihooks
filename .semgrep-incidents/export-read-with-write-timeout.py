@@ -57,7 +57,8 @@ def short_view_with_retry(slug: str, service: bool) -> None:
         _read_long_or_hold_stored(slug, service, exc)
 
 
-SLOW = ledger_client.SLOW
+def slow() -> bool:
+    return ledger_client.SLOW.get()
 
 
 def _offline_write(store: object, slug: str, ops: list, service: bool) -> dict:
@@ -76,7 +77,7 @@ class QueuedUnsent:
 class SentFirst:
     def _call(self, slug: str, ops: list, held_offline: bool, service: bool) -> dict:
         try:
-            if held_offline and ops and not SLOW.get():
+            if held_offline and ops and not slow():
                 # ok: offline-write-queued-without-send
                 return _offline_write(ledger, slug, ops, service)
             return ledger.call(slug, ops, service=service)
