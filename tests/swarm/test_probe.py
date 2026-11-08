@@ -169,7 +169,7 @@ STORE = Store()
 
 @pytest.fixture
 def live(monkeypatch):
-    from scripts.hive import join_report, registry
+    from scripts.hive import headroom, join_report, registry
     from scripts.swarm import commands, local_slots, publish
     from scripts.swarm.health import merge_stall
 
@@ -184,6 +184,7 @@ def live(monkeypatch):
     monkeypatch.setattr(
         registry, "show", lambda redis, hive: {"max_agents": 6} if (redis, hive) == (STORE.redis, "root") else None
     )
+    monkeypatch.setattr(headroom, "read", lambda redis, hive, now_ms: None)
     monkeypatch.setattr(
         join_report, "read", lambda redis, agent: reports.get(agent.name, {}) if redis is STORE.redis else {}
     )
