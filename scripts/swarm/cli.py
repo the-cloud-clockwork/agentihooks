@@ -62,6 +62,7 @@ import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from contextvars import Token
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
@@ -562,6 +563,17 @@ def _pass_tools(store: RedisStore, slug: str, owner: str) -> Tools:
     )
 
 
+def _end_hold(store: RedisStore, slug: str, token: str, keeping: Token[Any]) -> None:
+    """Release the pass's tick lock, then drop its step hook and stop hold even when the release raises."""
+    from scripts.swarm import controller
+
+    try:
+        controller.release_tick_lock(store, slug, token, "pass")
+    finally:
+        timing.BEFORE_STEP.reset(keeping)
+        tick_stop.drop(token)
+
+
 @timing.instrument_tick
 @scope.one_pass()
 @outage.guard_tick
@@ -654,11 +666,7 @@ def run_tick(
             try:
                 beating.close()
             finally:
-                try:
-                    controller.release_tick_lock(store, slug, token, "pass")
-                finally:
-                    timing.BEFORE_STEP.reset(keeping)
-                    tick_stop.drop(token)
+                _end_hold(store, slug, token, keeping)
 
 
 def cmd_list(store, args):
