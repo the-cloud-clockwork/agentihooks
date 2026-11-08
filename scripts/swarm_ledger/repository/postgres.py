@@ -219,30 +219,39 @@ class Pool:
             self.opened -= 1
             self.lock.notify()
 
+    def _reserve(self, deadline: float) -> tuple[Any, bool]:
+        """An idle connection, or None with a slot reserved for a new one and whether that one measures the server."""
+        with self.lock:
+            while not self.idle and self.opened >= self.cap:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+                self.lock.wait(timeout=left)
+            if self.idle:
+                return self.idle.pop(), False
+            self.opened += 1
+            return None, self.opened == 1
+
+    def _new(self, measure: bool) -> Any:
+        try:
+            raw = self._open(measure)
+        except BaseException:
+            self._release()
+            raise
+        if measure:
+            with self.lock:
+                self.lock.notify_all()
+        return raw
+
     def take(self) -> Any:
         """A live connection: an idle one that answers, else a new one in a slot reserved under the lock."""
         deadline = time.monotonic() + 5
-        while True:
-            with self.lock:
-                while not self.idle and self.opened >= self.cap:
-                    left = deadline - time.monotonic()
-                    if left <= 0:
-                        raise sqlite3.OperationalError("ledger database pool capacity exhausted")
-                    self.lock.wait(timeout=left)
-                raw = self.idle.pop() if self.idle else None
-                measure = raw is None and not self.opened
-                if raw is None:
-                    self.opened += 1
-            if raw is None:
-                try:
-                    return self._open(measure)
-                except BaseException:
-                    self._release()
-                    raise
-            if self._alive(raw):
-                return raw
+        raw, measure = self._reserve(deadline)
+        while raw is not None and not self._alive(raw):
             raw.close()
             self._release()
+            raw, measure = self._reserve(deadline)
+        return raw if raw is not None else self._new(measure)
 
     def give(self, raw: Any) -> None:
         try:

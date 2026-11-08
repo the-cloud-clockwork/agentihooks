@@ -16,7 +16,7 @@ class Cursor:
     def execute(self, sql: str, parameters: tuple = ()) -> None:
         if self.raw.dead:
             raise psycopg2.OperationalError("server closed connection")
-        self.raw.statements.append(sql)
+        self.raw.statements.append((sql, parameters))
 
     def fetchone(self) -> tuple[int, int]:
         return (100, 3)
@@ -35,7 +35,7 @@ class Raw:
     def __init__(self) -> None:
         self.closed = False
         self.dead = False
-        self.statements: list[str] = []
+        self.statements: list[tuple[str, Any]] = []
 
     def cursor(self) -> Cursor:
         return Cursor(self)
@@ -124,7 +124,7 @@ def test_pool_notifications_do_not_extend_the_checkout_deadline(
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.01")
     pool = postgres.Pool("database")
     raw = pool.take()
-    clock = iter((0.0, 1.0, 3.0, 6.0))
+    clock = iter((0.0, 1.0, 4.5, 5.0))
     waits: list[float] = []
 
     def wait(timeout: float) -> bool:
@@ -133,9 +133,9 @@ def test_pool_notifications_do_not_extend_the_checkout_deadline(
 
     monkeypatch.setattr(postgres.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(pool.lock, "wait", wait)
-    with pytest.raises(postgres.sqlite3.OperationalError, match="capacity exhausted"):
+    with pytest.raises(postgres.sqlite3.OperationalError, match="^ledger database pool capacity exhausted$"):
         pool.take()
-    assert waits == [4.0, 2.0]
+    assert waits == [4.0, 0.5]
     assert len(raws) == 1
     pool.give(raw)
 
@@ -162,9 +162,83 @@ def test_a_slow_connect_does_not_hold_the_pool_lock(raws: list[Raw], monkeypatch
         assert pool.take() is first
         release.set()
         opened = pending.result(timeout=2)
-    assert opened is raws[-1] and pool.opened == 2
+    assert opened is raws[-1] and pool.opened == 2 and opened.statements == []
     pool.give(first)
     pool.give(opened)
+
+
+CAPACITY = (
+    "SELECT current_setting('max_connections')::int, current_setting('superuser_reserved_connections')::int",
+    (),
+)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_only_the_first_connection_measures_the_server_and_reuse_checks_liveness(raws: list[Raw]) -> None:
+    pool = postgres.Pool("database")
+    first = pool.take()
+    second = pool.take()
+    assert first.statements == [CAPACITY] and second.statements == []
+    pool.give(first)
+    assert pool.take() is first
+    assert first.statements == [CAPACITY, (postgres.LIVENESS, ())]
+    pool.give(first)
+    pool.give(second)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_a_closed_idle_connection_is_replaced_and_frees_its_slot(raws: list[Raw]) -> None:
+    pool = postgres.Pool("database")
+    first = pool.take()
+    pool.give(first)
+    first.close()
+    replacement = pool.take()
+    assert replacement is not first and pool.opened == 1
+    assert first.statements == [CAPACITY]
+    pool.give(replacement)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_giving_back_a_closed_connection_frees_exactly_its_slot(raws: list[Raw]) -> None:
+    pool = postgres.Pool("database")
+    first, second, third = pool.take(), pool.take(), pool.take()
+    second.close()
+    pool.give(second)
+    assert pool.opened == 2 and pool.idle == []
+    pool.give(first)
+    assert pool.opened == 2 and pool.idle == [first]
+    pool.give(third)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_takers_wait_for_the_first_connection_to_measure_the_server(
+    raws: list[Raw], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = postgres.Pool("database")
+    connecting, release, early = Event(), Event(), Event()
+    made: list[Raw] = []
+
+    def slow(*args: Any, **kwargs: Any) -> Raw:
+        raw = Raw()
+        made.append(raw)
+        if len(made) == 1:
+            connecting.set()
+            assert release.wait(2)
+        elif not release.is_set():
+            early.set()
+        return raw
+
+    monkeypatch.setattr(psycopg2, "connect", slow)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(pool.take)
+        assert connecting.wait(1)
+        second = executor.submit(pool.take)
+        assert not early.wait(0.2) and not second.done()
+        release.set()
+        taken = first.result(timeout=2), second.result(timeout=2)
+    assert taken == (made[0], made[1]) and pool.opened == 2
+    for raw in taken:
+        pool.give(raw)
 
 
 @pytest.mark.feature("ledger-pool-liveness")
@@ -199,7 +273,7 @@ def test_an_invalid_share_closes_the_bootstrap_connection(
 ) -> None:
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", share)
     pool = postgres.Pool("database")
-    with pytest.raises(postgres.sqlite3.OperationalError, match="pool share"):
+    with pytest.raises(postgres.sqlite3.OperationalError, match="^ledger pool share must be between zero and one$"):
         pool.take()
     assert raws[0].closed
     assert pool.opened == 0
