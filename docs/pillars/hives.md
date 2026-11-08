@@ -1228,8 +1228,20 @@ in place and moves the master to another hive.
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
-| agents | Working agents against max agents, such as `1/3`. |
-| slots | One line per slot: harness, account and the sessions the hive reports on it. |
+| agents | Working agents against max agents, such as `1/3`, read at the latest heartbeat (`agents_at`); a quiet row counts none. |
+| slots | One line per slot: harness, account and the sessions the hive reports on it at its latest heartbeat. |
+
+The panel lists no ephemeral hive that has been quiet for an hour.
+
+### Quiet hives
+
+A hive is quiet once its last heartbeat is older than an hour (`registry.QUIET_MS`).
+
+- The `hive sweep` tick step marks a quiet ephemeral hive, other than one with `ui=yes`, draining, and deletes its
+  registry records through the hive remove path once no agent record still runs on it.
+- A quiet hive with `ephemeral=no` raises one `quiet hive` health finding in `agentihooks swarm <slug> status`.
+- `scripts/packaging/hive-reproduce.sh` runs `agentihooks hive remove` on the member it invited when it exits;
+  `HIVE_KEEP=yes` keeps it.
 | master | The live master running on the hive, from any swarm, or `—`. |
 | (no header) | The move master button, which moves this ledger's master to the hive. |
 

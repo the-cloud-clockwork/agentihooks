@@ -53,15 +53,26 @@ def masters(store: object) -> dict[str, dict]:
     return found
 
 
+def shown(hive: dict, now_ms: int) -> bool:
+    """A hive row is listed until a day without a heartbeat, and an ephemeral hive only until it goes quiet."""
+    if hive.get("ephemeral") == "yes" and registry.quiet(hive, now_ms):
+        return False
+    return now_ms - hive["heartbeat_at"] <= GONE_MS
+
+
 def view(store: object, now_ms: int) -> list[dict]:
     loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
-    hives = [hive for hive in loaded_hives(store) if now_ms - hive["heartbeat_at"] <= GONE_MS]
+    hives = [hive for hive in loaded_hives(store) if shown(hive, now_ms)]
     for hive in hives:
-        sessions = json.loads(store.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+        hive["live"] = registry.live(hive, now_ms)
+        raw = store.redis.get(f"{registry.key(hive['id'])}:sessions") if hive["live"] else None
+        sessions = json.loads(raw or "{}")
         if hive["name"] == hive["id"]:
             hive["name"] = (ports.hive().auth.member(store.redis, hive["id"]) or {}).get("name") or hive["id"]
-        hive["live"] = registry.live(hive, now_ms)
+        hive["agents_at"] = hive["heartbeat_at"]
+        if not hive["live"]:
+            hive["agents"] = 0
         hive["master"] = leads.get(hive["id"])
         hive["slots"] = [
             {**slot, "agents": sessions.get(f"{slot['harness']}:{slot['account']}", 0)} for slot in hive["slots"]

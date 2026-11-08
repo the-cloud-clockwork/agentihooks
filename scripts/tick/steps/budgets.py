@@ -146,6 +146,7 @@ FLOORS: dict[str, Timing] = {
     "last tick": Timing(LIGHT_S, CRITICAL_S),
     "heartbeat": Timing(LIGHT_S, CRITICAL_S),
     "status publish": Timing(LIGHT_S, CRITICAL_S),
+    "hive sweep": Timing(LIGHT_S, SLOW_S),
 }
 
 

@@ -1,5 +1,9 @@
 {
- "scenarios": {},
+ "scenarios": {
+  "hive sweep": [
+   "running"
+  ]
+ },
  "unmapped": [
   "automated cleanup",
   "bottleneck remedy",

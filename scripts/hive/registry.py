@@ -19,6 +19,7 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 BEAT_WINDOW_MS = 300_000
+QUIET_MS = 3_600_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -288,6 +289,11 @@ def live(record: Any, now_ms: int) -> bool:
         and now_ms - record["heartbeat_at"] <= LIVE_MS
         and now_ms - finished_at <= BEAT_WINDOW_MS
     )
+
+
+def quiet(record: Mapping[str, Any], now_ms: int, window_ms: int = QUIET_MS) -> bool:
+    """A hive that has beaten at least once is quiet once its last heartbeat is older than ``window_ms``."""
+    return record["heartbeat_at"] > 0 and now_ms - record["heartbeat_at"] > window_ms
 
 
 def touch(client: Any, hive_id: str, now_ms: int) -> None:

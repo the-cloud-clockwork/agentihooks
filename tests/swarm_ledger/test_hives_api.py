@@ -293,6 +293,27 @@ def test_only_the_operator_writes_hive_settings(store, token, slug, message):
     assert registry.show(store.redis, "pod") == before
 
 
+def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_one_is(store):
+    from scripts.hive import registry
+
+    for hive_id, ephemeral in (("proof", "yes"), ("lasting", "no")):
+        record = {**registry._default(hive_id), "ephemeral": ephemeral, "heartbeat_at": NOW_MS - registry.QUIET_MS - 1}
+        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.sadd(registry.INDEX, hive_id)
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [hive["id"] for hive in reply["data"]] == ["desk", "lasting", "pod"]
+    assert refusal(request("GET", "/api/v1/hives/proof"), store) == (404, "resource_missing", "No such hive")
+
+
+def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(store):
+    from scripts.hive import registry
+
+    store.redis.set(f"{registry.key('pod')}:sessions", json.dumps({"claude:luna": 3}))
+    desk, pod = dispatch(request("GET", token=None, slug=None), store)["data"]
+    assert (desk["agents_at"], desk["slots"][0]["agents"]) == (NOW_MS - 1000, 2)
+    assert (pod["agents_at"], pod["agents"], pod["slots"][0]["agents"]) == (NOW_MS - registry.LIVE_MS - 1, 0, 0)
+
+
 def test_a_write_to_an_unknown_hive_creates_nothing(store):
     from scripts.hive import registry
 

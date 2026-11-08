@@ -22,6 +22,7 @@ from scripts.swarm.health import prompt_backlog
 from scripts.tick import registry
 from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
+from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, Left, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
 
@@ -246,3 +247,27 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+
+
+def _hive_sweep(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Drain and remove each ephemeral hive quiet past the registry window, returning what it removed."""
+    from scripts.hive import sweep
+    from scripts.swarm import lease
+
+    store = get("store")
+    return timing.call(sweep.sweep, store, lease.now_ms(store))  # pyright: ignore[reportUnknownMemberType]
+
+
+registry.register(
+    CallStep(
+        "hive sweep",
+        "wrapper health",
+        _hive_sweep,
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"coordination"}),
+        feature="hive-quiet-sweep",
+    )
+)
