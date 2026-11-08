@@ -346,7 +346,26 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     except OSError as exc:
         if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
             raise
-        _hold_stored(slug, exc)
+        _read_long_or_hold_stored(slug, ledger, exc)
+
+
+def _timed_out(exc: OSError) -> bool:
+    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
+    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+
+
+def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
+    """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
+    stores no view fresh enough to run from, else hold the stored view."""
+    if _timed_out(exc) and not ledger_view.fresh(slug):
+        try:
+            ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
+            return
+        except OSError as again:
+            if isinstance(again, urllib.error.HTTPError) and again.code < 500:
+                raise
+            exc = again
+    _hold_stored(slug, exc)
 
 
 def _hold_stored(slug: str, exc: OSError) -> None:

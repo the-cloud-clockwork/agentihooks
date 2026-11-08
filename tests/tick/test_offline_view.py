@@ -134,6 +134,7 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
 
     monkeypatch.setattr(cli.ledger_view, "start", start)
     monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: stored if slug == "sw" else None)
+    monkeypatch.setattr(cli.ledger_view, "fresh", lambda slug: True)
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))
         assert OFFLINE.get() is True

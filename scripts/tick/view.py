@@ -8,6 +8,7 @@ window no longer covers the gap.
 import hashlib
 import os
 import sys
+import time
 import urllib.error
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
 
 __all__ = [
     "CURRENT",
+    "FRESH_VIEW_S",
     "PARTS",
     "READ_ONLY",
     "FrozenDict",
@@ -33,6 +35,7 @@ __all__ = [
     "current",
     "document",
     "freeze",
+    "fresh",
     "frozen_views",
     "hold_stored",
     "holding",
@@ -92,6 +95,7 @@ def frozen_views() -> bool:
 
 
 PARTS = LEDGER_PARTS
+FRESH_VIEW_S = 300.0
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -241,6 +245,21 @@ def stored(slug: str) -> LedgerView | None:
     base: str = ledger.base(slug)
     found = read_export_file(view_file(base, slug, scheduler.runtime_dir()))
     return None if found is None else LedgerView(found[0], found[1])
+
+
+def fresh(slug: str) -> bool:
+    """True when this host stored a view of this swarm's ledger within ``FRESH_VIEW_S``, recent enough for the
+    server to still answer a delta read after it."""
+    from scripts.scheduler import service as scheduler
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
+    try:
+        written = view_file(base, slug, scheduler.runtime_dir()).stat().st_mtime
+    except OSError:
+        return False
+    return time.time() - written < FRESH_VIEW_S
 
 
 def hold_stored(slug: str) -> LedgerView | None:

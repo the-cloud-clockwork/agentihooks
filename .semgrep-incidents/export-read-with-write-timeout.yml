@@ -1,0 +1,15 @@
+rules:
+  - id: export-read-with-write-timeout
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A full ledger export read runs under the 10 second request timeout meant for writes and small reads. On
+      8 November from 21:03 UTC the rig-grade-swarm export was about 41 MB and every controller pass timed out
+      reading it, so no launch claim could land. Read a full export under EXPORT_TIMEOUT.
+    paths:
+      include:
+        - /scripts/
+        - export-read-with-write-timeout.py
+    pattern-either:
+      - pattern: ResourceClient($BASE, $CREDENTIALS, REQUEST_TIMEOUT).request($SLUG, "export", ...)
+      - pattern: ResourceClient($BASE, $CREDENTIALS, $LEDGER.REQUEST_TIMEOUT).request($SLUG, "export", ...)
