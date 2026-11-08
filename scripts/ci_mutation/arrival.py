@@ -14,7 +14,7 @@ def missing_producers(folder: Path, parts: list[int]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     """Report missing stats producers to the job output; with --required, fail naming them as a producer error."""
-    parser = argparse.ArgumentParser(prog="python -m scripts.ci_mutation.arrival")
+    parser = argparse.ArgumentParser()
     parser.add_argument("folder", type=Path)
     parser.add_argument("parts", type=json.loads)
     parser.add_argument("--required", action="store_true")

@@ -30,8 +30,9 @@ def test_an_empty_download_names_every_producer_and_writes_the_gap_to_the_job_ou
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert main([str(tmp_path / "absent"), "[0, 1]"]) == 0
     assert output.read_text() == "missing=mutation-stats (0), mutation-stats (1)\n"
-    assert capsys.readouterr().out.startswith(
-        "::warning::mutation stats producer error: no part from mutation-stats (0)"
+    assert capsys.readouterr().out == (
+        "::warning::mutation stats producer error: no part from mutation-stats (0), mutation-stats (1)"
+        f" reached {tmp_path / 'absent'}; downloading the shared mutation stats again\n"
     )
 
 
