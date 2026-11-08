@@ -362,7 +362,7 @@
   "scripts/gates/log.py": 90,
   "scripts/gates/modes.py": 37,
   "scripts/gates/node_caps.py": 69,
-  "scripts/gates/one_push.py": 193,
+  "scripts/gates/one_push.py": 186,
   "scripts/gates/placement.py": 126,
   "scripts/gates/progress.py": 84,
   "scripts/gates/prompts.py": 119,
