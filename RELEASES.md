@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.728 · 2026-11-08
+
+### 2026-11-08 · 0eae1886de77 · #9987 · @nestorcolt
+
+**Type the first half of the top level scripts files**
+
+This change adds full type annotations to the first alphabetical half of the top-level `scripts` directory (60 files, `__init__.py` through `codex_refresh.py`), bringing them to zero strict basedpyright errors except for intentionally-baselined private-usage warnings. It closes #9457 and only touches types—annotations, casts, and TYPE_CHECKING imports—with no logic changes, verified by syntax-tree comparison against the base. Two new tests catch real mutation survivors introduced by the stricter typing, and some function parameters were widened so existing test fakes still satisfy type checks, improving long-term maintainability and catching latent bugs without altering runtime behavior.
+
 ## v2.17.725 · 2026-11-08
 
 ### 2026-11-08 · be13269b2622 · #9976 · @agenticore-app
