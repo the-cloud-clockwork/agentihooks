@@ -1,6 +1,7 @@
 """Each tick sends the ledger its live slots and CI median, so time left and its refresh age stay current."""
 
 import sqlite3
+from typing import Any
 
 from scripts.swarm import capacity, ci_speed, freeze
 from scripts.swarm.ledger_client import LedgerRefused
@@ -28,7 +29,7 @@ def focus(config, doc: dict) -> dict:
     return {key: value for key, value in (("fix_phase", freeze.fix_phase(config)), ("watched", watched)) if value}
 
 
-def refresh(slug, store, ledger, runtime, config, doc) -> list[str]:
+def refresh(slug: str, store: Any, ledger: Any, runtime: Any, config: Any, doc: dict[str, Any]) -> list[str]:
     writer = getattr(ledger, "time_left", None)
     if writer is not None:
         inputs = inputs_of(store, slug, runtime)
