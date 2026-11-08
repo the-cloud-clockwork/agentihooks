@@ -1,9 +1,10 @@
 """Runtime port over the runtime router for agent operations and herdr for the pane list."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
 from scripts.tick.deadline import Deadline
 
@@ -30,8 +31,10 @@ class RouterRuntime:
         agents: Callable[[str], AgentRecord | None],
         herdr: Callable[[list[str]], dict[str, object]] = _herdr,
         homes: Callable[[AgentRecord], tuple[Path, ...]] = lambda agent: (),
+        legacy: Any = None,
     ) -> None:
         self.router, self.agents, self.herdr, self.homes = router, agents, herdr, homes
+        self.legacy = legacy
 
     def inspect(self, handle: str, *, deadline: Deadline) -> Outcome:
         deadline.live()
@@ -54,3 +57,35 @@ class RouterRuntime:
         listed = self.herdr(["pane", "list"]).get("panes")
         panes: list[dict[str, object]] = listed if isinstance(listed, list) else []  # pyright: ignore[reportUnknownVariableType]
         return panes
+
+    def live_names(self, *, deadline: Deadline) -> set[str]:
+        deadline.live()
+        names: set[str] = self.legacy.live_names()
+        return names
+
+    def observe(self, agent: AgentRecord, *, deadline: Deadline) -> Any:
+        deadline.live()
+        return self.legacy.observe(agent)
+
+    def retire(self, agent: AgentRecord, *, homes: Sequence[Path] = (), deadline: Deadline) -> bool:
+        deadline.live()
+        retired: bool = self.legacy.retire(agent, homes=homes)
+        return retired
+
+    def name_pane(self, agent: AgentRecord, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.legacy.name_pane(agent)
+
+    def refusal(self, agent: AgentRecord, *, deadline: Deadline) -> str:
+        deadline.live()
+        refused: str = self.legacy.refusal(agent)
+        return refused
+
+    def resume(self, config: SwarmConfig, agent: AgentRecord, text: str, *, deadline: Deadline) -> Any:
+        deadline.live()
+        return self.legacy.resume(config, agent, text)
+
+    def dismiss(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        deadline.live()
+        dismissed: bool = self.legacy.dismiss(agent)
+        return dismissed

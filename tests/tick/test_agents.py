@@ -10,6 +10,8 @@ import pytest
 
 from scripts.swarm import tick as tick_module
 from scripts.tick import engine, registry
+from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
+from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
@@ -47,7 +49,7 @@ def _state(engine_name: str = "tick") -> dict[str, object]:
 
 
 def _ctx(state: dict[str, object]) -> Context:
-    return Context(_State(state), Deadline.after(60.0))
+    return Context(_State(state), Deadline.after(60.0), fake_tools())
 
 
 def _fakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...]]]:
@@ -97,8 +99,12 @@ def test_the_agents_group_runs_its_calls_with_the_pass_state(monkeypatch: pytest
     handed = seen[0][1][-1]
     assert isinstance(handed, Deadline)
     assert handed.expires_at <= ctx.deadline.expires_at
+    ledger, runtime = seen[0][1][2:4]
+    assert isinstance(ledger, LedgerCalls)
+    assert isinstance(runtime, RuntimeCalls)
+    assert (ledger.deadline, runtime.deadline) == (handed, handed)
     assert seen == [
-        ("reap", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7, handed)),
+        ("reap", ("sw", "store", ledger, runtime, {"t1": {}}, 7, handed)),
         ("recover", ("sw", "store", "ledger", state["runtime"], {"t1": {}}, 7)),
         ("strays", ("sw", state["config"], "store", state["runtime"])),
         ("panes", ("sw", "store", state["runtime"], 7)),

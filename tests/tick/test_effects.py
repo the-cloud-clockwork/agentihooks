@@ -190,5 +190,6 @@ def test_the_pass_tools_wire_every_real_adapter_for_the_swarm(monkeypatch: pytes
     assert tools.host == ("local_host", (store, "sw", os.environ), ())
     runtime: tuple[str, tuple[object, Callable[[str], object]], tuple[()]] = tools.runtime  # pyright: ignore[reportAssignmentType]
     assert runtime[1][0] == ("router", os.environ)
+    assert runtime[2] == (("legacy", None),)
     agent = runtime[1][1]
     assert (agent("eng-2"), agent("eng-1"), agent("eng-9")) == (records[1], records[0], None)
