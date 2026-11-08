@@ -2121,7 +2121,9 @@
         "tests/hive/test_hive_ceiling.py::test_placement_reads_the_computed_ceiling_and_keeps_the_cap",
         "tests/swarm_ledger/test_hives_panel.py::test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap",
         "tests/swarm_ledger/test_hives_panel.py::test_clearing_max_agents_writes_auto",
-        "tests/swarm_ledger/test_hives_panel.py::test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling"
+        "tests/swarm_ledger/test_hives_panel.py::test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling",
+        "tests/hive/test_workstation_admission.py::test_a_loaded_workstation_ceiling_keeps_the_swarm_share_under_a_higher_cap",
+        "tests/hive/test_workstation_admission.py::test_a_cap_below_the_computed_ceiling_keeps_the_swarm_share_reason"
       ],
       "semgrep_rule": "feature-hive-agent-ceiling",
       "live_check": [

@@ -51,7 +51,7 @@ def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
 
     hive = registry.show(store.redis, hive_id())
     bound = min(ceiling, store.config(slug).local_max_agents)
-    cap = cast("int | None", hive["max_agents"]) if hive is not None else None
+    cap = cast(int | None, hive["max_agents"]) if hive is not None else None
     return bound if cap is None else min(bound, cap)
 
 
