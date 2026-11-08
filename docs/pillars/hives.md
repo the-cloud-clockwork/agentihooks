@@ -1228,7 +1228,7 @@ in place and moves the master to another hive.
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
-| agents | Working agents against max agents, such as `1/3`: the worker sessions the hive reported at its latest heartbeat, named by the row's `agents_at`, without its interactive master sessions; a quiet row counts none. |
+| agents | Working agents against max agents, such as `1/3`: the worker sessions the hive reported at its latest heartbeat, named by the row's `agents_at`, without its interactive master sessions; a row that is not live counts none. |
 | slots | One line per slot: harness, account and the sessions the hive reports on it at its latest heartbeat. |
 | master | The live master running on the hive, from any swarm, or `—`. |
 | (no header) | The move master button, which moves this ledger's master to the hive. |
