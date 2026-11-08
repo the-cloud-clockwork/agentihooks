@@ -149,11 +149,12 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
             break
         host.sleep(POLL_S)
     handed = sorted(name for (slug, name), agent in seen.items() if agent.task and _handed(store, slug, agent))
-    released = release(store, plan.hive, host)
+    released, retired = release(store, plan.hive, host)
     lines = [
         f"drained {plan.hive}: {len(ordered)} agents ordered to hand off; "
         f"{len(handed)} handed off: {', '.join(handed) or 'none'}; "
-        f"{len(released)} claims released: {', '.join(released) or 'none'}"
+        f"{len(released)} claims released: {', '.join(released) or 'none'}; "
+        f"{len(retired)} agents retired: {', '.join(retired) or 'none'}"
     ]
     if still:
         names = ", ".join(sorted(agent.name for _, agent in still))
@@ -161,10 +162,10 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     return lines
 
 
-def release(store: "RedisStore", hive: str, host: Host) -> list[str]:
+def release(store: "RedisStore", hive: str, host: Host) -> tuple[list[str], list[str]]:
     """Release every claim an agent on ``hive`` still holds without a handoff and reopen its ledger task, then retire
-    every unfinished agent on the hive; return the released tasks."""
-    released, ledger = [], None
+    every unfinished agent on the hive; return the released tasks and the retired agents."""
+    released, retired, ledger = [], [], None
     for slug in store.slugs():
         for agent in store.agents(slug):
             if agent.hive != hive or agent.state == FINISHED:
@@ -175,7 +176,8 @@ def release(store: "RedisStore", hive: str, host: Host) -> list[str]:
                     released.append(agent.task)
             if not store.drop_agent(slug, agent.name):
                 raise auth.HiveError(f"{agent.name} on hive {hive} kept its record; run remove again")
-    return sorted(released)
+            retired.append(agent.name)
+    return sorted(released), sorted(retired)
 
 
 def _release_claim(store: "RedisStore", ledger: "LedgerClient", slug: str, agent: "AgentRecord") -> bool:

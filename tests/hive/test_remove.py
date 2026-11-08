@@ -239,7 +239,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), run, tmp_path))
 
     assert done == [
-        f"drain: drained {member}: 1 agents ordered to hand off; 0 handed off: none; 0 claims released: none",
+        f"drain: drained {member}: 1 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
         f"member: revoked member {member} and its Redis user",
         "herdr: removed herdr machine anton-9",
         "herdr: removed the host key of [10.10.30.207]:2222",
@@ -289,7 +289,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     again = remove.remove(store, bao, plan, host)
 
     assert again == [
-        f"drain: drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none",
+        f"drain: drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
         f"member: {member} holds no member credential",
         "herdr: herdr holds no machine anton-9",
         f"registry: deleted 0 registry records of {member}",
@@ -350,7 +350,7 @@ def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_of
 
     assert remove.drain(store, plan, host) == [f"{wait} engineer@1, engineer@2 to hand off"]
     assert remove.drain(store, replace(plan, dry_run=False), host) == [
-        f"drained {member}: 2 agents ordered to hand off; 0 handed off: none; 0 claims released: none"
+        f"drained {member}: 2 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none"
     ]
 
 
@@ -436,7 +436,8 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
     done = remove.remove(store, bao, plan, _host(clock, Run(), tmp_path, ledger))
 
     assert done[:3] == [
-        f"drain: drained {member}: 4 agents ordered to hand off; 1 handed off: engineer@1; 2 claims released: t2, t3",
+        f"drain: drained {member}: 4 agents ordered to hand off; 1 handed off: engineer@1; 2 claims released: t2, t3; "
+        "4 agents retired: ci@2, engineer@1, engineer@3, engineer@5",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",
         f"member: revoked member {member} and its Redis user",
     ]
@@ -476,7 +477,7 @@ def test_an_ended_agent_whose_task_already_moved_on_is_retired_without_touching_
     plan = remove.Plan(member, "anton-9", "p", wait_s=30)
 
     assert remove.drain(store, plan, _host(Clock(store, member, 99), Run(), tmp_path, ledger)) == [
-        f"drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none"
+        f"drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 1 agents retired: ci@2"
     ]
     assert ledger.updates == []
     assert store.agents(SLUG) == []
