@@ -2294,6 +2294,27 @@
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
         "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
       ]
+    },
+    {
+      "id": "hive-pods-not-rolled-by-release-image-digest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
+      "behaviour": "The chart release workflow no longer stamps the hive worker image digest into the Helm chart, so the worker hive pod template carries no per release digest annotation and a release never rolls the worker hives on its own; an explicit workers.rollout.release value still rolls them on request.",
+      "seam": "worker-hive.yaml pod template metadata.annotations and the chart release build",
+      "tests": [
+        "tests/test_swarm_chart_hive_rollout_release.py::test_the_release_annotation_only_follows_an_explicit_rollout_release"
+      ]
+    },
+    {
+      "id": "hive-retire-absence",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
+      "behaviour": "Remote retirement settles without acknowledgement once bounded hive heartbeat loss or a newer member report proves the agent gone, freeing its seat; live hives still acknowledge normally.",
+      "seam": "HerdrRuntime.retire",
+      "tests": [
+        "tests/hive/test_reports.py::test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat",
+        "tests/hive/test_reports.py::test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat"
+      ]
     }
   ],
   "unmapped_rules": [
