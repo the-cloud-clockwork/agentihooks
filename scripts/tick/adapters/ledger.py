@@ -60,7 +60,15 @@ class ClientLedger:
         stamped = [
             dict(operation) if epoch is None else {**operation, "controller_epoch": epoch} for operation in operations
         ]
-        mutated: dict[str, object] = client.mutate(self.slug, stamped)
+        mutated: dict[str, Any] = client.mutate(self.slug, stamped)
+        if mutated.get("rejected"):
+            from scripts.swarm.ledger_client import LedgerRefused
+
+            detail = "; ".join(mutated.get("_meta", {}).get("warnings", [])) or str(mutated["rejected"])
+            raise LedgerRefused(f"ledger {self.slug} refused: {detail}")
+        from scripts.tick import view
+
+        view.wrote()
         return mutated
 
     def update_task(
@@ -72,6 +80,7 @@ class ClientLedger:
         if_match: Mapping[str, object] | None = None,
         deadline: Deadline,
     ) -> dict[str, Any]:
+        deadline.live()
         guard: dict[str, object] = {"if_state": list(if_state)} if if_state else {}
         if if_match is not None:
             guard["if_match"] = if_match
@@ -82,3 +91,71 @@ class ClientLedger:
         tasks = cast(list[dict[str, Any]], state.get("tasks", []))
         found: dict[str, Any] = next((task for task in tasks if task["id"] == task_id), dict[str, Any]())
         return found
+
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
+        from urllib.error import HTTPError
+        from urllib.parse import quote
+
+        client: Any = self.clients(deadline.live())
+        try:
+            reply: dict[str, Any] = client.request(self.slug, f"tasks/{quote(task_id, safe='')}")
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            return {}
+        return reply["data"]
+
+    def notify(self, text: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.mutate([operation("notice", "swarm", text=text)], deadline=deadline)
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.mutate([{**operation("add_item", by, list="questions", text=text), "id": op_id}], deadline=deadline)
+
+
+@dataclass(frozen=True)
+class PassLedger:
+    """Preserve the domain client's behavior while bounding each reap call by its step deadline."""
+
+    slug: str
+    client: Any
+
+    def export(self, *, deadline: Deadline) -> dict[str, Any]:
+        deadline.live()
+        state: dict[str, Any] = self.client.state(self.slug)
+        return state
+
+    def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> dict[str, Any]:
+        deadline.live()
+        state: dict[str, Any] = self.client._call(self.slug, list(operations))
+        return state
+
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]:
+        deadline.live()
+        guard: dict[str, object] = {"if_state": if_state} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
+        row: dict[str, Any] = self.client.update_task(self.slug, task_id, fields, **guard)
+        return row
+
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
+        deadline.live()
+        row: dict[str, Any] = self.client.task(self.slug, task_id)
+        return row
+
+    def notify(self, text: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.client.notify(self.slug, text)
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.client.question(self.slug, text, by, op_id)

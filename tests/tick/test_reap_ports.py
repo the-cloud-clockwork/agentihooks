@@ -201,27 +201,19 @@ def test_reap_runtime_operations_obey_effects_and_deadlines(
     assert len(fake.calls) == 1
 
 
-def test_reap_ledger_facade_preserves_reads_and_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts.tick.adapters import ledger as module
+def test_reap_ledger_facade_preserves_reads_and_messages() -> None:
     from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
 
-    monkeypatch.setattr(module, "uuid4", lambda: SimpleNamespace(hex="b" * 32))
-    port = FakeLedger({"export": {"tasks": [{"id": "other"}, {"id": "task", "state": "open"}]}})
+    port = FakeLedger({"task": {"id": "task", "state": "open"}})
     deadline = Deadline(10, lambda: 0)
     ledger = LedgerCalls(port, deadline)
     assert ledger.task("sw", "task") == {"id": "task", "state": "open"}
-    assert ledger.task("sw", "missing") == {}
     ledger.notify("sw", "notice")
     ledger.question("sw", "question", "eng", "question-id")
     assert [(call.operation, call.args, call.deadline) for call in port.calls] == [
-        ("export", (), deadline),
-        ("export", (), deadline),
-        ("mutate", ([{"op": "notice", "id": "notice-bbbbbbbbbb", "by": "swarm", "text": "notice"}],), deadline),
-        (
-            "mutate",
-            ([{"op": "add_item", "id": "question-id", "by": "eng", "list": "questions", "text": "question"}],),
-            deadline,
-        ),
+        ("task", ("task",), deadline),
+        ("notify", ("notice",), deadline),
+        ("question", ("question", "eng", "question-id"), deadline),
     ]
     runtime = FakeRuntime({"resume": "placed", "dismiss": True})
     facade = RuntimeCalls(runtime, deadline)
@@ -276,3 +268,174 @@ def test_pass_binds_the_fenced_runtime_to_the_port(monkeypatch: pytest.MonkeyPat
     wrapper.state["runtime"] = raw
     assert cli._Wrapper._fence(wrapper) is True
     assert wrapper.state == {"runtime": fenced}
+
+
+@pytest.mark.parametrize("warning,expected", [(["guard changed"], "guard changed"), ([], "['update']")])
+def test_resource_ledger_refuses_rejected_updates_without_invalidating_the_view(
+    warning: list[str], expected: str
+) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+    from scripts.tick import view
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    changed: list[bool] = []
+    held = SimpleNamespace(stale=False)
+    token = view.HELD.set(cast(Any, held))
+    adapter = ClientLedger(
+        "sw",
+        lambda remaining: cast(
+            Any, SimpleNamespace(mutate=lambda slug, ops: {"rejected": ["update"], "_meta": {"warnings": warning}})
+        ),
+    )
+    try:
+        with pytest.raises(LedgerRefused) as error:
+            adapter.update_task("task", {}, deadline=Deadline.after(10))
+        assert str(error.value) == f"ledger sw refused: {expected}"
+        changed.append(held.stale)
+    finally:
+        view.HELD.reset(token)
+    assert changed == [False]
+
+
+def test_resource_ledger_success_invalidates_the_held_view() -> None:
+    from scripts.tick import view
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    renewed: list[bool] = []
+    after = object()
+    held = SimpleNamespace(stale=False, view=object(), renew=lambda: renewed.append(True) or after)
+    token = view.HELD.set(cast(Any, held))
+    adapter = ClientLedger(
+        "sw", lambda remaining: cast(Any, SimpleNamespace(mutate=lambda slug, ops: {"tasks": [{"id": "task"}]}))
+    )
+    try:
+        assert adapter.update_task("task", {}, deadline=Deadline.after(10)) == {"id": "task"}
+        assert held.stale is True
+        assert view.current() is after
+        assert renewed == [True]
+        assert held.stale is False
+    finally:
+        view.HELD.reset(token)
+
+
+@pytest.mark.parametrize(
+    "operation,args",
+    [
+        ("export", ()),
+        ("mutate", ([{"op": "notice"}],)),
+        ("task", ("task",)),
+        ("update_task", ("task", {"state": "open"})),
+        ("notify", ("notice",)),
+        ("question", ("question", "eng", "id")),
+    ],
+)
+def test_pass_ledger_preserves_domain_client_calls_and_deadlines(operation: str, args: tuple[object, ...]) -> None:
+    from scripts.tick.adapters.ledger import PassLedger
+
+    seen: list[tuple[object, ...]] = []
+    expected = {"id": "task"}
+
+    def call(*values: object, **kwargs: object) -> object:
+        seen.append((values, kwargs))
+        return expected
+
+    name = {"export": "state", "mutate": "_call"}.get(operation, operation)
+    adapter = PassLedger("sw", SimpleNamespace(**{name: call}))
+    result = getattr(adapter, operation)(*args, deadline=Deadline(10, lambda: 0))
+    assert result == (None if operation in {"notify", "question"} else expected)
+    assert seen == [(("sw", *args), {})]
+    with pytest.raises(TimeoutError):
+        getattr(adapter, operation)(*args, deadline=Deadline(0, lambda: 0))
+    assert len(seen) == 1
+
+
+def test_pass_ledger_keeps_conditional_guards() -> None:
+    from scripts.tick.adapters.ledger import PassLedger
+
+    seen: list[tuple[object, ...]] = []
+
+    def update(*args: object, **kwargs: object) -> dict[str, object]:
+        seen.append((args, kwargs))
+        return {"id": "task"}
+
+    adapter = PassLedger("sw", SimpleNamespace(update_task=update))
+    assert adapter.update_task("task", {}, if_state=("claimed",), if_match={}, deadline=Deadline.after(10)) == {
+        "id": "task"
+    }
+    assert seen == [(("sw", "task", {}), {"if_state": ("claimed",), "if_match": {}})]
+
+
+def test_resource_ledger_task_reads_only_the_named_resource() -> None:
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    seen: list[tuple[object, ...]] = []
+
+    def request(*args: object) -> dict[str, object]:
+        seen.append(args)
+        return {"data": {"id": "a/b"}}
+
+    adapter = ClientLedger("sw", lambda remaining: cast(Any, SimpleNamespace(request=request)))
+    assert adapter.task("a/b", deadline=Deadline.after(10)) == {"id": "a/b"}
+    assert seen == [("sw", "tasks/a%2Fb")]
+    with pytest.raises(TimeoutError):
+        adapter.task("a/b", deadline=Deadline(0, lambda: 0))
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_resource_ledger_missing_tasks_and_server_errors_keep_their_meaning(status: int) -> None:
+    from urllib.error import HTTPError
+
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    def request(*args: object) -> dict[str, object]:
+        raise HTTPError("http://ledger", status, "missing", None, None)
+
+    adapter = ClientLedger("sw", lambda remaining: cast(Any, SimpleNamespace(request=request)))
+    if status == 404:
+        assert adapter.task("task", deadline=Deadline.after(10)) == {}
+    else:
+        with pytest.raises(HTTPError) as error:
+            adapter.task("task", deadline=Deadline.after(10))
+        assert error.value.code == 500
+
+
+def test_resource_ledger_messages_keep_their_operations_and_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.tick.adapters import ledger as module
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    sent: list[tuple[object, ...]] = []
+    monkeypatch.setattr(module, "uuid4", lambda: SimpleNamespace(hex="c" * 32))
+
+    def mutate(*args: object) -> dict[str, object]:
+        sent.append(args)
+        return {}
+
+    adapter = ClientLedger("sw", lambda remaining: cast(Any, SimpleNamespace(mutate=mutate)))
+    adapter.notify("notice", deadline=Deadline.after(10))
+    adapter.question("question", "eng", "question-id", deadline=Deadline.after(10))
+    assert sent == [
+        ("sw", [{"op": "notice", "id": "notice-cccccccccc", "by": "swarm", "text": "notice"}]),
+        ("sw", [{"op": "add_item", "id": "question-id", "by": "eng", "list": "questions", "text": "question"}]),
+    ]
+    with pytest.raises(TimeoutError):
+        adapter.notify("notice", deadline=Deadline(0, lambda: 0))
+    with pytest.raises(TimeoutError):
+        adapter.question("question", "eng", "id", deadline=Deadline(0, lambda: 0))
+    assert len(sent) == 2
+
+
+def test_pass_tools_bind_the_supplied_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import cli
+    from scripts.tick.adapters.ledger import PassLedger
+    from scripts.tick.adapters.runtime import RouterRuntime
+
+    monkeypatch.setattr(cli.classifier_settings, "load", lambda: SimpleNamespace(models=["model"], url="url"))
+    ledger, runtime = object(), object()
+    store = SimpleNamespace(redis=object(), agents=lambda slug: [])
+    tools = cli._pass_tools(store, "sw", "tick", ledger, runtime)
+    assert isinstance(tools.ledger, PassLedger)
+    assert tools.ledger.client is ledger
+    assert tools.ledger.slug == "sw"
+    assert isinstance(tools.runtime, RouterRuntime)
+    assert tools.runtime.legacy is runtime

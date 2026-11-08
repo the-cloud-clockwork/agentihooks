@@ -303,7 +303,8 @@
         "tests/tick/steps/test_reap_watch.py::test_an_agent_refusing_content_is_handed_off_and_its_task_dropped",
         "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane",
         "tests/tick/steps/test_reap_watch.py::test_a_freeing_retire_asks_the_hive_report_with_its_store_agent_homes_and_time",
-        "tests/tick/steps/test_reap.py::test_reap"
+        "tests/tick/steps/test_reap.py::test_reap",
+        "tests/tick/steps/test_reap.py::test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent"
       ]
     },
     {

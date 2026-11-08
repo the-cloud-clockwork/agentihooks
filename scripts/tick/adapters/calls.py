@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.store import AgentRecord, SwarmConfig
-from scripts.tick.adapters.ledger import operation
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Ledger, Runtime
 
@@ -54,15 +53,10 @@ class LedgerCalls:
         return self.port.update_task(task_id, fields, if_state=if_state, if_match=if_match, deadline=self.deadline)
 
     def task(self, slug: str, task_id: str) -> dict[str, Any]:
-        state: Any = self.port.export(deadline=self.deadline)
-        tasks: list[dict[str, Any]] = state.get("tasks", [])
-        found = next((task for task in tasks if task["id"] == task_id), dict[str, Any]())
-        return found
+        return self.port.task(task_id, deadline=self.deadline)
 
     def notify(self, slug: str, text: str) -> None:
-        self.port.mutate([operation("notice", "swarm", text=text)], deadline=self.deadline)
+        self.port.notify(text, deadline=self.deadline)
 
     def question(self, slug: str, text: str, by: str, op_id: str) -> None:
-        self.port.mutate(
-            [{**operation("add_item", by, list="questions", text=text), "id": op_id}], deadline=self.deadline
-        )
+        self.port.question(text, by, op_id, deadline=self.deadline)

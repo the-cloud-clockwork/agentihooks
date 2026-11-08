@@ -85,6 +85,15 @@ class FakeLedger:
     ) -> dict[str, Any]:
         return _record(self, "update_task", (task_id, fields, if_state, if_match), deadline)
 
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "task", (task_id,), deadline)
+
+    def notify(self, text: str, *, deadline: Deadline) -> None:
+        _record(self, "notify", (text,), deadline)
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
+        _record(self, "question", (text, by, op_id), deadline)
+
 
 @dataclass
 class FakeCoordination:
