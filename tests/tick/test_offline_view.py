@@ -187,7 +187,9 @@ def test_a_cleartext_ledger_address_leaves_the_pass_to_its_health_probe(
         cli._hold_view(beating, "sw", LedgerClient(service=True))
         assert OFFLINE.get() is False
         assert view.current() is None
-    assert "ledger sw view not held: a ledger credential off loopback travels only over https" in capsys.readouterr().err
+    assert (
+        "ledger sw view not held: a ledger credential off loopback travels only over https" in capsys.readouterr().err
+    )
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
