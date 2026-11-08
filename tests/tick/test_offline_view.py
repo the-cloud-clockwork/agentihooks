@@ -173,6 +173,24 @@ def test_a_refusing_server_still_ends_the_pass(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_cleartext_ledger_address_leaves_the_pass_to_its_health_probe(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
+        raise Cleartext("a ledger credential off loopback travels only over https")
+
+    monkeypatch.setattr(cli.ledger_view, "start", start)
+    monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: pytest.fail("a cleartext address holds no view"))
+    with ExitStack() as beating:
+        cli._hold_view(beating, "sw", LedgerClient(service=True))
+        assert OFFLINE.get() is False
+        assert view.current() is None
+    assert "ledger sw view not held: a ledger credential off loopback travels only over https" in capsys.readouterr().err
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
 @pytest.mark.parametrize(
     "guard",
     [{"if_state": ["claimed"]}, {"if_match": {"claimed_by": "e2"}}],
