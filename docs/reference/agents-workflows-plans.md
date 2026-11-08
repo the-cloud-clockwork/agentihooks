@@ -1,7 +1,7 @@
 ---
 title: Agents, workflows and plan ingestion
 parent: Reference
-nav_order: 75
+nav_order: 76
 ---
 
 # Agents, workflows and plan ingestion
@@ -104,7 +104,8 @@ and a build verdict.
 
 Workflows load from the package, the bundle, the shared bundle, the user
 bundle, each chained profile and then the project's `.agentihooks/workflows`.
-A later layer wins by name.
+A later layer wins by name. `list`, `show` and `validate` read the project
+layer; `run` skips it.
 
 ### Commands
 
@@ -147,12 +148,23 @@ The phase description is the prose up to the first slice or heading.
 - Every phase heading sits at one heading level.
 - A file with slice markers needs at least one phase marker, and each slice
   name appears once in the file.
-- A marked phase holding headings but no slice markers is refused as prose
-  only.
+- A marked phase holding headings but no slice markers is refused: phase
+  '<title>' has no slice markers, so it holds prose only.
 - The file must be UTF-8, nonempty and free of YAML front matter.
 - Dependencies must name phases in the plan or already on the ledger.
 
 The marker field checks list every field error at once.
+
+### Ingest command
+
+```bash
+agentihooks plan ingest plan.md --ledger <slug> [--planning auto|manual] [--dry-run] [--repo OWNER/NAME]
+```
+
+`path` is the plan file, or `-` for standard input. `--ledger` names the
+target ledger. `--planning` sets planning for every phase. `--dry-run` prints
+what would be written and writes nothing. `--repo` names the repository for
+the plan issue, by default the current one.
 
 ## Troubleshooting
 
