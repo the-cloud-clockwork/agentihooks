@@ -109,6 +109,15 @@ def test_tick_equivalence_runs_characterisation_equivalence_and_load_budget() ->
     assert '[[ "$status" -le 1 ]]' in script
 
 
+def test_tick_equivalence_holds_every_scenario_step_to_its_floor_unconditionally() -> None:
+    steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
+    [step] = [step for step in steps if "tick_scenarios/test_step_budgets.py" in step.get("run", "")]
+    assert "if" not in step
+    assert step["working-directory"] == "head"
+    assert "|| true" not in step["run"]
+    assert "continue-on-error" not in step
+
+
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
     steps = workflow("tick-equivalence")["jobs"]["tick-equivalence"]["steps"]
     [pattern] = [

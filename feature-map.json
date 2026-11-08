@@ -2289,7 +2289,8 @@
         "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
         "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
         "tests/hive/test_controller_launch.py::test_placement_without_a_runtime_reader_reads_the_hive_reports",
-        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_fresh_controller_with_an_empty_quota_cache_places_an_agent"
       ]
     },
     {
@@ -2341,6 +2342,19 @@
         "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
         "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes",
         "tests/tick/steps/test_drop_remote.py::test_retiring_an_archived_projection_preserves_its_history_metadata"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-budget-gate",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-regression-ci",
+      "behaviour": "Every tick scenario replayed on the real step clock finishes each step inside its declared floor with no step abandoned, so a step budget overrun or an abandoned pass fails before merge.",
+      "seam": "the tick:records rows each scenario pass writes, held against scripts.tick.steps.budgets.FLOORS",
+      "tests": [
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_every_scenario_step_finishes_inside_its_floor",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_an_overrun_or_abandoned_step_is_named",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_step_inside_its_floor_passes"
       ]
     }
   ],
