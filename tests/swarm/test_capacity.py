@@ -2228,7 +2228,7 @@ def test_the_live_autoscale_command_names_hive_admission_as_the_binding_limit(ca
 
 def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_host_room_are_free(monkeypatch):
     from scripts.hive import launch
-    from scripts.swarm import status
+    from scripts.swarm import cli
 
     store = _store()
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": {"room": 4}}))
@@ -2236,7 +2236,7 @@ def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_hos
     monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed if not refresh else [])
     hives = [{"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"}]
     monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
-    assert status.hive_admission(store, "sw") == {
+    assert cli.hive_admission(store, "sw") == {
         "hives": [{"hive": "workstation", "room": 0, "limit": "max agents: 6 of 6"}],
         "lines": [
             "hive workstation  admission room 0  max agents: 6 of 6",
@@ -2244,9 +2244,9 @@ def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_hos
         ],
     }
     hives[0] = {**hives[0], "room": 9}
-    assert status.hive_admission(store, "sw")["lines"][-1] == "binding limit host room, room 4"
+    assert cli.hive_admission(store, "sw")["lines"][-1] == "binding limit host room, room 4"
     store.redis.delete(store.key("sw", "quota-capacity"))
-    assert status.hive_admission(store, "sw")["lines"][-1] == "binding limit quota seats, room 6"
+    assert cli.hive_admission(store, "sw")["lines"][-1] == "binding limit quota seats, room 6"
 
 
 def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path, monkeypatch):

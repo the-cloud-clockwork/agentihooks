@@ -157,7 +157,6 @@ from scripts.swarm.status import (
     agent_hive,
     auto_snapshot,
     findings,
-    hive_admission,
     live_agents,
     status_report,
     task_counts,
@@ -1486,10 +1485,28 @@ def probe_command(store, args):
         print(found.line())
 
 
-def cmd_status(store: RedisStore, args: argparse.Namespace) -> None:
+def hive_admission(store: Any, slug: str) -> dict[str, Any]:
+    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    from scripts.hive import admission
+    from scripts.hive.launch import live_hives
+    from scripts.swarm import capacity
+
+    hives = live_hives(store)
+    record: dict[str, Any] = capacity.read(store, slug)
+    host: dict[str, Any] = record.get("host") or {}
+    environ = dict(os.environ)
+    observed = capacity.accounts(environ, time.time(), refresh=False)
+    seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
+    others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
+    rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+
+
+def cmd_status(store: Any, args: Any) -> None:
     if args.json:
         store.config(args.slug)
-        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
+        report = status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())
+        print(json.dumps({**report, "hive_admission": hive_admission(store, args.slug)}))
         return
     outage.show(args.slug, False)
     config = store.config(args.slug)
@@ -1620,11 +1637,11 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     scaled = cast(dict[str, Any], decision)
     host: dict[str, Any] = scaled["host"]
     hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
-    others: dict[str, int | None] = {
-        "quota seats": capacity.quota_seats(inputs.observations, cast(dict[tuple[str, str], Any], inputs.warned)),
-        "host room": host["room"],
-    }
-    admitted = admission.view_lines(hives, others)
+    admitted: list[str] = []
+    if hives:
+        warned = cast(dict[tuple[str, str], Any], inputs.warned)
+        seats = capacity.quota_seats(inputs.observations, warned)
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
     if args.json:
         rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
         shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
