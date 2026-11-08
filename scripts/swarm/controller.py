@@ -275,20 +275,23 @@ class FencedRuntime:
             runtime = runtime.herdr_runtime
         elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
             runtime = runtime.original_runtime
+        else:
+            task = self._hive_task(config, lane, task)
         with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
-            return runtime.spawn(
-                config, lane, name, {**self._hive_task(config, lane, task), "controller_epoch": self.held.epoch}
-            )
+            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
     def _hive_task(self, config: SwarmConfig, lane: str, task: dict[str, Any]) -> dict[str, Any]:
         """A workstation task placed on a workstation hive other than this machine launches there, pinned to it."""
+        from scripts.hive.launch import Selection
         from scripts.swarm.commands import hive_id
 
         launch = getattr(self.runtime, "hive_launch", None)
         if not task.get("workstation") or launch is None:
             return task
-        hive = getattr(launch.select(config, lane, task), "hive", hive_id())
-        return task if hive == hive_id() else {**task, "workstation": False, "hive": hive}
+        selected = launch.select(config, lane, task)
+        if not isinstance(selected, Selection) or selected.hive == hive_id():
+            return task
+        return {**task, "workstation": False, "hive": selected.hive}
 
     def collect(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Any:
         from scripts.swarm.tick import SpawnError
