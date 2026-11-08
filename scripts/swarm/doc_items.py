@@ -73,7 +73,7 @@ def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadl
     items through the ledger port and record the digest through the coordination port; return the line naming the run."""
     if not document.is_file():
         return []
-    text = document.read_text(encoding="utf-8")
+    text = document.read_bytes().decode()
     found = digest(text)
     if found == tools.coordination.marked(MARK, deadline=deadline):
         return []
