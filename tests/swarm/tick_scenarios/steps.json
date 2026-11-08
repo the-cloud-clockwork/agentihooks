@@ -1,5 +1,8 @@
 {
  "scenarios": {
+  "doc items map": [
+   "running"
+  ],
   "workflow runner": [
    "running"
   ]

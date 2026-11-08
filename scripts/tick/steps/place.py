@@ -41,6 +41,7 @@ readiness: Any = import_module("scripts.swarm.readiness")
 run_window: Any = import_module("scripts.swarm.run_window")
 seat_spawn: Any = import_module("scripts.swarm.seat_spawn")
 successor_retry: Any = import_module("scripts.swarm.successor_retry")
+successor_fill: Any = import_module("scripts.swarm.successor_fill")
 timing: Any = import_module("scripts.swarm.timing")
 ledger_rank: Any = import_module("scripts.swarm_ledger.ledger_rank")
 ledger_workspace: Any = import_module("scripts.swarm_ledger.ledger_workspace")
@@ -574,7 +575,7 @@ def _prepare(
         store.seats.occupy(seat, name, now_ms)
         task["transfer"] = timing.timed(transfers.attach, store, slug, record)
         primed_task = {
-            **timing.timed(tick.primed, store, slug, seat, task),
+            **successor_fill.task(timing.timed(tick.primed, store, slug, seat, task), config, lane),
             tick.ACK_LATER: True,
             "detached_launch": True,
             **tick._steer(slug, store, task, failing),
