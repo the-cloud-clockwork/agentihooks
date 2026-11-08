@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/bundles.py:scripts.profiles.bundles.x_link:7d6a9956867a4ee3a45ce15d32258141016be27ba76795d1bc06d618c6ad1c31": {
+    "reader": "standards_reader",
+    "reason": "In `x_link`, the mutation changes only the static type argument of `typing.cast` on cast target `state.get(other_key) or {}`, from dict[str, Any] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

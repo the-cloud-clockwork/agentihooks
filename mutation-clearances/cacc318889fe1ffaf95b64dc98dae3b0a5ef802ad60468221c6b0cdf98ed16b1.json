@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__profiles_digest:7ebc8ed76a4fd6f42ab4e19042767b158c6e3da74c90fd8b7815cb73c891a911": {
+    "reader": "standards_reader",
+    "reason": "cast here is typing.cast (imported at the top of render.py), a runtime no-op that returns its second argument unchanged and never inspects the first. In _profiles_digest the mutant swaps the type argument from \"ModuleType\" to None, which changes no returned value and nothing downstream introspects the cast's type argument, so the mutant produces identical runtime output."
+  }
+}
