@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_session:5e83dee15c5b8d5b78605f978975393744fbf01a4825ef54c3f9da5f924d73c7": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so changing the type string leaves the credential and every output the same."
+  }
+}
