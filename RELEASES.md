@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.751 · 2026-11-08
+
+### 2026-11-08 · 3be08c9c40f7 · #10160 · @agenticore-app
+
+**Spawn step acts through the runtime and coordination ports**
+
+This change routes the spawn step's interactions with runtime and swarm-store state through the new Runtime and Coordination ports instead of touching raw tools directly, so placement, reaping, admission, and store reads/writes all go through tracked, effect-gated operations with a shared recording deadline. It also moves inbox cleanup for dropped spawn claims onto a new `Inbox.settle_exit` port call. The result is that the spawn pass and its helpers no longer hold raw store or runtime references, making their side effects observable, testable with fakes, and consistent with the rest of the tick pipeline's port discipline.
+
 ## v2.17.750 · 2026-11-08
 
 ### 2026-11-08 · f26a1b5d41d1 · #10192 · @agenticore-app
