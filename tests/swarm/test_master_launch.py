@@ -978,7 +978,7 @@ def quota_master(monkeypatch, tmp_path, observed, store):
     monkeypatch.setattr(
         runtime.profile_choice,
         "choose",
-        lambda slug, lane, chosen, task, environ, overlays=None, hosted=(): runtime.profile_choice.ProfileDecision(
+        lambda config, lane, task, environ, hosted=(): runtime.profile_choice.ProfileDecision(
             "master", "task", "explicit"
         ),
     )
