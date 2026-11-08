@@ -123,6 +123,24 @@ def test_hive_image_can_install_agentihooks_from_the_local_build_context():
         assert f"!{source}" in allowed or f"!{source}/" in allowed, source
 
 
+def test_kind_proof_builds_the_checkout_and_reuses_layers_without_skipping_the_pods() -> None:
+    hive = builds()[1]
+    assert "--build-arg AGENTIHOOKS_SOURCE=local" in hive
+    assert '"${hive_layers[@]}"' in hive
+    proof = PROOF.read_text()
+    assert '--cache-from "type=local,src=$HIVE_LAYER_CACHE"' in proof
+    assert '--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed"' in proof
+    steps = hive_jobs()["kind"]["steps"]
+    restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
+    build = next(step for step in steps if "kind-proof.sh" in step.get("run", ""))
+    assert restore["with"]["path"] == save["with"]["path"]
+    assert restore["with"]["restore-keys"].startswith("worker-hive-layers-")
+    assert "HIVE_LAYER_CACHE" in build["env"]
+    assert "if" not in build
+    assert proof.index("in_pod init ") > proof.index("worker_hive_image_build_seconds=")
+
+
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
     current, _, stale = PROOF.read_text().partition("\nelse\n")
     assert f'if bash deploy/worker/base-current.sh {BASE} "$out/worker-base.ref"; then' in current
