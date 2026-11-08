@@ -182,7 +182,7 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
         hives = equipped
     if not task.get("workstation"):
         return hives, None
-    kept = [hive for hive in hives if hive["id"] == hive_id()]
+    kept = placement.workstation_hives(hives, hive_id())
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
 
 
