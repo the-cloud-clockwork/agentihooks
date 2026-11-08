@@ -141,6 +141,7 @@
         "tests/tick/test_slow_export_write.py::test_a_pass_whose_server_refused_the_connection_queues_writes_without_sending",
         "tests/tick/test_slow_export_write.py::test_a_write_after_a_mid_pass_view_read_timed_out_is_still_sent",
         "tests/tick/test_slow_export_write.py::test_a_mid_pass_read_the_server_refused_queues_writes_without_sending",
+        "tests/tick/test_slow_export_write.py::test_a_full_outbox_leaves_an_offline_write_unreachable",
         "tests/tick/test_slow_export_write.py::test_only_a_timeout_marks_a_failed_read_slow"
       ]
     },

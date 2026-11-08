@@ -16,7 +16,7 @@ import orjson
 import pytest
 
 from scripts.swarm import cli, ledger_client
-from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerRefused
+from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerRefused, LedgerUnreachable
 from scripts.swarm_ledger.api import client as api
 from scripts.tick import view
 
@@ -219,6 +219,38 @@ def test_a_mid_pass_read_the_server_refused_queues_writes_without_sending(ledger
         LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
     assert Ledger.writes == []
     assert ledger.queued == [("sw", [OP], True)]
+
+
+@pytest.mark.feature("swarm-tick-slow-export-write")
+@pytest.mark.parametrize("slow", [True, False], ids=["slow", "refused"])
+def test_a_full_outbox_leaves_an_offline_write_unreachable(
+    slow: bool, ledger: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts: list[str] = []
+
+    def stopped(slug: str, ops: list[dict[str, Any]] | None, service: bool = False) -> dict[str, Any]:
+        """Exit as the ledger CLI does when the server stops answering."""
+        raise SystemExit(f"ledger server not answering on {ledger.url}: timed out")
+
+    def full(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+        """Exit as the outbox does when it holds no room for ops."""
+        attempts.append(slug)
+        raise SystemExit("the local inbox outbox is full")
+
+    def refused(slug: str, service: bool = False, timeout: float | None = None) -> None:
+        """Fail the view read as a server that is down fails it."""
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(ledger, "call", stopped)
+    monkeypatch.setattr(ledger, "queue", full)
+    if not slow:
+        monkeypatch.setattr(cli.ledger_view, "start", refused)
+    with ExitStack() as beating:
+        cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
+        assert ledger_client.slow() is slow
+        with pytest.raises(LedgerUnreachable, match="outbox is full"):
+            LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
+    assert attempts == ["sw"]
 
 
 @pytest.mark.feature("swarm-tick-slow-export-write")

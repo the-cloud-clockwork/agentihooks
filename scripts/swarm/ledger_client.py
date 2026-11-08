@@ -92,8 +92,11 @@ def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]
 
 def _offline_write(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
     """``ops`` queued in the outbox while the pass runs from its last good view, refused as the server would refuse
-    them against that view."""
-    return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+    them against that view, and unreachable when the outbox cannot take them."""
+    try:
+        return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+    except SystemExit as exc:
+        raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
 
 def _accepted(slug, state):
