@@ -382,9 +382,10 @@ def _list() -> None:
         excluded = ",".join(record["excluded"]) or "none"
         room = headroom.summary(headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
+        release = record.get("version") or "unknown"
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}\trelease={record.get('version') or 'unknown'}"
+            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}\trelease={release}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

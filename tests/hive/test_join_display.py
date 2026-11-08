@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -175,7 +176,9 @@ def test_hive_list_lists_each_live_local_agent_once_and_only_on_its_own_hive(sto
 
 
 @pytest.mark.feature("hive-release-report")
-def test_hive_list_prints_the_release_each_hive_runs(store, capsys, monkeypatch):
+def test_hive_list_prints_the_release_each_hive_runs(
+    store: Any, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import cli, registry
 
     monkeypatch.setattr(
