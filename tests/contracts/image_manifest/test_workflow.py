@@ -1,9 +1,9 @@
 import json
 import os
 import re
-from typing import Any
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
