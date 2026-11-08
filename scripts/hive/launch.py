@@ -10,6 +10,7 @@ from typing import Any
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
+from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -111,6 +112,22 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             hive[placement.FIRST_ROOM] = ranked.room
             hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
+
+
+def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
+    """The profiles each given hive advertises in its configuration snapshot, bundle profiles included."""
+    advertised: dict[str, frozenset[str]] = {}
+    for hive in hives:
+        snapshot: dict[str, list[str]] = hive_config.read(redis, str(hive["id"])) or {}
+        advertised[str(hive["id"])] = frozenset(snapshot.get("profiles", []))
+    return advertised
+
+
+def hosting(hives: list[dict[str, Any]], profile: str, advertised: dict[str, frozenset[str]]) -> list[dict[str, Any]]:
+    """The hives that can launch a profile this host cannot resolve: only those advertising it."""
+    if profile_choice.installed(profile) or not any(profile in names for names in advertised.values()):
+        return hives
+    return [hive for hive in hives if profile in advertised.get(hive["id"], frozenset())]
 
 
 def _master_logins(hives: list[dict], front: bool) -> list[dict]:
@@ -306,15 +323,18 @@ class HiveLaunch:
     ) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
-        decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] not in (excluded or ())]
-        role = ROLE_PROFILES.get(decision.profile, decision.profile)
+        advertised = hosted_profiles(self.store.redis, hives)
+        hosted: frozenset[str] = frozenset().union(*advertised.values())
+        decision = self.herdr._profile_decision(config, lane, task, saved, saved, dict(os.environ), hosted)
+        profile: str = decision.profile
+        role = ROLE_PROFILES.get(profile, profile)
         hives, refused = _pinned(_by_origin(hives, config.repo), task, role)
         if refused:
             return self._record_wait(lane, task, refused)
         listed = tuple(hives)
-        hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
+        hives = [hive for hive in hosting(hives, profile, advertised) if placement.hosts(lane, hive, (profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "auto"
         auto = harness == "auto"
         if auto:
