@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.755 · 2026-11-08
+
+### 2026-11-08 · 2e2dcf3f1b64 · #10187 · @agenticore-app
+
+**Reuse qualified worker layers across release tags**
+
+This change lets release-tag builds reuse the already-qualified worker image layers from the development branch instead of starting cold, since tagged builds can't access the dev branch's Actions cache. It does this by pulling the dev image from the registry as a cache source and baking in inline cache metadata so future builds can chain off it too. Local caching and all existing qualification and publication checks stay intact, so the worst case if the registry cache is missing is simply a normal full rebuild, not a broken release.
+
+### 2026-11-08 · f47b56578c27 · #10131 · @nestorcolt
+
+**Compute each hive's agent ceiling from its own resources unless capped**
+
+Each hive's maximum agent count is no longer a fixed default like twenty or ten; instead it's recalculated every tick from that hive's own reported memory, swap and load, using the same host room rule the workstation autoscaler already applies. If the operator sets an explicit cap via the hive command or the Hives panel, that cap bounds the computed ceiling from above; otherwise placement uses the live, resource-derived number. The Hives panel's max agents cell now shows this computed ceiling and flags when a cap is in effect, so capacity tracks actual hardware headroom rather than a guess.
+
 ## v2.17.753 · 2026-11-08
 
 ### 2026-11-08 · efceb0164343 · #10198 · @nestorcolt
