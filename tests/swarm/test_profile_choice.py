@@ -367,6 +367,18 @@ def test_a_bundle_only_profile_a_placement_target_hosts_is_not_refused(monkeypat
         _choose("eng", {}, task, {}, hosted=frozenset({"brain"}))
 
 
+def test_runtime_profile_decision_uses_the_supplied_classifier_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    variable = "AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE"
+    monkeypatch.delenv(variable, raising=False)
+    config = store.SwarmConfig("sw", str(tmp_path), 1, 1)
+    host = runtime.HerdrRuntime(home=tmp_path)
+
+    with pytest.raises(profile_choice.ProfileUnresolved, match="confidence"):
+        host._profile_decision(config, "eng", TASK, {}, {}, {variable: "1.5"})
+
+
 def test_runtime_records_the_decision_and_launches_its_profile(tmp_path, asked, ledger_file):
     asked("frontend")
     calls = []

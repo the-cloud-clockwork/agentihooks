@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -80,6 +81,18 @@ def test_the_snapshot_names_the_configuration_without_values_or_host_paths(machi
     }
     assert SENTINEL not in json.dumps(snapshot)
     assert str(home) not in json.dumps(snapshot)
+
+
+def test_snapshot_keeps_linked_profiles_outside_the_bundle(machine: tuple[dict[str, str], Path, Path]) -> None:
+    from scripts.hive import config
+
+    environ, home, state = machine
+    path = state / "state.json"
+    installed = json.loads(path.read_text())
+    installed["linked_profiles"].append({"name": "linked-only"})
+    path.write_text(json.dumps(installed))
+
+    assert config.snapshot(environ, home, state, [])["profiles"] == ["brain", "frontend", "linked-only"]
 
 
 def test_an_uninstalled_machine_reports_empty_sections(tmp_path, monkeypatch):
