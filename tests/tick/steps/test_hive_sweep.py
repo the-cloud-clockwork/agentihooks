@@ -79,6 +79,25 @@ def test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept(
 
 
 @pytest.mark.feature("hive-quiet-sweep")
+def test_a_kept_hive_does_not_stop_the_sweep_and_a_draining_hive_is_not_drained_again(store: RedisStore) -> None:
+    """A hive kept for its agents leaves later hives to the sweep, and one already draining gains no drain entry."""
+    _hive(store, "a-kept", "yes", QUIET_AT)
+    _hive(store, "b-draining", "yes", QUIET_AT)
+    registry.update(store.redis, "b-draining", ["draining=yes"], drain=registry.Drain("operator", "release"))
+    store.start_execution(
+        "sw",
+        AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="a-kept", state="working"),
+    )
+    lines = sweep.sweep(store, NOW_MS)
+    assert lines[:2] == [
+        "drained quiet ephemeral hive a-kept",
+        "kept quiet hive a-kept while 1 agent records still run on it",
+    ]
+    assert len(lines) == 3 and lines[2].endswith(" registry records of b-draining")
+    assert registry.show(store.redis, "b-draining") is None
+
+
+@pytest.mark.feature("hive-quiet-sweep")
 def test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none(store: RedisStore) -> None:
     """Each non ephemeral hive past the window is one quiet hive finding naming its silence in minutes."""
     _hive(store, "lasting", "no", QUIET_AT)
@@ -87,6 +106,7 @@ def test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none(store
     found = quiet_hives.findings(store.redis, NOW_MS)
     assert [(f.id, f.measure, f.threshold) for f in found] == [("quiet-hive/lasting", 60, quiet_hives.THRESHOLD)]
     assert found[0].summary == "Hive lasting has sent no heartbeat for 60 minutes"
+    assert found[0].evidence == (f"last heartbeat at {QUIET_AT}",)
 
 
 @pytest.mark.feature("hive-quiet-sweep")
@@ -110,6 +130,7 @@ def test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories(store
     assert store.redis.exists(f"{registry.key('other')}:sessions") == 1
 
 
+@pytest.mark.feature("hive-quiet-sweep")
 def test_purge_counts_only_agents_still_running_on_the_hive(store: RedisStore) -> None:
     """Hosted lists the hive's working agents and leaves finished, ended and elsewhere agents out."""
     names: list[str] = []
