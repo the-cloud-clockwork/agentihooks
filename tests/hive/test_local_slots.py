@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from scripts import terminate_agent
 from scripts.swarm import local_slots
@@ -186,7 +189,9 @@ def test_a_hive_at_its_cap_launches_nothing_when_its_session_report_misses_recor
     )
 
 
-def _remote_agents(setup, monkeypatch, states, report):
+def _remote_agents(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, states: list[str], report: dict[str, int], account: str = "account"
+) -> int:
     import json
 
     from scripts.hive import launch, registry
@@ -204,7 +209,7 @@ def _remote_agents(setup, monkeypatch, states, report):
                 seat=f"eng-{index + 1}@{setup.config.slug}",
                 state=state,
                 harness="claude",
-                account="account",
+                account=account,
                 hive="remote",
                 runtime_target={"host_id": "remote"},
             ),
@@ -220,6 +225,13 @@ def test_finished_and_ended_agents_do_not_count_on_their_hive(setup, monkeypatch
 def test_each_unreported_live_agent_adds_to_the_processes_its_hive_reports(setup, monkeypatch):
     states = ["launching", "working", "suspect", "retiring"]
     assert _remote_agents(setup, monkeypatch, states, {"codex:other": 2}) == 5
+
+
+@pytest.mark.parametrize(("account", "reported"), [("one-x", "claude:one_x"), ("one_x", "claude:one-x")])
+def test_an_unreported_agent_is_claimed_by_its_hive_process_under_either_account_spelling(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, account: str, reported: str
+) -> None:
+    assert _remote_agents(setup, monkeypatch, ["working"], {reported: 1}, account) == 1
 
 
 def test_running_and_held_reuse_one_fleet_scan_through_a_shared_cache(setup, monkeypatch):
