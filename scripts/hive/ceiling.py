@@ -1,5 +1,6 @@
 """A hive's agent ceiling: the agents its own headroom reading counts plus the workstation host room rule over that
-reading's memory, swap and one minute load, bounded from above by a cap the operator set."""
+reading's memory, swap and one minute load, bounded from above by a cap the operator set. The rule runs with no
+previous room, so between the load watermarks the ceiling holds at the agents already running."""
 
 from typing import Any
 

@@ -50,7 +50,7 @@ function ceilingBox(hive) {
 function hiveRow(hive) {
   const values = [h("span", { class: "sw-id", title: hive.id, text: hive.name || hive.id }), label(hive.live ? "live" : "quiet", hive.live ? "live" : "stalled"),
     flag(hive, "ui"), flag(hive, "ephemeral"), text(hive, "excluded", (hive.excluded || []).join(",")),
-    ceilingCell(hive), `${hive.agents}/${hive.max_agents}`,
+    ceilingCell(hive), `${hive.agents}/${hive.unread ? "?" : hive.max_agents}`,
     hive.master ? h("span", { class: "sw-id", title: hive.master.name, text: hive.master.name }) : "—", moveButton(hive)];
   return h("tr", { id: `hive-${hive.id}` }, ...values.map((v) => (v.nodeType ? h("td", {}, v) : h("td", { text: v }))));
 }

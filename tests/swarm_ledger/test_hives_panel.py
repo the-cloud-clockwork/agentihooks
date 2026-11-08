@@ -269,6 +269,7 @@ def test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling(browser: An
         box = page.tab.locator('#hive-lab [data-hive-field="max_agents"]')
         assert (box.input_value(), box.get_attribute("placeholder")) == ("", "unknown")
         assert page.table("swarm-hives")[2][5].lower() == "auto"
+        assert page.table("swarm-hives")[2][6] == "0/?"
         assert page.errors == []
     finally:
         page.context.close()
