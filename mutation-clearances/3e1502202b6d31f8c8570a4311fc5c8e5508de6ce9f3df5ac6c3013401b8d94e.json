@@ -1,0 +1,6 @@
+{
+  "scripts/access_env.py:scripts.access_env.x_values:1805e3a1b29c97087308e6b1f5a083d8379bd7cfad5af4e1085e326272272ca6": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}
