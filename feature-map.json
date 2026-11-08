@@ -2013,6 +2013,7 @@
       "tests": [
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_never_bound_is_retired_and_releases_its_task",
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_never_bound_keeps_its_task_inside_the_lost_window",
+        "tests/tick/steps/test_reap_ended_executions.py::test_the_unbound_window_holds_across_passes_until_the_store_retires_the_agent",
         "tests/tick/steps/test_reap_ended_executions.py::test_a_bound_pod_is_never_judged_by_the_unbound_window",
         "tests/tick/steps/test_reap_ended_executions.py::test_a_finished_master_retires_after_its_handoff_when_its_pane_is_out_of_reach",
         "tests/tick/steps/test_reap_ended_executions.py::test_a_finished_master_with_no_successor_keeps_retrying"

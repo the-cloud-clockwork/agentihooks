@@ -101,6 +101,18 @@ def test_an_attempt_whose_pod_never_bound_is_retired_and_releases_its_task(store
     assert store.claimant(SLUG, "t1") is None
     assert agent.name not in {a.name for a in store.agents(SLUG)}
     assert rows["t1"]["state"] == "open"
+    assert not store.redis.hexists(store.key(SLUG, "unbound-since"), agent.name)
+
+
+@pytest.mark.feature("swarm-tick-reap-ended-executions")
+def test_the_unbound_window_holds_across_passes_until_the_store_retires_the_agent(store: RedisStore) -> None:
+    agent = _unbound(store, "t1")
+
+    assert agents._remote_gone_reason(SLUG, store, _Unreachable(), agent, NOW) == ""
+    assert agents._remote_gone_reason(SLUG, store, _Unreachable(), agent, LATER) == "its pod never started"
+    assert agents._remote_gone_reason(SLUG, store, _Unreachable(), agent, LATER + 1) == "its pod never started"
+    assert store.drop_agent(SLUG, agent.name)
+    assert not store.redis.hexists(store.key(SLUG, "unbound-since"), agent.name)
 
 
 @pytest.mark.feature("swarm-tick-reap-ended-executions")
@@ -117,13 +129,11 @@ def test_an_attempt_whose_pod_never_bound_keeps_its_task_inside_the_lost_window(
 def test_a_bound_pod_is_never_judged_by_the_unbound_window(store: RedisStore) -> None:
     agent = _unbound(store, "t1")
     bound = replace(agent, runtime_target={**agent.runtime_target, "pod_name": "swarm-t1"})
-    rows = {"t1": {"state": "claimed", "claimed_by": agent.name, "claim_generation": 1}}
 
     assert agents._remote_gone_reason(SLUG, store, _Unreachable(), bound, NOW) == ""
     assert agents._remote_gone_reason(SLUG, store, _Unreachable(), bound, LATER) == ""
     assert agents._remote_gone_reason(SLUG, store, _Unreachable(), replace(agent, state="working"), LATER) == ""
     assert store.claimant(SLUG, "t1") == agent.name
-    assert rows["t1"]["claimed_by"] == agent.name
 
 
 @pytest.mark.feature("swarm-tick-reap-ended-executions")

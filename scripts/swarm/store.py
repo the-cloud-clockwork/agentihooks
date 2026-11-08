@@ -25,7 +25,15 @@ MASTER = "master"
 PROJECTION_ATTEMPTS = 5
 PROJECTION_CONTENTION = "agent registry kept changing; the agent was not shown"
 LEGACY_PROJECTION_CONTENTION = "agent registry kept changing; update was not committed"
-RETIRED_PARTS = ("agents", "hosts", "desired-routes", "state-since", "retire-failures", "retired-process")
+RETIRED_PARTS = (
+    "agents",
+    "hosts",
+    "desired-routes",
+    "state-since",
+    "retire-failures",
+    "retired-process",
+    "unbound-since",
+)
 RETIRE_ROW = """
 if (redis.call('HGET', KEYS[1], ARGV[1]) or '') ~= ARGV[2] then return 0 end
 if ARGV[3] ~= '' then redis.call('RPUSH', KEYS[#KEYS], ARGV[3]) end

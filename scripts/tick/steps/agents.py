@@ -124,7 +124,7 @@ def _remote_gone_reason(slug: str, store: Any, runtime: Any, agent: AgentRecord,
     hives = tick.reports.Reports(store.redis)
     if tick._elsewhere(agent) and hives.vanished(agent, now_ms):
         return "its hive no longer lists it"
-    if _never_bound(slug, store, agent, now_ms):
+    if _unbound_past_window(slug, store, agent, now_ms):
         return "its pod never started"
     if not tick.reports.host(agent):
         return ""
@@ -133,8 +133,9 @@ def _remote_gone_reason(slug: str, store: Any, runtime: Any, agent: AgentRecord,
     return "its hive stopped reporting" if tick._hive_lost(slug, store, agent, now_ms) else ""
 
 
-def _never_bound(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
-    """True once a Kubernetes attempt on the placeholder pod, with no pod uid, has stayed suspect for the lost window."""
+def _unbound_past_window(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
+    """Start the unbound window of a suspect Kubernetes attempt on the placeholder pod with no pod uid, and answer
+    True once that window has lasted the lost window; the store clears the window when it retires the agent."""
     from scripts.swarm_v2.kubernetes.failures import PENDING_POD
 
     target = cast(dict[str, Any], agent.runtime_target)
@@ -142,12 +143,9 @@ def _never_bound(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool
         return False
     if target.get("pod_uid") or target.get("pod_name") != PENDING_POD:
         return False
-    key, field = store.key(slug, "unbound-since"), f"{agent.execution_id}:{agent.generation}"
-    store.redis.hsetnx(key, field, now_ms)
-    if now_ms - int(store.redis.hget(key, field)) < tick.reports.LOST_MS:
-        return False
-    store.redis.hdel(key, field)
-    return True
+    key = store.key(slug, "unbound-since")
+    store.redis.hsetnx(key, agent.name, now_ms)
+    return now_ms - int(store.redis.hget(key, agent.name)) >= tick.reports.LOST_MS
 
 
 def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
