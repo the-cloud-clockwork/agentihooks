@@ -56,7 +56,7 @@ class LedgerCalls:
     def task(self, slug: str, task_id: str) -> dict[str, Any]:
         state: Any = self.port.export(deadline=self.deadline)
         tasks: list[dict[str, Any]] = state.get("tasks", [])
-        found = next((task for task in tasks if task["id"] == task_id), {})
+        found = next((task for task in tasks if task["id"] == task_id), dict[str, Any]())
         return found
 
     def notify(self, slug: str, text: str) -> None:

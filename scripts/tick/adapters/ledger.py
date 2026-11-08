@@ -3,7 +3,7 @@ bounded by its deadline and every write stamped with the controller epoch of its
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from scripts.swarm import lease
@@ -79,6 +79,6 @@ class ClientLedger:
             [operation("task_update", "swarm", item=f"tasks/{task_id}", fields=dict(fields), **guard)],
             deadline=deadline,
         )
-        tasks: list[dict[str, Any]] = state.get("tasks", [])
-        found: dict[str, Any] = next((task for task in tasks if task["id"] == task_id), {})
+        tasks = cast(list[dict[str, Any]], state.get("tasks", []))
+        found: dict[str, Any] = next((task for task in tasks if task["id"] == task_id), dict[str, Any]())
         return found
