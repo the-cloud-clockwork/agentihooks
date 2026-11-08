@@ -58,6 +58,7 @@ def resolve(monkeypatch: pytest.MonkeyPatch) -> schema.Workflow:
     return flow
 
 
+@pytest.mark.feature("swarm-workflow-runner")
 def test_pending_head_is_delivered_once_without_consuming_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -83,6 +84,7 @@ def test_pending_head_is_delivered_once_without_consuming_attempt(
     assert str(tmp_path / "outputs" / "build" / "seat-1-0-0.json") in args[2]
 
 
+@pytest.mark.feature("swarm-workflow-runner")
 def test_head_result_advances_once_then_other_stage_uses_headless(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -114,6 +116,7 @@ def test_head_result_advances_once_then_other_stage_uses_headless(
 @pytest.mark.parametrize(
     "changes", [{"kind": "code"}, {"state": "open"}, {"state": "done"}, {"done": True}, {"claimed_by": ""}]
 )
+@pytest.mark.feature("swarm-workflow-runner")
 def test_only_claimed_workflow_tasks_run(tmp_path: Path, changes: dict) -> None:
     from scripts.swarm import workflow_runner
 
@@ -123,6 +126,7 @@ def test_only_claimed_workflow_tasks_run(tmp_path: Path, changes: dict) -> None:
     inbox.send.assert_not_called()
 
 
+@pytest.mark.feature("swarm-workflow-runner")
 def test_existing_state_and_case_survive_definition_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import workflow_runner
 
@@ -143,6 +147,7 @@ def test_existing_state_and_case_survive_definition_changes(tmp_path: Path, monk
     assert store.load(tmp_path) == state
 
 
+@pytest.mark.feature("swarm-workflow-runner")
 def test_bad_task_does_not_prevent_the_next_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import workflow_runner
 
@@ -155,6 +160,7 @@ def test_bad_task_does_not_prevent_the_next_task(tmp_path: Path, monkeypatch: py
 
 
 @pytest.mark.parametrize("stage_id", ["build", "review"])
+@pytest.mark.feature("swarm-workflow-runner")
 def test_filtered_stages_use_judge_including_the_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage_id: str
 ) -> None:
@@ -187,6 +193,7 @@ def test_filtered_stages_use_judge_including_the_head(
     inbox.send.assert_not_called()
 
 
+@pytest.mark.feature("swarm-workflow-runner")
 def test_scouter_stage_uses_scout_after_claimant_completion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from dataclasses import replace
 

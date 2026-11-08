@@ -2117,7 +2117,8 @@
         "tests/swarm/test_workflow_runner.py::test_existing_state_and_case_survive_definition_changes",
         "tests/swarm/test_workflow_runner.py::test_bad_task_does_not_prevent_the_next_task",
         "tests/swarm/test_workflow_runner.py::test_filtered_stages_use_judge_including_the_head",
-        "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion"
+        "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion",
+        "tests/tick/steps/test_workflow_runner.py::test_tick_passes_claimed_snapshot_to_runner"
       ]
     }
   ],

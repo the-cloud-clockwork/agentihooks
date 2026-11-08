@@ -16,6 +16,8 @@ machine: Any = import_module("scripts.workflows.machine")
 store: Any = import_module("scripts.workflows.store")
 runner: Any = import_module("scripts.workflows.runner")
 HeadlessProfile: Any = import_module("scripts.workflows.launchers").HeadlessProfile
+Judge: Any = import_module("scripts.workflows.launchers").Judge
+Routed: Any = import_module("scripts.workflows.launchers").Routed
 
 
 class PendingStage(Exception):
@@ -84,7 +86,8 @@ def advance_task(inbox: Any, task: dict[str, Any], repo: Path) -> str:
     if state["status"] != machine.RUNNING:
         return ""
     definition = schema.parse(yaml.safe_dump(state["definition"]))
-    launcher = SeatLauncher(inbox, task, definition, HeadlessProfile(harness=state["harness"]))
+    seat = SeatLauncher(inbox, task, definition, HeadlessProfile(harness=state["harness"]))
+    launcher = Routed(seat, Judge(harness=state["harness"]))
     try:
         after = runner.Runner(definition, launcher, exit_checks.check).step(folder)
     except PendingStage:
