@@ -167,3 +167,22 @@ def test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs(
     second = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
     assert calls == [0, 1]
     assert not any(line.startswith("pass failed") for line in second)
+
+
+@pytest.mark.feature("swarm-tick-late-view")
+def test_a_redis_error_a_step_held_reaches_the_outage_guard(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    swarm, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+
+    def stall_pass(watch: Any, doc: dict[str, Any]) -> list[str]:
+        raise RedisConnectionError("dropped")
+
+    monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: None)
+    monkeypatch.setattr(stall_watch, "stall_pass", stall_pass)
+    actions = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+    assert actions == ["Redis operation failed: ConnectionError"]
