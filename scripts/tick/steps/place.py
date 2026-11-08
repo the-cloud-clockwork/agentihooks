@@ -372,7 +372,8 @@ class _LaunchClock:
 
 def _launch_room(runtime: Any, config: SwarmConfig) -> int:
     room = getattr(runtime, "launch_room", None)
-    return max(1, min(tick.SPAWN_POOL, room(config) if room else 1))
+    value = room(config) if room else None
+    return max(1, min(tick.SPAWN_POOL, 1 if value is None else value))
 
 
 def _steer(slug: str, store: Any, task: dict[str, Any], failing: str) -> dict[str, str]:
