@@ -27,9 +27,10 @@ RUN dpkg-query -W -f='${Package}\n' | sort > /base-packages \
         libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 \
         libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 fonts-liberation \
     && mkdir /browser-libs \
-    && dpkg-query -W -f='${Package}\n' | sort | comm -13 /base-packages - | xargs dpkg -L | sort -u \
-        | while read -r path; do if [ -f "$path" ] || [ -L "$path" ]; then printf '%s\n' "$path"; fi; done \
-        | tar -cf - --no-recursion -T - | tar -xf - -C /browser-libs
+    && dpkg-query -W -f='${Package}\n' | sort | comm -13 /base-packages - | xargs dpkg -L \
+        | while read -r path; do if [ ! -d "$path" ] && { [ -f "$path" ] || [ -L "$path" ]; }; then \
+            printf '%s/%s\n' "$(readlink -f "$(dirname "$path")")" "$(basename "$path")"; fi; done \
+        | sort -u | tar -cf - --no-recursion -T - | tar -xf - -C /browser-libs
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS overlay
 COPY --from=wheel /wheels /wheels
