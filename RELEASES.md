@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.719 · 2026-11-08
+
+### 2026-11-07 · d700cb581cda · #10009 · @agenticore-app
+
+**Profiles connectors drop deprecated MCP client calls and import only typed functions**
+
+This change updates the profiles connectors code to use the current MCP client instead of the deprecated wrapper, listing tools via `streamable_http_client` with explicit `httpx.AsyncClient` headers, timeouts, and paginated cursor requests. It also adds type annotations to eight previously untyped functions imported across the profiles modules and lowers the type baseline file to reflect the reduced error counts. This removes reliance on soon-to-be-removed MCP APIs, improves type safety and tooling confidence, and keeps the type gate green without changing runtime behavior.
+
 ## v2.17.716 · 2026-11-07
 
 ### 2026-11-07 · 89100789a438 · #10013 · @nestorcolt
