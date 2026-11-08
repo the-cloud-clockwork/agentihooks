@@ -10,7 +10,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import LedgerCalls
+from scripts.tick.adapters.calls import LedgerCalls, SpawnRuntimeCalls
 from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -271,13 +271,15 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("preempt", "sw", config, store, "doc", 7, seats),
         ("places", "tick", ROWS),
         "panic read",
-        ("enter pass", "runtime"),
-        ("spawn", "sw", config, store, calm[7][4], "runtime", ROWS, "doc", 7, calm[7][-1]),
-        ("leave pass", "runtime"),
+        ("enter pass", calm[7][5]),
+        ("spawn", "sw", config, store, calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
+        ("leave pass", calm[7][5]),
         ("delete", "due key"),
     ]
     assert isinstance(calm[7][-1], Deadline)
     assert isinstance(calm[7][4], LedgerCalls)
+    assert isinstance(calm[7][5], SpawnRuntimeCalls)
+    assert calm[7][5].deadline is calm[7][4].deadline
     assert calm[7][4].deadline.expires_at == calm[7][-1].expires_at + tick.SPAWN_BUDGET_S
     spawned = calm[7][6]
     assert spawned is not ROWS and state["box"]["rows"] == ROWS
@@ -633,8 +635,10 @@ def test_the_spawn_step_hands_the_spawn_pass_its_step_deadline(
     spawn.run(Context(_State(state), deadline, tools))
 
     [found] = [entry for entry in calm if isinstance(entry, tuple) and entry[0] == "spawn"]
-    ledger = found[4]
-    assert found == ("spawn", "sw", state["config"], state["store"], ledger, "runtime", ROWS, "doc", 7, deadline)
+    ledger, runtime = found[4], found[5]
+    assert found == ("spawn", "sw", state["config"], state["store"], ledger, runtime, ROWS, "doc", 7, deadline)
     assert isinstance(ledger, LedgerCalls) and ledger.port is tools.ledger
+    assert isinstance(runtime, SpawnRuntimeCalls) and runtime.port is tools.runtime
+    assert runtime.deadline is ledger.deadline
     assert place.PASS_DEADLINE.get() is None
     assert (ledger.deadline.expires_at, ledger.deadline.clock) == (50.0 + _tick(calm).SPAWN_BUDGET_S, deadline.clock)
