@@ -418,7 +418,7 @@ def _dead(raw: str) -> bool:
     return _gone(held["pid"], held["start"]) or _forgotten(raw, held)
 
 
-def _forgotten(raw: str, held: dict[str, Any]) -> bool:
+def _forgotten(raw: str, held: Any) -> bool:
     """Tell whether ``held`` names this very process while no pass in it still holds the token ``raw``."""
     return held["pid"] == os.getpid() and _stat(os.getpid())[19:20] == [held["start"]] and raw not in _LIVE
 
