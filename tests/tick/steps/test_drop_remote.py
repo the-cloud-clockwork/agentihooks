@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import fakeredis
@@ -6,6 +7,31 @@ import pytest
 from scripts.swarm import fencing, tick
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger
+
+
+@pytest.mark.feature("swarm-tick-dead-remote-budget")
+def test_retiring_an_archived_projection_preserves_its_history_metadata() -> None:
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    agent = store.start_execution(
+        "sw", AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="rolled")
+    )
+
+    def archive(doc: dict[str, Any]) -> None:
+        doc["archive"][agent.execution_id] = doc["executions"].pop(agent.execution_id)
+
+    fencing.write(store, "sw", archive)
+    row = json.loads(store.redis.hget(store.key("sw", "agents"), agent.name))
+    for field in ("execution_id", "hive", "runtime_backend"):
+        row.pop(field)
+    store.redis.hset(store.key("sw", "agents"), agent.name, json.dumps(row))
+    assert store.drop_agent("sw", agent.name)
+    history = json.loads(store.redis.lindex(store.key("sw", "history"), -1))
+    assert (history["execution_id"], history["hive"], history["runtime_backend"]) == (
+        agent.execution_id,
+        "rolled",
+        agent.runtime_backend,
+    )
 
 
 @pytest.mark.feature("swarm-tick-dead-remote-budget")

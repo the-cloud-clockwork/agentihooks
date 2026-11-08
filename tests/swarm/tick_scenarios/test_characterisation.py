@@ -7,6 +7,8 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass, replace
 from itertools import count
 from pathlib import Path
@@ -250,22 +252,44 @@ def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
 def test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes(
     entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.deadline import Deadline
+
+    elapsed = [0.0]
+    dropping: ContextVar[bool] = ContextVar("dropping", default=False)
     dropped: list[float] = []
     reaped: list[float] = []
-    drop, reap = tick_module._drop_remote, agent_steps._reap
+    drop, reap, read = tick_module._drop_remote, agent_steps._reap, fencing.read
+
+    def clock() -> float:
+        return elapsed[0]
+
+    def deadline(cls: type[Deadline], seconds: float, *, clock: Callable[[], float] = clock) -> Deadline:
+        return cls(clock() + seconds, clock)
+
+    def archive_read(store: Any, slug: str) -> dict[str, Any]:
+        if dropping.get():
+            elapsed[0] += 3.0
+        return read(store, slug)
 
     def measured_drop(*args: Any, **kwargs: Any) -> str:
-        started = time.monotonic()
-        action: str = drop(*args, **kwargs)
-        dropped.append(time.monotonic() - started)
+        started = clock()
+        token = dropping.set(True)
+        try:
+            action: str = drop(*args, **kwargs)
+        finally:
+            dropping.reset(token)
+        dropped.append(clock() - started)
         return action
 
     def measured_reap(*args: Any, **kwargs: Any) -> list[str]:
-        started = time.monotonic()
+        started = clock()
         actions: list[str] = reap(*args, **kwargs)
-        reaped.append(time.monotonic() - started)
+        reaped.append(clock() - started)
         return actions
 
+    monkeypatch.setattr(Deadline, "after", classmethod(deadline))
+    monkeypatch.setattr(fencing, "read", archive_read)
     monkeypatch.setattr(tick_module, "_drop_remote", measured_drop)
     monkeypatch.setattr(agent_steps, "_reap", measured_reap)
     record = replay("hive-roll", entry, monkeypatch, tmp_path)
