@@ -243,7 +243,7 @@ def remove_managed_keys(settings_path: Path) -> bool:
     return False
 
 
-def settings_document(rendered: dict) -> dict:
+def settings_document(rendered: dict[str, Any]) -> dict[str, Any]:
     """
     rendered["env"] can carry connector-injected literal values, and this is the one adapter that copies the whole dict
     into settings verbatim — codex and copilot read only permissions.defaultMode. Scan each env value and drop
