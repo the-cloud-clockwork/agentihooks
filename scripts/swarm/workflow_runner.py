@@ -95,7 +95,7 @@ def advance_task(inbox: Any, task: dict[str, Any], repo: Path) -> str:
     return f"workflow {task['id']} advanced from {state['stage']} to {after['stage']}: {after['status']}"
 
 
-def advance_tasks(inbox: Any, slug: str, doc: dict[str, Any], repo: Path) -> list[str]:
+def advance_tasks(inbox: Any, doc: dict[str, Any], repo: Path) -> list[str]:
     actions: list[str] = []
     for task in doc.get("tasks", []):
         if (

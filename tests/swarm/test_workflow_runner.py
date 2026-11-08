@@ -68,7 +68,7 @@ def test_pending_head_is_delivered_once_without_consuming_attempt(
     inbox = Mock()
     row = task(tmp_path)
     doc = {"tasks": [row]}
-    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == ["workflow work waits for its claimant"]
+    assert workflow_runner.advance_tasks(inbox, doc, tmp_path) == ["workflow work waits for its claimant"]
     before = store.load(tmp_path)
     assert (before["stage"], before["status"], before["visit"], before["runs"]) == ("build", "running", 0, {})
     assert before["case"] == "Build the case"
@@ -77,7 +77,7 @@ def test_pending_head_is_delivered_once_without_consuming_attempt(
     assert before["workflow"] == "bridge"
     assert before["run"] == tmp_path.name
     assert (tmp_path / "outputs" / "build" / "seat-1-0-0.sent").read_text() == row["claimed_by"]
-    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == ["workflow work waits for its claimant"]
+    assert workflow_runner.advance_tasks(inbox, doc, tmp_path) == ["workflow work waits for its claimant"]
     assert store.load(tmp_path) == before
     assert inbox.send.call_count == 1
     args, kwargs = inbox.send.call_args
@@ -107,18 +107,18 @@ def test_head_result_advances_once_then_other_stage_uses_headless(
     row = task(tmp_path)
     doc = {"tasks": [row]}
     inbox = Mock()
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    workflow_runner.advance_tasks(inbox, doc, tmp_path)
     result = tmp_path / "outputs" / "build" / "seat-1-0-0.json"
     result.write_text(json.dumps({"outcome": "pass", "outputs": "built"}))
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    workflow_runner.advance_tasks(inbox, doc, tmp_path)
     assert (store.load(tmp_path)["stage"], store.load(tmp_path)["outputs"]) == ("review", {"build": "built"})
     fallback.launch.assert_not_called()
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    workflow_runner.advance_tasks(inbox, doc, tmp_path)
     fallback.launch.assert_called_once_with(
         definition().stages["review"], {"case": "Build the case", "build": "built"}, tmp_path
     )
     assert store.load(tmp_path)["status"] == "passed"
-    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == []
+    assert workflow_runner.advance_tasks(inbox, doc, tmp_path) == []
     assert fallback.launch.call_count == 1
 
 
@@ -130,7 +130,7 @@ def test_only_claimed_workflow_tasks_run(tmp_path: Path, changes: dict) -> None:
     from scripts.swarm import workflow_runner
 
     inbox = Mock()
-    assert workflow_runner.advance_tasks(inbox, "proof", {"tasks": [{**task(tmp_path), **changes}]}, tmp_path) == []
+    assert workflow_runner.advance_tasks(inbox, {"tasks": [{**task(tmp_path), **changes}]}, tmp_path) == []
     assert not (tmp_path / "workflow.json").exists()
     inbox.send.assert_not_called()
 
@@ -143,14 +143,14 @@ def test_existing_state_and_case_survive_definition_changes(tmp_path: Path, monk
     case = tmp_path / "case.md"
     case.write_text("Original case")
     row = {**task(tmp_path), "case": str(case)}
-    workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [row]}, tmp_path)
+    workflow_runner.advance_tasks(Mock(), {"tasks": [row]}, tmp_path)
     state = store.load(tmp_path)
     assert state["case"] == "Original case"
     case.write_text("Changed case")
     monkeypatch.setattr(
         workflow_runner.loader, "resolve", Mock(side_effect=AssertionError("must resume stored definition"))
     )
-    workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [row]}, tmp_path)
+    workflow_runner.advance_tasks(Mock(), {"tasks": [row]}, tmp_path)
     assert store.load(tmp_path)["definition"] == flow.to_document()
     assert store.load(tmp_path)["case"] == "Original case"
     assert store.load(tmp_path) == state
@@ -163,7 +163,7 @@ def test_bad_task_does_not_prevent_the_next_task(tmp_path: Path, monkeypatch: py
     resolve(monkeypatch)
     bad = {**task(tmp_path / "bad"), "workflow": "missing", "id": "bad"}
     good = {**task(tmp_path / "good"), "id": "good"}
-    actions = workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [bad, good]}, tmp_path)
+    actions = workflow_runner.advance_tasks(Mock(), {"tasks": [bad, good]}, tmp_path)
     assert any("bad" in action and "missing" in action for action in actions)
     assert store.load(tmp_path / "good")["status"] == machine.RUNNING
 
@@ -242,9 +242,7 @@ def test_new_nested_workspace_forwards_repository_and_records_identity(
     row = task(folder)
     del row["claim_generation"]
     inbox = Mock()
-    assert workflow_runner.advance_tasks(inbox, "proof", {"tasks": [row]}, tmp_path) == [
-        "workflow work waits for its claimant"
-    ]
+    assert workflow_runner.advance_tasks(inbox, {"tasks": [row]}, tmp_path) == ["workflow work waits for its claimant"]
     loaded.assert_called_once_with(tmp_path)
     assert store.load(folder)["workflow"] == "bridge"
     assert store.load(folder)["run"] == "run"
@@ -259,8 +257,8 @@ def test_definition_errors_preserve_every_message_and_empty_documents_are_idle(
     from scripts.swarm import workflow_runner
 
     monkeypatch.setattr(workflow_runner.loader, "resolve", Mock(return_value=({}, ["first error", "second error"])))
-    assert workflow_runner.advance_tasks(Mock(), "proof", {}, tmp_path) == []
-    assert workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [task(tmp_path)]}, tmp_path) == [
+    assert workflow_runner.advance_tasks(Mock(), {}, tmp_path) == []
+    assert workflow_runner.advance_tasks(Mock(), {"tasks": [task(tmp_path)]}, tmp_path) == [
         "workflow work refused: first error\nsecond error"
     ]
 
@@ -272,7 +270,7 @@ def test_ignored_task_does_not_hide_a_later_claim(tmp_path: Path, monkeypatch: p
     resolve(monkeypatch)
     ignored = {**task(tmp_path / "ignored"), "kind": "code"}
     good = task(tmp_path / "good")
-    assert workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [ignored, good]}, tmp_path) == [
+    assert workflow_runner.advance_tasks(Mock(), {"tasks": [ignored, good]}, tmp_path) == [
         "workflow work waits for its claimant"
     ]
     assert not (tmp_path / "ignored").exists()
