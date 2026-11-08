@@ -110,18 +110,18 @@ def test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories(store
     assert store.redis.exists(f"{registry.key('other')}:sessions") == 1
 
 
-@pytest.mark.feature("hive-quiet-sweep")
 def test_purge_counts_only_agents_still_running_on_the_hive(store: RedisStore) -> None:
     """Hosted lists the hive's working agents and leaves finished, ended and elsewhere agents out."""
-    for n, (hive, state) in enumerate(
-        (("proof", "working"), ("proof", "finished"), ("proof", "ended"), ("x", "working"))
-    ):
-        started = store.start_execution(
-            "sw", AgentRecord(f"engineer@{n}", "eng", f"t{n}", seat=f"eng-{n + 1}@sw", hive=hive, state="working")
-        )
+    names: list[str] = []
+    placed = (("proof", "working"), ("proof", "finished"), ("proof", "ended"), ("x", "working"))
+    for n, (hive, state) in enumerate(placed):
+        name = store.next_name("sw", "eng")
+        names.append(name)
+        agent = AgentRecord(name, "eng", f"t{n}", seat=f"eng-{n + 1}@sw", hive=hive, state="working")
+        started = store.start_execution("sw", agent)
         if state != "working":
             store.put_agent("sw", replace(started, state=state))
-    assert [(slug, agent.name) for slug, agent in purge.hosted(store, "proof")] == [("sw", "engineer@0")]
+    assert [(slug, agent.name) for slug, agent in purge.hosted(store, "proof")] == [("sw", names[0])]
 
 
 @pytest.mark.feature("hive-quiet-sweep")

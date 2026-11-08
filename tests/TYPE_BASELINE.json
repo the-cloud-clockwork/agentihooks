@@ -391,7 +391,7 @@
   "scripts/hive/quota_refresh.py": 2,
   "scripts/hive/redis_acl.py": 28,
   "scripts/hive/registry.py": 94,
-  "scripts/hive/remove.py": 116,
+  "scripts/hive/remove.py": 105,
   "scripts/hive/reports.py": 54,
   "scripts/hive/rollout.py": 27,
   "scripts/hive/scope.py": 7,
