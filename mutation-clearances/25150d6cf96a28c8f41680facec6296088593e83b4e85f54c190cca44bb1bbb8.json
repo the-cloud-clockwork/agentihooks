@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_auth_session:ece35b84ea2e5fb990c5c460491282a1ec7508b44d18c380f2dbf49f0dcb3273": {
+    "reader": "standards_reader",
+    "reason": "headers get and item lookup are case insensitive, and urllib Request add_header capitalises every header name, so the outgoing assertion header is identical."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_auth_session:67b0624a5e59c1629c67154833e926a3539c83415b1a6fdf0e031085dd2e8fbf": {
+    "reader": "standards_reader",
+    "reason": "Omitting method leaves it None, but the request data is an empty bytes object, so urllib Request get_method still returns POST and the request sent is identical."
+  }
+}

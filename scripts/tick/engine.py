@@ -517,7 +517,8 @@ def _eager(
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
     A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
-    expired or a step it needs was dropped, bounded by its own budget and the pass deadline.
+    expired or a step it needs was dropped, bounded by its own budget and the pass deadline. A sweep that ends a step
+    without a thread sweeps again at once, so a step whose needs that ended starts before the running steps end.
     """
     clock = ctx.deadline.clock
     names = {step.name for step in ordered}
@@ -556,6 +557,7 @@ def _eager(
                     future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
                     submitted.append(future)
                     running[future] = (step, clock(), lane)
+            ended = [0.0] if any(step.name in records for step in ready) else []
             held = any(_waiting(step, names, found) for step in pending)
             if not running:
                 if not ready and not held:
@@ -563,7 +565,7 @@ def _eager(
                 if held:
                     time.sleep(SETTLE_S)
                 continue
-            timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []))
+            timeout = min([lane.remaining for _, _, lane in running.values()] + ([SETTLE_S] if held else []) + ended)
             done, _ = wait(running, timeout=timeout, return_when=FIRST_COMPLETED)
             for future in done:
                 step, _, _ = running.pop(future)

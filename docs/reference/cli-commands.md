@@ -535,6 +535,35 @@ Statuses, run folder, tiers, worker mode and troubleshooting:
 
 ---
 
+## `agentihooks workflow`
+
+List, check and run workflows: YAML files of stages, each stage one or more
+headless profile runs. `run`, `status` and `resume` print one JSON object, the
+saved run state or `{"error": ...}`; `run` and `resume` exit 0 only when the
+run ends `passed`.
+
+```bash
+agentihooks workflow list
+agentihooks workflow validate ./review.yaml
+agentihooks workflow run simple-workflow --case case.txt --run-id cleanup-dry-run --harness codex
+agentihooks workflow status cleanup-dry-run
+agentihooks workflow resume cleanup-dry-run
+```
+
+| Command | Meaning |
+|---|---|
+| `list` | Every loaded workflow with its layer and file |
+| `show NAME` | One workflow with its defaults filled in |
+| `validate FILE\|NAME` | Check a workflow file or a loaded name |
+| `run NAME --case FILE [--run-id ID] [--harness auto\|claude\|codex]` | Start a run in `<AGENTIHOOKS_HOME>/workflows/runs/<ID>` (default id: 32 hex characters) |
+| `status RUN` | Print the saved state; launches nothing |
+| `resume RUN` | Continue from the saved stage with the saved definition and harness |
+
+File format, layers, run folder, state fields, limitations and troubleshooting:
+[Workflow runs](workflows.md).
+
+---
+
 ## `agentihooks terminate-agent`
 
 List live Claude Code and Codex sessions, end one by exact name, session UUID or

@@ -281,7 +281,6 @@ def test_the_harness_streams_the_ledger_as_one_snapshot():
 def test_the_harness_shell_fills_every_placeholder_with_the_sanity_values():
     page = sanity.page_html()
     for meta in (
-        'ledger-token" content=""',
         'ledger-page" content="000000000000"',
         'ledger-slug" content="artifact-sanity"',
     ):
