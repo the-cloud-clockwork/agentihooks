@@ -2315,6 +2315,18 @@
         "tests/hive/test_reports.py::test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat",
         "tests/hive/test_reports.py::test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat"
       ]
+    },
+    {
+      "id": "swarm-tick-dead-remote-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
+      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget and allowing a launch within two passes after a hive roll.",
+      "seam": "remote retirement and the reap/spawn tick passes",
+      "tests": [
+        "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes",
+        "tests/tick/steps/test_drop_remote.py::test_retiring_an_archived_projection_preserves_its_history_metadata"
+      ]
     }
   ],
   "unmapped_rules": [
