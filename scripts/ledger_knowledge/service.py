@@ -8,15 +8,16 @@ from pathlib import Path
 from scripts.recall.store import agentihooks_home
 
 from .chunks import ROOT, Document, chunk_ledger
-from .index import Hit, KnowledgeIndex, Refresh
+from .index import HASH, Hit, KnowledgeIndex, Refresh
 
 REFRESH_SECONDS = 120
 CHANGES = 10
 
 
-def index_path(slug: str, environ: Mapping[str, str] = os.environ) -> Path:
-    """The index file of one ledger under the agentihooks home."""
-    return agentihooks_home(environ) / "knowledge" / f"{slug}.sqlite3"
+def index_path(slug: str, environ: Mapping[str, str] = os.environ, embedder: str = HASH) -> Path:
+    """The index file of one ledger and one embedder under the agentihooks home."""
+    name = slug if embedder == HASH else f"{slug}.{embedder}"
+    return agentihooks_home(environ) / "knowledge" / f"{name}.sqlite3"
 
 
 def refresh(index: KnowledgeIndex, document: Document, now: int) -> Refresh:

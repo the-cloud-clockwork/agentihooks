@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_client.py:scripts.swarm.ledger_client.x__guarded:cdfe662c2fd4b5cc7ee98711b06f7bf5e2855322c878dbc1f8aef7395c087b07": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and never inspects the type argument; both dict[str, Any] and None evaluate without side effects, so row is identical for every input and no test can observe the mutant. Only the static type differs, which the type checker reports."
+  }
+}

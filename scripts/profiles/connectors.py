@@ -12,6 +12,10 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from scripts.targets._common import (
     _install_module,
@@ -54,12 +58,12 @@ async def _list(url: str, headers: dict[str, str]) -> list[str]:
                         return names
 
 
-def advertised(url: str, headers: dict) -> list[str]:
+def advertised(url: str, headers: dict[str, str]) -> list[str]:
     return asyncio.run(_list(url, headers))
 
 
-def _resolved(headers: dict) -> tuple[dict, str]:
-    out = {}
+def _resolved(headers: dict[str, str]) -> tuple[dict[str, str], str]:
+    out: dict[str, str] = {}
     for key, value in headers.items():
         text, ok = resolve_env_references(str(value))
         if not ok:
@@ -69,7 +73,7 @@ def _resolved(headers: dict) -> tuple[dict, str]:
     return out, ""
 
 
-def require_environment(servers: dict) -> None:
+def require_environment(servers: dict[str, dict[str, Any]]) -> None:
     for name, spec in servers.items():
         if spec.get("enabled_tools") is not None:
             _, reason = _resolved(spec.get("headers") or {})
@@ -77,7 +81,7 @@ def require_environment(servers: dict) -> None:
                 raise ValueError(f"MCP '{name}' cannot mount: {reason}")
 
 
-def _claude_filter(spec: dict) -> tuple[list[str], list[str], str]:
+def _claude_filter(spec: dict[str, Any]) -> tuple[list[str], list[str], str]:
     """(tools to deny, allowlisted tools the server does not advertise, why it cannot mount)."""
     allow, disabled = spec.get("enabled_tools"), list(spec.get("disabled_tools") or [])
     if allow is None:
@@ -95,8 +99,8 @@ def _claude_filter(spec: dict) -> tuple[list[str], list[str], str]:
     return denied + [tool for tool in disabled if tool not in denied], [t for t in allow if t not in tools], ""
 
 
-def _mounted(spec: dict, absent: list[str] | None = None) -> dict:
-    row: dict = {"mounted": True}
+def _mounted(spec: dict[str, Any], absent: list[str] | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {"mounted": True}
     if spec.get("enabled_tools"):
         row["enabled_tools"] = list(spec["enabled_tools"])
     if absent:
@@ -104,13 +108,13 @@ def _mounted(spec: dict, absent: list[str] | None = None) -> dict:
     return row
 
 
-def _unmounted(reason: str) -> dict:
+def _unmounted(reason: str) -> dict[str, Any]:
     return {"mounted": False, "reason": reason}
 
 
-def claude(servers: dict, dst: str) -> tuple[dict, list[str], dict]:
+def claude(servers: dict[str, dict[str, Any]], dst: str) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
     """(servers for .claude.json, permission deny rules, mount manifest)."""
-    mounted, deny, manifest = {}, [], {}
+    mounted, deny, manifest = cast(dict[str, Any], {}), cast(list[str], []), cast(dict[str, Any], {})
     for name, spec in servers.items():
         if drop_if_credentialed(name, spec, dst):
             manifest[name] = _unmounted(CREDENTIALED)
@@ -126,11 +130,11 @@ def claude(servers: dict, dst: str) -> tuple[dict, list[str], dict]:
     return mounted, deny, manifest
 
 
-def codex(servers: dict) -> tuple[dict, dict]:
+def codex(servers: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
     """(entries for config.toml, mount manifest)."""
-    mounted, manifest = {}, {}
+    mounted, manifest = cast(dict[str, Any], {}), cast(dict[str, Any], {})
     for name, spec in servers.items():
-        entry, reason = codex_mcp_entry(name, dict(spec))
+        entry, reason = cast("tuple[dict[str, Any] | None, str]", codex_mcp_entry(name, dict(spec)))
         if entry is None:
             manifest[name] = _unmounted(reason)
             continue
@@ -139,8 +143,8 @@ def codex(servers: dict) -> tuple[dict, dict]:
     return mounted, manifest
 
 
-def write(dst: Path, manifest: dict, profile: str, target: str) -> None:
-    say = _install_module()._cprint
+def write(dst: Path, manifest: dict[str, Any], profile: str, target: str) -> None:
+    say = cast("ModuleType", _install_module())._cprint
     for name, row in manifest.items():
         if not row["mounted"]:
             say(f"  [!!] MCP '{name}' is not mounted for {profile} ({target}): {row['reason']}")

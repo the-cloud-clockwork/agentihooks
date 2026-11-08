@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/binding.py:scripts.profiles.binding.x_process:d8e72d3e954f8ec2ccc073075caa551829ce0e3c92fe8513d8a44bd0aa04b1c8": {
+    "reader": "standards_reader",
+    "reason": "In `x_process`, the mutation changes only the static type argument of `typing.cast` on cast target `[]`, from list[str] to None; `typing.cast(T, v)` returns `v` unchanged at runtime regardless of `T`, so this alters no runtime output."
+  }
+}

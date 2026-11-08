@@ -6,12 +6,15 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from mcp import ClientSession, types
     from mcp.client.stdio import StdioServerParameters
     from mcp.server.lowlevel import Server
+    from mcp.shared.context import RequestContext
 
 from hooks.context.profile_chain import PACKAGE_PREFIX
 from scripts.targets._common import _install_module
@@ -31,12 +34,12 @@ def proxy_enabled(chain: list[str]) -> bool:
     )
 
 
-def spec() -> dict:
-    install = _install_module()
+def spec() -> dict[str, Any]:
+    install = cast("ModuleType", _install_module())
     return {"command": str(install._detect_venv() or sys.executable), "args": ["-I", "-m", __name__]}
 
 
-def configure(servers: dict, chain: list[str]) -> dict:
+def configure(servers: dict[str, Any], chain: list[str]) -> dict[str, Any]:
     if not enabled(chain):
         return servers
     return {
@@ -85,7 +88,9 @@ def parameters(out: Path, executable: str) -> StdioServerParameters:
     )
 
 
-async def call(session: ClientSession, out: Path, name: str, arguments: dict) -> types.CallToolResult:
+async def call(
+    session: ClientSession | Upstream, out: Path, name: str, arguments: dict[str, Any]
+) -> types.CallToolResult:
     args = dict(arguments)
     if args.get("filename"):
         args["filename"] = str(out / Path(args["filename"]).name)
@@ -102,7 +107,7 @@ def proxy(session: ClientSession | Upstream, out: Path) -> Server:
         return (await session.list_tools()).tools
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> types.CallToolResult:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         return await call(session, out, name, arguments)
 
     return server
@@ -158,7 +163,7 @@ class Upstream:
         from mcp.client.stdio import stdio_client
         from playwright.async_api import async_playwright
 
-        async def roots(context) -> types.ListRootsResult:
+        async def roots(context: RequestContext[ClientSession, Any]) -> types.ListRootsResult:
             return types.ListRootsResult(roots=[types.Root(uri=self.out.as_uri())])
 
         async with async_playwright() as playwright:
@@ -186,7 +191,7 @@ class Upstream:
         save_tools(result.tools, key)
         return result
 
-    async def call_tool(self, name: str, arguments: dict) -> types.CallToolResult:
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         return await (await self.started()).call_tool(name, arguments)
 
 

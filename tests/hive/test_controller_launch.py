@@ -57,6 +57,36 @@ def test_resolves_profile_before_hive_selection(setup):
     assert launch.ROLE_PROFILES["cicd"] == "ci"
 
 
+def test_the_profile_check_sees_the_profiles_its_target_hives_advertise(setup):
+    from scripts.hive import config as hive_config
+    from scripts.hive import launch
+
+    write_hive(setup, id="other")
+    write_hive(setup, id="gone")
+    setup.store.redis.set(hive_config._key("remote"), json.dumps({"profiles": ["brain", "frontend"]}))
+    setup.store.redis.set(hive_config._key("other"), json.dumps({"profiles": ["qa"]}))
+    setup.store.redis.set(hive_config._key("gone"), json.dumps({"profiles": ["smith"]}))
+    hives = [hive for hive in setup.launcher.hives() if hive["id"] in ("remote", "other", "silent")]
+    assert launch.hosted_profiles(setup.store.redis, [*hives, {"id": "silent"}]) == {
+        "remote": frozenset({"brain", "frontend"}),
+        "other": frozenset({"qa"}),
+        "silent": frozenset(),
+    }
+    setup.launcher._select(setup.config, "eng", {"id": "task"}, excluded={"gone"})
+    assert setup.herdr._profile_decision.call_args.args[-1] == frozenset({"brain", "frontend", "qa"})
+
+
+def test_a_profile_only_target_hives_hold_places_only_on_a_hive_advertising_it(setup, monkeypatch):
+    from scripts.hive import launch
+
+    monkeypatch.setattr(launch.profile_choice, "installed", lambda name: name != "frontend")
+    hives = [{"id": "remote"}, {"id": "other"}, {"id": "silent"}]
+    advertised = {"remote": frozenset({"frontend"}), "other": frozenset({"qa"})}
+    assert launch.hosting(hives, "frontend", advertised) == [{"id": "remote"}]
+    assert launch.hosting(hives, "engineer", advertised) == hives
+    assert launch.hosting(hives, "frontend", {"other": frozenset({"qa"})}) == hives
+
+
 def test_selects_an_advertised_claude_slot(setup):
     chosen = setup.launcher.select(setup.config, "eng", {"id": "task"})
     assert chosen.hive == "remote"
@@ -1482,9 +1512,7 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
     environ = {"fixture": "scope"}
     with patch.object(launch, "os", SimpleNamespace(environ=environ)):
         selected = setup.launcher.select(config, "eng", task)
-    setup.herdr._profile_decision.assert_called_once_with(
-        config, "eng", config.lanes["eng"], task, saved, saved, environ
-    )
+    setup.herdr._profile_decision.assert_called_once_with(config, "eng", task, saved, saved, environ, frozenset())
     assert not isinstance(selected, Wait)
     assert (selected.hive, selected.account.name) == ("remote", "account")
     assert selected.account.harness == ("claude" if harness == "auto" else harness)
@@ -1513,7 +1541,7 @@ def test_handoff_assignment_is_forwarded_to_profile_resolution(setup):
     ):
         assert setup.launcher.select(setup.config, "eng", task).hive == "remote"
     transfer.assert_called_once_with(task)
-    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", {}, task, saved, saved, {})
+    setup.herdr._profile_decision.assert_called_once_with(setup.config, "eng", task, saved, saved, {}, frozenset())
 
 
 def test_initial_placement_reads_global_account_reports_without_a_credential_probe(setup):

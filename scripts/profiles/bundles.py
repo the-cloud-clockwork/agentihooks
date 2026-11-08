@@ -3,8 +3,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from hooks.context import conditions, profile_chain
 from scripts.targets._common import _install_module
@@ -31,8 +36,10 @@ def _holders(kinds: list[str]) -> str:
 
 
 def warn_unavailable() -> None:
-    _i = _install_module()
-    for kind, path in profile_chain.missing_bundle_roots(_i._load_state()):
+    _i = cast("ModuleType", _install_module())
+    for kind, path in cast(Callable[[dict[str, Any]], "list[tuple[str, Path]]"], profile_chain.missing_bundle_roots)(
+        _i._load_state()
+    ):
         _i._cprint(f"  [WARN] Configured {kind} bundle {path} is missing - not applied.")
     roots = (_i._get_bundle_path(), _i._get_user_bundle_path(), _i._get_shared_bundle_path())
     holders = profile_chain.profile_holders(*roots)
@@ -70,14 +77,14 @@ def cmd_bundle(
 
 
 def _linked(user: bool = False, shared: bool = False) -> Path | None:
-    _i = _install_module()
+    _i = cast("ModuleType", _install_module())
     getters = {"root": _i._get_bundle_path, "shared": _i._get_shared_bundle_path, "user": _i._get_user_bundle_path}
     return getters[_slot(user, shared)]()
 
 
 def pull(rebase: bool = False, user: bool = False, shared: bool = False) -> None:
     """Git pull the linked bundle directory."""
-    _i = _install_module()
+    _i = cast("ModuleType", _install_module())
     label = _names(user, shared)[1]
     bundle_dir = _linked(user, shared)
     if not bundle_dir:
@@ -110,7 +117,7 @@ def pull(rebase: bool = False, user: bool = False, shared: bool = False) -> None
 
 def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> None:
     """Link a bundle directory as the root bundle, or as the shared or user bundle beside it."""
-    _i = _install_module()
+    _i = cast("ModuleType", _install_module())
     if bundle_dir is None:
         print("ERROR: Provide the path to a bundle directory.", file=sys.stderr)
         sys.exit(1)
@@ -122,7 +129,7 @@ def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> N
     key, label = _names(user, shared)
     state = _i._load_state()
     for held, (other_key, _) in _SLOTS.items():
-        other = (state.get(other_key) or {}).get("path") if other_key != key else None
+        other = cast(dict[str, Any], state.get(other_key) or {}).get("path") if other_key != key else None
         if other and Path(other).expanduser().resolve() == bundle_dir.resolve():
             print(f"ERROR: {bundle_dir} is already linked as the {held} bundle.", file=sys.stderr)
             sys.exit(1)
@@ -152,15 +159,15 @@ def link(bundle_dir: Path | None, user: bool = False, shared: bool = False) -> N
     print("Run 'agentihooks init' to apply.")
 
 
-def _generated(path: Path, entry: dict) -> bool:
+def _generated(path: Path, entry: dict[str, Any]) -> bool:
     if path.is_symlink():
         return os.readlink(path).rstrip("/") == str(entry.get("target", "")).rstrip("/")
     return entry.get("kind") == "rules" and path.is_file()
 
 
 def _sweep_generated(root: Path, label: str = "user bundle") -> None:
-    _i = _install_module()
-    swept = []
+    _i = cast("ModuleType", _install_module())
+    swept: list[Path] = []
     for link, entry in _i._state_links().items():
         path = Path(link)
         if _generated(path, entry) and Path(entry.get("target", "")).is_relative_to(root):
@@ -172,7 +179,7 @@ def _sweep_generated(root: Path, label: str = "user bundle") -> None:
 
 def unlink(user: bool = False, shared: bool = False) -> None:
     """Unlink the root bundle, or only the shared or user bundle."""
-    _i = _install_module()
+    _i = cast("ModuleType", _install_module())
     key, label = _names(user, shared)
     state = _i._load_state()
     bundle = state.get(key)
@@ -199,7 +206,7 @@ def unlink(user: bool = False, shared: bool = False) -> None:
 
 def list_bundle(user: bool = False, shared: bool = False) -> None:
     """Show the linked bundle and its contents."""
-    _i = _install_module()
+    _i = cast("ModuleType", _install_module())
     key, label = _names(user, shared)
     bundle = _linked(user, shared)
     if not bundle:
@@ -242,7 +249,7 @@ def user_last(argv: list[str]) -> list[str]:
     return [arg for arg in argv if arg not in flags] + flags
 
 
-def add_parser(sub) -> None:
+def add_parser(sub: Any) -> None:
     bundle_p = sub.add_parser("bundle", help="Manage the linked bundle (new, link, unlink, list, pull)")
     bundle_p.add_argument(
         "action",

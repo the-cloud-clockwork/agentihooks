@@ -170,6 +170,9 @@ jobs:
           fi
           python "$grader" check --base FETCH_HEAD
 
+      - name: A chart version bump leaves every pod template unchanged
+        run: python tests/ci_charts/chart_pod_templates.py
+
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler
         run: python tests/ci_charts/chart_timers.py

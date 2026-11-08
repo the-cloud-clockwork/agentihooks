@@ -8,9 +8,12 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from . import service
+from hooks.memory.catalog import Conflict
+from hooks.memory.embeddings import TransientEmbeddingError
+
+from . import embedders, service
 from .chunks import Document
-from .index import HashEmbedder, KnowledgeIndex
+from .index import KnowledgeIndex
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,11 +48,20 @@ def main(
     if not slug:
         print("knowledge: name a ledger with --ledger", file=sys.stderr)
         return 2
-    index = KnowledgeIndex(service.index_path(slug, environ), HashEmbedder())
+    try:
+        choice = embedders.choose(environ)
+    except ValueError as error:
+        print(f"knowledge: {error}", file=sys.stderr)
+        return 2
+    index = KnowledgeIndex(service.index_path(slug, environ, choice.name), choice.embedder)
     now = int(clock() * 1000)
-    if args.command == "refresh":
-        answer = vars(service.refresh(index, reader(slug), now))
-    else:
-        answer = service.ask(index, lambda: reader(slug), args.question, now, args.limit)
+    try:
+        if args.command == "refresh":
+            answer = vars(service.refresh(index, reader(slug), now))
+        else:
+            answer = service.ask(index, lambda: reader(slug), args.question, now, args.limit)
+    except (TransientEmbeddingError, Conflict, ValueError) as error:
+        print(f"knowledge: {error}", file=sys.stderr)
+        return 1
     print(json.dumps({"ledger_slug": slug, **answer}, ensure_ascii=False, indent=1))
     return 0

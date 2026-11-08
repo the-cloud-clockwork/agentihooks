@@ -3,10 +3,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+from typing import cast
 
 READ_SECONDS = 10
 COPY_SECONDS = 300
@@ -67,8 +68,11 @@ def attach(root: Path) -> None:
 
 
 def reuse(root: Path) -> bool:
-    pinned = [(folder, slot, slot.get()) for folder, slot in _SLOTS if slot.get() is not None]
-    moved = []
+    pinned = cast(
+        "list[tuple[str, ContextVar[tuple[Path, Path, str] | None], tuple[Path, Path, str]]]",
+        [(folder, slot, slot.get()) for folder, slot in _SLOTS if slot.get() is not None],
+    )
+    moved: list[tuple[ContextVar[tuple[Path, Path, str] | None], tuple[Path, Path, str]]] = []
     for folder, slot, active in pinned:
         destination = root / folder / active[0].name
         if not destination.is_dir():
@@ -134,7 +138,7 @@ def recorded(
     user_revision: str = "",
     shared: Path | None = None,
     shared_revision: str = "",
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     if bundle is None:
         raise ValueError(f"the launch recorded bundle commit {revision}, but no bundle is linked")
     if shared_revision and shared is None:
@@ -146,11 +150,11 @@ def recorded(
         copy, commit = _pin(stack, bundle, revision, root, "bundle")
         pinned = {_ACTIVE: (bundle, copy, commit)}
         if shared_revision:
-            shared_copy, shared_commit = _pin(stack, shared, shared_revision, root, "shared bundle")
-            pinned[_ACTIVE_SHARED] = (shared, shared_copy, shared_commit)
+            shared_copy, shared_commit = _pin(stack, cast(Path, shared), shared_revision, root, "shared bundle")
+            pinned[_ACTIVE_SHARED] = (cast(Path, shared), shared_copy, shared_commit)
         if user_revision:
-            user_copy, user_commit = _pin(stack, user, user_revision, root, "user bundle")
-            pinned[_ACTIVE_USER] = (user, user_copy, user_commit)
+            user_copy, user_commit = _pin(stack, cast(Path, user), user_revision, root, "user bundle")
+            pinned[_ACTIVE_USER] = (cast(Path, user), user_copy, user_commit)
         for slot in (_ACTIVE, _ACTIVE_SHARED, _ACTIVE_USER):
             stack.callback(slot.reset, slot.set(pinned.get(slot)))
         yield

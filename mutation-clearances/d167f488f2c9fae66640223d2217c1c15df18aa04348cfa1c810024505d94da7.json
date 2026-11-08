@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x__shared:c875d5c8644fa332193655481ca8a9d026b5f1c6e5014642f89991c8d163813e": {
+    "reader": "standards_reader",
+    "reason": "In x__shared, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to None); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}
