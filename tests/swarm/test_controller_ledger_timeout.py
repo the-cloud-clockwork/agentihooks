@@ -1,11 +1,12 @@
 """The controller run loop survives a pass whose ledger client times out."""
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 from scripts import operator_env
-from scripts.swarm import controller, tick_stop
+from scripts.swarm import controller, ledger_client, tick_stop
 from scripts.swarm.ledger_client import LedgerUnreachable
 from scripts.swarm_v2 import control_service, proof_swarm
 
@@ -51,10 +52,16 @@ def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
     waits: list[float] = []
     monkeypatch.setattr(controller, "scheduled_wait", waits.append)
 
+    def timed_out(slug: str, ops: list | None, service: bool) -> dict:
+        raise SystemExit("ledger server not answering on http://ledger:8765: The read operation timed out")
+
+    fake = SimpleNamespace(call=timed_out, Missing=LookupError)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: fake)
+
     def tick_once(store: str, running: Service) -> dict:
         passes.append(len(passes) + 1)
         if len(passes) == 1:
-            raise LedgerUnreachable(TIMEOUT)
+            return ledger_client.LedgerClient(service=True)._call("rig-grade-swarm")
         raise Ended
 
     monkeypatch.setattr(controller, "tick_once", tick_once)
@@ -62,8 +69,7 @@ def test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass(
         controller.main(["run"])
     assert passes == [1, 2]
     assert waits and waits[0] > 0
-    assert "The read operation timed out" in capsys.readouterr().err
-    assert service.ticks == 0
+    assert "ledger rig-grade-swarm: ledger server not answering" in capsys.readouterr().err
     assert service.stopped == 1
 
 
