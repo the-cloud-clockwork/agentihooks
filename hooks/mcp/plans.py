@@ -53,7 +53,6 @@ def plan_ingest(ledger: str, path: str = "", text: str = "", planning: str = "",
         dry_run: report what would be written and write nothing.
     """
     return json.dumps(run(path, text, ledger, planning, dry_run))
-    return json.dumps(run(path, text, ledger, planning, dry_run))
 
 
 def register(mcp: Any) -> None:

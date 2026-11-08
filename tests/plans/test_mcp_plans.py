@@ -66,6 +66,13 @@ def test_inline_text_reaches_ingest_as_a_file_with_the_command_defaults_and_its_
     assert captured.err == "ingest chatter\n"
 
 
+def test_the_tool_defaults_to_no_path_no_text_own_planning_and_a_real_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(plans, "run", lambda *args: calls.append(args) or {"success": True})
+    assert plans.plan_ingest("plan-proof") == '{"success": true}'
+    assert calls == [("", "", "plan-proof", "", False)]
+
+
 def test_inline_text_dry_run_writes_nothing(served: dict[str, Any], seat: None) -> None:
     result = plans.run("", MARKED, "plan-proof", "", True)
     assert served["sent"] == []
