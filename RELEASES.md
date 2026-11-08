@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.742 · 2026-11-08
+
+### 2026-11-08 · 44c9796ca964 · #10170 · @agenticore-app
+
+**Budget 850 MB per agent in hive admission from the measured hive three peak**
+
+Hive admission's per-agent memory budget (`scripts.hive.admission.AGENT_MB`) rises from 700 MB to 850 MB, matching the measured peak from hive three (16503 MB pod peak across 20 agents, ≈825 MB/agent, rounded up, and corroborated by a 756 MB CI mean). The previous 700 MB figure sat below observed memory use, risking out-of-memory failures as a hive fills toward its 48-agent max. The host room default in `scripts.swarm.host_budget` stays untouched since it already takes the larger of measured agent trees or its own configured value. Tests were updated to expect 850 MB while preserving each case's room count.
+
+### 2026-11-08 · 17d6f6597de9 · #10166 · @agenticore-app
+
+**Hive release rechecks the newest release right before moving the release tag**
+
+This fixes a race where overlapping Hive releases could stomp on each other: previously the job checked if it was the newest release early on, before images built, so a slower older release could finish last and yank the `:release` tag back onto stale code. Now `release-hive.sh` re-reads the newest stable version tag from the remote right before actually moving `:release`, skipping the move if a newer release has since landed, and fails loudly if that check can't be performed. The version tag is still always pushed. Tests cover newer/older releases, unreachable remotes, and prerelease tags being ignored.
+
 ## v2.17.741 · 2026-11-08
 
 ### 2026-11-08 · 99931e716c95 · #10158 · @agenticore-app
