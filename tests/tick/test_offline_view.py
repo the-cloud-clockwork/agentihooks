@@ -144,7 +144,7 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         raise urllib.error.URLError("refused")
@@ -156,6 +156,9 @@ def test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe
         assert OFFLINE.get() is False
         assert view.current() is None
     assert OFFLINE.get() is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ledger sw not answering (<urlopen error refused>) and no view is stored to run from" in captured.err
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
