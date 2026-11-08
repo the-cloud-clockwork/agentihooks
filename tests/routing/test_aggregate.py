@@ -76,7 +76,7 @@ def test_sessions_add_every_harness_of_an_account_under_its_secret_key_spelling(
 
 
 def test_sessions_keep_everything_after_the_harness_as_the_account(monkeypatch: pytest.MonkeyPatch) -> None:
-    given = object()
+    given: Any = object()
 
     def rows(redis: object, now: float) -> dict[str, dict[str, int]]:
         assert redis is given and now == 100
