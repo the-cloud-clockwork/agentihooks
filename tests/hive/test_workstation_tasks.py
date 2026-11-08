@@ -106,8 +106,12 @@ def test_a_distributed_controller_launches_a_workstation_task_on_the_root_hive(
     monkeypatch.setattr(commands, "hive_id", lambda: "anton-controller")
     fenced = hybrid(setup, monkeypatch, "distributed")
     write_hive(setup, id="root", ui="yes", excluded=[], max_agents=20)
+    launcher = fenced.runtime.hive_launch
+    select, lanes = launcher.select, []
+    monkeypatch.setattr(launcher, "select", lambda config, lane, task: lanes.append(lane) or select(config, lane, task))
     assert fenced.placement_refusal("eng", TASK) == ""
     assert fenced.spawn(setup.config, "eng", "eng name", TASK) == "placed on the hive"
+    assert set(lanes) == {"eng"}
     (request,) = fenced.runtime.hive_launch.spawn.call_args.args
     assert (request.task["workstation"], request.task["hive"], request.task["id"]) == (False, "root", "landing")
     assert setup.store.redis.hkeys(local_slots.key("anton-controller")) == []
