@@ -9,11 +9,11 @@ from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.unit
 
-SAVED = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1", "seat": ""}
+SAVED = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1"}
 
 
 def swarm(lanes: dict, low: str = "high", high: str = "xhigh") -> store.RedisStore:
-    """A fakeredis swarm whose eng lane carries the given settings inside the given effort range."""
+    """A fakeredis swarm whose lanes carry the given settings inside the given effort range."""
     import fakeredis
 
     saved = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -26,12 +26,12 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     held = swarm({"eng": {"model": "sonnet-lane"}})
-    held.redis.hset(held.key("sw", "launch-assignments"), "t1", json.dumps(SAVED))
+    held.redis.set(held.key("sw", "handoff-envelope", "t1"), json.dumps({"reason": "context", "launch": SAVED}))
     decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
     monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
     runtime = FakeRuntime()
     tick.tick("sw", held, tasks(("t1", "eng")), runtime, now_ms=1_000)
-    launch = runtime.tasks[0]["launch_assignment"]
+    launch = runtime.tasks[0]["handoff_envelope"]["launch"]
     assert launch["model"] == "sonnet-lane"
     assert effort_range.rank("high") <= effort_range.rank(launch["effort"]) <= effort_range.rank("xhigh")
     assert {key: launch[key] for key in ("profile", "harness", "account")} == {
@@ -39,27 +39,29 @@ def test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane
         "harness": "claude",
         "account": "a1",
     }
+    assert "launch_assignment" not in runtime.tasks[0]
 
 
-def test_an_automatic_lane_falls_back_to_the_swarm_model_and_the_range_floor() -> None:
+def test_an_automatic_lane_leaves_the_model_to_the_band_pick_and_takes_the_range_floor() -> None:
     config = swarm({"eng": {"model": "auto"}}).config("sw")
-    assert successor_fill.filled(SAVED, config, "eng") == {
-        **SAVED,
-        "model": config.claude_model,
-        "effort": "high",
-    }
+    assert successor_fill.filled(SAVED, config, "eng") == {**SAVED, "effort": "high"}
+    assert successor_fill.filled(SAVED, swarm({}).config("sw"), "eng") == {**SAVED, "effort": "high"}
 
 
-def test_a_lane_effort_is_clamped_into_the_range_and_a_codex_launch_names_its_own_level() -> None:
+def test_a_lane_effort_is_kept_and_a_codex_launch_names_its_own_level() -> None:
     config = swarm({"eng": {"effort": "max"}}, "medium", "max").config("sw")
     assert successor_fill.filled({**SAVED, "harness": "codex"}, config, "eng") == {
         **SAVED,
         "harness": "codex",
-        "model": config.codex_model,
         "effort": "xhigh",
     }
-    low = swarm({"eng": {"effort": "low"}}, "medium", "high").config("sw")
-    assert successor_fill.filled(SAVED, low, "eng")["effort"] == "medium"
+    held = swarm({"eng": {"effort": "medium"}}, "medium", "high").config("sw")
+    assert successor_fill.filled(SAVED, held, "eng")["effort"] == "medium"
+
+
+def test_a_master_bound_lifts_a_lane_effort_below_high() -> None:
+    lifted = swarm({"master": {"effort": "medium"}}, "medium", "high").config("sw")
+    assert successor_fill.filled(SAVED, lifted, "master")["effort"] == "high"
 
 
 def test_present_keys_stay_and_an_unknown_harness_is_left_alone() -> None:
@@ -79,17 +81,15 @@ def test_present_keys_stay_and_an_unknown_harness_is_left_alone() -> None:
     assert successor_fill.filled({**SAVED, "harness": ""}, config, "eng") == {**SAVED, "harness": ""}
 
 
-def test_a_master_lane_fill_never_starts_below_high() -> None:
-    config = swarm({}, "low", "xhigh").config("sw")
-    assert successor_fill.filled(SAVED, config, "master")["effort"] == "high"
-
-
-def test_the_primed_task_fills_both_the_assignment_and_the_handoff_launch() -> None:
+def test_only_the_handoff_launch_is_filled_and_the_launch_assignment_is_left_as_saved() -> None:
     config = swarm({"eng": {"model": "sonnet-lane"}}).config("sw")
     primed = {"id": "t1", "launch_assignment": SAVED, "handoff_envelope": {"reason": "context", "launch": SAVED}}
-    filled = successor_fill.task(primed, config, "eng")
     want = {**SAVED, "model": "sonnet-lane", "effort": "high"}
-    assert filled == {"id": "t1", "launch_assignment": want, "handoff_envelope": {"reason": "context", "launch": want}}
+    assert successor_fill.task(primed, config, "eng") == {
+        "id": "t1",
+        "launch_assignment": SAVED,
+        "handoff_envelope": {"reason": "context", "launch": want},
+    }
     bare = {"id": "t2", "handoff_envelope": {"reason": "context"}}
-    assert successor_fill.task(bare, config, "eng") == bare
+    assert successor_fill.task(bare, config, "eng") is bare
     assert successor_fill.task({"id": "t3"}, config, "eng") == {"id": "t3"}

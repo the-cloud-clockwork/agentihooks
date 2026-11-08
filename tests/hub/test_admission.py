@@ -126,6 +126,19 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
 
 
+@pytest.mark.feature("swarm-tick-successor-fill")
+def test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range(
+    rig: SimpleNamespace,
+) -> None:
+    rig.store.update(SLUG, lanes={"eng": {"model": "sonnet-lane"}})
+    launch = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1"}
+    rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "context", "launch": launch})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["handoff_envelope"]["launch"] == {**launch, "model": "sonnet-lane", "effort": "medium"}
+
+
 def test_a_task_whose_dependencies_are_done_is_admitted_with_an_empty_stack_base(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == []
 
