@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.729 · 2026-11-08
+
+### 2026-11-08 · 70b6a9438eff · #10081 · @agenticore-app
+
+**Run filtered workflow stages only through agentihooks judge**
+
+Workflow stages that declare judge filters now bypass headless execution entirely and run exclusively through `agentihooks judge`: the new `Judge` launcher writes the case and gathered evidence into a fresh attempt folder, invokes `agentihooks judge` with the case, evidence, tier, and harness, and treats the resulting verdict.json as the stage outcome, retrying on nonzero exit or timeout. `HeadlessProfile` now refuses any filtered stage, and a new `Routed` launcher dispatches filtered stages to `Judge` and everything else to `HeadlessProfile`, with `workflow` execution switched over to it. This closes a gap where filtered stages could silently skip judging.
+
 ## v2.17.728 · 2026-11-08
 
 ### 2026-11-08 · 0eae1886de77 · #9987 · @nestorcolt
