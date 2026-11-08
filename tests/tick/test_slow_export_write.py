@@ -133,6 +133,7 @@ def test_a_write_lands_within_its_budget_while_another_client_reads_a_full_expor
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
         assert OFFLINE.get() is True
+        assert ledger_client.SLOW.get() is True
         held = view.current()
         assert held is not None and held.generation == 3
         assert Ledger.exports.count("ended") < Ledger.exports.count("started")
@@ -140,6 +141,7 @@ def test_a_write_lands_within_its_budget_while_another_client_reads_a_full_expor
         LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
         elapsed = time.monotonic() - started
     reader.join(10)
+    assert ledger_client.SLOW.get() is False
     assert Ledger.writes == [[OP]]
     assert ledger.queued == []
     assert elapsed < REQUEST_S
@@ -149,14 +151,18 @@ def test_a_write_lands_within_its_budget_while_another_client_reads_a_full_expor
 def test_a_write_the_slow_server_does_not_answer_is_queued_locally(
     ledger: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    sent: list[tuple[str, list[dict[str, Any]] | None, bool]] = []
+
     def stopped(slug: str, ops: list[dict[str, Any]] | None, service: bool = False) -> dict[str, Any]:
-        """Exit as the ledger CLI does when the server stops answering."""
+        """Record the send, then exit as the ledger CLI does when the server stops answering."""
+        sent.append((slug, ops, service))
         raise SystemExit(f"ledger server not answering on {ledger.url}: timed out")
 
     monkeypatch.setattr(ledger, "call", stopped)
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
         answer = LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
+    assert sent == [("sw", [OP], True)]
     assert ledger.queued == [("sw", [OP], True)]
     assert answer["queued"] == "c1"
 
