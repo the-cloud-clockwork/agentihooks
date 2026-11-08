@@ -71,6 +71,14 @@ def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "
     return {**grant, "bus_scoped": True, "bus_swarms": list(signer.member_swarms[grant["id"]])}
 
 
+def _reply(exc: auth.HiveError) -> str:
+    """The refusal text a caller sees; a store refusal's own text goes to the server log only."""
+    if not isinstance(exc, auth.StoreRefused):
+        return str(exc)
+    print(f"hive endpoint refused a refresh: {exc}", file=sys.stderr, flush=True)
+    return exc.reply
+
+
 def _handler(
     redis: "Redis",
     redis_url: str,
@@ -98,7 +106,7 @@ def _handler(
                 return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
-                    return self._answer(403, {"error": str(exc)})
+                    return self._answer(403, {"error": _reply(exc)})
             except (Stalled, Unreachable):
                 pass
             return self._answer(503, {"error": REDIS_STALLED})
