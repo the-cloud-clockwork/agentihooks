@@ -1005,7 +1005,7 @@
   "scripts/updater.py": 2,
   "scripts/workflows/cli.py": 52,
   "scripts/workflows/exit_checks.py": 8,
-  "scripts/workflows/launchers.py": 2,
+  "scripts/workflows/launchers.py": 1,
   "scripts/workflows/loader.py": 8,
   "scripts/workflows/machine.py": 32,
   "scripts/workflows/runner.py": 28,

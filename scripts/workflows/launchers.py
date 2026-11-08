@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
+from typing import Any, cast
 
 from scripts.headless.profile_run import ProfileRun, run_profile
 from scripts.headless.request import TIMEOUT_S
@@ -25,14 +26,14 @@ def attempt_folder(stage: Stage, run_dir: Path) -> Path:
     return Path(mkdtemp(dir=artifacts))
 
 
-def evidence_items(inputs: dict) -> list:
+def evidence_items(inputs: dict[str, Any]) -> list[Any]:
     """Every evidence item in the earlier stage outputs, in input order."""
     return [
         item
         for outputs in inputs.values()
         for output in outputs
         if isinstance(output, dict)
-        for item in output.get("items", [])
+        for item in cast("dict[str, list[Any]]", output).get("items", [])
     ]
 
 
@@ -41,10 +42,10 @@ class HeadlessProfile:
     harness: str = "auto"
     timeout: float = TIMEOUT_S
 
-    def launch(self, stage: Stage, inputs: dict, run_dir: Path) -> StageResult:
+    def launch(self, stage: Stage, inputs: dict[str, Any], folder: Path) -> StageResult:
         if stage.filters:
             raise ValueError(f"{stage.id} carries filters and runs only through agentihooks judge")
-        attempt = attempt_folder(stage, run_dir)
+        attempt = attempt_folder(stage, folder)
         requests = [
             ProfileRun(
                 profile=stage.profile,
@@ -69,11 +70,11 @@ class Judge:
     harness: str = "auto"
     timeout: float = TIMEOUT_S
 
-    def launch(self, stage: Stage, inputs: dict, run_dir: Path) -> StageResult:
-        attempt = attempt_folder(stage, run_dir)
+    def launch(self, stage: Stage, inputs: dict[str, Any], folder: Path) -> StageResult:
+        attempt = attempt_folder(stage, folder)
         case = attempt / CASE_FILE
         evidence = attempt / EVIDENCE_FILE
-        verdict = run_dir / VERDICT_FILE
+        verdict = folder / VERDICT_FILE
         case.write_text(inputs[CASE])
         evidence.write_text(json.dumps({"items": evidence_items(inputs)}))
         command = [
@@ -106,6 +107,6 @@ class Routed:
     profile: StageLauncher
     judge: StageLauncher
 
-    def launch(self, stage: Stage, inputs: dict, run_dir: Path) -> StageResult:
+    def launch(self, stage: Stage, inputs: dict[str, Any], folder: Path) -> StageResult:
         launcher = self.judge if stage.filters else self.profile
-        return launcher.launch(stage, inputs, run_dir)
+        return launcher.launch(stage, inputs, folder)
