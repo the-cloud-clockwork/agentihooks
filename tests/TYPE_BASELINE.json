@@ -516,7 +516,7 @@
   "scripts/recall/tools.py": 52,
   "scripts/release_changelog.py": 21,
   "scripts/release_changelog_seed.py": 12,
-  "scripts/routing/aggregate.py": 25,
+  "scripts/routing/aggregate.py": 16,
   "scripts/routing/claude_ai.py": 19,
   "scripts/routing/claude_api.py": 1,
   "scripts/routing/codex_api.py": 1,

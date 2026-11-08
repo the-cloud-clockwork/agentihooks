@@ -1,7 +1,7 @@
 import json
 import os
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.hive import registry
 from scripts.routing.slots import account_key
@@ -24,7 +24,7 @@ def name(slot: str) -> str:
 def read(redis: "Redis", now: float) -> dict[str, dict]:
     from scripts.routing.reservation import LaunchSlots
 
-    rows: dict[str, dict] = {}
+    rows: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for hive in registry.hives(redis):
         if not registry.live(hive, int(now * 1000)):
@@ -54,6 +54,16 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
         )
         row["sessions"] += count
     return rows
+
+
+def sessions(redis: "Redis", now: float) -> dict[str, int]:
+    """Sessions per account under its Secret key spelling, from live hive reports and unreported launches."""
+    counted: dict[str, int] = {}
+    rows: Any = read(redis, now)
+    for key, row in rows.items():
+        account = key.partition(":")[2]
+        counted[account] = counted.get(account, 0) + row["sessions"]
+    return counted
 
 
 def current(now: float) -> dict[str, dict]:
