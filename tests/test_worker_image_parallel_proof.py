@@ -343,6 +343,7 @@ def test_a_failed_worker_rebuild_prints_only_its_rebuild_log(tmp_path: Path) -> 
     assert '> "$output/rebuild.log" 2>&1 (exit 1)' in message
     assert result.stderr.rstrip().endswith("urllib.error.HTTPError: HTTP Error 504: Gateway Time-out")
     assert result.stderr.count("HTTP Error 504") == 1
+    assert f"{output}/build.log" not in result.stderr
 
 
 @pytest.mark.parametrize(
