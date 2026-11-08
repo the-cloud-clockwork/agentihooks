@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.740 · 2026-11-08
+
+### 2026-11-08 · 7e1b8c4b82ba · #10134 · @nestorcolt
+
+**Answer hive refresh store refusals with a fixed reply and log the Redis text**
+
+When the hive refresh endpoint hits a store refusal from Redis, it previously echoed the raw Redis error text straight back in the API reply, leaking internal detail to callers. Now it answers with a fixed message naming what was refused (e.g. "Redis refused the refreshed member"), while the full Redis error text is written to server stderr for operator diagnosis. This is implemented via a new `auth.StoreRefused` HiveError carrying both the fixed reply and the full message, with the server route answering the fixed reply and logging the detail. A test covers the behavior.
+
 ## v2.17.736 · 2026-11-08
 
 ### 2026-11-08 · cbd9f747d01c · #10122 · @agenticore-app
