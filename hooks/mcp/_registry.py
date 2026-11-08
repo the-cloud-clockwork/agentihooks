@@ -8,6 +8,7 @@ CATEGORY_MODULES = {
     "recall": "hooks.mcp.recall",
     "sessions": "hooks.mcp.sessions",
     "culture": "hooks.mcp.culture",
+    "agents": "hooks.mcp.agents",
 }
 
 ALL_CATEGORIES = list(CATEGORY_MODULES.keys())
