@@ -79,15 +79,14 @@ def test_the_panel_offers_approve_on_a_proposal_and_roll_back_on_an_earlier_revi
     assert tab.locator("#swarm-architecture [data-architecture='rollback']").inner_text() == "roll back"
 
 
-def test_approve_sends_the_proposal_and_reason_with_the_page_credential(page):
+def test_approve_sends_the_proposal_and_reason_without_a_page_token(page):
     tab, sent = page
-    token = tab.evaluate("() => document.querySelector('meta[name=\"ledger-token\"]').content")
     tab.fill("#swarm-architecture input[data-reason='duplicate-dispatcher']", "operator moves dispatch")
     tab.click("#swarm-architecture [data-architecture='approve']")
     assert sent_body(tab, sent) == [
         {
             "body": {"action": "approve", "proposal": "duplicate-dispatcher", "reason": "operator moves dispatch"},
-            "token": token,
+            "token": None,
         }
     ]
     tab.wait_for_function("() => document.querySelector('#swarm-architecture').innerText.includes('APPROVED')")

@@ -102,7 +102,7 @@ def test_editing_the_weight_writes_it_as_the_operator_and_shows_the_stored_value
         if page.patches:
             break
         page.tab.wait_for_timeout(100)
-    assert page.patches == [({"claude-api-weight": 40}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
+    assert page.patches == [({"claude-api-weight": 40}, None, "__LEDGER_SLUG__")]
     assert dict((key, value) for key, value, _ in inputs(page))["claude-api-weight"] == "40"
 
 

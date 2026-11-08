@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for:70ec309b84e42aec4ba9f2fdfbfd1f4b8dce7b50840c4b9f47505865c346b772": {
+    "reader": "standards_reader",
+    "reason": "codecs lookup normalises encoding names case insensitively, so UTF-8 selects the same utf-8 codec as utf-8 and the shell text read is identical."
+  }
+}
