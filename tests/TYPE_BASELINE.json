@@ -541,7 +541,7 @@
   "scripts/swarm/difficulty.py": 106,
   "scripts/swarm/dispatch_seat.py": 311,
   "scripts/swarm/dispatcher.py": 603,
-  "scripts/swarm/doc_items.py": 15,
+  "scripts/swarm/doc_items.py": 14,
   "scripts/swarm/doc_report.py": 74,
   "scripts/swarm/done_gate.py": 156,
   "scripts/swarm/drain_watch.py": 41,
