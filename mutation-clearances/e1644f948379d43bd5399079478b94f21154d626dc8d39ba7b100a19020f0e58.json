@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1post_artifact:329aa61cd156ee7d3d4d398c98b2b72349f232d35e114029fc35d4b86b513083": {
+    "reader": "Standards reader",
+    "reason": "The upload op name is read by no check on this path: check_add, authority.refusal and the artifact refusal never branch on artifact_add here."
+  }
+}
