@@ -196,10 +196,29 @@ def test_a_pass_whose_server_refused_the_connection_queues_writes_without_sendin
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
         assert OFFLINE.get() is True
+        assert ledger_client.SLOW.get() is False
         LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
     assert Ledger.writes == []
     assert ledger.queued == [("sw", [OP], True)]
-    assert ledger_client.SLOW.get() is False
+
+
+@pytest.mark.feature("swarm-tick-slow-export-write")
+def test_a_mid_pass_read_the_server_refused_queues_writes_without_sending(ledger: SimpleNamespace) -> None:
+    stored = view.LedgerView(3, STORED)
+
+    def refused() -> view.LedgerView:
+        """Fail the renewed view read as a server that is down fails it."""
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    with view.holding():
+        view._hold("sw", stored, view._kept(refused))  # pyright: ignore[reportPrivateUsage]
+        view.wrote()
+        assert view.current() is stored
+        assert view.offline() is True
+        assert view.slow() is False
+        LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
+    assert Ledger.writes == []
+    assert ledger.queued == [("sw", [OP], True)]
 
 
 @pytest.mark.feature("swarm-tick-slow-export-write")
