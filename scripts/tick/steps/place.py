@@ -19,7 +19,7 @@ from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import LedgerCalls
+from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
@@ -116,12 +116,14 @@ def _spawn_step(tick: Any, get: Get) -> Any:
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
-        rows, deadline = dict(get("rows")), get(DEADLINE)
-        bound = {"rows": rows, "ledger": LedgerCalls(get("tools").ledger, _recording(tick, deadline))}
+        rows, deadline, tools = dict(get("rows")), get(DEADLINE), get("tools")
+        recording = _recording(tick, deadline)
+        runtime = SpawnRuntimeCalls(tools.runtime, recording)
+        bound = {"rows": rows, "ledger": LedgerCalls(tools.ledger, recording), "runtime": runtime}
         args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
         token = PASS_DEADLINE.set(deadline)
         try:
-            with tick._placement_pass(get("runtime")):
+            with tick._placement_pass(runtime):
                 found = tick.skip_refused(tick._spawn, *args)
         finally:
             PASS_DEADLINE.reset(token)
@@ -245,7 +247,7 @@ def _admission(runtime: Any) -> Any:
     from scripts.swarm_v2.admission import PendingAdmission
 
     gate = getattr(runtime, "admission", None)
-    return gate if isinstance(gate, PendingAdmission) else None
+    return gate if isinstance(gate, (PendingAdmission, AdmissionCalls)) else None
 
 
 def _held_back(slug: str, ledger: Any, rows: dict[str, Any], runtime: Any, task: dict[str, Any], now_ms: int) -> str:
