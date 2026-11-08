@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.750 · 2026-11-08
+
+### 2026-11-08 · f26a1b5d41d1 · #10192 · @agenticore-app
+
+**Events admission skips a hive that is stopping for a release**
+
+This change fixes a bug where the hub would keep assigning new task seats to a hive that was already draining in preparation for a release, because the admission check never consulted the hive's drain flag before claiming and seating a task. As a result, the same seat was handed to a departing hive three times in a row, forcing immediate handoffs each time. Now `Admission._placeable` checks the registry's drain status upfront and refuses placement on a draining hive before any claim, execution, seat, or ledger write occurs, preventing wasted work and churn during releases.
+
 ## v2.17.748 · 2026-11-08
 
 ### 2026-11-08 · 9fe0d9519892 · #10195 · @agenticore-app
