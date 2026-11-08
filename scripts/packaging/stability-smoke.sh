@@ -101,7 +101,8 @@ mapfile -t placed <<< "$agents"
 printf 'launched %s on hive %s\n' "${placed[*]}" "$member_id"
 for agent in "${placed[@]}"; do
   docker exec -e AGENTIHOOKS_AGENT_NAME="$agent" "$run-member" sh -c \
-    'set -a; . "$HOME/.agentihooks/hive.env"; set +a; exec python -c "from hooks.context import hive_join; hive_join.run({\"session_id\": \"$AGENTIHOOKS_AGENT_NAME-session\"}, \"start\")"'
+    'set -a; . "$HOME/.agentihooks/hive.env"; set +a; exec python -c "$0"' \
+    'import os; from hooks.context import hive_join; hive_join.run({"session_id": os.environ["AGENTIHOOKS_AGENT_NAME"]}, "start")'
 done
 printf 'every launched agent ran its hive join session start checks\n'
 
@@ -115,7 +116,8 @@ for _ in $(seq 60); do
 done
 printf 'hive list: %s\n' "$live"
 
-if ! "${hub[@]}" -e SLUG="$slug" -e PLACED="${#placed[@]}" swarm python - <<'PY'; then
+graded=0
+"${hub[@]}" -e SLUG="$slug" -e PLACED="${#placed[@]}" swarm python - <<'PY' || graded=$?
 import os
 import sys
 import time
@@ -141,6 +143,7 @@ if failed:
     sys.exit(f"stability invariants failed: {failed}")
 print(f"every stability invariant held on a swarm with one hive and {placed} agents")
 PY
+if [[ $graded != 0 ]]; then
   docker exec "$run-member" sh -c 'tail -n 40 "$HOME/hive-run.log"' >&2 || true
   "${compose[@]}" logs --tail 60 swarm controller >&2 || true
   exit 1
