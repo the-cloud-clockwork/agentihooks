@@ -112,10 +112,11 @@ def test_a_session_needs_an_allowed_origin(live: dict) -> None:
 
 def test_a_session_without_an_origin_is_refused(live: dict) -> None:
     with allowed(live):
-        status, body, _ = send(live, "POST", f"/api/{SLUG}/session")
+        status, body, content_type = send(live, "POST", f"/api/{SLUG}/session")
 
     assert status == 403
     assert body == b"origin not allowed"
+    assert content_type == "text/plain"
 
 
 def test_the_session_response_is_never_cached(live: dict) -> None:
