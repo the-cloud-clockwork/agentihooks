@@ -578,6 +578,27 @@ def test_the_deployed_controller_counts_the_sessions_live_hives_report_in_its_qu
     ]
 
 
+def test_held_reads_hive_sessions_at_the_clock_in_seconds_and_keeps_an_idle_account_at_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = object()
+    store: Any = type("Store", (), {"redis": redis})()
+
+    def fleet(given: object, now: int) -> dict[str, int]:
+        assert given is store and now == 1_800_000_000
+        return {}
+
+    def sessions(given: object, now: float) -> dict[str, int]:
+        assert given is redis and now == 1_800_000
+        return {"idle": 0, "busy": 2}
+
+    monkeypatch.setattr(deployed, "fleet_held", fleet)
+    monkeypatch.setattr(deployed.aggregate, "sessions", sessions)
+    capacity: Any = type("Capacity", (), {"store": store, "clock": staticmethod(lambda: 1_800_000_000)})()
+
+    assert deployed._held(capacity) == {"idle": 0, "busy": 2}
+
+
 class PoolPods(Pods):
     def __init__(self, namespace, pods):
         super().__init__(namespace)

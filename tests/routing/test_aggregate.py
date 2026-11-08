@@ -75,6 +75,18 @@ def test_sessions_add_every_harness_of_an_account_under_its_secret_key_spelling(
     assert aggregate.sessions(redis, 100) == {"one-two": 3, "one": 4}
 
 
+def test_sessions_keep_everything_after_the_harness_as_the_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    given = object()
+
+    def rows(redis: object, now: float) -> dict[str, dict[str, int]]:
+        assert redis is given and now == 100
+        return {"codex:one:two": {"sessions": 2}}
+
+    monkeypatch.setattr(aggregate, "read", rows)
+
+    assert aggregate.sessions(given, 100) == {"one:two": 2}
+
+
 def test_nonlocal_consumers_use_aggregate_without_credential_probes(redis, monkeypatch):
     from hooks.context import account_sessions
     from scripts.swarm import capacity
