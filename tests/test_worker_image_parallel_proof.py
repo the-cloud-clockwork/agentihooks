@@ -330,9 +330,8 @@ def test_a_failed_worker_build_prints_its_build_log(tmp_path: Path, proof: str) 
     result, calls, state, output = run_proof(tmp_path, "build", proof)
     assert result.returncode == 1, result.stderr
     message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
-    assert message.startswith("worker proof failed at line 71: docker build ")
-    assert message.endswith("(exit 1)")
-    assert f"==> {output}/build.log <==" in result.stderr
+    assert ': docker build "${build_args[@]}"' in message
+    assert '> "$output/build.log" 2>&1 (exit 1)' in message
     assert result.stderr.rstrip().endswith("urllib.error.HTTPError: HTTP Error 504: Gateway Time-out")
 
 
