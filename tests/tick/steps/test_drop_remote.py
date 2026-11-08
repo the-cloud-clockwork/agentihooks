@@ -18,6 +18,8 @@ def test_retiring_an_archived_projection_preserves_its_history_metadata() -> Non
         "sw", AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="rolled")
     )
 
+    store.start_execution("sw", AgentRecord(store.next_name("sw", "eng"), "eng", "t2", seat="eng-2@sw", hive="live"))
+
     def archive(doc: dict[str, Any]) -> None:
         doc["archive"][agent.execution_id] = doc["executions"].pop(agent.execution_id)
 
