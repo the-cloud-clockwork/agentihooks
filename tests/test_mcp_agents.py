@@ -1,6 +1,10 @@
 """The agents MCP category: profile cards and one-stage workflow runs."""
 
 import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -21,8 +25,8 @@ CARDS = {
 
 
 @pytest.fixture
-def cards(monkeypatch):
-    def show(name):
+def cards(monkeypatch: pytest.MonkeyPatch) -> None:
+    def show(name: str) -> dict[str, Any]:
         if name not in CARDS:
             raise ValueError(f"Unknown agent profile: {name}")
         return CARDS[name]
@@ -32,7 +36,7 @@ def cards(monkeypatch):
 
 
 @pytest.fixture
-def runs(monkeypatch, tmp_path, cards):
+def runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cards: None) -> tuple[Path, Mock, Mock]:
     monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
     root = tmp_path / "runs"
     monkeypatch.setattr(store, "default_root", lambda: root)
@@ -42,17 +46,17 @@ def runs(monkeypatch, tmp_path, cards):
     return root, launch, factory
 
 
-def test_agent_list_serves_every_card_and_filters_by_capability(cards):
+def test_agent_list_serves_every_card_and_filters_by_capability(cards: None) -> None:
     assert json.loads(agents.agent_list()) == list(CARDS.values())
     assert json.loads(agents.agent_list(capability="code")) == [CARDS["engineer"], CARDS["scouter"]]
 
 
-def test_agent_show_serves_one_card_and_refuses_an_unknown_profile(cards):
+def test_agent_show_serves_one_card_and_refuses_an_unknown_profile(cards: None) -> None:
     assert json.loads(agents.agent_show("judge")) == CARDS["judge"]
     assert json.loads(agents.agent_show("ghost")) == {"success": False, "error": "Unknown agent profile: ghost"}
 
 
-def test_agent_run_with_wait_runs_one_stage_and_returns_the_finished_state(runs):
+def test_agent_run_with_wait_runs_one_stage_and_returns_the_finished_state(runs: tuple[Path, Mock, Mock]) -> None:
     root, launch, factory = runs
 
     state = json.loads(agents.agent_run("engineer", "Build the sample"))
@@ -69,7 +73,7 @@ def test_agent_run_with_wait_runs_one_stage_and_returns_the_finished_state(runs)
     assert folder == root / state["run"]
 
 
-def test_agent_run_that_fails_its_stage_ends_exhausted_after_one_launch(runs):
+def test_agent_run_that_fails_its_stage_ends_exhausted_after_one_launch(runs: tuple[Path, Mock, Mock]) -> None:
     _, launch, _ = runs
     launch.return_value = StageResult("retry", ["broken"])
 
@@ -80,10 +84,12 @@ def test_agent_run_that_fails_its_stage_ends_exhausted_after_one_launch(runs):
     assert launch.call_count == 1
 
 
-def test_agent_run_without_wait_resumes_in_a_detached_process(runs, monkeypatch):
+def test_agent_run_without_wait_resumes_in_a_detached_process(
+    runs: tuple[Path, Mock, Mock], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root, launch, _ = runs
     popen = Mock()
-    monkeypatch.setattr(agents.subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
 
     state = json.loads(agents.agent_run("scouter", "Find the cause", wait=False))
 
@@ -92,12 +98,12 @@ def test_agent_run_without_wait_resumes_in_a_detached_process(runs, monkeypatch)
     assert store.load(root / state["run"]) == state
     launch.assert_not_called()
     (argv,), options = popen.call_args
-    assert argv == [agents.sys.executable, "-m", "scripts.install", "workflow", "resume", state["run"]]
+    assert argv == [sys.executable, "-m", "scripts.install", "workflow", "resume", state["run"]]
     assert options["start_new_session"] is True
-    assert options["stdin"] == options["stdout"] == options["stderr"] == agents.subprocess.DEVNULL
+    assert options["stdin"] == options["stdout"] == options["stderr"] == subprocess.DEVNULL
 
 
-def test_agent_run_refuses_an_unknown_profile_before_saving_a_run(runs):
+def test_agent_run_refuses_an_unknown_profile_before_saving_a_run(runs: tuple[Path, Mock, Mock]) -> None:
     root, launch, _ = runs
 
     result = json.loads(agents.agent_run("ghost", "anything"))
@@ -107,7 +113,9 @@ def test_agent_run_refuses_an_unknown_profile_before_saving_a_run(runs):
     launch.assert_not_called()
 
 
-def test_agent_run_is_refused_inside_a_worker_run(runs, monkeypatch):
+def test_agent_run_is_refused_inside_a_worker_run(
+    runs: tuple[Path, Mock, Mock], monkeypatch: pytest.MonkeyPatch
+) -> None:
     root, launch, _ = runs
     monkeypatch.setenv("AGENTIHOOKS_WORKER_RUN", "1")
 
@@ -118,7 +126,7 @@ def test_agent_run_is_refused_inside_a_worker_run(runs, monkeypatch):
     launch.assert_not_called()
 
 
-def test_the_server_serves_the_agents_tools(monkeypatch):
+def test_the_server_serves_the_agents_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MCP_CATEGORIES", "agents")
     from hooks.mcp import build_server
 
