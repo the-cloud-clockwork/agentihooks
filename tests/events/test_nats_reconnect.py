@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from scripts.events import nats
-from scripts.events.config import BusConfig
+from scripts.events.config import BusConfig, QueuePolicy
+from scripts.events.envelope import Envelope
 
 from . import nats_server
 
@@ -51,12 +52,28 @@ def test_shared_bus_reconnects_and_restores_subscriptions_after_server_restart(
         try:
             opened.serve("reconnect.echo", "worker", lambda subject, data: data)
             assert opened.request("reconnect.echo", b"before", 2_000) == b"before"
+            queue = opened.queue("work", QueuePolicy(max_deliver=3, ack_wait_ms=1_000))
             first.terminate()
             first.wait(10)
             wait_log(caplog, "NATS bus disconnected")
             with server(store, port):
                 wait_log(caplog, "NATS bus reconnected")
                 assert opened.request("reconnect.echo", b"after", 2_000) == b"after"
+                queue.offer(
+                    Envelope(
+                        id="after",
+                        type="task.claimed",
+                        swarm="s",
+                        entity="task",
+                        key="t1",
+                        version=1,
+                        time=0,
+                        author="a",
+                        data={},
+                    )
+                )
+                delivery = queue.take(2_000)
+                assert delivery is not None and delivery.event.id == "after"
             assert caplog.messages.index("NATS bus disconnected") < caplog.messages.index("NATS bus reconnected")
         finally:
             opened.close()
