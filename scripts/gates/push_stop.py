@@ -1,5 +1,6 @@
-"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds,
-then refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
+"""The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself unless fleet panic holds
+or the task pull request's checks run with none red, which passes the stop naming the checks as the wait, then
+refuses the stop over uncommitted changes, a push origin refused, or pushed work with no pull request and no
 ledger line since the push, unless any declared wait during fleet panic, a checked wait on another task not yet done,
 or one on the merge of a pull request still open, holds it."""
 
@@ -11,12 +12,17 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hooks.config import CONDITIONS_TIMEOUT_SEC
 from scripts.gates.base import Call, Decision, Who
 from scripts.swarm.naming import lane_of, plain
 from scripts.swarm_ledger import ledger_kinds
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from scripts.swarm.ledger_events import PullRequest
 
 WORKERS = frozenset({"eng", "ci"})
 TEMPLATE = (
@@ -51,6 +57,10 @@ GATE_LATE = (
 )
 PUSH_LATE = "The stop hook had too little time left to push {path}, so it did not push it. Push it yourself."
 PANIC_HELD = "Fleet panic holds, so the stop hook pushes nothing and did not push {path}."
+CHECKS = (
+    "Checks still run on {url} and none is red, so the stop hook did not push: a push now cancels them. "
+    "Wait with agentihooks swarm {swarm} wait --on checks {url}, then push once they resolve."
+)
 
 
 @dataclass(frozen=True)
@@ -230,9 +240,13 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, progress, failed, found = self.connect(), False, False, [], trees(self.root(), who.name)
+        store, progress, failed, found = self.connect(), False, [], trees(self.root(), who.name)
         frozen, reviewing = self.frozen(store), self.reviewing(call.session)
-        for tree in found:
+        holding = [tree for tree in found if tree.unpushed and own_pull(tree, task)]
+        checks = self.checks(task) if holding else ""
+        held = holding if checks else []
+        owed = any(tree.dirty and not reviewing for tree in held)
+        for tree in [tree for tree in found if tree not in held]:
             if tree.unpushed and frozen:
                 failed.append(PANIC_HELD.format(path=tree.path))
             elif tree.unpushed and (refused := self.held(tree)):
@@ -245,7 +259,7 @@ class PushStop:
             )
         if not (owed or progress):
             self.settle(store, who)
-            return Decision()
+            return Decision(reason=CHECKS.format(url=checks, swarm=who.swarm)) if checks else Decision()
         if self.waiting(store, who, doc, task, any(tree.dirty for tree in found), frozen):
             return Decision()
         reason = " ".join(
@@ -253,6 +267,17 @@ class PushStop:
         )
         self.notify(store, who, reason)
         return Decision.deny(" ".join([reason, *failed]))
+
+    def checks(self, task: Any) -> str:
+        """The task pull request's link while its checks run and none is red, when the one push gate refuses a push,
+        else ''."""
+        from scripts.gates.one_push import never_started
+
+        url = str(task["pr_url"])
+        pull = self.github()(url)
+        if pull is None or pull.state != "OPEN" or pull.red or pull.queued or not pull.running:
+            return ""
+        return "" if never_started(pull) else url
 
     def held(self, tree):
         """Why HEAD stays off origin: its pre push gate refused, or less than the reserve is left for the push."""
@@ -371,7 +396,7 @@ class PushStop:
 
         return LedgerClient()
 
-    def github(self):
+    def github(self) -> "Callable[[str], PullRequest | None]":
         from scripts.swarm.ledger_events import view
 
         return self._github or view
