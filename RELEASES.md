@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.723 · 2026-11-08
+
+### 2026-11-08 · 751c9cf7af31 · #10061 · @agenticore-app
+
+**Count a profile a placement target hive advertises as installed**
+
+This change fixes profile placement so a bundle profile is treated as installed on a candidate hive as soon as that hive advertises it, and the controller now only places a profile on hives that actually hold it, with configuration snapshots covering both linked and bundle profiles. This matters because previously the controller could pick an incompatible hive for a given profile, risking misplaced workloads; the fix closes that gap and ships with new regression tests and a clean mutation/test run, keeping placement decisions reliable going forward. It is a two-way change, reversible via a follow-up PR if issues surface.
+
+### 2026-11-08 · eccec2438af5 · #10072 · @nestorcolt
+
+**Keep the chart version out of pod templates so a release rolls no pod that did not change**
+
+This change splits chart labeling so pod templates use a new `swarm.podLabels` helper (name, instance, managed-by, component only) while `helm.sh/chart` stays on object metadata via `swarm.labels`; selectors are untouched. A CI check (`tests/ci_charts/chart_pod_templates.py`, run in the semgrep charts job) now renders every chart at its current and a bumped version and fails if any pod template differs, catching regressions like the one observed where hive revisions 45–49 rolled pods solely because the chart version string changed. The first release with this fix will roll every workload once; afterwards, chart-version-only bumps roll nothing.
+
 ## v2.17.722 · 2026-11-08
 
 ### 2026-11-08 · d8b8fe71d290 · #10056 · @nestorcolt
