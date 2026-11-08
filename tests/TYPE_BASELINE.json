@@ -671,7 +671,7 @@
   "scripts/swarm/priming_trace.py": 64,
   "scripts/swarm/priority_sweep.py": 244,
   "scripts/swarm/probe.py": 64,
-  "scripts/swarm/profile_choice.py": 138,
+  "scripts/swarm/profile_choice.py": 137,
   "scripts/swarm/profile_first.py": 50,
   "scripts/swarm/promotion_owner.py": 34,
   "scripts/swarm/promotion_watch.py": 375,
