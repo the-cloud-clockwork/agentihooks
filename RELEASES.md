@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.735 · 2026-11-08
+
+### 2026-11-08 · e095530d8f39 · #10102 · @agenticore-app
+
+**Stop the spawn pass at its pass deadline and route it through the ledger port**
+
+This change makes the spawn pass write all ledger updates and comments through its declared ledger port rather than touching storage directly, and enforces its pass deadline strictly: once time runs out, it stops preparing new tasks, settles whatever batch it already prepared, and hands off the remaining work to the next pass instead of leaving unresolved writes behind. This closes a gap where expired passes could still perform risky writes, and keeps ledger access cleanly scoped as part of the broader tc-h15b split separating coordination, inbox, and ledger responsibilities.
+
 ## v2.17.734 · 2026-11-08
 
 ### 2026-11-08 · 87f8576b7e49 · #10126 · @agenticore-app
