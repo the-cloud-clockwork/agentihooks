@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_session_slug:3fb145afd3ac466aa2c0564b1055216e79f51a4e89ff63393d06b38f0eb1a6f1": {
+    "reader": "standards_reader",
+    "reason": "headers is an email Message whose get is case insensitive, so the lower case slug header name returns the same value and session_slug is unchanged."
+  }
+}

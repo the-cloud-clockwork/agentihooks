@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_auth_session:e4cf6031eb469fd5853b1e7a0c308bbb54775321e5888781f1840b9161c3281d": {
+    "reader": "standards_reader",
+    "reason": "The request data is an empty bytes object, not None, so urllib Request get_method returns POST whether method is POST or None and the request sent is identical."
+  }
+}

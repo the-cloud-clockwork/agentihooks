@@ -1,11 +1,14 @@
 """The ledger page carries no operator token: the browser holds an operator session cookie instead."""
 
+import codecs
 import email.message
 import http.client
 import json
 import re
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Iterator
 from contextlib import AbstractContextManager
@@ -250,3 +253,163 @@ def test_the_page_renews_its_session_before_it_expires() -> None:
 
     assert observed["calls"] == ["/api/sw/session"] * 3
     assert observed["timers"] == [["keepSession", 720000], ["keepSession", 30000], ["keepSession", 30000]]
+
+
+def raw_session(live: dict, slug: str = SLUG, **headers: str) -> tuple[int, list[tuple[str, str]], bytes]:
+    """POST a page session and return the status, the response headers with their names as sent, and the body."""
+    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    try:
+        conn.request("POST", f"/api/{slug}/session", b"", {"Host": live["host"], **origin(live), **headers})
+        response = conn.getresponse()
+        return response.status, response.getheaders(), response.read()
+    finally:
+        conn.close()
+
+
+def test_the_session_response_names_its_headers_exactly(live: dict, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_URL", raising=False)
+    monkeypatch.delenv("SWARM_AUTH_MODE", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_LEGACY", raising=False)
+    with allowed(live):
+        status, headers, body = raw_session(live)
+    sent = dict(headers)
+    value = SimpleCookie(sent["Set-Cookie"])[f"ledger-session-{SLUG}"].value
+
+    assert status == 200
+    assert json.loads(body) == {"expires_in": None}
+    assert sent["Content-Type"] == "application/json"
+    assert sent["Content-Length"] == str(len(body))
+    assert sent["Cache-Control"] == "no-store"
+    assert sent["Set-Cookie"] == f"ledger-session-{SLUG}={value}; Path=/; HttpOnly; SameSite=Strict"
+
+
+def test_the_signed_session_cookie_is_secure_and_expires(auth: dict) -> None:
+    with allowed(auth):
+        status, headers, body = raw_session(auth, **{"Cf-Access-Jwt-Assertion": "operator-assertion"})
+    ttl = json.loads(body)["expires_in"]
+
+    assert status == 200
+    assert dict(headers)["Set-Cookie"].endswith(f"; Path=/; HttpOnly; SameSite=Strict; Max-Age={ttl}; Secure")
+
+
+@pytest.mark.parametrize(
+    ("slug", "extra", "expected"),
+    [
+        ("no-such-ledger", {}, (404, b"no such ledger")),
+        (SLUG, {"Origin": "http://elsewhere.test"}, (403, b"origin not allowed")),
+    ],
+)
+def test_a_refused_session_answers_in_plain_text(live: dict, slug: str, extra: dict, expected: tuple) -> None:
+    with allowed(live):
+        status, headers, body = raw_session(live, slug, **extra)
+
+    assert (status, body) == expected
+    assert dict(headers)["Content-Type"] == "text/plain"
+
+
+def test_a_session_without_an_operator_answers_in_plain_text(live: dict, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_URL", raising=False)
+    monkeypatch.setenv("SWARM_AUTH_MODE", "edge")
+    with allowed(live):
+        status, headers, body = raw_session(live)
+
+    assert (status, body) == (503, b"no operator session")
+    assert dict(headers)["Content-Type"] == "text/plain"
+
+
+class Shell:
+    """A ledger shell template that only reads as UTF-8."""
+
+    def read_text(self, encoding: str) -> str:
+        """The template, refusing any encoding but UTF-8."""
+        assert codecs.lookup(encoding).name == "utf-8"
+        return "__LEDGER_SLUG__"
+
+
+def test_the_ledger_shell_is_read_as_utf8(live: dict) -> None:
+    with patch.object(server.core, "SHELL", Shell()):
+        assert server.page_for(SLUG) == SLUG
+
+
+def test_the_slug_header_names_the_session_ledger() -> None:
+    headers = email.message.Message()
+    headers["X-Ledger-Slug"] = "named"
+
+    assert server.session_slug(f"/api/{SLUG}", headers) == "named"
+    assert server.session_slug("/elsewhere", email.message.Message()) == ""
+
+
+class Reply:
+    """An auth service reply carrying a signed token."""
+
+    def __enter__(self) -> "Reply":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        """The reply body."""
+        return json.dumps({"data": {"token": "signed", "expires_in": 900}}).encode()
+
+
+def test_the_auth_exchange_posts_the_assertion_to_the_token_route() -> None:
+    seen: list[tuple[urllib.request.Request, float]] = []
+    headers = email.message.Message()
+    headers["Cf-Access-Jwt-Assertion"] = "assertion"
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> Reply:
+        seen.append((request, timeout))
+        return Reply()
+
+    with patch.object(server.urllib.request, "urlopen", urlopen):
+        result = server.auth_session("http://auth.testX/", "sw", headers)
+    request, timeout = seen[0]
+
+    assert result == (200, "bearer:signed", 900)
+    assert request.full_url == "http://auth.testX/v1/ledgers/sw/token"
+    assert request.get_method() == "POST"
+    assert request.data == b""
+    assert request.get_header("Cf-access-jwt-assertion") == "assertion"
+    assert timeout == 10
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (urllib.error.HTTPError("http://auth", 403, "refused", email.message.Message(), None), 403),
+        (urllib.error.HTTPError("http://auth", 500, "broken", email.message.Message(), None), 503),
+        (OSError("down"), 503),
+    ],
+)
+def test_a_failed_auth_exchange_opens_no_session(failure: Exception, status: int) -> None:
+    def urlopen(request: urllib.request.Request, timeout: float) -> Reply:
+        raise failure
+
+    with patch.object(server.urllib.request, "urlopen", urlopen):
+        assert server.auth_session("http://auth", "sw", email.message.Message()) == (status, None, None)
+
+
+def test_an_operator_assertion_goes_to_the_auth_service_outside_edge_mode(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_AUTH_URL", "http://auth")
+    monkeypatch.delenv("SWARM_AUTH_MODE", raising=False)
+    headers = email.message.Message()
+    headers["Cf-Access-Jwt-Assertion"] = "assertion"
+
+    with patch.object(server, "auth_session", return_value=(200, "bearer:signed", 900)) as exchange:
+        assert server.page_session("sw", headers) == (200, "bearer:signed", 900)
+    exchange.assert_called_once_with("http://auth", "sw", headers)
+
+
+@pytest.mark.parametrize(
+    ("credential", "expected"), [("stored", (200, "page:stored", None)), (None, (503, None, None))]
+)
+def test_the_legacy_page_session_carries_the_stored_credential(
+    monkeypatch: MonkeyPatch, credential: str | None, expected: tuple
+) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_URL", raising=False)
+    monkeypatch.delenv("SWARM_AUTH_MODE", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_AUTH_LEGACY", raising=False)
+
+    with patch.object(server.repository, "token", return_value=credential):
+        assert server.page_session("sw", email.message.Message()) == expected
