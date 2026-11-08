@@ -2294,6 +2294,16 @@
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
         "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
       ]
+    },
+    {
+      "id": "swarm-tick-dead-remote-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
+      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget and allowing a launch within two passes after a hive roll.",
+      "seam": "remote retirement and the reap/spawn tick passes",
+      "tests": [
+        "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive"
+      ]
     }
   ],
   "unmapped_rules": [
