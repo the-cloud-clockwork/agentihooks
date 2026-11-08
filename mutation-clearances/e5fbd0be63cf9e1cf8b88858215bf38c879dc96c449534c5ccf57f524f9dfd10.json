@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/agents.py:scripts.tick.steps.agents.x__unbound_past_window:1bc6d4e07532db6aa2b207a3ef4869dca2d608f124fc2439c7740254850941a4": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime and never reads the type argument, so cast(None, agent.runtime_target) yields the same runtime target dict as cast(dict[str, Any], ...); the mutant changes no output."
+  }
+}

@@ -2,10 +2,11 @@
 
 # pyright: reportUnusedFunction=false
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
@@ -123,11 +124,28 @@ def _remote_gone_reason(slug: str, store: Any, runtime: Any, agent: AgentRecord,
     hives = tick.reports.Reports(store.redis)
     if tick._elsewhere(agent) and hives.vanished(agent, now_ms):
         return "its hive no longer lists it"
+    if _unbound_past_window(slug, store, agent, now_ms):
+        return "its pod never started"
     if not tick.reports.host(agent):
         return ""
     if hives.gone(agent) or runtime.observe(agent).state == "exited":
         return "its hive pane is gone"
     return "its hive stopped reporting" if tick._hive_lost(slug, store, agent, now_ms) else ""
+
+
+def _unbound_past_window(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
+    """Start the unbound window of a suspect Kubernetes attempt on the placeholder pod with no pod uid, and answer
+    True once that window has lasted the lost window; the store clears the window when it retires the agent."""
+    from scripts.swarm_v2.kubernetes.failures import PENDING_POD
+
+    target = cast(dict[str, Any], agent.runtime_target)
+    if agent.runtime_backend != "kubernetes" or agent.state != tick.SUSPECT:
+        return False
+    if target.get("pod_uid") or target.get("pod_name") != PENDING_POD:
+        return False
+    key = store.key(slug, "unbound-since")
+    store.redis.hsetnx(key, agent.name, now_ms)
+    return now_ms - int(store.redis.hget(key, agent.name)) >= tick.reports.LOST_MS
 
 
 def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
@@ -151,7 +169,8 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     )
     if not removed and not runtime.retire(agent, homes=tick.reaper.scratch_homes(slug, agent.task)):
         tick.retire_watch.failed(store, slug, agent.name, runtime.refusal(agent), now_ms)
-        return [f"could not retire {agent.name}, retrying next tick"]
+        if not _handed_on(slug, store, agent, now_ms):
+            return [f"could not retire {agent.name}, retrying next tick"]
     store.redis.hset(retired, agent.name, now_ms)
     tick._refund_parked(slug, store, rows, agent)
     store.release(slug, agent.task, agent.name)
@@ -162,6 +181,18 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
         tick._reopen(slug, ledger, rows, agent.task)
     tick.exits.settle(tick.InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
     return [f"retired {agent.name}"]
+
+
+def _handed_on(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool:
+    """True for a finished master whose seat holds a later agent and whose retire has failed for the lost window."""
+    if agent.lane != tick.MASTER or agent.state != "finished":
+        return False
+    later = any(
+        other.seat == agent.seat and other.name != agent.name and other.started_at > agent.started_at
+        for other in store.agents(slug)
+    )
+    raw = store.redis.hget(store.key(slug, "retire-failures"), agent.name)
+    return later and bool(raw) and now_ms - json.loads(raw)["since"] >= tick.reports.LOST_MS
 
 
 def _live_names(runtime: Any) -> Any:
