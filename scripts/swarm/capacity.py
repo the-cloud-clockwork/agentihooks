@@ -250,7 +250,7 @@ def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None)
 def hive_accounts(store: RedisStore) -> Callable[..., list[Account]]:
     """A quota reader over the hive quota reports in ``store``, which a restarted hive controller reads at once."""
 
-    def read(environ: dict[str, str], now: float, refresh: bool = False) -> list[Account]:
+    def read(environ: dict[str, str], now: float, refresh: bool) -> list[Account]:
         """Every account with its band cap from the hive reports; ``refresh`` is ignored, hives probe their own."""
         return accounts(environ, now, refresh=refresh, redis=store.redis)
 

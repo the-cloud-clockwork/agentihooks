@@ -120,6 +120,20 @@ def test_placement_before_the_pass_reads_quota_uses_the_runtime_reader(setup):
 
 
 @pytest.mark.feature("controller-quota-after-restart")
+def test_placement_without_a_runtime_reader_reads_the_hive_reports(setup):
+    from unittest.mock import patch
+
+    from scripts.hive import launch
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    del setup.herdr.quota_accounts
+    with patch.object(launch.capacity, "accounts", return_value=rows) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    assert accounts.call_args.kwargs == {"refresh": False, "redis": setup.store.redis}
+
+
+@pytest.mark.feature("controller-quota-after-restart")
 def test_a_placement_wait_names_an_account_with_no_fresh_quota_reading(setup):
     from scripts.hive.placement import Wait
     from scripts.swarm.capacity import Account
