@@ -348,3 +348,55 @@ def test_a_holder_records_its_machine_when_one_is_known(monkeypatch):
         controller, "_read", lambda path: {f"/proc/{pid}/stat": STAT, "/etc/machine-id": "m"}.get(path, "")
     )
     assert controller._holder() == {"host": "h", "pid": pid, "start": "22", "machine": "m"}
+
+
+@pytest.mark.feature("swarm-tick-lock")
+def test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces(locked_store, monkeypatch):
+    from redis.exceptions import ConnectionError as RedisDown
+
+    store, held = locked_store
+    key = store.key("sw", "tick-lock")
+    original = controller.take_tick_lock(store, "sw", held, 600_000, "pass")
+    assert original is not None
+    working = store.redis.pipeline
+
+    def down(*_: object, **__: object) -> None:
+        raise RedisDown("Redis is restarting")
+
+    monkeypatch.setattr(store.redis, "pipeline", down)
+    with pytest.raises(RedisDown):
+        controller.release_tick_lock(store, "sw", original, "pass")
+    monkeypatch.setattr(store.redis, "pipeline", working)
+    assert store.redis.get(key) == original
+    replacement = controller.take_tick_lock(store, "sw", held, 600_000, "pass")
+    assert replacement is not None and replacement != original
+    assert store.redis.get(key) == replacement
+    assert controller.take_tick_lock(store, "sw", held, 600_000, "pass") is None
+
+
+@pytest.mark.feature("swarm-tick-lock")
+def test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass(locked_store, capsys):
+    store, held = locked_store
+    key = store.key("sw", "tick-lock")
+    original = controller.take_tick_lock(store, "sw", held, 600_000, "pass")
+    assert original is not None
+    controller.release_tick_lock(store, "sw", original, "pass")
+    store.redis.set(key, original, px=600_000)
+    capsys.readouterr()
+    replacement = controller.take_tick_lock(store, "sw", held, 600_000, "pass")
+    assert replacement is not None and replacement != original
+    assert store.redis.get(key) == replacement
+    assert json.loads(capsys.readouterr().err)["outcome"] == "replaced a dead holder"
+
+
+def test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process(monkeypatch):
+    pid = controller.os.getpid()
+    asked = []
+    monkeypatch.setattr(controller, "_host", lambda: "h")
+    monkeypatch.setattr(controller, "_read", lambda path: STAT if path == f"/proc/{pid}/stat" else "")
+    monkeypatch.setattr(controller, "_gone", lambda held_pid, start: asked.append((held_pid, start)) or False)
+    raw = json.dumps({"epoch": 1, "token": "t", "host": "h", "pid": pid, "start": "21"})
+    assert controller._dead(raw) is False
+    assert asked == [(pid, "21")]
+    own = json.dumps({"epoch": 1, "token": "t", "host": "h", "pid": pid, "start": "22"})
+    assert controller._dead(own) is True
