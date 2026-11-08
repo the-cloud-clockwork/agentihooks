@@ -419,7 +419,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. The host room guard still refuses a spawn when load or free memory leaves no room. A stored value is kept. |
+| `max-agents` | whole number, 0 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once; `0` scales the hive fully down, so the tick places no new agent there. Masters do not count against it. The host room guard still refuses a spawn when load or free memory leaves no room. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,

@@ -87,6 +87,12 @@ def _count(setting: str, value: str) -> int:
     return int(value)
 
 
+def _cap(setting: str, value: str) -> int:
+    if not (value.isascii() and value.isdigit()):
+        raise HiveError(f"{setting} must be a whole number, not {value!r}")
+    return int(value)
+
+
 def _names(setting: str, value: str, noun: str) -> list[str]:
     names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
     for name in names:
@@ -125,7 +131,7 @@ SETTINGS = {
     "excluded": ("excluded", _excluded),
     "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),
-    "max-agents": ("max_agents", _count),
+    "max-agents": ("max_agents", _cap),
     "capabilities": ("capabilities", _capabilities),
 }
 
