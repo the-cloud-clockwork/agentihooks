@@ -56,6 +56,8 @@ class Ledger(Protocol):
 
     def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None: ...
 
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None: ...
+
 
 @runtime_checkable
 class Coordination(Protocol):

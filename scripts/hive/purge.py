@@ -8,17 +8,19 @@ from scripts.swarm.keyspace import ROOT
 if TYPE_CHECKING:
     from scripts.swarm.store import AgentRecord
 
-ENDED = ("finished", "ended")
+FINISHED = "finished"
+ENDED = (FINISHED, "ended")
+
+
+def on_hive(store: Any, hive: str) -> list[tuple[str, "AgentRecord"]]:
+    """Every agent record placed on ``hive``, with its swarm, in any state."""
+    slugs: list[str] = store.slugs()
+    return [(slug, agent) for slug in slugs for agent in store.agents(slug) if agent.hive == hive]
 
 
 def hosted(store: Any, hive: str) -> list[tuple[str, "AgentRecord"]]:
     """Every agent record of any swarm placed on ``hive`` that has not finished or ended."""
-    return [
-        (slug, agent)
-        for slug in store.slugs()
-        for agent in store.agents(slug)
-        if agent.hive == hive and agent.state not in ENDED
-    ]
+    return [(slug, agent) for slug, agent in on_hive(store, hive) if agent.state not in ENDED]
 
 
 def keys(redis: Any, hive: str) -> list[str]:
