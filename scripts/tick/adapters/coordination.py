@@ -2,11 +2,13 @@
 locks, launch capacity and swarm marks, each call admitted only while its deadline holds."""
 
 import uuid
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
 from scripts.swarm import lease as leases
 from scripts.tick.deadline import Deadline
+from scripts.tick.ports.contracts import STORE_READS, UndeclaredEffect
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore, SwarmConfig
@@ -80,3 +82,27 @@ class StoreCoordination:
         deadline.live()
         value: str | None = self._redis().get(self._key(name))
         return value
+
+    def _operation(self, operation: str) -> Callable[..., Any]:
+        target: Any = self.store
+        for part in operation.split("."):
+            if part.startswith("_"):
+                raise AttributeError(part)
+            target = getattr(target, part)
+        return target
+
+    def store_read(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Answer the named swarm store read, a dotted path such as ``redis.hget``, while the deadline holds."""
+        deadline.live()
+        if operation not in STORE_READS:
+            raise UndeclaredEffect(f"{operation} is a store write")
+        return self._operation(operation)(*args, **kwargs)
+
+    def store_write(
+        self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
+    ) -> Any:
+        """Apply the named swarm store write, a dotted path such as ``seats.occupy``, while the deadline holds."""
+        deadline.live()
+        return self._operation(operation)(*args, **kwargs)

@@ -11,6 +11,17 @@
       ]
     },
     {
+      "id": "hive-drain-events-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1896",
+      "behaviour": "The hub refuses an events admission request from a hive whose registry record is draining, such as a hive stopping for a release, before any claim, execution, seat or ledger write.",
+      "seam": "Admission.admit for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -456,7 +467,7 @@
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
-      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass.",
+      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass. The spawn helpers reach the runtime only through the runtime port bound to that same recording deadline: placement, capacity, launch room, peer reports, placement refusal, the placement pass bracket, reaping and pending admission are runtime port operations, the placing and admitting ones writes that need the runtime effect. The spawn helpers reach the swarm store only through the coordination port bound to the same deadline: each store method, seat, memory and Redis command is a named store read or store write, the writes needing the coordination effect, and keys are built without a port call. A spawn claim it drops settles the leaving agent's inbox items through the inbox port, and the pending admission it holds, activates and releases goes through the runtime port.",
       "seam": "scripts.tick.steps.place, re-exported by scripts.swarm.tick",
       "tests": [
         "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
@@ -479,7 +490,31 @@
         "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
         "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
         "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
-        "tests/tick/steps/test_spawn.py::test_spawn"
+        "tests/tick/steps/test_spawn.py::test_spawn",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_admission_admits_and_releases_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_keeps_the_optional_runtime_defaults",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_answers_no_launch_room_when_the_pass_runtime_names_none",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_refuses_spawn_operations_past_their_deadline",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_writes_need_the_runtime_effect",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_reads_pass_without_the_runtime_effect",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_writes_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reads_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reaches_redis_seats_and_memory_through_the_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_builds_keys_without_a_port_call",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_keeps_the_store_method_names_for_step_timing",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_refuses_private_names",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_runs_the_named_store_operation",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_private_operations",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_a_write_named_as_a_read",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_operations_past_their_deadline",
+        "tests/tick/test_spawn_store_ports.py::test_spawn_store_writes_need_the_coordination_effect",
+        "tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports"
       ]
     },
     {
@@ -2171,6 +2206,25 @@
       "seam": "Overrun inbox reports and published ledger workspace progress",
       "tests": [
         "tests/swarm/test_overrun.py::test_remote_overrun_quotes_the_same_progress_as_the_ledger"
+      ]
+    },
+    {
+      "id": "controller-quota-after-restart",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ctl-quota-empty",
+      "behaviour": "A restarted hive controller reads each routed account's cap from the hive quota reports in Redis within one pass, and a placement wait names an account with no fresh quota reading instead of a cap of None.",
+      "seam": "scripts.swarm.capacity.hive_accounts, the hive controller runtime's quota reader and the hive launch wait text",
+      "tests": [
+        "tests/swarm/test_controller_quota_after_restart.py::test_a_restarted_controller_reads_a_fresh_cap_from_the_hive_quota_reports",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_runtime_reads_quota_from_its_store",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_without_a_probe",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_keeps_the_quota_rows_its_pass_already_read",
+        "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
+        "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
+        "tests/hive/test_controller_launch.py::test_placement_without_a_runtime_reader_reads_the_hive_reports",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
       ]
     },
     {
