@@ -170,6 +170,14 @@ def test_real_ledger_task_updates_keep_every_guard(
     assert sent == before
 
 
+@pytest.mark.parametrize("reply", [{}, {"tasks": []}])
+def test_resource_ledger_update_without_returned_tasks_returns_an_empty_row(reply: dict[str, object]) -> None:
+    from scripts.tick.adapters.ledger import ClientLedger
+
+    adapter = ClientLedger("sw", lambda remaining: cast(Any, SimpleNamespace(mutate=lambda slug, operations: reply)))
+    assert adapter.update_task("task", {"state": "open"}, deadline=Deadline.after(10)) == {}
+
+
 @pytest.mark.parametrize(
     "operation,args,write",
     [
