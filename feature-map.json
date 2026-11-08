@@ -2155,6 +2155,7 @@
         "tests/hive/test_hive_ceiling.py::test_a_reading_without_agents_counts_none_running",
         "tests/hive/test_hive_ceiling.py::test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one",
         "tests/hive/test_hive_ceiling.py::test_placement_reads_the_computed_ceiling_and_keeps_the_cap",
+        "tests/swarm/test_probe.py::test_an_uncapped_unread_root_counts_against_the_swarm_local_limit",
         "tests/hive/test_hive_ceiling.py::test_a_reading_without_swap_counts_none_and_a_reported_swap_counts",
         "tests/hive/test_hive_ceiling.py::test_shown_is_none_only_without_a_cap_and_a_reading",
         "tests/hive/test_hive_ceiling.py::test_auto_removes_the_stored_cap",
