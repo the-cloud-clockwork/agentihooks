@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 import pytest
 
@@ -59,7 +60,7 @@ def test__read_decodes_the_config_as_utf8(tmp_path: Path, monkeypatch: pytest.Mo
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     original = Path.read_text
 
-    def spy(self: Path, *args: object, **kwargs: object) -> str:
+    def spy(self: Path, *args: Any, **kwargs: Any) -> str:
         calls.append((args, kwargs))
         return original(self, *args, **kwargs)
 
