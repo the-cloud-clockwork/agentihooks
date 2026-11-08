@@ -44,6 +44,7 @@ UNREACHABLE = (
 OFFLINE: ContextVar[bool] = ContextVar("tick_ledger_offline", default=False)
 OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
 SNAPSHOT_TIMEOUT_S = 3.0
+EXPORT_TIMEOUT_S = 30.0
 
 
 def offline() -> bool:
