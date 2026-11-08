@@ -22,8 +22,7 @@ def test_retiring_an_archived_projection_preserves_its_history_metadata() -> Non
 
     fencing.write(store, "sw", archive)
     row = json.loads(store.redis.hget(store.key("sw", "agents"), agent.name))
-    for field in ("execution_id", "hive", "runtime_backend"):
-        row.pop(field)
+    row = {key: value for key, value in row.items() if key not in ("execution_id", "hive", "runtime_backend")}
     store.redis.hset(store.key("sw", "agents"), agent.name, json.dumps(row))
     assert store.drop_agent("sw", agent.name)
     history = json.loads(store.redis.lindex(store.key("sw", "history"), -1))
