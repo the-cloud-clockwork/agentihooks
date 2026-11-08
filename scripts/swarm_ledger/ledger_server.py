@@ -1158,13 +1158,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
         except (ValueError, TypeError) as exc:
-            request = str(exc)
+            request = exc
         plan_requested = isinstance(request, dict) and request.get("plan") is True
 
         def store(data: bytes) -> dict:
             try:
-                if isinstance(request, str):
-                    raise ValueError(request)
+                if isinstance(request, (ValueError, TypeError)):
+                    raise request
                 if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
                     raise ValueError("artifact upload takes task, title and optional request or plan")
                 by = self.headers.get("X-Ledger-Agent") or ("operator" if plan_requested else None)
