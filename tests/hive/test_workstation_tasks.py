@@ -78,3 +78,31 @@ def test_a_hybrid_controller_leaves_the_claim_of_a_plain_task_to_the_hive_launch
     assert fenced.spawn(setup.config, "eng", "eng name", {"id": "other"}) == "placed on the hive"
     assert setup.store.redis.hkeys(local_slots.key("workstation")) == []
     setup.herdr.spawn.assert_not_called()
+
+
+def test_workstation_hives_are_the_headed_hive_else_the_controller_hive():
+    root = {"id": "root", "ui": "yes"}
+    anton = {"id": "anton", "ui": "no"}
+    own = {"id": "controller", "ui": "no"}
+    assert placement.workstation_hives([anton, root, own], "controller") == [root]
+    assert placement.workstation_hives([anton, own], "controller") == [own]
+    assert placement.workstation_hives([anton], "controller") == []
+
+
+def test_a_controller_off_the_workstation_selects_the_root_hive_for_a_workstation_task(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "anton-controller")
+    write_hive(setup, prefer={"eng": 0})
+    write_hive(setup, id="root", ui="yes", excluded=[], max_agents=20)
+    assert setup.launcher.select(setup.config, "eng", TASK).hive == "root"
+
+
+def test_a_distributed_controller_launches_a_workstation_task_on_the_root_hive(setup, monkeypatch):
+    monkeypatch.setattr(commands, "hive_id", lambda: "anton-controller")
+    fenced = hybrid(setup, monkeypatch, "distributed")
+    write_hive(setup, id="root", ui="yes", excluded=[], max_agents=20)
+    assert fenced.placement_refusal("eng", TASK) == ""
+    assert fenced.spawn(setup.config, "eng", "eng name", TASK) == "placed on the hive"
+    (request,) = fenced.runtime.hive_launch.spawn.call_args.args
+    assert (request.task["workstation"], request.task["hive"], request.task["id"]) == (False, "root", "landing")
+    assert setup.store.redis.hkeys(local_slots.key("anton-controller")) == []
+    setup.herdr.spawn.assert_not_called()
