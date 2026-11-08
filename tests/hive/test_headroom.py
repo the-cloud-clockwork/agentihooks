@@ -259,8 +259,8 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     redis.set(headroom.key("old"), json.dumps({**record, "measured_at": 9_999}))
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tstale\tui=no\tmax-agents=20\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
+        "box\tstale\tui=no\tworkers=0 of 20\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
+        "old\tstale\tui=no\tworkers=0 of 20\texcluded=master\theadroom=missing\n"
     )
 
 

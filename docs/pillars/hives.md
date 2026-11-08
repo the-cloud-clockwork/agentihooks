@@ -557,8 +557,8 @@ restarts the thread.
 
 ```bash
 agentihooks hive list
-# vm  live  ui=no  max-agents=20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
-# anton-2  live  ui=no  max-agents=8  excluded=master  cpus=16  load5=4.73  available-mb=2576  pod-limit-mb=4200  pending=0
+# vm  live  ui=no  workers=3 of 20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
+# anton-2  live  ui=no  workers=2 of 8  excluded=master  cpus=16  load5=4.73  available-mb=2576  pod-limit-mb=4200  pending=0
 ```
 
 A hive in a pod with a cgroup memory limit shows `available-mb` as the tighter of the node and pod figures, and

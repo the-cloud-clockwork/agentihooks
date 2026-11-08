@@ -121,7 +121,14 @@ def _scanned(store: RedisStore) -> Records:
 def live() -> set[str]:
     from scripts.terminate_agent import sessions
 
-    return {row.name for row in sessions() if row.name and not row.name.startswith("master@")}
+    return {row.name for row in sessions() if row.name and not is_master(row.name)}
+
+
+def is_master(name: str) -> bool:
+    """Whether a session name is a master's, by address, plain herdr name or title; masters hold no worker slot."""
+    from scripts.swarm_v2.masters import is_title
+
+    return name.startswith(("master@", "master-")) or is_title(name)
 
 
 def _workers(records: dict, own: str | None, cache: PassCache | None = None) -> set[str]:

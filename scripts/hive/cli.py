@@ -369,6 +369,13 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workers(names: list[str]) -> int:
+    """How many of a hive's listed agents count against its agent limit: every one but its masters."""
+    from scripts.swarm import local_slots
+
+    return sum(not local_slots.is_master(name) for name in names)
+
+
 def _list() -> None:
     from scripts.hive import headroom, join_report
 
@@ -382,9 +389,10 @@ def _list() -> None:
         excluded = ",".join(record["excluded"]) or "none"
         room = headroom.summary(headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
+        workers = _workers([report["agent"] for report in reported[record["id"]]] + local.get(record["id"], []))
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"\tworkers={workers} of {record['max_agents']}\texcluded={excluded}\t{room}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
