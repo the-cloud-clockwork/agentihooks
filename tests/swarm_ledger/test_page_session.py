@@ -234,6 +234,28 @@ def test_a_cookie_of_an_unknown_kind_sets_no_credential() -> None:
     assert headers.get("X-Ledger-Token") is None
 
 
+@pytest.mark.parametrize(("site", "expected"), [("same-origin", "Bearer from-cookie"), ("cross-site", None)])
+def test_only_a_same_origin_fetch_carries_the_session_cookie(site: str, expected: str | None) -> None:
+    headers = email.message.Message()
+    headers["Sec-Fetch-Site"] = site
+    headers["Cookie"] = f"ledger-session-{SLUG}=bearer:from-cookie"
+
+    server.session_credential(headers, f"/api/{SLUG}")
+
+    assert headers.get("Authorization") == expected
+
+
+def test_a_named_bearer_keeps_the_session_cookie_out() -> None:
+    headers = email.message.Message()
+    headers["Authorization"] = "Bearer named"
+    headers["Cookie"] = f"ledger-session-{SLUG}=page:from-cookie"
+
+    server.session_credential(headers, f"/api/{SLUG}")
+
+    assert headers.get_all("Authorization") == ["Bearer named"]
+    assert headers.get("X-Ledger-Token") is None
+
+
 def test_the_page_renews_its_session_before_it_expires() -> None:
     api = (server.core.HOME.parent / "static" / "js" / "api.js").read_text(encoding="utf-8")
     functions = "\n".join(
