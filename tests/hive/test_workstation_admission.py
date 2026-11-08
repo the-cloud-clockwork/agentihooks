@@ -270,6 +270,43 @@ def test_a_quiet_workstation_admits_past_the_swarm_share_up_to_the_root_hive_max
     assert fenced.spawn(setup.config, "eng", "next", {"id": "task"}) == setup.herdr.spawn.return_value
 
 
+def ceiling_fenced(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, cap: int, load1: float) -> object:
+    """A local runtime on a 16 CPU workstation with twelve agents, the given cap and one minute load."""
+    from scripts.hive import headroom
+
+    fenced = local_fenced(setup, monkeypatch, 16, load5=4.32)
+    reading = {"cpus": 16, "load5": 4.32, "load1": load1, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=cap)
+    setup.store.update(setup.config.slug, local_max_agents=20)
+    local_agents(setup, 12)
+    return fenced
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_a_loaded_workstation_ceiling_keeps_the_swarm_share_under_a_higher_cap(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = ceiling_fenced(setup, monkeypatch, 20, 30.0)
+    assert isinstance(fenced, FencedRuntime)
+    assert "swarm share" in fenced.placement_refusal("eng", {"id": "task"})
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_a_cap_below_the_computed_ceiling_keeps_the_swarm_share_reason(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = ceiling_fenced(setup, monkeypatch, 12, 1.0)
+    assert isinstance(fenced, FencedRuntime)
+    refusal = fenced.placement_refusal("eng", {"id": "task"})
+    assert "swarm share" in refusal
+    assert "agents on the hive" not in refusal
+
+
 def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_the_share(setup, monkeypatch):
     fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
     with pytest.raises(SpawnError) as raised:
