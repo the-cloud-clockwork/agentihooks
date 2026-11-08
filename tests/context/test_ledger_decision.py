@@ -295,10 +295,7 @@ def test_an_empty_plan_path_falls_back_to_a_scratch_copy(isolated: Path, monkeyp
     out = decision.directive(payload)
     scratch = decision.STATE_DIR / "s1.plan.md"
     assert scratch.read_bytes() == "# Plan é\n".encode("utf-8")
-    assert (
-        f"without asking: write the accepted plan as markdown to a file, then run `agentihooks plan ingest {scratch}"
-        in out
-    )
+    assert f"without asking: run `agentihooks plan ingest {scratch} --ledger rig-grade-swarm`." in out
 
 
 def test_a_carried_plan_path_needs_no_write_step(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
