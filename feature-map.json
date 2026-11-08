@@ -96,11 +96,11 @@
       "id": "swarm-spawn-claim-before-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
-      "behaviour": "The spawn pass launches a lane agent only after the ledger server accepted its claim: claimed_by, state claimed and a branch named for the agent unless the task records its own; a pass running from its last good view claims and launches nothing.",
+      "behaviour": "The spawn pass launches a lane agent only after the ledger server accepted its claim: claimed_by and state claimed, clearing a stale protected branch so publication and reclaim never read it; a pass running from its last good view claims and launches nothing.",
       "seam": "scripts.tick.steps.place._prepare called with the pass ledger offline and online",
       "tests": [
         "tests/tick/test_place_prepare.py::test_an_offline_pass_neither_claims_nor_launches",
-        "tests/tick/test_place_prepare.py::test_the_claim_write_names_the_agent_branch_unless_the_task_holds_its_own"
+        "tests/tick/test_place_prepare.py::test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one"
       ]
     },
     {

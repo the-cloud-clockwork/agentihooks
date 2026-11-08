@@ -222,22 +222,20 @@ def test_an_offline_pass_neither_claims_nor_launches(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.feature("swarm-spawn-claim-before-launch")
 @pytest.mark.parametrize(
-    ("recorded", "lives", "written"),
+    ("recorded", "written"),
     [
-        ("", [], "engineer-1-1"),
-        *[(protected, [], "engineer-1-1") for protected in sorted(place.continuation.PROTECTED)],
-        ("dev", ["engineer@1-0"], ""),
-        ("work-7", [], None),
-        ("work-7", ["engineer@1-0"], None),
+        ("", None),
+        *[(protected, "") for protected in sorted(place.continuation.PROTECTED)],
+        ("work-7", None),
     ],
 )
-def test_the_claim_write_names_the_agent_branch_unless_the_task_holds_its_own(
-    monkeypatch: pytest.MonkeyPatch, recorded: str, lives: list[str], written: str | None
+def test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one(
+    monkeypatch: pytest.MonkeyPatch, recorded: str, written: str | None
 ) -> None:
     log: list[Any] = []
     _seams(monkeypatch, log, {})
     monkeypatch.setattr(place.ledger_client, "offline", lambda: False)
-    run = _run(_Store(log, lives=lives), _Ledger(log))
+    run = _run(_Store(log), _Ledger(log))
     launch, _ = place._prepare(run, "eng", {"id": "t1", "branch": recorded}, set(), "", set())
     assert launch is not None
     [(_, _, fields, conditions)] = _calls(log, "update_task")
