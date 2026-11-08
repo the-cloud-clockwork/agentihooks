@@ -71,6 +71,14 @@ class HiveError(Exception):
     pass
 
 
+class StoreRefused(HiveError):
+    """A refusal by the hive state store: its reply names what was refused, its message adds the store's own text."""
+
+    def __init__(self, reply: str, detail: str) -> None:
+        super().__init__(f"{reply} ({detail})")
+        self.reply = reply
+
+
 def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
@@ -102,9 +110,9 @@ def _refusals() -> tuple[type[BaseException], ...]:
     return (*state.unavailable(), redis_acl.Refused)
 
 
-def _refused(exc: BaseException, what: str) -> HiveError:
+def _refused(exc: BaseException, what: str) -> StoreRefused:
     source = "Redis" if hive_state.on_redis() else "the hive state store"
-    return HiveError(f"{source} refused {what} ({exc})")
+    return StoreRefused(f"{source} refused {what}", str(exc))
 
 
 def member(client, member_id: str) -> dict | None:
