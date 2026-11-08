@@ -1576,7 +1576,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
         inputs = capacity.fixture_inputs(json.loads(Path(args.fixture).read_text()))
     else:
         inputs = capacity.live_inputs(args.slug, store, LedgerClient(), dict(os.environ), now_ms())
-    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs)
+    _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
     if args.json:
