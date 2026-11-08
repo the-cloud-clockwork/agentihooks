@@ -23,7 +23,7 @@ def wait(name):
             sys.exit(41)
         time.sleep(0.01)
 if args[0] == 'build':
-    if os.environ['FAILURE'] == 'build':
+    if os.environ['FAILURE'] == 'build' or (os.environ['FAILURE'] == 'rebuild' and '--no-cache-filter' in args):
         print('urllib.error.HTTPError: HTTP Error 504: Gateway Time-out')
         sys.exit(1)
     if '--no-cache-filter' in args:
@@ -333,6 +333,16 @@ def test_a_failed_worker_build_prints_its_build_log(tmp_path: Path, proof: str) 
     assert ': docker build "${build_args[@]}"' in message
     assert '> "$output/build.log" 2>&1 (exit 1)' in message
     assert result.stderr.rstrip().endswith("urllib.error.HTTPError: HTTP Error 504: Gateway Time-out")
+
+
+def test_a_failed_worker_rebuild_prints_only_its_rebuild_log(tmp_path: Path) -> None:
+    """A failed independent rebuild shows its own rebuild log, not the earlier build log."""
+    result, calls, state, output = run_proof(tmp_path, "rebuild")
+    assert result.returncode == 1, result.stderr
+    message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
+    assert '> "$output/rebuild.log" 2>&1 (exit 1)' in message
+    assert result.stderr.rstrip().endswith("urllib.error.HTTPError: HTTP Error 504: Gateway Time-out")
+    assert result.stderr.count("HTTP Error 504") == 1
 
 
 @pytest.mark.parametrize(
