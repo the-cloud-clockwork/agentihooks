@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from scripts.headless.profile_run import ProfileRun, execute, run_profile
 from scripts.headless.request import TIMEOUT_S
@@ -36,9 +36,14 @@ def evidence_items(inputs: dict[str, Any]) -> list[Any]:
         item
         for outputs in inputs.values()
         for output in outputs
-        if isinstance(output, dict)
-        for item in cast("dict[str, list[Any]]", output).get("items", [])
+        if is_record(output)
+        for item in output.get("items", [])
     ]
+
+
+def is_record(output: object) -> TypeGuard[dict[str, list[Any]]]:
+    """Whether a stage output is a record that can carry evidence items."""
+    return isinstance(output, dict)
 
 
 @dataclass(frozen=True)
