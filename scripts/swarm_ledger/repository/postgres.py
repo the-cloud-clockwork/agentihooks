@@ -181,11 +181,11 @@ class Pool:
         self.opened = 0
         self.cap = 1
 
-    def _open(self) -> Any:
+    def _open(self, measure: bool) -> Any:
         with mapped():
             raw = errors().connect(self.address, **SESSION)
             try:
-                if not self.opened:
+                if measure:
                     share = float(os.environ.get("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.1"))
                     if not 0 < share < 1:
                         raise sqlite3.OperationalError("ledger pool share must be between zero and one")
@@ -201,30 +201,48 @@ class Pool:
             except BaseException:
                 raw.close()
                 raise
-        self.opened += 1
         return raw
 
-    def take(self) -> Any:
-        deadline = time.monotonic() + 5
+    def _alive(self, raw: Any) -> bool:
+        if raw.closed:
+            return False
+        try:
+            with raw.cursor() as cursor:
+                cursor.execute(LIVENESS, ())
+            raw.rollback()
+        except errors().Error:
+            return False
+        return True
+
+    def _release(self) -> None:
         with self.lock:
-            while time.monotonic() < deadline:
-                if self.idle:
-                    raw = self.idle.pop()
-                    try:
-                        if raw.closed:
-                            raise errors().InterfaceError("connection already closed")
-                        with raw.cursor() as cursor:
-                            cursor.execute(LIVENESS, ())
-                        raw.rollback()
-                        return raw
-                    except errors().Error:
-                        raw.close()
-                        self.opened -= 1
-                elif self.opened < self.cap:
-                    return self._open()
-                else:
-                    self.lock.wait(timeout=max(0, deadline - time.monotonic()))
-        raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+            self.opened -= 1
+            self.lock.notify()
+
+    def take(self) -> Any:
+        """A live connection: an idle one that answers, else a new one in a slot reserved under the lock."""
+        deadline = time.monotonic() + 5
+        while True:
+            with self.lock:
+                while not self.idle and self.opened >= self.cap:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+                    self.lock.wait(timeout=left)
+                raw = self.idle.pop() if self.idle else None
+                measure = raw is None and not self.opened
+                if raw is None:
+                    self.opened += 1
+            if raw is None:
+                try:
+                    return self._open(measure)
+                except BaseException:
+                    self._release()
+                    raise
+            if self._alive(raw):
+                return raw
+            raw.close()
+            self._release()
 
     def give(self, raw: Any) -> None:
         try:

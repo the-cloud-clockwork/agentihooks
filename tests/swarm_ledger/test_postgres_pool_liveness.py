@@ -124,7 +124,7 @@ def test_pool_notifications_do_not_extend_the_checkout_deadline(
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.01")
     pool = postgres.Pool("database")
     raw = pool.take()
-    clock = iter((0.0, 0.0, 1.0, 2.0, 3.0, 6.0))
+    clock = iter((0.0, 1.0, 3.0, 6.0))
     waits: list[float] = []
 
     def wait(timeout: float) -> bool:
@@ -138,6 +138,48 @@ def test_pool_notifications_do_not_extend_the_checkout_deadline(
     assert waits == [4.0, 2.0]
     assert len(raws) == 1
     pool.give(raw)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_a_slow_connect_does_not_hold_the_pool_lock(raws: list[Raw], monkeypatch: pytest.MonkeyPatch) -> None:
+    pool = postgres.Pool("database")
+    first = pool.take()
+    connecting, release = Event(), Event()
+
+    def slow(*args: Any, **kwargs: Any) -> Raw:
+        connecting.set()
+        assert release.wait(2)
+        raw = Raw()
+        raws.append(raw)
+        return raw
+
+    monkeypatch.setattr(psycopg2, "connect", slow)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(pool.take)
+        assert connecting.wait(1)
+        assert pool.opened == 2
+        pool.give(first)
+        assert pool.take() is first
+        release.set()
+        opened = pending.result(timeout=2)
+    assert opened is raws[-1] and pool.opened == 2
+    pool.give(first)
+    pool.give(opened)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_a_failed_connect_returns_its_reserved_slot(raws: list[Raw], monkeypatch: pytest.MonkeyPatch) -> None:
+    pool = postgres.Pool("database")
+    first = pool.take()
+
+    def refused(*args: Any, **kwargs: Any) -> Raw:
+        raise psycopg2.OperationalError("connection refused")
+
+    monkeypatch.setattr(psycopg2, "connect", refused)
+    with pytest.raises(postgres.sqlite3.DatabaseError):
+        pool.take()
+    assert pool.opened == 1
+    pool.give(first)
 
 
 @pytest.mark.parametrize("share, cap", [("0.1", 10), ("0.5", 50), ("0.99", 96)])
