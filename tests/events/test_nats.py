@@ -461,7 +461,9 @@ def test_dead_letter_migration_reads_the_selected_legacy_stream(bus, url):
         hub.close()
 
 
-def test_a_bounded_first_connect_reconnects_without_end_once_connected(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_bounded_first_connect_reconnects_without_end_once_connected(
+    url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     connect = mock.Mock(wraps=nats.nats_client.connect)
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
