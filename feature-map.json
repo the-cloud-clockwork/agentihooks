@@ -2077,6 +2077,28 @@
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_has_a_uid_is_never_past_the_unbound_window",
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_outside_kubernetes_is_never_past_the_unbound_window"
       ]
+    },
+    {
+      "id": "ledger-pool-liveness",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-db-pool-liveness",
+      "behaviour": "Ledger pooled connections are checked before checkout, dead connections are replaced, total open connections stay within a configured server share, and database write failures leave the tick running.",
+      "seam": "Postgres Pool take and give, ledger probe and tick pass",
+      "tests": [
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_checkout_replaces_a_connection_killed_by_database_restart",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_pool_bounds_checked_out_connections_by_server_share",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_failed_rollback_is_recorded_as_a_probe_failure",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_pool_notifications_do_not_extend_the_checkout_deadline",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_slow_connect_does_not_hold_the_pool_lock",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_failed_connect_returns_its_reserved_slot",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_only_the_first_connection_measures_the_server_and_reuse_checks_liveness",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_closed_idle_connection_is_replaced_and_frees_its_slot",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_a_dead_idle_connection_keeps_the_checkout_deadline",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_giving_back_a_closed_connection_frees_exactly_its_slot",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_takers_wait_for_the_first_connection_to_measure_the_server",
+        "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
+        "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
+      ]
     }
   ],
   "unmapped_rules": [
