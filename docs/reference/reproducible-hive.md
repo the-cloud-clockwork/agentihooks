@@ -74,7 +74,7 @@ agentihooks hive remove <name>
 
 | Step | What it does |
 |---|---|
-| drain | marks the hive's registry record draining, so placement sends it no new agent, and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds; past that it refuses naming the agents still running, and a rerun keeps waiting |
+| drain | marks the hive's registry record draining, so placement sends it no new agent, and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds for them to end. Then every claim an agent on the hive still holds without a handoff is released, and its task reopens; every unfinished agent left on the hive is then retired, before any later step deletes the hive. A retirement the store refuses stops the remove, and a rerun retries it. It reports how many agents it ordered, how many handed off and which claims it released |
 | member | revokes the hive's member credential and its Redis user, and its NATS credential when a NATS signer is configured |
 | herdr | deletes the herdr machine and its `known_hosts` entry |
 | registry | deletes the hive's registry records, keeping its wait history in the swarm, releases the hive name of every node holding that name and deletes the saved create when it names that hive |
@@ -100,7 +100,6 @@ kubectl -n <name> logs deploy/<name>-agentihooks-swarm-worker-hive | grep worker
 | the pod stays in `CreateContainerConfigError` | a Secret its ExternalSecrets write is missing | `kubectl -n <name> describe externalsecret`; check the record the invite step printed |
 | the pod stays in `ContainerCreating` | its NFS home folder does not mount on the node it landed on | the pod events name the mount; the node must reach the hive home NFS server |
 | `engineer` times out | placement is off, no engineer task is open, or the hive lacks the task's repo | `agentihooks hive show <id>` for repos and slots |
-| `drain` refuses | an agent did not hand off within `--wait` | rerun `hive remove`; it keeps waiting |
 
 ## Related pages
 
