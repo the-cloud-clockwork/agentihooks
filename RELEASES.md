@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.757 · 2026-11-08
+
+### 2026-11-08 · b046f80e8d0d · #10239 · @nestorcolt
+
+**Stop the chart release from stamping a per-release digest into worker hives**
+
+This change reverts the part of #10198 that had the chart-release workflow stamp a fresh image digest into the worker hive pod template on every release build. Because releases happen roughly every 20 minutes, that stamping was quietly rolling both worker hives each time, killing every in-progress agent on them and degrading launches for over an hour on 2026-11-08. The `agentihooks.io/release` annotation now only changes when an operator explicitly sets `workers.rollout.release`, restoring worker hives to their intended operator-controlled roll mechanism while keeping the rest of #10198 intact.
+
+### 2026-11-08 · 66066c7ed1dd · #10150 · @agenticore-app
+
+**Settle retirement after a hive stops acknowledging**
+
+This change fixes a bug where retire orders could get stuck forever on a hive whose agent had stopped responding, leaving seats falsely marked as running even after the underlying worker was long gone. Now HerdrRuntime.retire checks for bounded heartbeat loss or newer hive membership evidence to recognize when the remote agent is actually gone, clears the stale refusal, and settles the seat as retired, while still retaining the normal retire-and-wait behavior for hives that are alive and acknowledging. This closes a real production issue where seats stayed occupied after pod rollouts, without ever force-killing a live agent.
+
 ## v2.17.755 · 2026-11-08
 
 ### 2026-11-08 · 2e2dcf3f1b64 · #10187 · @agenticore-app
