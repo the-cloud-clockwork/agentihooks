@@ -2419,6 +2419,32 @@ def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypat
     )
 
 
+def test_hive_accounts_read_the_hive_quota_reports_without_a_runtime_backend(monkeypatch):
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": None, "resets_at": 500},
+        "seven_day": {"used": 27, "resets_at": 600},
+    }
+    record = {"harness": "claude", "account": "a", "kind": "subscription", "sessions": 5, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    monkeypatch.setattr(balancer, "cached_observations", lambda environ=None: [])
+    assert not aggregate.enabled({})
+    (row,) = capacity.hive_accounts({}, 100, refresh=False)
+    assert (row.harness, row.name, row.state, row.sessions, row.cap) == ("claude", "a", "OPEN", 5, 8)
+
+
+def test_a_placement_names_a_missing_quota_reading_instead_of_a_none_cap():
+    rows = [
+        capacity.Account("claude", "a", "UNKNOWN", 5, None, None),
+        capacity.Account("claude", "b", "OPEN", 2, 90, 80, 8),
+        capacity.Account("codex", "c", "OPEN", 1, 90, 80, 6),
+    ]
+    assert capacity.rooms(rows, "claude") == "a 5 sessions, no fresh quota reading, b 2 sessions of 8"
+    assert capacity.rooms(rows[2:], "claude") == "no live hive reports a claude quota reading"
+
+
 @pytest.mark.parametrize(
     ("environ", "high", "near"),
     [

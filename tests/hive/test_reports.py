@@ -1143,6 +1143,26 @@ def test_the_hive_controller_reads_hive_reports_from_its_store(remote):
     assert remote.runtime.hive.redis is remote.redis
 
 
+def test_the_hive_controller_reads_account_quota_from_the_hive_reports(remote, monkeypatch):
+    from scripts.routing import aggregate
+    from scripts.swarm import capacity, lease
+    from scripts.swarm_v2.runtime.routed import hive_controller, routed
+
+    quota = {
+        "observed_at": 100,
+        "five_hour": {"used": None, "resets_at": 500},
+        "seven_day": {"used": 27, "resets_at": 600},
+    }
+    record = {"harness": "claude", "account": "a", "kind": "subscription", "sessions": 5, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"claude:a": record})
+    held = lease.acquire(remote.store, "fixture", "controller")
+    placed = hive_controller(routed(environ={}, herdr=remote.runtime), remote.store, "fixture", held)
+    assert remote.runtime.quota_accounts is capacity.hive_accounts
+    assert placed.hive_launch.herdr.quota_accounts is capacity.hive_accounts
+    (row,) = remote.runtime.quota_accounts({}, 100, refresh=False)
+    assert (row.name, row.cap) == ("a", 8)
+
+
 @pytest.mark.parametrize("handoff", [False, True])
 def test_finished_removed_hive_workers_settle_after_an_absence_lease(remote, handoff):
     from scripts.hive import registry
