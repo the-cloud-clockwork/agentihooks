@@ -665,6 +665,7 @@ def main(argv: list[str]) -> int:
     from scripts.swarm import commands
     from scripts.swarm_v2 import control_service, proof_swarm
 
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     operator_env.fill(os.environ)
     operator_env.classifier(os.environ)
     outage = redis_grace.Outage.from_environ()
