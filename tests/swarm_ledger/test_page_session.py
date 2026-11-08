@@ -107,6 +107,28 @@ def test_a_session_needs_an_allowed_origin(live: dict) -> None:
     assert not cookie
 
 
+def test_a_session_without_an_origin_is_refused(live: dict) -> None:
+    with allowed(live):
+        status, body, _ = send(live, "POST", f"/api/{SLUG}/session")
+
+    assert status == 403
+    assert body == b"origin not allowed"
+
+
+def test_the_session_response_is_never_cached(live: dict) -> None:
+    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    try:
+        with allowed(live):
+            conn.request("POST", f"/api/{SLUG}/session", b"", {"Host": live["host"], **origin(live)})
+            response = conn.getresponse()
+            response.read()
+    finally:
+        conn.close()
+
+    assert response.status == 200
+    assert response.getheader("Cache-Control") == "no-store"
+
+
 @pytest.fixture
 def auth(live: dict, monkeypatch: MonkeyPatch) -> Iterator[dict]:
     """An auth service with a signing key, legacy credentials off, the ledger in edge mode."""
