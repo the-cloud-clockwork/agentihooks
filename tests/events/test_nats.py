@@ -461,18 +461,30 @@ def test_dead_letter_migration_reads_the_selected_legacy_stream(bus, url):
         hub.close()
 
 
-def test_the_bus_connects_without_reconnecting(url, monkeypatch):
+def test_a_bounded_first_connect_reconnects_without_end_once_connected(
+    url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     connect = mock.Mock(wraps=nats.nats_client.connect)
     monkeypatch.setattr(nats.nats_client, "connect", connect)
     opened = nats.open_bus(BusConfig(backend="nats", url=url))
+    options = dict(opened._nc.options)
     opened.close()
+    lifecycle = connect.call_args.kwargs["disconnected_cb"].__self__
+    assert (lifecycle.client, connect.call_args.kwargs["reconnected_cb"].__self__) == (opened._nc, lifecycle)
     connect.assert_called_once_with(
         url,
+        disconnected_cb=lifecycle.disconnected,
+        reconnected_cb=lifecycle.reconnected,
         allow_reconnect=False,
         max_reconnect_attempts=1,
         reconnect_time_wait=0,
         connect_timeout=nats.FIRST_CONNECT_S,
         error_cb=nats._unreported,
+    )
+    assert (options["allow_reconnect"], options["max_reconnect_attempts"], options["reconnect_time_wait"]) == (
+        True,
+        -1,
+        nats.RECONNECT_WAIT_S,
     )
 
 
