@@ -61,6 +61,19 @@ def test_inbox_delegates_each_operation_as_the_tick() -> None:
     ]
 
 
+def test_inbox_settles_a_leaving_agent_with_every_argument_on_its_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.inbox import exits
+
+    store, settled = _Store(), []
+    monkeypatch.setattr(exits, "settle", lambda *args: settled.append(args) or "settled")
+    port = inbox.StoreInbox(cast(Any, store), "tick@swarm")
+    assert port.settle_exit("engineer@a1-0001", "eng-1@swarm", "stopped", deadline=_open()) == "settled"
+    assert settled == [(store, "engineer@a1-0001", "eng-1@swarm", "stopped")]
+    with pytest.raises(TimeoutError, match="^tool deadline expired$"):
+        port.settle_exit("engineer@a1-0001", "eng-1@swarm", "stopped", deadline=_expired())
+    assert len(settled) == 1
+
+
 def _strict_store() -> Any:
     import fakeredis
 
