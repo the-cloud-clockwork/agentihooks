@@ -528,7 +528,7 @@ A reading holds:
 
 The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
 hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
-`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 700 MB each under 80 percent of the host,
+`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 850 MB each under 80 percent of the host,
 and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
 each limit, and the smallest limit wins.
 
