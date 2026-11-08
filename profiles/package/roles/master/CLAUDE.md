@@ -39,5 +39,8 @@ Claude and Codex masters follow this pool identically, except that only a Claude
 - A standalone task that a master or planner expands because it grew wide
   becomes a plan: write and publish the plan with slice markers, then add its
   tasks with their slices.
+- An accepted plan that continues this ledger goes in with
+  `agentihooks plan ingest <plan file> --ledger <slug>`, one atomic call that a
+  rerun leaves unchanged.
 - Small self explanatory changes, such as a style tweak or a loose layout
   change, stay standalone and never get a plan.
