@@ -1178,3 +1178,139 @@ def test_cached_observations_skip_entries_missing_a_result_or_a_time(
     cache.write_text(json.dumps(data))
 
     assert balancer.cached_observations(cache_file=cache) == []
+
+
+def test_requested_model_falls_back_to_empty_when_the_settings_dict_has_no_model(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"other": "value"}))
+
+    assert balancer.requested_model([], settings) == ""
+
+
+def test_requested_model_falls_back_to_empty_when_the_settings_file_is_not_a_dict(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps([1, 2, 3]))
+
+    assert balancer.requested_model([], settings) == ""
+
+
+def _model_usage_stream(model: str, model_usage: dict[str, dict[str, int]]) -> str:
+    events = [
+        {"type": "system", "subtype": "init", "model": model},
+        {
+            "type": "result",
+            "usage": {"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            "modelUsage": model_usage,
+        },
+    ]
+    return "\n".join(json.dumps(event) for event in events)
+
+
+def test_a_single_model_usage_entry_sets_context_capacity_when_the_model_name_differs() -> None:
+    output = _model_usage_stream("claude-haiku-4-5-20251001", {"other-model-name": {"contextWindow": 123456}})
+
+    result = balancer.parse_probe("ALPHA", output, 100)
+
+    assert result.context_capacity == 123456
+
+
+def test_context_capacity_uses_the_requested_models_own_usage_entry() -> None:
+    output = _model_usage_stream(
+        "claude-haiku-4-5-20251001",
+        {
+            "claude-haiku-4-5-20251001": {"contextWindow": 200000},
+            "claude-sonnet-4-5-20251001": {"contextWindow": 1000000},
+        },
+    )
+
+    result = balancer.parse_probe("ALPHA", output, 100)
+
+    assert result.context_capacity == 200000
+
+
+def test_an_unknown_probe_state_raises_the_fixed_rate_limit_error_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def unreachable(*args: object, **kwargs: object) -> None:
+        raise claude_usage.Unreachable
+
+    monkeypatch.setattr(claude_usage, "probe", unreachable)
+    monkeypatch.setattr(balancer.subprocess, "run", run)
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+
+    result = balancer.probe_credential(credential, "haiku", 10, {})
+
+    assert result.state == "UNKNOWN"
+    assert result.error == "rate-limit windows unavailable"
+
+
+def test_cache_freshness_honours_the_mode_fable_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def probe(credentials: list[balancer.Credential], *args: object, **kwargs: object) -> list[balancer.ProbeResult]:
+        calls.append([credential.account for credential in credentials])
+        return [balancer.parse_probe(item.account, _stream(0.10, 0.10, 0.10), 100) for item in credentials]
+
+    monkeypatch.setattr(balancer, "probe_credentials", probe)
+    cache = tmp_path / "cache.json"
+    credential = balancer.Credential("AH_CC_TOKEN_ALPHA", "secret")
+    stale_fable = balancer.ProbeResult(
+        "ALPHA",
+        "allowed",
+        "NORMAL",
+        80.0,
+        balancer.QuotaWindow(used=10.0, resets_at=90000),
+        balancer.QuotaWindow(used=10.0, resets_at=90000),
+        balancer.QuotaWindow(used=10.0, resets_at=500),
+    )
+    cache.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "modes": {
+                    "fable": {
+                        "accounts": {
+                            "AH_CC_TOKEN_ALPHA": {
+                                "observed_at": 1000,
+                                "result": balancer._result_data(stale_fable),
+                            }
+                        }
+                    }
+                },
+            }
+        )
+    )
+
+    results, source = balancer.collect_results([credential], include_fable=True, cache_file=cache, environ={}, now=1030)
+
+    assert source == "live"
+    assert calls == [["ALPHA"]]
+    assert results[0].account == "ALPHA"
+
+
+def test_entry_is_fresh_treats_the_cache_ttl_boundary_as_stale() -> None:
+    entry = {
+        "observed_at": 940,
+        "result": balancer._result_data(balancer.parse_probe("ALPHA", _stream(0.10, 0.10), 100)),
+    }
+
+    assert balancer._entry_is_fresh(entry, 1000, False) is False
+
+
+class _FreshLookingMapping:
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    def get(self, key: str) -> object:
+        return self._data.get(key)
+
+    def __getitem__(self, key: str) -> object:
+        return self._data[key]
+
+
+def test_entry_is_fresh_rejects_a_non_dict_entry_even_when_it_looks_fresh() -> None:
+    result = balancer.parse_probe("ALPHA", _stream(0.10, 0.10), 100)
+    entry = _FreshLookingMapping({"observed_at": 999, "result": balancer._result_data(result)})
+
+    assert balancer._entry_is_fresh(entry, 1000, False) is False

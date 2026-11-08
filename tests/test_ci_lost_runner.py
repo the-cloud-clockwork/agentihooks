@@ -806,3 +806,14 @@ def test_main_with_a_free_lock_holds_it_while_it_scans(monkeypatch, capsys, tmp_
     assert capsys.readouterr().out == ""
     assert len(api.calls) == 5
     assert seen == [None] * 5
+
+
+def test_stop_keeps_its_initial_run_when_every_poll_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, no_sleep: list[float]
+) -> None:
+    monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 0)
+    api = Api({})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    assert ci_lost_runner.stop("o/r", 7, {}) == {}
+    assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
+    assert no_sleep == []
