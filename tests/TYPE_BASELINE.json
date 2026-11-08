@@ -651,7 +651,7 @@
   "scripts/swarm/name_state.py": 3,
   "scripts/swarm/naming.py": 510,
   "scripts/swarm/operator_email.py": 33,
-  "scripts/swarm/operator_mail.py": 138,
+  "scripts/swarm/operator_mail.py": 135,
   "scripts/swarm/outage.py": 218,
   "scripts/swarm/overlays.py": 43,
   "scripts/swarm/overrun.py": 96,

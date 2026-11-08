@@ -14,7 +14,7 @@ from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
 from scripts.swarm_v2 import masters
 
 if TYPE_CHECKING:
-    from scripts.inbox.store import InboxStore
+    from scripts.inbox.store import InboxStore, Item
 
 OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
@@ -96,7 +96,7 @@ def relay(
     doc: dict,
     events: list[dict],
     line: Callable[[dict], str],
-) -> list[dict]:
+) -> list["Item"]:
     """Send each new operator write once; a write already relayed is skipped. No swarm on the ledger sends nothing."""
     try:
         store.config(slug)
