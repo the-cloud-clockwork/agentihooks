@@ -87,7 +87,7 @@ def equipped(task: dict, hive: dict | None) -> bool:
     return set(task.get("needs") or ()) <= set((hive or {}).get("capabilities") or ())
 
 
-def workstation_hives(hives: list[dict], local: str) -> list[dict]:
+def workstation_hives(hives: list[dict[str, Any]], local: str) -> list[dict[str, Any]]:
     """The hives a workstation task runs on: the headed hive, else the controller's own hive."""
     headed = [hive for hive in hives if hive.get("ui") == YES]
     return headed or [hive for hive in hives if hive["id"] == local]

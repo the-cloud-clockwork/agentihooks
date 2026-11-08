@@ -28,6 +28,7 @@ from scripts.tick.ports.tools import PASS_TOOLS
 
 if TYPE_CHECKING:
     from scripts.hive.admission import Room
+    from scripts.hive.launch import Selection
     from scripts.hive.placement import Wait
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.control_service import ControlService
@@ -136,7 +137,7 @@ class FencedRuntime:
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
             if not isinstance(selected, Wait):
-                return self._workstation_claim(lane, task, claim, selected.hive)
+                return self._workstation_claim(lane, task, claim, selected)
             if lane == "master":
                 return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
             return self._overflow(lane, task, selected, claim)
@@ -145,14 +146,14 @@ class FencedRuntime:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
-    def _workstation_claim(self, lane: str, task: dict, claim: str, hive: str) -> str:
+    def _workstation_claim(self, lane: str, task: dict[str, Any], claim: str, selected: "Selection") -> str:
         from scripts.swarm.commands import hive_id
 
-        if self.runtime.router.placed_backend(lane, task) != WORKSTATION_BACKEND or hive != hive_id():
+        if self.runtime.router.placed_backend(lane, task) != WORKSTATION_BACKEND or selected.hive != hive_id():
             return ""
         return self._local_refusal(lane, task, claim)
 
-    def _local_refusal(self, lane: str, task: dict, name: str) -> str:
+    def _local_refusal(self, lane: str, task: dict[str, Any], name: str) -> str:
         if lane == "master":
             return ""
         from scripts.hive import admission, placement_waits, registry
