@@ -476,10 +476,10 @@
         "tests/tick/test_spawn_ports.py::test_the_ledger_facade_comments_through_the_port_with_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
-        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect"
-        ,"tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks"
-        ,"tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires"
-        ,"tests/tick/steps/test_spawn.py::test_spawn"
+        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
+        "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
+        "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
+        "tests/tick/steps/test_spawn.py::test_spawn"
       ]
     },
     {
@@ -2160,6 +2160,22 @@
         "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
         "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
         "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
+      ]
+    },
+    {
+      "id": "tick-doc-items-map",
+      "origin": "inventory",
+      "behaviour": "When the watchdog document copy named by the swarm setting watchdog-document changes, the next tick maps its open items onto their tasks once and records the copy digest; an unchanged, unset or missing copy runs nothing.",
+      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed",
+      "tests": [
+        "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
+        "tests/tick/steps/test_doc_items_map.py::test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once",
+        "tests/tick/steps/test_doc_items_map.py::test_an_unchanged_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_an_unset_or_missing_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_copy_already_on_its_tasks_records_its_digest_without_writes",
+        "tests/tick/steps/test_doc_items_map.py::test_unknown_tasks_refuse_the_copy_once_until_it_changes",
+        "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
+        "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
       ]
     }
   ],

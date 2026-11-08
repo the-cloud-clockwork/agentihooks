@@ -293,3 +293,23 @@ STEPS = (
 
 for _step in STEPS:
     registry.register(_step)
+
+
+def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the doc items map step, given the tick module and a reader of the pass state."""
+    return []
+
+
+registry.register(
+    CallStep(
+        "doc items map",
+        "wrapper events",
+        _doc_items_map,
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"coordination", "ledger"}),
+        feature="tick-doc-items-map",
+    )
+)
