@@ -129,9 +129,16 @@ def test_a_chart_version_bump_leaves_hive_pod_templates_unchanged() -> None:
         shutil.copytree(CHART, bumped)
         manifest = bumped / "Chart.yaml"
         manifest.write_text(re.sub(r"(?m)^version: .*$", "version: 9.9.9", manifest.read_text()))
-        before = {d["metadata"]["name"]: d["spec"]["template"] for d in render() if d["kind"] == "Deployment"}
+        settings = ("workers.node=node-one", "hiveStorage.default.homes=/homes")
+        before = {
+            (d["kind"], d["metadata"]["name"]): d["spec"]["template"]
+            for d in render(*settings)
+            if "template" in d.get("spec", {})
+        }
         after = {
-            d["metadata"]["name"]: d["spec"]["template"] for d in render(chart=bumped) if d["kind"] == "Deployment"
+            (d["kind"], d["metadata"]["name"]): d["spec"]["template"]
+            for d in render(*settings, chart=bumped)
+            if "template" in d.get("spec", {})
         }
     assert before
     assert before == after
