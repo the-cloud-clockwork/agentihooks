@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.741 · 2026-11-08
+
+### 2026-11-08 · 99931e716c95 · #10158 · @agenticore-app
+
+**Reuse stable worker hive build layers in the kind proof**
+
+This change updates the kind proof so the worker hive image build reuses cached layers across ephemeral runners instead of rebuilding from scratch each time, while still checking base image freshness and falling back to a full rebuild when needed. It keeps the complete kind pod proof and publication path intact. This matters because cold builds were taking up to 270 seconds with no layer reuse, and consistently restoring stable layers should cut build time and make CI runs faster and more predictable, pending three after-push samples to confirm the new median.
+
 ## v2.17.740 · 2026-11-08
 
 ### 2026-11-08 · 7e1b8c4b82ba · #10134 · @nestorcolt
