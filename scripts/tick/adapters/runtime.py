@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm.store import AgentRecord, SwarmConfig
+from scripts.swarm_v2.admission import PendingAdmission
 from scripts.swarm_v2.runtime.base import Outcome, RuntimeRouter, SpawnRequest, Status
 from scripts.tick.deadline import Deadline
 
@@ -89,3 +90,63 @@ class RouterRuntime:
         deadline.live()
         dismissed: bool = self.legacy.dismiss(agent)
         return dismissed
+
+    def place(self, config: SwarmConfig, lane: str, name: str, task: Mapping[str, Any], *, deadline: Deadline) -> Any:
+        """Place the agent ``name`` for ``task`` in ``lane`` through the pass runtime."""
+        deadline.live()
+        return self.legacy.spawn(config, lane, name, task)
+
+    def has_capacity(self, config: SwarmConfig, *, deadline: Deadline) -> bool:
+        deadline.live()
+        room: bool = self.legacy.has_capacity(config)
+        return room
+
+    def launch_room(self, config: SwarmConfig, *, deadline: Deadline) -> int | None:
+        """The launches the pass runtime takes at once, or None when it does not say."""
+        deadline.live()
+        room = getattr(self.legacy, "launch_room", None)
+        return None if room is None else int(room(config))
+
+    def reported(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        deadline.live()
+        seen: bool = self.legacy.reported(agent)
+        return seen
+
+    def placement_refusal(self, lane: str, task: Mapping[str, Any], *, deadline: Deadline) -> str:
+        """Why the pass runtime places ``task`` elsewhere, or nothing when it does not refuse placements."""
+        deadline.live()
+        refuses = getattr(self.legacy, "placement_refusal", None)
+        return str(refuses(lane, task)) if refuses else ""
+
+    def placement(self, *, deadline: Deadline) -> object:
+        """The placement backend of the pass runtime's router, or None without one."""
+        deadline.live()
+        return getattr(getattr(self.legacy, "router", None), "placement", None)
+
+    def begin_placement(self, *, deadline: Deadline) -> None:
+        deadline.live()
+        if begin := getattr(self.legacy, "begin_placement_pass", None):
+            begin()
+
+    def end_placement(self, *, deadline: Deadline) -> None:
+        deadline.live()
+        if end := getattr(self.legacy, "end_placement_pass", None):
+            end()
+
+    def reap_name(self, name: str, *, deadline: Deadline) -> bool:
+        deadline.live()
+        reaped: bool = self.legacy.reap_name(name)
+        return reaped
+
+    def admits(self, *, deadline: Deadline) -> bool:
+        """Whether the pass runtime holds a pending admission gate."""
+        deadline.live()
+        return isinstance(getattr(self.legacy, "admission", None), PendingAdmission)
+
+    def admit(self, slug: str, tasks: Sequence[Mapping[str, Any]], now_ms: int, *, deadline: Deadline) -> Any:
+        deadline.live()
+        return self.legacy.admission.admit(slug, tasks, now_ms)
+
+    def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.legacy.admission.release(slug, task_id, reservation)

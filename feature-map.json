@@ -435,7 +435,7 @@
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
-      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass.",
+      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass. The spawn helpers reach the runtime only through the runtime port bound to that same recording deadline: placement, capacity, launch room, peer reports, placement refusal, the placement pass bracket, reaping and pending admission are runtime port operations, the placing and admitting ones writes that need the runtime effect.",
       "seam": "scripts.tick.steps.place, re-exported by scripts.swarm.tick",
       "tests": [
         "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
@@ -459,6 +459,16 @@
         ,"tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks"
         ,"tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires"
         ,"tests/tick/steps/test_spawn.py::test_spawn"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_admission_admits_and_releases_through_the_port"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_keeps_the_optional_runtime_defaults"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_refuses_spawn_operations_past_their_deadline"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_writes_need_the_runtime_effect"
+        ,"tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_reads_pass_without_the_runtime_effect"
       ]
     },
     {
