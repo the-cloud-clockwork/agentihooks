@@ -873,3 +873,12 @@ def test_a_terminated_runner_without_a_reason_is_named_terminated() -> None:
 
 def test_a_runner_set_source_names_no_kill() -> None:
     assert ci_lost_runner.killed([CLUSTER["job"]], RUNNERS) == ""
+
+
+def test_two_killed_lost_runners_are_named_together() -> None:
+    runners = oom_cluster()
+    runners.kills["other-runner"] = "Error exit 1"
+    lost = [CLUSTER["job"], {**CLUSTER["job"], "name": "unit", "runner_name": "other-runner"}]
+    assert ci_lost_runner.killed(lost, runners) == (
+        f"; runner pod ended: {CLUSTER['job']['name']} OOMKilled exit 137, unit Error exit 1"
+    )

@@ -74,7 +74,7 @@ def _alive(pod: dict[str, Any], away: dict[str, timedelta | None], bound: timede
 
 def _kill(pod: dict[str, Any]) -> str | None:
     """Name the runner container's termination reason and exit code, or None while it has not terminated."""
-    runner = [c for c in pod["status"].get("containerStatuses", cast(list[Any], [])) if c["name"] == "runner"]
+    runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
     ended = next((c["state"]["terminated"] for c in runner if "terminated" in c["state"]), None)
     if ended is None:
         return None
@@ -99,7 +99,7 @@ def cluster_runners(_org: str) -> ClusterRunners:
     return ClusterRunners(sets, pods, _kubectl("nodes"), datetime.now(UTC), timedelta(seconds=NODE_BOUND_SECONDS))
 
 
-def lost_jobs(jobs: list[dict[str, Any]], runners: set[str], now: datetime, grace: timedelta) -> list[dict[str, Any]]:
+def lost_jobs(jobs: list[dict[str, Any]], runners: Container[str], now: datetime, grace: timedelta) -> list[dict[str, Any]]:
     return [
         job
         for job in jobs
@@ -207,7 +207,7 @@ def assess(
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     jobs = jobs_of(repo, run["id"], cached)
     runners = source(repo.split("/")[0])
-    lost = lost_jobs(jobs, cast(set[str], runners), datetime.now(UTC), grace)
+    lost = lost_jobs(jobs, runners, datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
     return stuck, reason + (killed(lost, runners) if stuck else ""), jobs
 
