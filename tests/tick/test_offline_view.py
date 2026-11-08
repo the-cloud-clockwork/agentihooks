@@ -142,15 +142,18 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
     assert "ledger sw not answering" in capsys.readouterr().err
 
 
-@pytest.mark.feature("swarm-tick-cached-ledger")
-def test_a_down_server_without_a_stored_view_ends_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(cli.ledger_view, "start", start)
     monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: None)
-    with ExitStack() as beating, pytest.raises(LedgerUnreachable, match="no stored view"):
+    with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient())
+        assert OFFLINE.get() is False
+        assert view.current() is None
     assert OFFLINE.get() is False
 
 
