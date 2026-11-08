@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -12,14 +14,14 @@ __all__ = ["plan_ledger", "served"]
 
 
 @pytest.fixture
-def seat(monkeypatch):
+def seat(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     for key, value in SEAT.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr("hooks.mcp._session._ENV_FALLBACK_ALLOWED", True)
 
 
-def test_a_network_transport_refuses_before_any_ingest(monkeypatch):
+def test_a_network_transport_refuses_before_any_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hooks.mcp._session._ENV_FALLBACK_ALLOWED", False)
     monkeypatch.setattr(ingest, "ingest", lambda args, env: pytest.fail("ingest ran under a network transport"))
     assert plans.run("", MARKED, "plan-proof", "", True) == {"success": False, "error": plans.NETWORK}
@@ -31,14 +33,17 @@ def test_a_network_transport_refuses_before_any_ingest(monkeypatch):
         ("", "", "", "pass exactly one of path or text"),
         ("plan.md", MARKED, "", "pass exactly one of path or text"),
         ("", MARKED, "later", "planning is auto, manual or empty"),
+        ("-", "", "", "standard input is the MCP channel; pass the plan as text"),
     ],
 )
-def test_arguments_are_refused_before_any_ingest(monkeypatch, seat, path, text, planning, error):
+def test_arguments_are_refused_before_any_ingest(
+    monkeypatch: pytest.MonkeyPatch, seat: None, path: str, text: str, planning: str, error: str
+) -> None:
     monkeypatch.setattr(ingest, "ingest", lambda args, env: pytest.fail("ingest ran on refused arguments"))
     assert plans.run(path, text, "plan-proof", planning, False) == {"success": False, "error": error}
 
 
-def test_inline_text_dry_run_writes_nothing(served, seat):
+def test_inline_text_dry_run_writes_nothing(served: dict[str, Any], seat: None) -> None:
     result = plans.run("", MARKED, "plan-proof", "", True)
     assert served["sent"] == []
     assert result == {
@@ -52,7 +57,9 @@ def test_inline_text_dry_run_writes_nothing(served, seat):
     }
 
 
-def test_a_path_applies_once_and_a_rerun_reports_already_ingested(served, seat, tmp_path):
+def test_a_path_applies_once_and_a_rerun_reports_already_ingested(
+    served: dict[str, Any], seat: None, tmp_path: Path
+) -> None:
     path = tmp_path / "plan.md"
     path.write_text(MARKED, encoding="utf-8")
     applied = plans.run(str(path), "", "plan-proof", "manual", False)
@@ -73,7 +80,9 @@ def test_a_path_applies_once_and_a_rerun_reports_already_ingested(served, seat, 
     }
 
 
-def test_a_seat_of_another_swarm_is_refused(served, seat, monkeypatch):
+def test_a_seat_of_another_swarm_is_refused(
+    served: dict[str, Any], seat: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
     assert plans.run("", MARKED, "plan-proof", "", False) == {
         "success": False,
@@ -82,13 +91,13 @@ def test_a_seat_of_another_swarm_is_refused(served, seat, monkeypatch):
     assert served["sent"] == []
 
 
-def test_a_missing_path_is_refused(served, seat, tmp_path):
+def test_a_missing_path_is_refused(served: dict[str, Any], seat: None, tmp_path: Path) -> None:
     result = plans.run(str(tmp_path / "absent.md"), "", "plan-proof", "", True)
     assert result["success"] is False
     assert "absent.md" in result["error"]
 
 
-def test_the_server_serves_plan_ingest_from_the_plans_category(served, seat):
+def test_the_server_serves_plan_ingest_from_the_plans_category(served: dict[str, Any], seat: None) -> None:
     from hooks.mcp import build_server
 
     server = build_server(["plans"])

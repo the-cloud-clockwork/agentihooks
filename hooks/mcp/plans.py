@@ -2,8 +2,10 @@
 
 import json
 import os
+import sys
 import tempfile
 from argparse import Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,8 @@ def run(path: str, text: str, ledger: str, planning: str, dry_run: bool) -> dict
         return {"success": False, "error": NETWORK}
     if bool(path) == bool(text):
         return {"success": False, "error": "pass exactly one of path or text"}
+    if path == "-":
+        return {"success": False, "error": "standard input is the MCP channel; pass the plan as text"}
     if planning not in PLANNING:
         return {"success": False, "error": "planning is auto, manual or empty"}
     from scripts.plans import ingest
@@ -30,7 +34,8 @@ def run(path: str, text: str, ledger: str, planning: str, dry_run: bool) -> dict
             Path(source).write_text(text, encoding="utf-8")
         args = Namespace(path=source, ledger=ledger, planning=planning, dry_run=dry_run, repo="")
         try:
-            result = ingest.ingest(args, os.environ)
+            with redirect_stdout(sys.stderr):
+                result = ingest.ingest(args, os.environ)
         except (ingest.IngestError, SystemExit, OSError) as exc:
             return {"success": False, "error": str(exc)}
     state = result.pop("swarm", "dry run")
