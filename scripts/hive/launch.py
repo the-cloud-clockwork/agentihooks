@@ -13,6 +13,7 @@ from scripts.hive import admission, headroom, orders, placement, placement_waits
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
+from scripts.routing.slots import account_key
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import ACK_LATER, Placed
@@ -77,6 +78,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             key: count for key, count in counts.items() if key != "_executions" and not key.startswith("interactive:")
         }
         masters = sum(count for key, count in counts.items() if key.startswith("interactive:"))
+        spellings = {account_key(key): key for key in reported}
         pending: dict[str, int] = {}
         recorded = 0
         for agent in agents:
@@ -84,6 +86,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
                 recorded += 1
                 if agent.state in ("launching", "working", "suspect") and agent.execution_id not in seen:
                     slot = f"{agent.harness}:{agent.account}"
+                    slot = spellings.get(account_key(slot), slot)
                     pending[slot] = pending.get(slot, 0) + 1
         unclaimed = {
             slot: max(0, reported.get(slot, 0) - counts.get(f"interactive:{slot}", 0) - len(executions.get(slot, [])))
