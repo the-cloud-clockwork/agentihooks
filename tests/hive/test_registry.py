@@ -56,7 +56,8 @@ def test_hive_set_accepts_zero_max_agents_to_scale_a_hive_fully_down(redis):
     registry.update(redis, "box", ["max-agents=3"])
     assert registry.update(redis, "box", ["max-agents=0"]) == {**DEFAULT, "max_agents": 0}
     assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 0}
-    assert _record(redis, "box")["max_agents"] == 0
+    stored = _record(redis, "box")
+    assert stored is not None and stored["max_agents"] == 0
 
 
 def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
