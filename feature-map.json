@@ -2003,6 +2003,20 @@
         "tests/tick/test_database_ledger_routes.py::test_a_tick_routed_call_keeps_its_own_ledger_route",
         "tests/tick/test_database_ledger_routes.py::test_the_port_builds_the_database_client_with_its_base_and_bounded_timeout"
       ]
+    },
+    {
+      "id": "swarm-tick-reap-ended-executions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2422",
+      "behaviour": "The reap step retires an agent record whose execution ended out of the tick's reach and releases its claimed task: a Kubernetes attempt whose pod never bound and stays suspect for the hive lost window is dropped with its task reopened, and a finished master whose seat holds a later master retires once its runtime retire has failed for the same window.",
+      "seam": "scripts.tick.steps.agents reap: remote gone reason and ended retirement",
+      "tests": [
+        "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_never_bound_is_retired_and_releases_its_task",
+        "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_never_bound_keeps_its_task_inside_the_lost_window",
+        "tests/tick/steps/test_reap_ended_executions.py::test_a_bound_pod_is_never_judged_by_the_unbound_window",
+        "tests/tick/steps/test_reap_ended_executions.py::test_a_finished_master_retires_after_its_handoff_when_its_pane_is_out_of_reach",
+        "tests/tick/steps/test_reap_ended_executions.py::test_a_finished_master_with_no_successor_keeps_retrying"
+      ]
     }
   ],
   "unmapped_rules": [
