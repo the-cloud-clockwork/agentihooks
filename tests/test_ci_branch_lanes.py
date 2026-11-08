@@ -1071,3 +1071,37 @@ def test_a_branch_only_copy_of_the_mutation_preflight_keeps_no_superseded_lane(t
     found = lanes.refused(sha, base)[f"{lanes.WORKFLOWS}/mutation-copy.yml"]
     assert "job stats has no shared hosted lane concurrency group" in found
     assert "job mutation-shard has no shared hosted lane concurrency group" in found
+
+
+def test_a_tests_workflow_whose_trusted_baseline_has_no_jobs_mapping_is_still_graded() -> None:
+    baseline = _workflow()
+    baseline["name"] = "Tests"
+    del baseline["jobs"]
+    workflow = _workflow(a={"runs-on": "ubuntu-latest"})
+    workflow["name"] = "Tests"
+    assert lanes.problems(workflow, baseline) == ["job a has no shared hosted lane concurrency group"]
+
+
+def test_dedicated_chart_group_without_a_trusted_jobs_mapping_does_not_crash() -> None:
+    trusted = {
+        "name": "Helm chart release",
+        "on": {"workflow_run": {"workflows": ["Swarm worker image"], "types": ["completed"]}},
+    }
+    job = {"runs-on": "ubuntu-latest"}
+    block = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
+    assert lanes.dedicated_chart_group("package", block, job, trusted) is False
+
+
+def test_refused_asks_git_for_inherited_workflows_with_the_path_separator(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def git(*args: str) -> str:
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr(lanes, "branch_only", lambda *a, **k: ["x"])
+    monkeypatch.setattr(lanes, "trusted_ancestor", lambda *a: "anc")
+    monkeypatch.setattr(lanes, "git", git)
+    monkeypatch.setattr(lanes, "grade", lambda *a: [])
+    assert lanes.refused("head", Path(".")) == {}
+    assert ("ls-tree", "-r", "--name-only", "anc", "--", lanes.WORKFLOWS) in calls

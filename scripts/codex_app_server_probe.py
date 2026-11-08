@@ -13,6 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from websockets.sync.client import unix_connect
 
@@ -21,12 +22,12 @@ RESPONSE_TIMEOUT_S = 60
 
 
 class Client:
-    def __init__(self, socket_path: str, name: str):
+    def __init__(self, socket_path: str, name: str) -> None:
         self.name = name
         self.ws = unix_connect(socket_path, max_size=None)
         self.next_id = 1
-        self.responses: dict[int, dict] = {}
-        self.events: queue.Queue = queue.Queue()
+        self.responses: dict[int, dict[str, Any]] = {}
+        self.events: queue.Queue[dict[str, Any]] = queue.Queue()
         self.lock = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
@@ -46,16 +47,16 @@ class Client:
         except Exception as exc:
             self.events.put({"method": "_closed", "error": type(exc).__name__})
 
-    def notify(self, method: str, params: dict | None = None) -> None:
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "method": method, **({"params": params} if params else {})}))
 
-    def send(self, method: str, params: dict) -> int:
+    def send(self, method: str, params: dict[str, Any]) -> int:
         rid = self.next_id
         self.next_id += 1
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params}))
         return rid
 
-    def wait_response(self, rid: int, timeout: float | None = None) -> dict:
+    def wait_response(self, rid: int, timeout: float | None = None) -> dict[str, Any]:
         end = time.monotonic() + (RESPONSE_TIMEOUT_S if timeout is None else timeout)
         while time.monotonic() < end:
             with self.lock:
@@ -64,14 +65,16 @@ class Client:
             time.sleep(0.02)
         raise TimeoutError(f"{self.name}: no response to {rid}")
 
-    def request(self, method: str, params: dict, timeout: float | None = None) -> dict:
+    def request(self, method: str, params: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         return self.wait_response(self.send(method, params), timeout)
 
-    def answer(self, rid: int | str, result: dict) -> None:
+    def answer(self, rid: int | str, result: dict[str, Any]) -> None:
         self.ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}))
 
-    def until(self, pred: Callable[[dict], bool], timeout: float = TURN_TIMEOUT_S) -> tuple[dict | None, list[dict]]:
-        seen = []
+    def until(
+        self, pred: Callable[[dict[str, Any]], bool], timeout: float = TURN_TIMEOUT_S
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        seen: list[dict[str, Any]] = []
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             try:
@@ -87,20 +90,20 @@ class Client:
         self.ws.close()
 
 
-def text(s: str) -> list[dict]:
+def text(s: str) -> list[dict[str, Any]]:
     return [{"type": "text", "text": s}]
 
 
-def method_is(name: str) -> Callable[[dict], bool]:
+def method_is(name: str) -> Callable[[dict[str, Any]], bool]:
     return lambda m: m.get("method") == name
 
 
-def is_approval_request(msg: dict) -> bool:
+def is_approval_request(msg: dict[str, Any]) -> bool:
     return "id" in msg and str(msg.get("method")).endswith("requestApproval")
 
 
-def agent_texts(seen: list[dict]) -> list[str]:
-    out = []
+def agent_texts(seen: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
     for m in seen:
         if m.get("method") == "item/completed":
             item = m["params"].get("item", {})
@@ -109,13 +112,13 @@ def agent_texts(seen: list[dict]) -> list[str]:
     return out
 
 
-def start_thread(c: Client, repo: str, **extra) -> str:
+def start_thread(c: Client, repo: str, **extra: Any) -> str:
     params = {"cwd": repo, "approvalPolicy": "never", "sandbox": "read-only", **extra}
     r = c.request("thread/start", params)
     return r["result"]["thread"]["id"]
 
 
-def run_turn(c: Client, thread: str, prompt: str, **extra) -> dict:
+def run_turn(c: Client, thread: str, prompt: str, **extra: Any) -> dict[str, Any]:
     r = c.request("turn/start", {"threadId": thread, "input": text(prompt), **extra})
     if "error" in r:
         return {"start_error": r["error"]}
@@ -126,11 +129,11 @@ def run_turn(c: Client, thread: str, prompt: str, **extra) -> dict:
         "completed": done is not None,
         "status": done["params"]["turn"].get("status") if done else None,
         "agent_text": agent_texts(seen),
-        "methods": sorted({m.get("method") for m in seen}),
+        "methods": sorted(cast("set[str]", {m.get("method") for m in seen})),
     }
 
 
-def conversation(sock: str, repo: str) -> dict:
+def conversation(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-conversation")
     thread = start_thread(c, repo)
     first = run_turn(c, thread, "Fixture one. Reply with exactly the word ALPHA and nothing else.")
@@ -164,7 +167,7 @@ SLOW_PROMPT = (
 )
 
 
-def steer(sock: str, repo: str) -> dict:
+def steer(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-steer")
     thread = start_thread(c, repo)
     r = c.request("turn/start", {"threadId": thread, "input": text(SLOW_PROMPT)})
@@ -216,7 +219,7 @@ APPROVAL_PROMPT = (
 )
 
 
-def approvals(sock: str, repo: str) -> dict:
+def approvals(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-owner-a")
     thread = start_thread(a, repo, approvalPolicy="untrusted")
     b = Client(sock, "probe-viewer-b")
@@ -257,7 +260,7 @@ def approvals(sock: str, repo: str) -> dict:
     return result
 
 
-def late_approval(sock: str, repo: str) -> dict:
+def late_approval(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-owner-a")
     thread = start_thread(a, repo, approvalPolicy="untrusted")
     a.request("turn/start", {"threadId": thread, "input": text(APPROVAL_PROMPT)})
@@ -269,9 +272,16 @@ def late_approval(sock: str, repo: str) -> dict:
     resumed = late.request("thread/resume", {"threadId": thread})
     reread = late.request("thread/read", {"threadId": thread, "includeTurns": True})
     req_late, _ = late.until(is_approval_request, 10)
-    turns = (read.get("result") or {}).get("thread", {}).get("turns") or [{}]
-    resumed_turns = (resumed.get("result") or {}).get("thread", {}).get("turns") or [{}]
-    result = {
+    turns = cast(
+        "list[dict[str, Any]]",
+        cast("dict[str, Any]", cast("dict[str, Any]", read.get("result") or {}).get("thread", {})).get("turns") or [{}],
+    )
+    resumed_turns = cast(
+        "list[dict[str, Any]]",
+        cast("dict[str, Any]", cast("dict[str, Any]", resumed.get("result") or {}).get("thread", {})).get("turns")
+        or [{}],
+    )
+    result: dict[str, Any] = {
         "late_resume_last_turn_status": resumed_turns[-1].get("status"),
         "thread": thread,
         "request_method": req_a.get("method") if req_a else None,
@@ -291,7 +301,7 @@ def late_approval(sock: str, repo: str) -> dict:
         _, reader_seen = reader.until(method_is("turn/completed"), 5)
         result.update(
             {
-                "late_reader_methods": sorted({m.get("method") for m in reader_early + reader_seen}),
+                "late_reader_methods": sorted(cast("set[str]", {m.get("method") for m in reader_early + reader_seen})),
                 "resolved_seen_by_late_resumer": resolved_late is not None,
                 "turn_status": done["params"]["turn"].get("status") if done else None,
                 "file_created": (Path(repo) / "approval-probe.txt").exists(),
@@ -302,7 +312,7 @@ def late_approval(sock: str, repo: str) -> dict:
     return result
 
 
-def detach(sock: str, repo: str) -> dict:
+def detach(sock: str, repo: str) -> dict[str, Any]:
     a = Client(sock, "probe-bridge")
     thread = start_thread(a, repo)
     r = a.request("turn/start", {"threadId": thread, "input": text(SLOW_PROMPT.replace("CHARLIE", "GOLF"))})
@@ -336,7 +346,7 @@ def detach(sock: str, repo: str) -> dict:
     }
 
 
-def compaction(sock: str, repo: str) -> dict:
+def compaction(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-compact")
     thread = start_thread(c, repo)
     first = run_turn(c, thread, "Fixture nine. Reply INDIA.")
@@ -349,7 +359,7 @@ def compaction(sock: str, repo: str) -> dict:
         "first": first,
         "compact_response": r.get("error") or r.get("result"),
         "compacted_notification": compacted is not None,
-        "methods": sorted({m.get("method") for m in seen}),
+        "methods": sorted(cast("set[str]", {m.get("method") for m in seen})),
         "after": after,
     }
 
@@ -364,7 +374,7 @@ SANDBOX_CMD = [
     "curl -s -o /dev/null -m 5 -w 'external_https=%{http_code}\\n' https://pypi.org/simple/ || echo external_https=fail",
 ]
 
-SANDBOX_POLICIES = {
+SANDBOX_POLICIES: dict[str, dict[str, Any]] = {
     "readOnly": {"type": "readOnly"},
     "readOnly+network": {"type": "readOnly", "networkAccess": True},
     "workspaceWrite(repo)": {"type": "workspaceWrite"},
@@ -375,13 +385,13 @@ SANDBOX_POLICIES = {
 }
 
 
-def sandbox(sock: str, repo: str) -> dict:
+def sandbox(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-sandbox")
-    out = {}
+    out: dict[str, Any] = {}
     for name, policy in SANDBOX_POLICIES.items():
         policy = {**policy, **({"writableRoots": [repo]} if policy.get("writableRoots") == ["REPO"] else {})}
         r = c.request("command/exec", {"command": SANDBOX_CMD, "cwd": repo, "sandboxPolicy": policy}, 60)
-        res = r.get("result") or {}
+        res = cast("dict[str, Any]", r.get("result") or {})
         out[name] = {
             "error": r.get("error"),
             "exit": res.get("exitCode"),
@@ -393,10 +403,10 @@ def sandbox(sock: str, repo: str) -> dict:
     return out
 
 
-def account(sock: str, repo: str) -> dict:
+def account(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-account")
     r = c.request("account/read", {})
-    acct = (r.get("result") or {}).get("account") or {}
+    acct = cast("dict[str, Any]", cast("dict[str, Any]", r.get("result") or {}).get("account") or {})
     thread = start_thread(c, repo)
     turn = run_turn(c, thread, "Fixture eleven. Reply KILO.")
     c.close()
@@ -404,12 +414,12 @@ def account(sock: str, repo: str) -> dict:
         "account_read_error": r.get("error"),
         "account_type": acct.get("type"),
         "plan_present": bool(acct.get("planType")),
-        "requires_openai_auth": (r.get("result") or {}).get("requiresOpenaiAuth"),
+        "requires_openai_auth": cast("dict[str, Any]", r.get("result") or {}).get("requiresOpenaiAuth"),
         "turn": turn,
     }
 
 
-def bridge_turn(sock: str, thread: str) -> dict:
+def bridge_turn(sock: str, thread: str) -> dict[str, Any]:
     c = Client(sock, "probe-bridge-tui")
     c.request("thread/resume", {"threadId": thread})
     turn = run_turn(c, thread, "Fixture twelve from the bridge while the terminal is attached. Reply LIMA.")
@@ -417,7 +427,7 @@ def bridge_turn(sock: str, thread: str) -> dict:
     return turn
 
 
-def new_thread(sock: str, repo: str) -> dict:
+def new_thread(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-tui-seed")
     thread = start_thread(c, repo)
     turn = run_turn(c, thread, "Fixture thirteen seeds the terminal thread. Reply MIKE.")
@@ -425,12 +435,12 @@ def new_thread(sock: str, repo: str) -> dict:
     return {"thread": thread, "turn": turn}
 
 
-def list_hooks(c: Client, repo: str) -> list[dict]:
+def list_hooks(c: Client, repo: str) -> list[dict[str, Any]]:
     entries = c.request("hooks/list", {"cwds": [repo]})["result"]["data"]
     return [h for e in entries for h in e["hooks"]]
 
 
-def trust_hooks(sock: str, repo: str) -> dict:
+def trust_hooks(sock: str, repo: str) -> dict[str, Any]:
     c = Client(sock, "probe-hook-trust")
     before = list_hooks(c, repo)
     edits = [
@@ -471,7 +481,7 @@ def first_reply(sock_path: str, payload: bytes, wait_s: float) -> str:
     return line.decode().strip() or "closed"
 
 
-def transport(sock: str, repo: str) -> dict:
+def transport(sock: str, repo: str) -> dict[str, Any]:
     return {
         "socket_is_symlink": Path(sock).is_symlink(),
         "raw_json_line_reply": first_reply(sock, RAW_LINE, 3),

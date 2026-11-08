@@ -4,9 +4,13 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from scripts.routing.settings import SettingsStore
 
 
-def _routing_settings():
+def _routing_settings() -> "SettingsStore":
     from scripts.routing import place
     from scripts.routing.settings import open_store
 
@@ -124,7 +128,7 @@ def cmd_balance_master_account(tokens: list[str], clear: bool = False, now: floa
     return 0
 
 
-def add_parser(sub: argparse._SubParsersAction) -> None:
+def add_parser(sub: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
     balance_p = sub.add_parser(
         "balance", help="One table for every Claude and Codex account, without launching anything"
     )

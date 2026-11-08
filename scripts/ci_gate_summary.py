@@ -11,8 +11,8 @@ FAILED = "failed"
 
 
 def counts(reports: Path) -> dict[str, int]:
-    ran = set()
-    outcomes = {}
+    ran: set[tuple[str, str]] = set()
+    outcomes: dict[tuple[str, str], str] = {}
     for path in reports.glob(DURATIONS):
         shard = path.parent.name.removeprefix("durations-")
         ran.update((shard, test) for test in json.loads(path.read_text()))

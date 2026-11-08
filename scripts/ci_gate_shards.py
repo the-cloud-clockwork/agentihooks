@@ -3,10 +3,12 @@ import os
 import subprocess
 import sys
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from scripts.ci_budget import rate_limit
-from scripts.ci_budget.rate_limit import gh_api
+
+gh_api = cast("Callable[..., subprocess.CompletedProcess[bytes]]", rate_limit.gh_api)
 
 RETRY_DELAYS = (5, 10, 20, None)
 POLL_SECONDS = 15
@@ -15,10 +17,11 @@ NOT_LISTED = "not listed"
 UNKNOWN = "unknown"
 
 
-def api(endpoint: str, *, binary: bool = False) -> list | bytes:
+def api(endpoint: str, *, binary: bool = False) -> list[Any] | bytes:
     command = [endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
+    result: subprocess.CompletedProcess[bytes] | None = None
     for delay in RETRY_DELAYS:
         try:
             result = gh_api(command, timeout=60)
@@ -27,10 +30,11 @@ def api(endpoint: str, *, binary: bool = False) -> list | bytes:
             if delay is None:
                 raise
             time.sleep(delay)
+    assert result is not None
     return result.stdout if binary else json.loads(result.stdout)
 
 
-def ready(jobs: list[dict], shards: list[int]) -> bool:
+def ready(jobs: list[dict[str, Any]], shards: list[int]) -> bool:
     passed = {job["name"] for job in jobs if job.get("conclusion") == "success"}
     return bool(shards) and all(
         f"unit (3.12, {shard})" in passed or f"unit rerun (3.12, {shard})" in passed for shard in shards
@@ -65,7 +69,9 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
     pending: list[str] = []
     while (now := time.monotonic()) < deadline:
         polls += 1
-        pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
+        pages = cast(
+            "list[dict[str, Any]]", api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
+        )
         jobs = [job for page in pages for job in page["jobs"]]
         pending = waiting(jobs, shards)
         print(

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Literal, cast
 
 from scripts.claude_quota_balancer import QuotaWindow, _state
 
@@ -32,7 +33,7 @@ class CodexQuota:
         windows = [w for w in (self.five_hour, self.seven_day) if w.used is not None]
         if not windows:
             return "UNKNOWN"
-        worst = max(windows, key=lambda w: w.used)
+        worst = max(windows, key=lambda w: cast(float, w.used))
         return _state("allowed", worst, worst)[0]
 
     @property
@@ -60,12 +61,14 @@ def codex_home(environ: dict[str, str]) -> Path:
 
 
 def _window(raw: object) -> tuple[str, QuotaWindow] | None:
-    if not isinstance(raw, dict) or raw.get("used_percent") is None:
+    if not isinstance(raw, dict) or cast(dict[str, Any], raw).get("used_percent") is None:
         return None
-    minutes = raw.get("window_minutes") or 0
+    minutes = cast(dict[str, Any], raw).get("window_minutes") or 0
     name = "five_hour" if minutes <= FIVE_HOUR_MINUTES else "seven_day"
-    resets = raw.get("resets_at")
-    return name, QuotaWindow(used=float(raw["used_percent"]), resets_at=int(resets) if resets else None)
+    resets = cast(dict[str, Any], raw).get("resets_at")
+    return name, QuotaWindow(
+        used=float(cast(dict[str, Any], raw)["used_percent"]), resets_at=int(resets) if resets else None
+    )
 
 
 def parse_event(line: str) -> CodexQuota | None:
@@ -73,20 +76,31 @@ def parse_event(line: str) -> CodexQuota | None:
         event = json.loads(line)
     except ValueError:
         return None
-    payload = event.get("payload") if isinstance(event, dict) else None
-    limits = payload.get("rate_limits") if isinstance(payload, dict) else None
+    payload = cast(dict[str, Any], event).get("payload") if isinstance(event, dict) else None
+    limits = cast(dict[str, Any], payload).get("rate_limits") if isinstance(payload, dict) else None
     if not isinstance(limits, dict):
         return None
-    family = [limits.get("primary"), limits.get("secondary")] if limits.get("limit_id") in DEFAULT_FAMILY else []
-    windows = dict(w for w in map(_window, family) if w)
-    reached = str(limits.get("rate_limit_reached_type") or "")
+    family = (
+        [cast(dict[str, Any], limits).get("primary"), cast(dict[str, Any], limits).get("secondary")]
+        if cast(dict[str, Any], limits).get("limit_id") in DEFAULT_FAMILY
+        else cast(list[Any], [])
+    )
+    windows = cast("dict[Literal['five_hour', 'seven_day'], QuotaWindow]", dict(w for w in map(_window, family) if w))
+    reached = str(cast(dict[str, Any], limits).get("rate_limit_reached_type") or "")
     if not windows and not reached:
         return None
     try:
-        observed = datetime.fromisoformat(str(event.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+        observed = datetime.fromisoformat(
+            str(cast(dict[str, Any], event).get("timestamp", "")).replace("Z", "+00:00")
+        ).timestamp()
     except ValueError:
         return None
-    return CodexQuota(observed_at=observed, plan_type=str(limits.get("plan_type") or "?"), reached=reached, **windows)
+    return CodexQuota(
+        observed_at=observed,
+        plan_type=str(cast(dict[str, Any], limits).get("plan_type") or "?"),
+        reached=reached,
+        **windows,
+    )
 
 
 def _last_in(path: Path) -> CodexQuota | None:

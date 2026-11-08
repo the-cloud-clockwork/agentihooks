@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_shards.py:scripts.ci_gate_shards.x_api:a4d8a03bc7cde5f91b38eccbca607b67e888297fa9eb6e2c668eec9cf28f0a78": {
+    "reader": "standards_reader",
+    "reason": "RETRY_DELAYS ends in None, so the retry loop either breaks after assigning result or re-raises, and result is always overwritten before the assert and use."
+  }
+}

@@ -13,6 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import AbstractSet, Any, cast
 from urllib.parse import quote
 
 LONG_LIVED = frozenset({"dev", "main", "master"})
@@ -26,7 +27,7 @@ MB = 1000**2
 BUILD_RECORD = ".dockerbuild"
 
 
-def _read(command: list[str], key: str | None) -> list[dict]:
+def _read(command: list[str], key: str | None) -> list[dict[str, Any]]:
     for attempt in range(ATTEMPTS):
         try:
             done = subprocess.run(
@@ -42,17 +43,18 @@ def _read(command: list[str], key: str | None) -> list[dict]:
             time.sleep(attempt + 1)
         else:
             return [json.loads(line) for line in done.stdout.splitlines() if line]
+    raise AssertionError
 
 
-def rows(path: str, key: str | None) -> list[dict]:
+def rows(path: str, key: str | None) -> list[dict[str, Any]]:
     return _read(["gh", "api", "--paginate", path], key)
 
 
-def first_page(path: str, key: str) -> list[dict]:
+def first_page(path: str, key: str) -> list[dict[str, Any]]:
     return _read(["gh", "api", path], key)
 
 
-def billed(owner: str) -> list[dict]:
+def billed(owner: str) -> list[dict[str, Any]]:
     found = rows(f"orgs/{owner}/repos?per_page=100", None)
     return sorted(
         (repo for repo in found if repo["visibility"] != "public" and not repo["archived"]),
@@ -60,8 +62,8 @@ def billed(owner: str) -> list[dict]:
     )
 
 
-def by_name(repo: str) -> list[dict]:
-    names = set()
+def by_name(repo: str) -> list[dict[str, Any]]:
+    names: set[str] = set()
     for workflow in rows(f"repos/{repo}/actions/workflows?per_page=100", "workflows"):
         runs = f"repos/{repo}/actions/workflows/{workflow['id']}/runs?status=success&per_page={RUNS_PER_WORKFLOW}"
         for run in first_page(runs, "workflow_runs"):
@@ -76,19 +78,19 @@ def by_name(repo: str) -> list[dict]:
     ]
 
 
-def artifacts(repo: str) -> list[dict]:
+def artifacts(repo: str) -> list[dict[str, Any]]:
     try:
         return rows(f"repos/{repo}/actions/artifacts?per_page=100", "artifacts")
     except subprocess.CalledProcessError:
         return by_name(repo)
 
 
-def kept_branches(repo: dict) -> frozenset[str]:
+def kept_branches(repo: dict[str, Any]) -> frozenset[str]:
     heads = {pull["head"]["ref"] for pull in rows(f"repos/{repo['full_name']}/pulls?state=open&per_page=100", None)}
     return LONG_LIVED | {repo["default_branch"]} | heads
 
 
-def passed_runs(repo: str, branches: set[str]) -> set[int]:
+def passed_runs(repo: str, branches: AbstractSet[str]) -> set[int]:
     return {
         run["id"]
         for branch in sorted(branches)
@@ -98,27 +100,28 @@ def passed_runs(repo: str, branches: set[str]) -> set[int]:
     }
 
 
-def _branch(row: dict) -> str | None:
-    return (row.get("workflow_run") or {}).get("head_branch")
+def _branch(row: dict[str, Any]) -> str | None:
+    return cast("dict[str, Any]", row.get("workflow_run") or {}).get("head_branch")
 
 
-def _run(row: dict) -> int | None:
-    return (row.get("workflow_run") or {}).get("id")
+def _run(row: dict[str, Any]) -> int | None:
+    return cast("dict[str, Any]", row.get("workflow_run") or {}).get("id")
 
 
-def _created(row: dict) -> datetime:
+def _created(row: dict[str, Any]) -> datetime:
     return datetime.fromisoformat(row["created_at"])
 
 
-def _size(rows) -> int:
+def _size(rows: list[dict[str, Any]]) -> int:
     return sum(row["size_in_bytes"] for row in rows if not row["expired"])
 
 
 def plan(
-    found: list[dict], branches: frozenset[str], passed: set[int], now: datetime, keep: timedelta
-) -> tuple[list[dict], list[dict]]:
+    found: list[dict[str, Any]], branches: frozenset[str], passed: set[int], now: datetime, keep: timedelta
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     live = sorted((row for row in found if not row["expired"]), key=_created)
-    newest, newest_passed = {}, {}
+    newest: dict[tuple[Any, str | None], int] = {}
+    newest_passed: dict[tuple[Any, str | None], int] = {}
     for row in live:
         if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD):
             newest[(row["name"], _branch(row))] = row["id"]
@@ -131,7 +134,7 @@ def plan(
     return old + [row for row in found if row["expired"]], young
 
 
-def delete(repo: str, row: dict) -> bool:
+def delete(repo: str, row: dict[str, Any]) -> bool:
     try:
         done = subprocess.run(
             ["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/artifacts/{row['id']}"],
@@ -144,10 +147,10 @@ def delete(repo: str, row: dict) -> bool:
     return done.returncode == 0 or "(HTTP 404)" in done.stderr
 
 
-def delete_all(work: list[tuple[str, dict]], per_minute: int = DELETES_PER_MINUTE) -> set[tuple[str, int]]:
+def delete_all(work: list[tuple[str, dict[str, Any]]], per_minute: int = DELETES_PER_MINUTE) -> set[tuple[str, int]]:
     gap, lock, slot = 60 / per_minute, threading.Lock(), [time.monotonic()]
 
-    def paced(item: tuple[str, dict]) -> bool:
+    def paced(item: tuple[str, dict[str, Any]]) -> bool:
         with lock:
             now = time.monotonic()
             wait, slot[0] = slot[0] - now, max(slot[0], now) + gap
@@ -160,8 +163,10 @@ def delete_all(work: list[tuple[str, dict]], per_minute: int = DELETES_PER_MINUT
     return {(name, row["id"]) for (name, row), ok in zip(work, done) if ok}
 
 
-def _survey(args: argparse.Namespace, now: datetime) -> tuple[dict, list[str]]:
-    def read(repo: dict) -> tuple | None:
+def _survey(args: argparse.Namespace, now: datetime) -> tuple[dict[str, Any], list[str]]:
+    def read(
+        repo: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]] | None:
         name = repo["full_name"]
         try:
             found = artifacts(name)
@@ -179,9 +184,9 @@ def _survey(args: argparse.Namespace, now: datetime) -> tuple[dict, list[str]]:
     return plans, unread
 
 
-def prune(args: argparse.Namespace, now: datetime) -> dict:
+def prune(args: argparse.Namespace, now: datetime) -> dict[str, Any]:
     plans, unread = _survey(args, now)
-    doomed = [(name, row) for name, (_, old, _) in plans.items() for row in old]
+    doomed: list[tuple[str, dict[str, Any]]] = [(name, row) for name, (_, old, _) in plans.items() for row in old]
     total = sum(_size(found) - _size(old) for found, old, _ in plans.values())
     ripe = sorted(
         (
@@ -201,7 +206,7 @@ def prune(args: argparse.Namespace, now: datetime) -> dict:
     budgeted = ranked[: args.budget]
     chosen = {(name, row["id"]) for name, row in budgeted}
     gone = delete_all(budgeted) if args.apply else chosen
-    report = []
+    report: list[dict[str, Any]] = []
     for name, (found, _, _) in plans.items():
         mine = [row for row_name, row in doomed if row_name == name]
         picked = [row for row in mine if (name, row["id"]) in chosen]
@@ -221,9 +226,9 @@ def prune(args: argparse.Namespace, now: datetime) -> dict:
     return {"repositories": report, "unread": unread}
 
 
-def verdict(result: dict, limit: int) -> tuple[list[str], int]:
+def verdict(result: dict[str, Any], limit: int) -> tuple[list[str], int]:
     lines = [f"::error title=Artifacts not listed::{name} could not be listed" for name in result["unread"]]
-    rows = result["repositories"]
+    rows: list[dict[str, Any]] = result["repositories"]
     lines += [
         f"::error title=Artifact deletion failed::{row['failed']} deletions failed in {row['repository']}"
         for row in rows

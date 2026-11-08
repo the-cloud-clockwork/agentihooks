@@ -1,0 +1,6 @@
+{
+  "scripts/agent_choice.py:scripts.agent_choice.x_choose:4b1b222689310729f5d8de22f02694bc3c9787a2d3aa18ce98da2af00f4c4004": {
+    "reader": "standards_reader",
+    "reason": "Replacing the first argument of typing.cast with None, another string, or an expression changes no output, because cast returns its value unchanged and never reads the type; every touched module imports cast from typing with no shadowing."
+  }
+}
