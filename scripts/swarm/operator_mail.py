@@ -4,11 +4,17 @@ everything else to the lead master, the front door: a backend master receives no
 order and the @swarm information copy. The lead is the lead seat while it is live, else the lowest numbered live
 master. A gone addressee falls back to the lead."""
 
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
 from scripts.inbox import outbox
 from scripts.inbox.seen import write_ref
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_ledger.ledger_gate import IGNORED_KINDS, MENTION_RE
 from scripts.swarm_v2 import masters
+
+if TYPE_CHECKING:
+    from scripts.inbox.store import InboxStore
 
 OPERATOR = "operator"
 SYNC_ORDER = "sync requested"
@@ -83,7 +89,14 @@ def entry(event):
     return f"{head}/{rest.partition('/')[0]}" if head in ENTRY_LISTS and rest else ""
 
 
-def relay(inbox, store, slug, doc, events, line):
+def relay(
+    inbox: "InboxStore",
+    store: RedisStore,
+    slug: str,
+    doc: dict,
+    events: list[dict],
+    line: Callable[[dict], str],
+) -> list[dict]:
     """Send each new operator write once; a write already relayed is skipped. No swarm on the ledger sends nothing."""
     try:
         store.config(slug)

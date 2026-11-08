@@ -160,7 +160,7 @@ def check(op):
     return None
 
 
-def check_add(op):
+def check_add(op: dict) -> None:
     if not ADD_KEYS <= set(op) <= ADD_KEYS | {"request", "plan"}:
         raise ValueError("artifact_add takes id, by, task, title, file and an optional request or plan")
     if "plan" in op and op["plan"] is not True:
@@ -207,7 +207,7 @@ def refusal(doc: dict, op: dict, members: dict) -> str:
     return "" if requested or operator_asked(doc, op.get("request")) else REFUSED
 
 
-def _add(doc, op, ctx):
+def _add(doc: dict, op: dict, ctx: core.Context) -> bool:
     rows = doc.setdefault("artifacts", [])
     if any(row["id"] == op["id"] for row in rows):
         return True

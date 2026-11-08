@@ -1,6 +1,7 @@
 """Plans and slices: the ledger resources a phase and a task name as their parents."""
 
 import re
+from typing import Any
 
 OPS = ("plan_add", "slice_add")
 PLAN_RE = re.compile(r"^[A-Za-z][\w-]{0,63}$")
@@ -42,10 +43,10 @@ def check_links(fields: dict) -> None:
             raise ValueError(f"{key} must be an http or https link")
 
 
-def check_source(op: dict) -> None:
+def check_source(op: dict[str, object]) -> None:
     if "source" not in op:
         return
-    source = op["source"]
+    source: object = op["source"]
     if (
         not isinstance(source, dict)
         or set(source) != SOURCE_KEYS
@@ -263,7 +264,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
     return not refusal
 
 
-def add_plan(doc: dict, op: dict, ctx) -> str:
+def add_plan(doc: dict, op: dict, ctx: Any) -> str:
     plans = doc.setdefault("plans", [])
     plan = {
         "id": op["plan"],

@@ -85,7 +85,7 @@ class ArtifactEndpoint(Endpoint):
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read().decode()
 
-    def publish_as_operator(self, filename, data, request=None):
+    def publish_as_operator(self, filename: str, data: bytes, request: object = None) -> tuple[int, object]:
         headers = {
             "Host": f"127.0.0.1:{server.PORT}",
             "Origin": f"http://127.0.0.1:{server.PORT}",
@@ -212,7 +212,7 @@ class ArtifactEndpoint(Endpoint):
         assert code == 200
         assert not json.loads(body)["rejected"]
 
-    def test_an_operator_plan_upload_is_accepted_and_a_non_plan_upload_is_still_refused(self):
+    def test_an_operator_plan_upload_is_accepted_and_a_non_plan_upload_is_still_refused(self) -> None:
         code, file = self.publish_as_operator("plan.md", b"# Operator plan\n", request={"plan": True, "title": "Plan"})
         assert code == 200, file
         code, _, body = self.put(
@@ -338,13 +338,13 @@ def test_artifact_op_shape_is_checked():
             core.check_op(bad)
 
 
-def test_artifact_add_by_validation_names_the_right_fault():
+def test_artifact_add_by_validation_names_the_right_fault() -> None:
     good = {"op": "artifact_add", "id": "a", "task": "t1", "title": "Plan", "file": {"id": "a" * 64 + ".md"}}
     with pytest.raises(ValueError, match="^artifact_add needs `by`, an agent name$"):
         artifacts.check_add({**good, "by": ""})
 
 
-def test_a_master_lane_upload_by_a_non_member_operator_does_not_crash():
+def test_a_master_lane_upload_by_a_non_member_operator_does_not_crash() -> None:
     from scripts.swarm_ledger import ledger_core
 
     doc = {}

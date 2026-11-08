@@ -219,7 +219,9 @@ def test_agent_writes_and_cleared_chat_are_not_relayed(swarm):
     assert inbox.pending() == []
 
 
-def test_plan_and_slice_additions_are_quiet_but_other_adds_and_events_still_relay(swarm):
+def test_plan_and_slice_additions_are_quiet_but_other_adds_and_events_still_relay(
+    swarm: tuple[RedisStore, InboxStore],
+) -> None:
     _, inbox = swarm
     sent = relay(
         swarm,

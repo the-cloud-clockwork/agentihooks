@@ -351,7 +351,7 @@ def test_plan_and_slice_ops_start_their_collections_and_record_events():
     assert ctx.refused == []
 
 
-def test_plan_add_with_a_source_stores_it_and_an_operator_by_is_accepted():
+def test_plan_add_with_a_source_stores_it_and_an_operator_by_is_accepted() -> None:
     doc, ctx = {}, Recorder()
     source = {"harness": "claude", "session": "s-1", "path": "/tmp/plan.md", "sha256": "a" * 64}
     op = {"op": "plan_add", "by": "operator", "plan": "a", "title": "Plan", "source": source}
