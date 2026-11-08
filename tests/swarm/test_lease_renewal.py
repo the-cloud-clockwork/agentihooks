@@ -346,8 +346,9 @@ def test_run_tick_stops_between_steps_when_another_controller_took_the_lease(env
 
     monkeypatch.setattr(progress, "checks_pass", stolen)
     monkeypatch.setattr(cli.waits, "end_pass", lambda *args: later.append(args) or [])
-    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert actions == ["pass failed: a step raised SwarmError: the controller lease is stale"]
+    with pytest.raises(SwarmError) as error:
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert str(error.value) == "the controller lease is stale"
     assert later == []
     assert lease.current(store, "sw").owner == "other"
     assert not store.redis.exists(store.key("sw", "tick-lock"))
