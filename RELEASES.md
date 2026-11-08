@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.733 · 2026-11-08
+
+### 2026-11-08 · 2d484dfd5cf1 · #10105 · @agenticore-app
+
+**Document agent cards: the bundle catalogue replaces the registry**
+
+This change updates the documentation to reflect that the bundle catalogue of profile cards (using `description` and `capabilities`) now replaces the old agentibridge agent registry, as outlined in Swarm-v2 section 9.2. It adds a new reference page covering agent cards, the `agentihooks agents` commands, MCP tools (`agent_list`, `agent_show`, `agent_run`), workflow files, and plan normalizer behavior, plus corresponding toolbelt rule rows. This matters because it gives operators and engineers accurate, discoverable documentation for the new agent-card system as it lands alongside the MCP `agents` category work, keeping docs in sync with the actual implementation and passing the docs build check.
+
 ## v2.17.730 · 2026-11-08
 
 ### 2026-11-08 · fa42cf6f2616 · #10090 · @nestorcolt
