@@ -5,11 +5,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
-
-if TYPE_CHECKING:
-    from scripts.workflows.schema import Workflow
 
 STAGE = "run"
 NESTED = "agent_run is refused inside a worker run, so runs cannot nest"
@@ -28,7 +25,7 @@ def _respond(call: Callable[[], Any]) -> str:
         return json.dumps({"success": False, "error": str(exc)})
 
 
-def one_stage(profile: str) -> "Workflow":
+def one_stage(profile: str) -> Any:
     """A workflow whose one stage runs the profile on the case; its pass exits and any other outcome exhausts it."""
     return _module("scripts.workflows.schema").validate(
         {
