@@ -172,12 +172,13 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
     return rows + _api(codex_api.CodexApiSource(counts), "codex", environ, now)
 
 
-def _global(environ: dict, now: float) -> list[Account]:
+def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
     from scripts.routing import aggregate
 
     refused = _refused(environ)
     rows = []
-    for row in aggregate.current(now).values():
+    reports = aggregate.current(now) if redis is None else aggregate.read(redis, now)
+    for row in reports.values():
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
         week = session_bands.left(quota["seven_day"]["used"], quota["seven_day"]["resets_at"], now) if quota else None
@@ -227,13 +228,16 @@ def probe(environ: dict[str, str], now: float) -> list[Account]:
     return _claude(environ, now, True) + _codex(environ, now, True)
 
 
-def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
-    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs."""
+def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None) -> list[Account]:
+    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
+
+    A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says.
+    """
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _global(environ, now)
-        if aggregate.enabled(environ)
+        _global(environ, now, redis)
+        if redis is not None or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
     store = reservation._store(environ)
@@ -241,6 +245,16 @@ def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
         held = reservation.current(harness, environ)
         rows = latch(reserve(rows, held), held, store)
     return rows
+
+
+def hive_accounts(redis: Any) -> Callable[..., list[Account]]:
+    """A quota reader over the hive quota reports on ``redis``, which a restarted hive controller reads at once."""
+
+    def read(environ: dict, now: float, refresh: bool = False) -> list[Account]:
+        """Every account with its band cap from the hive reports; ``refresh`` is ignored, hives probe their own."""
+        return accounts(environ, now, refresh=refresh, redis=redis)
+
+    return read
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:

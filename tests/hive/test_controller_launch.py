@@ -1560,7 +1560,7 @@ def test_initial_placement_reads_global_account_reports_without_a_credential_pro
         patch.object(launch.capacity, "accounts", return_value=rows) as accounts,
     ):
         assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
-    accounts.assert_called_once_with(environ, now / 1000, refresh=False)
+    accounts.assert_called_once_with(environ, now / 1000, refresh=False, redis=setup.store.redis)
 
 
 def test_placement_shares_accounts_in_a_pass_and_rereads_in_the_next_pass(setup):

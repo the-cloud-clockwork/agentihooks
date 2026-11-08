@@ -145,6 +145,13 @@ def _open_rows(rows: list, harness: str = "claude") -> list:
     return [row for row in rows if row.harness == harness and capacity.free_seats(row) > 0]
 
 
+def seat_text(row: capacity.Account) -> str:
+    """One account's seats in a placement wait, naming a missing quota reading instead of a cap of None."""
+    if row.cap is None:
+        return f"{row.name} {row.sessions} sessions, no fresh quota reading"
+    return f"{row.name} {row.sessions} sessions of {row.cap}"
+
+
 def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
     """A master on a hive is held to the session cap that hive reports for the account, not the cloud worker cap."""
     caps = [
@@ -344,7 +351,7 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         if rows is None:
             if self._quota_accounts is None:
-                self._quota_accounts = capacity.accounts(dict(os.environ), now / 1000, refresh=False)
+                self._quota_accounts = capacity.hive_accounts(self.store.redis)(dict(os.environ), now / 1000)
             rows = self._quota_accounts
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         if lane == "master" and not task.get("route_kind"):
@@ -376,9 +383,7 @@ class HiveLaunch:
         if not candidates:
             candidates = open_rows
         if not candidates:
-            seats = ", ".join(
-                f"{row.name} {row.sessions} sessions of {row.cap}" for row in rows if row.harness == harness
-            )
+            seats = ", ".join(seat_text(row) for row in rows if row.harness == harness)
             pinned = f"; pinned to {account}" if account else ""
             return placement.Wait(
                 f"no {harness.capitalize()} account has room after hive sessions: {seats}{pinned}", role
