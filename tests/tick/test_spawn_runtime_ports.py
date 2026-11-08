@@ -77,17 +77,23 @@ def test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing() -> 
 
 @pytest.mark.feature("swarm-tick-spawn")
 def test_the_spawn_admission_admits_and_releases_through_the_port() -> None:
-    port, runtime, deadline = _calls({"admits": True, "admit": ["decision"]})
+    port, runtime, deadline = _calls(
+        {"admits": True, "admit": ["decision"], "held_admission": "r1", "activate_admission": True}
+    )
 
     gate = runtime.admission
     assert isinstance(gate, AdmissionCalls)
     assert gate.admit("sw", [TASK], 7) == ["decision"]
     gate.release("sw", "t1", "r1")
+    assert gate.held("sw", "t1") == "r1"
+    assert gate.activate("sw", "t1", "r1") is True
 
     assert [(call.operation, call.args, call.deadline) for call in port.calls] == [
         ("admits", (), deadline),
         ("admit", ("sw", [TASK], 7), deadline),
         ("release_admission", ("sw", "t1", "r1"), deadline),
+        ("held_admission", ("sw", "t1"), deadline),
+        ("activate_admission", ("sw", "t1", "r1"), deadline),
     ]
 
 
@@ -97,6 +103,8 @@ class _Legacy:
         self.admission = SimpleNamespace(
             admit=lambda *args: self.calls.append(("admit", *args)) or ["decision"],
             release=lambda *args: self.calls.append(("release", *args)),
+            held=lambda *args: self.calls.append(("held", *args)) or "r1",
+            activate=lambda *args: self.calls.append(("activate", *args)) or True,
         )
         self.router = SimpleNamespace(placement="hive")
 
@@ -153,6 +161,8 @@ def test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime(monkey
     assert adapter.admits(deadline=deadline) is True
     assert adapter.admit("sw", [TASK], 7, deadline=deadline) == ["decision"]
     adapter.release_admission("sw", "t1", "r1", deadline=deadline)
+    assert adapter.held_admission("sw", "t1", deadline=deadline) == "r1"
+    assert adapter.activate_admission("sw", "t1", "r1", deadline=deadline) is True
 
     assert legacy.calls == [
         ("spawn", CONFIG, "eng", "eng-1", TASK),
@@ -165,6 +175,8 @@ def test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime(monkey
         ("reap_name", "eng-1"),
         ("admit", "sw", [TASK], 7),
         ("release", "sw", "t1", "r1"),
+        ("held", "sw", "t1"),
+        ("activate", "sw", "t1", "r1"),
     ]
 
 
@@ -209,6 +221,7 @@ def test_the_router_runtime_refuses_spawn_operations_past_their_deadline() -> No
         ("reap_name", ("eng-1",)),
         ("admit", ("sw", [TASK], 7)),
         ("release_admission", ("sw", "t1", "r1")),
+        ("activate_admission", ("sw", "t1", "r1")),
     ],
 )
 def test_spawn_runtime_writes_need_the_runtime_effect(operation: str, args: tuple[object, ...]) -> None:
@@ -232,6 +245,7 @@ def test_spawn_runtime_writes_need_the_runtime_effect(operation: str, args: tupl
         ("placement_refusal", ("eng", TASK)),
         ("placement", ()),
         ("admits", ()),
+        ("held_admission", ("sw", "t1")),
     ],
 )
 def test_spawn_runtime_reads_pass_without_the_runtime_effect(operation: str, args: tuple[object, ...]) -> None:

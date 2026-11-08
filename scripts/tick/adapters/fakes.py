@@ -297,6 +297,12 @@ class FakeRuntime:
     def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
         _record(self, "release_admission", (slug, task_id, reservation), deadline)
 
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str:
+        return _record(self, "held_admission", (slug, task_id), deadline)
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
+        return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
+
 
 @dataclass
 class FakeProcesses:
@@ -333,6 +339,9 @@ class FakeInbox:
         if state == "done" and reason == "done" and item_id not in self.information:
             raise InboxError("done needs an outcome naming where the work went")
         return _record(self, "close", (item_id, outcome, detail), deadline)
+
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object:
+        return _record(self, "settle_exit", (name, seat, exit_text), deadline)
 
 
 @dataclass

@@ -62,6 +62,7 @@ class Ledger(Protocol):
 STORE_READS = frozenset(
     {
         "agents",
+        "claim_generation",
         "claims",
         "config",
         "earlier_lives",
@@ -228,6 +229,10 @@ class Runtime(Protocol):
 
     def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None: ...
 
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str: ...
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool: ...
+
 
 @runtime_checkable
 class Processes(Protocol):
@@ -241,6 +246,8 @@ class Inbox(Protocol):
     def send(self, address: str, body: str, *, deadline: Deadline) -> object: ...
 
     def close(self, item_id: str, outcome: str, detail: str, *, deadline: Deadline) -> object: ...
+
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object: ...
 
 
 @runtime_checkable

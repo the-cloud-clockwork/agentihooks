@@ -151,3 +151,13 @@ class RouterRuntime:
     def release_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> None:
         deadline.live()
         self.legacy.admission.release(slug, task_id, reservation)
+
+    def held_admission(self, slug: str, task_id: str, *, deadline: Deadline) -> str:
+        deadline.live()
+        reservation: str = self.legacy.admission.held(slug, task_id)
+        return reservation
+
+    def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
+        deadline.live()
+        activated: bool = self.legacy.admission.activate(slug, task_id, reservation)
+        return activated

@@ -112,7 +112,7 @@ def _preempt(tick: Any, get: Get) -> Any:
 def _spawn_step(tick: Any, get: Get) -> Any:
     config, deadline, tools = get("config"), get(DEADLINE), get("tools")
     recording = _recording(tick, deadline)
-    store = SpawnStoreCalls(tools.coordination, recording)
+    store = SpawnStoreCalls(tools.coordination, recording, tools.inbox)
     if (
         config.state == "running"
         and tick.readiness.tick_places(config.engine, get("rows"))

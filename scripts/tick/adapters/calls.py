@@ -7,7 +7,7 @@ from typing import Any
 
 from scripts.swarm.store import PREFIX, AgentRecord, SwarmConfig
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports import Coordination, Ledger, Runtime
+from scripts.tick.ports import Coordination, Inbox, Ledger, Runtime
 from scripts.tick.ports.contracts import STORE_READS
 
 
@@ -50,6 +50,12 @@ class AdmissionCalls:
 
     def release(self, slug: str, task_id: str, reservation: str) -> None:
         self.port.release_admission(slug, task_id, reservation, deadline=self.deadline)
+
+    def held(self, slug: str, task_id: str) -> str:
+        return self.port.held_admission(slug, task_id, deadline=self.deadline)
+
+    def activate(self, slug: str, task_id: str, reservation: str) -> bool:
+        return self.port.activate_admission(slug, task_id, reservation, deadline=self.deadline)
 
 
 @dataclass(frozen=True)
@@ -125,9 +131,14 @@ class SpawnStoreCalls:
 
     port: Coordination
     deadline: Deadline
+    inbox: Inbox
 
     def key(self, slug: str, *parts: str) -> str:
         return ":".join((PREFIX, slug, *parts))
+
+    def settle_exit(self, name: str, seat: str, exit_text: str) -> None:
+        """Settle the leaving agent's inbox items through the inbox port."""
+        self.inbox.settle_exit(name, seat, exit_text, deadline=self.deadline)
 
     def __getattr__(self, name: str) -> Any:
         if name in _STORE_GROUPS:

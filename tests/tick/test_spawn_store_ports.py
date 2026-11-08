@@ -7,14 +7,14 @@ from typing import Any, Iterator, cast
 import pytest
 
 from scripts.swarm import timing
-from scripts.swarm.store import PREFIX
+from scripts.swarm.store import PREFIX, AgentRecord
 from scripts.tick.adapters.calls import SpawnStoreCalls
 from scripts.tick.adapters.coordination import StoreCoordination
-from scripts.tick.adapters.fakes import FakeCoordination, fake_tools
+from scripts.tick.adapters.fakes import FakeCoordination, FakeInbox, FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, place
+from scripts.tick.steps import PASS, common, place
 
 pytestmark = pytest.mark.unit
 
@@ -24,7 +24,7 @@ EXPIRED = Deadline(0, lambda: 0)
 
 def _calls(answers: dict[str, object] | None = None) -> tuple[FakeCoordination, SpawnStoreCalls]:
     port = FakeCoordination(answers=answers or {})
-    return port, SpawnStoreCalls(port, DEADLINE)
+    return port, SpawnStoreCalls(port, DEADLINE, FakeInbox())
 
 
 def _seen(port: FakeCoordination) -> list[tuple[str, tuple[object, ...], Deadline]]:
@@ -160,12 +160,31 @@ def test_the_store_coordination_refuses_operations_past_their_deadline(read: boo
 
 @pytest.mark.feature("swarm-tick-spawn")
 def test_spawn_store_writes_need_the_coordination_effect() -> None:
-    store = SpawnStoreCalls(fake_tools(frozenset()).coordination, DEADLINE)
+    tools = fake_tools(frozenset())
+    store = SpawnStoreCalls(tools.coordination, DEADLINE, tools.inbox)
 
     assert store.agents("sw") is None
     with pytest.raises(UndeclaredEffect) as raised:
         store.claim("sw", "t1", "eng-1", 5)
     assert str(raised.value) == "coordination is not a declared effect"
+
+
+@pytest.mark.feature("swarm-tick-spawn")
+def test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox() -> None:
+    port, inbox = FakeCoordination(), FakeInbox()
+    store = SpawnStoreCalls(port, DEADLINE, inbox)
+    agent = AgentRecord("eng-1", "eng", "t1", seat="eng-1@sw")
+
+    assert common._drop("sw", store, FakeLedger(), {}, agent) == ""
+
+    assert _seen(port) == [
+        ("store_read", ("claim_generation", ("sw", "t1"), {}), DEADLINE),
+        ("store_write", ("release", ("sw", "t1", "eng-1"), {}), DEADLINE),
+        ("store_write", ("drop_agent", ("sw", "eng-1"), {}), DEADLINE),
+    ]
+    assert [(call.operation, call.args, call.deadline) for call in inbox.calls] == [
+        ("settle_exit", ("eng-1", "", "stopped"), DEADLINE)
+    ]
 
 
 class _Untouched:

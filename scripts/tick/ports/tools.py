@@ -85,6 +85,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.placement_refusal.__name__,
                 Runtime.placement.__name__,
                 Runtime.admits.__name__,
+                Runtime.held_admission.__name__,
             ]
         ),
         frozenset(
@@ -101,11 +102,15 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.reap_name.__name__,
                 Runtime.admit.__name__,
                 Runtime.release_admission.__name__,
+                Runtime.activate_admission.__name__,
             ]
         ),
     ),
     "processes": (frozenset([Processes.scan.__name__]), frozenset()),
-    "inbox": (frozenset([Inbox.read.__name__]), frozenset([Inbox.send.__name__, Inbox.close.__name__])),
+    "inbox": (
+        frozenset([Inbox.read.__name__]),
+        frozenset([Inbox.send.__name__, Inbox.close.__name__, Inbox.settle_exit.__name__]),
+    ),
     "llm": (frozenset(), frozenset([Llm.classify.__name__])),
     "metrics": (frozenset(), frozenset([Metrics.emit.__name__])),
     "host": (frozenset([Host.read.__name__]), frozenset([Host.run.__name__])),
