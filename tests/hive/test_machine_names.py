@@ -193,21 +193,23 @@ def test_cli_add_names_the_hive_after_its_machine_on_every_run(admin, monkeypatc
     )
 
 
-def test_remove_deletes_the_files_of_a_hive_that_hive_create_named():
+def test_remove_deletes_the_files_of_a_hive_that_hive_create_named() -> None:
     owned = [
         "k8s/argocd/apps/swarm-hive-1792865339.yaml",
         "k8s/manifests/swarm-hive-1792865339/hive.yaml",
         "k8s/values-overlays/swarm-hive-1792865339/values.yaml",
     ]
     tree = "".join(f"{path}\n" for path in [*owned, "k8s/manifests/swarm-hive-001/hive.yaml"])
+    template = "".join(f"#@ file: {path.replace('swarm-hive-1792865339', '${name}')}\nx: 1\n" for path in owned)
 
-    def run(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, tree, "")
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(argv, 0, template if "-H" in argv else tree, "")
 
     plan = remove.Plan("m1", "swarm-hive-1792865339", "k8s/x", dry_run=True)
 
     assert remove.unmanifest(plan, run) == [
-        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(owned)}"
+        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(owned)} "
+        "and merge it once its checks pass"
     ]
 
 
