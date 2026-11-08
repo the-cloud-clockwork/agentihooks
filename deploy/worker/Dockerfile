@@ -21,6 +21,7 @@ FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
 RUN apt-get update && apt-get install -y --no-install-recommends gh
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS browser-libs
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN dpkg-query -W -f='${Package}\n' | sort > /base-packages \
     && apt-get update \
     && apt-get install -y --no-install-recommends libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 \
