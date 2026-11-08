@@ -2294,6 +2294,17 @@
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
         "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
       ]
+    },
+    {
+      "id": "hive-retire-absence",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
+      "behaviour": "Remote retirement settles without acknowledgement once bounded hive heartbeat loss or a newer member report proves the agent gone, freeing its seat; live hives still acknowledge normally.",
+      "seam": "HerdrRuntime.retire",
+      "tests": [
+        "tests/hive/test_reports.py::test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat",
+        "tests/hive/test_reports.py::test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat"
+      ]
     }
   ],
   "unmapped_rules": [
