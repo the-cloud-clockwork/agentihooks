@@ -1,10 +1,12 @@
 import itertools
+import os
 import re
 import sqlite3
 import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
@@ -168,30 +170,70 @@ def mapped() -> Iterator[None]:
 
 
 class Pool:
-    """Idle connections to one database, at most KEPT of them, each rolled back before it is kept."""
+    """Live connections to one database, bounded by this process's share of server capacity."""
 
-    def __init__(self, address: str):
-        self.address, self.idle, self.lock = address, [], threading.Lock()
+    def __init__(self, address: str) -> None:
+        self.address = address
+        self.idle: list[Any] = []
+        self.lock = threading.Condition()
+        self.opened = 0
+        self.cap = 1
 
-    def take(self) -> object:
-        with self.lock:
-            if self.idle:
-                return self.idle.pop()
+    def _open(self) -> Any:
         with mapped():
-            return errors().connect(self.address, **SESSION)
+            raw = errors().connect(self.address, **SESSION)
+            try:
+                if not self.opened:
+                    share = float(os.environ.get("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.1"))
+                    if not 0 < share < 1:
+                        raise sqlite3.OperationalError("ledger pool share must be between zero and one")
+                    with raw.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT current_setting('max_connections')::int, "
+                            "current_setting('superuser_reserved_connections')::int",
+                            (),
+                        )
+                        maximum, reserved = cursor.fetchone()
+                    raw.rollback()
+                    self.cap = max(1, min(int(maximum * share), maximum - reserved - 1))
+            except BaseException:
+                raw.close()
+                raise
+        self.opened += 1
+        return raw
 
-    def give(self, raw) -> None:
-        psycopg2 = errors()
+    def take(self) -> Any:
+        with self.lock:
+            while True:
+                if self.idle:
+                    raw = self.idle.pop()
+                    try:
+                        if raw.closed:
+                            raise errors().InterfaceError("connection already closed")
+                        with raw.cursor() as cursor:
+                            cursor.execute("SELECT 1", ())
+                        raw.rollback()
+                        return raw
+                    except errors().Error:
+                        raw.close()
+                        self.opened -= 1
+                elif self.opened < self.cap:
+                    return self._open()
+                elif not self.lock.wait(timeout=5):
+                    raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+
+    def give(self, raw: Any) -> None:
         try:
             raw.rollback()
-        except psycopg2.Error:
+        except errors().Error:
             raw.close()
-            return
         with self.lock:
             if not raw.closed and len(self.idle) < KEPT:
                 self.idle.append(raw)
-                return
-        raw.close()
+            else:
+                raw.close()
+                self.opened -= 1
+            self.lock.notify()
 
 
 POOLS = {}

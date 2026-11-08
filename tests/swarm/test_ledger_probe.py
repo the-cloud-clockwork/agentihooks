@@ -826,3 +826,29 @@ def test_the_swarm_timer_pass_runs_the_probe(store, monkeypatch):
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert "raised the ledger slow alert" in actions
     assert any("timed out" in text for text in master_mail(store)) and ledger.written == (None, None)
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_a_database_connection_closed_during_a_write_keeps_the_tick_running(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+    from typing import Any
+
+    from scripts.swarm import cli, ledger_host
+    from tests.swarm.test_delivery import FakeHerdr
+
+    class Disconnected(FakeLedger):
+        def metadata(self, slug: str) -> dict[str, str]:
+            return {"title": "Swarm"}
+
+        def time_left(self, slug: str, slots: Any, ci_minutes: Any) -> None:
+            raise sqlite3.DatabaseError("connection already closed")
+
+    monkeypatch.setattr(ledger_host, "facts", lambda: FACTS)
+    ledger = Disconnected([])
+    runtime = FakeRuntime()
+    cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert "raised the ledger slow alert" in actions
+    assert any("gave no answer" in text for text in master_mail(store))

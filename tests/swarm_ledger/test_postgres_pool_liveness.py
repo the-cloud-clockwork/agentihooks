@@ -24,6 +24,12 @@ class Cursor:
     def close(self) -> None:
         pass
 
+    def __enter__(self) -> "Cursor":
+        return self
+
+    def __exit__(self, *args: Any) -> bool:
+        return False
+
 
 class Raw:
     def __init__(self) -> None:
@@ -56,6 +62,7 @@ def raws(monkeypatch: pytest.MonkeyPatch) -> list[Raw]:
     return made
 
 
+@pytest.mark.feature("ledger-pool-liveness")
 def test_checkout_replaces_a_connection_killed_by_database_restart(raws: list[Raw]) -> None:
     pool = postgres.Pool("database")
     first = pool.take()
@@ -69,6 +76,7 @@ def test_checkout_replaces_a_connection_killed_by_database_restart(raws: list[Ra
     pool.give(replacement)
 
 
+@pytest.mark.feature("ledger-pool-liveness")
 def test_pool_bounds_checked_out_connections_by_server_share(raws: list[Raw], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.02")
     pool = postgres.Pool("database")
@@ -94,6 +102,7 @@ def test_pool_bounds_checked_out_connections_by_server_share(raws: list[Raw], mo
     pool.give(second)
 
 
+@pytest.mark.feature("ledger-pool-liveness")
 def test_failed_rollback_is_recorded_as_a_probe_failure(raws: list[Raw]) -> None:
     def write() -> None:
         connection = postgres.Connection("database")

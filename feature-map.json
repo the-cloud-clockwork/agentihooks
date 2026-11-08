@@ -2071,6 +2071,19 @@
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_has_a_uid_is_never_past_the_unbound_window",
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_outside_kubernetes_is_never_past_the_unbound_window"
       ]
+    },
+    {
+      "id": "ledger-pool-liveness",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-db-pool-liveness",
+      "behaviour": "Ledger pooled connections are checked before checkout, dead connections are replaced, total open connections stay within a configured server share, and database write failures leave the tick running.",
+      "seam": "Postgres Pool take and give, ledger probe and tick pass",
+      "tests": [
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_checkout_replaces_a_connection_killed_by_database_restart",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_pool_bounds_checked_out_connections_by_server_share",
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_failed_rollback_is_recorded_as_a_probe_failure",
+        "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running"
+      ]
     }
   ],
   "unmapped_rules": [
