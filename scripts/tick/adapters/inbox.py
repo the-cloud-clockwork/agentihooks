@@ -37,3 +37,10 @@ class StoreInbox:
         """Close an item with the outcome kind and its detail; the store refuses a bare done on a work item."""
         deadline.live()
         return self.store.close(item_id, self.sender, outcome, detail)
+
+    def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object:
+        """Settle the open items of the agent ``name`` leaving, moving them to ``seat`` when it goes on."""
+        from scripts.inbox.exits import settle  # pyright: ignore[reportUnknownVariableType]
+
+        deadline.live()
+        return settle(self.store, name, seat, exit_text)
