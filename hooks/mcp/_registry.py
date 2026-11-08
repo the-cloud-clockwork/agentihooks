@@ -9,6 +9,7 @@ CATEGORY_MODULES = {
     "sessions": "hooks.mcp.sessions",
     "culture": "hooks.mcp.culture",
     "agents": "hooks.mcp.agents",
+    "plans": "hooks.mcp.plans",
 }
 
 ALL_CATEGORIES = list(CATEGORY_MODULES.keys())

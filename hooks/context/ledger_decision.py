@@ -1,30 +1,38 @@
-"""Tell a swarm-bound session to add an accepted plan as new ledger phases."""
+"""Tell a swarm-bound session to ingest an accepted plan into its ledger with agentihooks plan ingest."""
 
 import fcntl
 import json
 import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from hooks.config import AGENTIHOOKS_HOME
 from hooks.context import worker_mode
 from hooks.targets import capabilities
+from scripts.swarm_ledger.ledger_phases import PLANNING_DEFAULT
 
 STATE_DIR = AGENTIHOOKS_HOME / "ledger-decision"
+PLAN_LANE = "plan"
+PLAN_PLACEHOLDER = "<plan file>"
 
-PHASES_DIRECTIVE = (
+INGEST_DIRECTIVE = (
     "LEDGER DECISION: the operator accepted a plan and this session is bound to the ledger {slug}, so the plan "
-    "continues that ledger. Add it there as new phases now, without asking: write the plan's phases list in the "
-    "init swarm shape to a file, then run `agentihooks ledger --slug {slug} --as {name} plan phases <phases.json>`. "
-    "The phases land planned manually and in review. Never start a new swarm for this plan, and do not implement "
-    "it here."
+    "continues that ledger. Ingest it there now, without asking: {prepare}run "
+    "`agentihooks plan ingest {path} --ledger {slug}`. Its phases land planned {planning} unless the plan says "
+    "otherwise. Never start a new swarm for this plan, and do not implement it here."
 )
+WRITE_STEP = "write the accepted plan as markdown to a file, then "
 
 
-def directive(payload, environ=None):
+def directive(payload: Mapping[str, Any], environ: Mapping[str, str] | None = None) -> str:
+    """Return the one-shot plan ingest directive for a bound session accepting a plan, else an empty string."""
     env = os.environ if environ is None else environ
     session_id = payload.get("session_id") or ""
-    if not session_id or worker_mode.active(env) or not _is_plan_accept(payload):
+    if not session_id or worker_mode.active(env) or env.get("AGENTIHOOKS_SWARM_LANE") == PLAN_LANE:
+        return ""
+    if not _is_plan_accept(payload):
         return ""
     binding = _binding(env, session_id)
     if not binding:
@@ -34,7 +42,28 @@ def directive(payload, environ=None):
         if "plan" in fired:
             return ""
         fired.append("plan")
-        return PHASES_DIRECTIVE.format(**binding)
+    path = _plan_path(payload, session_id)
+    return INGEST_DIRECTIVE.format(
+        slug=binding["slug"],
+        path=path,
+        planning=PLANNING_DEFAULT,
+        prepare=WRITE_STEP if path == PLAN_PLACEHOLDER else "",
+    )
+
+
+def _plan_path(payload: Mapping[str, Any], session_id: str) -> str:
+    """Name the accepted plan's file: the payload's own path, a scratch copy of its text, or a placeholder."""
+    tool_input = payload.get("tool_input")
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    carried = tool_input.get("planFilePath")
+    if isinstance(carried, str) and carried:
+        return carried
+    text = tool_input.get("plan")
+    if not isinstance(text, str) or not text.strip():
+        return PLAN_PLACEHOLDER
+    scratch = STATE_DIR / f"{session_id}.plan.md"
+    scratch.write_bytes(text.encode())
+    return str(scratch)
 
 
 def _is_plan_accept(payload):

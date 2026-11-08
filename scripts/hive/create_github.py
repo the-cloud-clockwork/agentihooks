@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from scripts.hive import auth, machine
 
-Run = Callable[..., subprocess.CompletedProcess]
+Run = Callable[..., subprocess.CompletedProcess[str]]
 GH_TIMEOUT_S = 120
 RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
@@ -16,6 +16,12 @@ OPEN_LIMIT = 1000
 TRUNCATED = "truncated"
 TREE = f'if .truncated then "{TRUNCATED}" else .tree[].path end'
 REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
+QUEUED = 'any(.[]; .type == "merge_queue")'
+PULL = "query($url: URI!) { resource(url: $url) { ... on PullRequest { id headRefOid mergeQueueEntry { id } } } }"
+ENQUEUE = (
+    "mutation($id: ID!, $head: GitObjectID!) "
+    "{ enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } } }"
+)
 
 
 def gh(run: Run, argv: list[str], body: dict | None = None, cwd: str | None = None) -> str:
@@ -119,7 +125,20 @@ def required_checks(run: Run, repo: str, base: str) -> list[str]:
     return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", REQUIRED]))
 
 
-def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
+def queued(run: Run, repo: str, base: str) -> bool:
+    """Whether the base branch ruleset lands pull requests through a merge queue."""
+    return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", QUEUED])) is True
+
+
+def enqueue(run: Run, url: str) -> None:
+    """Put the pull request into its base's merge queue at its current head, once."""
+    pull = json.loads(gh(run, ["api", "graphql", "-f", f"query={PULL}", "-f", f"url={url}", "--jq", ".data.resource"]))
+    if pull["mergeQueueEntry"]:
+        return
+    gh(run, ["api", "graphql", "-f", f"query={ENQUEUE}", "-f", f"id={pull['id']}", "-f", f"head={pull['headRefOid']}"])
+
+
+def checks_passed(run: Run, url: str, required: Sequence[str] = (), command: str = "hive create") -> bool:
     rollup = json.loads(gh(run, ["pr", "view", url, "--json", "statusCheckRollup"]))["statusCheckRollup"] or []
     results = [
         (check.get("name") or check.get("context"), check.get("conclusion") or check.get("state")) for check in rollup
@@ -128,9 +147,7 @@ def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
         results = [(name, _best([result for found, result in results if found == name])) for name in required]
     failed = [name for name, result in results if result not in (*PASSED, *WAITING)]
     if failed:
-        raise auth.HiveError(
-            f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun hive create"
-        )
+        raise auth.HiveError(f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun {command}")
     return bool(results) and all(result in PASSED for _, result in results)
 
 

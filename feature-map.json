@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-drain-launch-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
+      "behaviour": "A cached launch rechecks hive eligibility after a removal or drain starts, including the pod preStop drain, and orders another eligible hive or waits without reserving the draining hive.",
+      "seam": "HiveLaunch.spawn after a cached selection",
+      "tests": [
+        "tests/hive/test_draining_placement.py::test_a_cached_launch_skips_a_hive_that_started_draining_or_was_removed"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -70,10 +80,10 @@
       "id": "swarm-tick-cached-ledger",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
-      "behaviour": "A tick pass against a real ledger server made slow or stopped claims and launches a ready task from the last good ledger view inside the pass deadline, and its claim lands on the ledger once the server answers again.",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server claims and launches the ready task.",
       "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
       "tests": [
-        "tests/features/test_tick_cached_ledger.py::test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped",
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_holds_launches_while_the_ledger_is_slow_or_stopped_and_claims_before_launching",
         "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
         "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
         "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing",
@@ -90,6 +100,17 @@
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
         "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+      ]
+    },
+    {
+      "id": "swarm-spawn-claim-before-launch",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
+      "behaviour": "The spawn pass launches a lane agent only after the ledger server accepted its claim: claimed_by and state claimed, clearing a stale protected branch so publication and reclaim never read it; a pass running from its last good view claims and launches nothing.",
+      "seam": "scripts.tick.steps.place._prepare called with the pass ledger offline and online",
+      "tests": [
+        "tests/tick/test_place_prepare.py::test_an_offline_pass_neither_claims_nor_launches",
+        "tests/tick/test_place_prepare.py::test_the_claim_write_clears_a_stale_protected_branch_and_keeps_a_real_one"
       ]
     },
     {
@@ -715,7 +736,11 @@
       "tests": [
         "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
         "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock",
-        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock", "tests/swarm/test_tick_lock.py::test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces", "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass", "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process", "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock",
+        "tests/swarm/test_tick_lock.py::test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces",
+        "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass",
+        "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process",
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
       ]
     },
     {
@@ -2133,6 +2158,32 @@
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_takers_wait_for_the_first_connection_to_measure_the_server",
         "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
         "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
+      ]
+    },
+    {
+      "id": "swarm-workflow-runner",
+      "origin": "inventory",
+      "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",
+      "seam": "scripts.tick.steps.workflows._workflow_runner registered as tick step workflow runner",
+      "tests": [
+        "tests/swarm/test_workflow_job.py::test_background_job_holds_workspace_lock_until_child_finishes",
+        "tests/swarm/test_workflow_job.py::test_failed_spawn_releases_workspace_lock",
+        "tests/swarm/test_workflow_job.py::test_worker_advances_once_and_releases_lock_on_success_or_failure",
+        "tests/swarm/test_workflow_runner.py::test_bad_task_does_not_prevent_the_next_task",
+        "tests/swarm/test_workflow_runner.py::test_definition_errors_preserve_every_message_and_empty_documents_are_idle",
+        "tests/swarm/test_workflow_runner.py::test_existing_state_and_case_survive_definition_changes",
+        "tests/swarm/test_workflow_runner.py::test_filtered_stages_use_judge_including_the_head",
+        "tests/swarm/test_workflow_runner.py::test_head_result_advances_once_then_other_stage_uses_headless",
+        "tests/swarm/test_workflow_runner.py::test_ignored_task_does_not_hide_a_later_claim",
+        "tests/swarm/test_workflow_runner.py::test_new_nested_workspace_forwards_repository_and_records_identity",
+        "tests/swarm/test_workflow_runner.py::test_only_claimed_workflow_tasks_run",
+        "tests/swarm/test_workflow_runner.py::test_pending_head_is_delivered_once_without_consuming_attempt",
+        "tests/swarm/test_workflow_runner.py::test_runner_receives_stored_harness_and_exit_checker",
+        "tests/swarm/test_workflow_runner.py::test_scouter_stage_uses_scout_after_claimant_completion",
+        "tests/tick/steps/test_workflow_runner.py::test_tick_passes_claimed_snapshot_to_runner",
+        "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
+        "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
+        "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
       ]
     }
   ],

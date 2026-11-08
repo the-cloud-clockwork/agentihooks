@@ -91,7 +91,7 @@ def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monk
 
     assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (
         403,
-        {"error": "Redis refused the refreshed member (unknown reply from the server)"},
+        {"error": "Redis refused the refreshed member"},
     )
 
 

@@ -253,8 +253,8 @@ def test_a_reservation_refused_on_the_first_ranked_hive_names_its_memory_line(se
     assert (selected.hive, selected.first) == ("remote", True)
     assert admission.reserve(setup.store.redis, "remote", "fixture/other", 1) == (True, 0)
     assert setup.launcher.reserve_room(request, selected) == (
-        "no hive for eng has room: remote ram: 20700 of 100000 MB available, 80 percent used, "
-        "700 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
+        "no hive for eng has room: remote ram: 20850 of 100000 MB available, 80 percent used, "
+        "850 MB per agent with 1 pending launches, fits 0 more under the 80 percent line"
     )
 
 
@@ -317,7 +317,7 @@ def test_the_hive_listing_counts_pending_launches_against_the_first_room(setup):
     listed = next(hive for hive in launch.loaded_hives(setup.store) if hive["id"] == "remote")
     assert (listed[placement.FIRST_ROOM], listed[placement.FIRST_REFUSAL]) == (
         0,
-        "ram: 20700 of 100000 MB available, 80 percent used, 700 MB per agent with 1 pending launches, "
+        "ram: 20850 of 100000 MB available, 80 percent used, 850 MB per agent with 1 pending launches, "
         "fits 0 more under the 80 percent line",
     )
 
