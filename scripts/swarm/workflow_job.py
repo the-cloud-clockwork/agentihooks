@@ -13,8 +13,8 @@ from scripts.inbox.store import connect
 from scripts.swarm import workflow_runner
 
 
-def start(request: Mapping[str, Any]) -> bool:
-    folder = Path(request["task"]["workspace"])
+def start(job: Mapping[str, Any]) -> bool:
+    folder = Path(job["task"]["workspace"])
     folder.mkdir(parents=True, exist_ok=True)
     with (folder / "workflow.lock").open("a") as lock:
         try:
@@ -22,7 +22,7 @@ def start(request: Mapping[str, Any]) -> bool:
         except BlockingIOError:
             return False
         payload = folder / "workflow-task.json"
-        payload.write_text(json.dumps({"task": request["task"], "repo": request["repo"]}))
+        payload.write_text(json.dumps({"task": job["task"], "repo": job["repo"]}))
         with (folder / "workflow-job.log").open("ab") as log:
             subprocess.Popen(
                 [sys.executable, "-m", "scripts.swarm.workflow_job", str(lock.fileno()), str(payload)],
@@ -31,6 +31,7 @@ def start(request: Mapping[str, Any]) -> bool:
                 stderr=log,
                 cwd=Path(__file__).resolve().parents[2],
                 start_new_session=True,
+                shell=False,
                 pass_fds=(lock.fileno(),),
             )
     return True
@@ -38,8 +39,8 @@ def start(request: Mapping[str, Any]) -> bool:
 
 def main(argv: list[str]) -> int:
     with os.fdopen(int(argv[0])):
-        request = json.loads(Path(argv[1]).read_text())
-        print(workflow_runner.advance_task(connect(), request["task"], Path(request["repo"])))
+        job = json.loads(Path(argv[1]).read_text())
+        print(workflow_runner.advance_task(connect(), job["task"], Path(job["repo"])))
     return 0
 
 

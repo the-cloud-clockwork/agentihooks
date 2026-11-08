@@ -23,6 +23,7 @@ def test_background_job_holds_workspace_lock_until_child_finishes(
         assert kwargs["stdin"] == -3
         assert kwargs["stdout"] is kwargs["stderr"]
         assert kwargs["start_new_session"] is True
+        assert kwargs["shell"] is False
         assert kwargs["cwd"] == Path(workflow_job.__file__).resolve().parents[2]
 
     monkeypatch.setattr(workflow_job, "subprocess", SimpleNamespace(Popen=Mock(side_effect=launch), DEVNULL=-3))
