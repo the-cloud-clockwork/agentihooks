@@ -72,6 +72,7 @@ def test_the_hive_controller_runtime_reads_quota_from_its_store(redis: Any) -> N
     store.create(config)
     _report(redis, "remote", 2, 20)
     held = lease.acquire(store, config.slug, "controller")
+    assert held is not None
     placed: RoutedRuntime = hive_controller(routed({}), store, config.slug, held)
     reader = placed.herdr_runtime.quota_accounts
     assert reader is not None

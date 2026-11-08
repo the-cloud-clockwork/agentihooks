@@ -177,7 +177,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
 
     refused = _refused(environ)
     rows = []
-    reports = aggregate.current(now) if redis is None else aggregate.read(redis, now)
+    reports: dict[str, dict[str, Any]] = aggregate.current(now) if redis is None else aggregate.read(redis, now)
     for row in reports.values():
         quota = row["quota"]
         five = session_bands.left(quota["five_hour"]["used"], quota["five_hour"]["resets_at"], now) if quota else None
@@ -250,7 +250,7 @@ def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None)
 def hive_accounts(redis: Any) -> Callable[..., list[Account]]:
     """A quota reader over the hive quota reports on ``redis``, which a restarted hive controller reads at once."""
 
-    def read(environ: dict, now: float, refresh: bool = False) -> list[Account]:
+    def read(environ: dict[str, str], now: float, refresh: bool = False) -> list[Account]:
         """Every account with its band cap from the hive reports; ``refresh`` is ignored, hives probe their own."""
         return accounts(environ, now, refresh=refresh, redis=redis)
 
