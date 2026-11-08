@@ -2486,6 +2486,9 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         if not str(step.get("name", "")).startswith(
             (
                 *downloads,
+                "Check every mutation stats producer's part arrived",
+                "Download the missing mutation stats parts",
+                "Fail on a mutation stats producer whose part never arrived",
                 "Cap the merged test stats",
                 "Check for merged test stats",
                 "Check out the protected mutation grader",
