@@ -263,6 +263,7 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     assert done == [
         f"drain: drained {member}: 1 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
         f"member: revoked member {member} and its Redis user",
+        f"signer: {remove.NO_SIGNER}",
         "herdr: removed herdr machine anton-9",
         "herdr: removed the host key of [10.10.30.207]:2222",
         f"registry: deleted 3 registry records of {member}",
@@ -313,6 +314,7 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     assert again == [
         f"drain: drained {member}: 0 agents ordered to hand off; 0 handed off: none; 0 claims released: none; 0 agents retired: none",
         f"member: {member} holds no member credential",
+        f"signer: {remove.NO_SIGNER}",
         "herdr: herdr holds no machine anton-9",
         f"registry: deleted 0 registry records of {member}",
         "manifests: the-cloud-clockwork/antoncore dev holds no manifests of hive anton-9",
@@ -540,6 +542,7 @@ def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     assert shown == [
         f"drain: would stop placement on {member} and wait up to 600 seconds for engineer@1 to hand off",
         f"member: would revoke member {member} and its Redis user",
+        f"signer: {remove.NO_SIGNER}",
         "herdr: would remove herdr machine anton-9 and the host key of [10.10.30.207]:2222",
         f"registry: would delete 3 registry records of {member}",
         "registry: would release the hive name anton-9 of node worker-009",
@@ -604,6 +607,7 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
         "3 claims released: t2, t3, t6; 6 agents retired: ci@2, ci@6, engineer@1, engineer@3, engineer@5, engineer@7",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",
         f"member: revoked member {member} and its Redis user",
+        f"signer: {remove.NO_SIGNER}",
     ]
     assert (clock.now, clock.slept) == (30, 2)
     assert sorted(ledger.updates) == [

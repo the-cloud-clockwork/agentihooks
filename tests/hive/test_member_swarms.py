@@ -148,13 +148,28 @@ def test_remove_after_create_leaves_the_signer_record_without_the_hive_and_a_sec
     assert fake.written == [SIGNER, SIGNER]
 
 
-def test_remove_unlists_nothing_without_a_hub_signer_path_and_only_names_it_on_a_dry_run():
+def test_remove_writes_nothing_on_a_dry_run_or_without_a_hub_signer_path_and_says_which():
     fake = Bao({SIGNER: {"member_swarms": {"m1": ["rig"]}}})
     assert remove.unlist(_bao(fake), _unlisting(dry_run=True)) == [
         f"would unlist m1 from the hub signer record {SIGNER}"
     ]
-    assert remove.unlist(None, remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9")) == []
+    unset = remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9")
+    assert remove.unlist(None, unset) == [
+        "AGENTIHOOKS_NATS_SIGNER names no hub signer record, so no member swarms entry to unlist"
+    ]
     assert fake.written == []
+
+
+def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, monkeypatch):
+    monkeypatch.setattr(cli, "redis_client", lambda: admin)
+    monkeypatch.setattr(cli, "_signer", lambda: None)
+    monkeypatch.setenv(openbao_kv.URL_ENV, BAO_URL)
+    monkeypatch.setenv(openbao_kv.TOKEN_ENV, BAO_TOKEN)
+    monkeypatch.setenv(nats_grant.SIGNER_ENV, SIGNER)
+    seen = []
+    monkeypatch.setattr(remove, "remove", lambda store, bao, plan, host: seen.append(plan) or [])
+    assert cli.main(["remove", "m1", "--label", "anton-9"]) == 0
+    assert seen == [remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER)]
 
 
 def test_remove_unlists_the_signer_record_right_after_it_revokes_the_member():

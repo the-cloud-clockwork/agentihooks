@@ -71,6 +71,7 @@ MANIFESTS = (
     "k8s/manifests/{release}/",
     "k8s/values-overlays/{release}/",
 )
+NO_SIGNER = f"{nats_grant.SIGNER_ENV} names no hub signer record, so no member swarms entry to unlist"
 MEMBER_ID = re.compile("[0-9a-f]{16}")
 TREE = 'if .truncated then error("the tree listing is truncated") else .tree[] | select(.type == "blob") | .path end'
 
@@ -303,7 +304,7 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
 
 def unlist(bao: openbao_kv.OpenBao | None, plan: Plan) -> list[str]:
     if plan.signer_path is None:
-        return []
+        return [NO_SIGNER]
     if plan.dry_run:
         return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
     if member_swarms.unassign(bao, plan.signer_path, plan.hive):
