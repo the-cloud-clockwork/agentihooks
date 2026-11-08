@@ -65,7 +65,7 @@ Read the result in a script:
 
 ```bash
 if report=$(agentihooks workflow run simple-workflow --case case.txt --harness codex); then
-  jq -r '.run, .runs' <<<"$report"
+  jq '{run, runs}' <<<"$report"
 else
   jq -r '.error // "\(.status) \(.action)"' <<<"$report"
 fi
@@ -80,19 +80,15 @@ agentihooks workflow resume cleanup-dry-run
 ```
 
 A live two stage run on Codex, recorded on the delivering pull request
-([#7785](https://github.com/the-cloud-clockwork/agentihooks/pull/7785)),
-`definition` and `case` shortened:
+([#7785](https://github.com/the-cloud-clockwork/agentihooks/pull/7785)), with
+`workflow`, `run`, `case` and `definition` left out:
 
 ```json
 {"stage": null, "status": "passed", "iterations": 0, "visit": 1,
  "runs": {"first": 1, "second": 1},
  "outputs": {"first": ["{\"verdict\":\"pass\",\"proof\":\"workflow commands\"}"],
              "second": ["{\"verdict\":\"pass\",\"proof\":\"workflow commands\"}"]},
- "notes": null, "action": null, "workflow": "proofdc5d10ab5b624a8a9a17b7e7af084cd0",
- "run": "e3818628535048e79083fecce176d5d8", "case": "Return exactly ...",
- "definition": {"workflow": {"name": "...", "head": "first", "exit": "second.pass", "...": "..."},
-                "stages": {"first": {"...": "..."}, "second": {"...": "..."}}},
- "harness": "codex"}
+ "notes": null, "action": null, "harness": "codex"}
 ```
 
 `status` and `resume` on that run both exited 0 and printed the same JSON;
@@ -145,7 +141,7 @@ writes every default out.)
 | `intent` | required | One line saying what the workflow is for |
 | `head` | required | First stage; every stage must be reachable from it |
 | `exit` | required | When the workflow passes: `<stage>.pass`, or a condition in plain words (see [Exit conditions](#exit-conditions)) |
-| `max_iterations` | `3` | `retry` and `enhance` edges allowed before the run ends `exhausted` |
+| `max_iterations` | `3` | The run ends `exhausted` on this many `retry` and `enhance` edges, so one fewer loop edge leads on to its target |
 | `on_exhausted` | `block` | `block`, `escalate` or `keep-best`; recorded as `action` in an exhausted run |
 
 Stage keys:
@@ -195,12 +191,16 @@ when any loaded file is invalid.
 3. The stage outcome is `pass` when every profile run reports `ok`, and `retry`
    otherwise. Its outputs are the list of each run's `output`.
 4. The stage's own `exit`, when set, can turn the outcome into `pass`. When it
-   is not met and the stage has iterations left, the same stage runs again.
+   is not met and the stage has iterations left, the same stage runs again. On
+   its last iteration the launch outcome stands, so an unmet stage `exit` still
+   moves on when every profile run reported `ok`.
 5. When the workflow `exit` is met the run ends `passed`. Otherwise the
    outcome's `next` edge picks the next stage; an `exit` target ends the run
    `passed`. Each `retry` or `enhance` edge counts one iteration and stores the
-   outcome and outputs in `notes`; at `max_iterations` the run ends
-   `exhausted` with `action` set to `on_exhausted`.
+   outcome and outputs in `notes`; the edge that reaches `max_iterations` ends
+   the run `exhausted` with `action` set to `on_exhausted` instead of being
+   followed. The command line launcher only produces `pass` and `retry`, so
+   `enhance` edges validate but are never taken.
 6. `workflow.json` is written after every stage through a temporary file,
    fsync and rename, so a crash never leaves a partial state file.
 
@@ -218,7 +218,8 @@ saved and launches nothing.
 | Plain words as the workflow `exit` | A stage outcome is `pass` and a low tier headless classifier judges the condition true over every stage's outputs so far |
 | Plain words as a stage `exit` | The classifier judges the condition true over that stage's outputs |
 
-The classifier is one extra sealed headless run per check at low tier and low
+The classifier is one sealed headless run per check, two when the first reply
+does not match its schema, at low tier and low
 effort. It ignores `--harness`: it runs on `AGENTIHOOKS_TARGET`, else Claude,
 and falls back to Claude when Codex refuses the route.
 
@@ -283,10 +284,10 @@ A refusal prints `{"error": "<reason>"}` instead.
 | Symptom | Cause and fix |
 |---|---|
 | `{"error": "no workflow named X"}` | Not loaded, or only in the project layer; check `agentihooks workflow list` and move the file to a bundle or profile `workflows/` folder |
-| `{"error": "<file>: <reason>"}` lines on `run` | A file in some layer is invalid and blocks every run; fix or remove it, then `agentihooks workflow validate <file>` |
+| `{"error": "<file>: <reason>\n..."}` on `run` | Files in some layer are invalid, one per line of the error text, and block every run; fix or remove them, then `agentihooks workflow validate <file>` |
 | `{"error": "run identifier must be a single name"}` | `--run-id`, `status` or `resume` got an empty value, `.`, `..` or a path; pass a bare name |
-| `{"error": "[Errno 17] File exists: ..."}` | `--run-id` names an existing run, which is never overwritten; `resume` it or pick another id |
-| `{"error": "[Errno 2] No such file or directory: .../workflow.json"}` | No run by that name under `<AGENTIHOOKS_HOME>/workflows/runs`; check `AGENTIHOOKS_HOME` and the id |
-| `{"error": "<stage> has no retry edge"}` | A stage failed and its `next` has no target for that outcome; the run stays `running` at that stage. Read the transcripts under `outputs/<stage>/`, fix the cause, then `resume` |
+| `{"error": "[Errno 17] File exists: '...'"}` | `--run-id` names an existing run, which is never overwritten; `resume` it or pick another id |
+| `{"error": "[Errno 2] No such file or directory: '.../workflow.json'"}` | No run by that name under `<AGENTIHOOKS_HOME>/workflows/runs`; check `AGENTIHOOKS_HOME` and the id |
+| `{"error": "<stage> has no retry edge"}` | A stage failed and its `next` has no target for that outcome; the run stays `running` at that stage. `resume` uses the saved definition and fails the same way while the stage keeps failing; read the transcripts under `outputs/<stage>/`, then add the edge to the workflow file and start a new `run` |
 | `status: exhausted`, exit 1 | The run took `max_iterations` loop edges; `notes` holds the last stage outcome and outputs |
 | A stage keeps retrying | One of its profile runs did not report `ok`; read `transcript.jsonl` in `outputs/<stage>/` and the [headless troubleshooting](headless-run.md#troubleshooting) |
