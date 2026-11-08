@@ -142,6 +142,7 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
     assert "ledger sw not answering" in capsys.readouterr().err
 
 
+@pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
