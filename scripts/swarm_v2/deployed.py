@@ -4,6 +4,8 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
+from scripts.routing import aggregate
+from scripts.routing.slots import account_key
 from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
@@ -289,7 +291,15 @@ def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> Term
 
 
 def _held(capacity: AccountCapacity) -> dict[str, int]:
-    return fleet_held(capacity.store, capacity.clock())
+    """Per account, the larger of its Kubernetes account reservations and the sessions live hives report, since a
+    worker pod's hive reports the same session its reservation holds."""
+    now = capacity.clock()
+    held: dict[str, int] = {}
+    for account, count in fleet_held(capacity.store, now).items():
+        held[account_key(account)] = held.get(account_key(account), 0) + count
+    for account, count in aggregate.sessions(getattr(capacity.store, "redis"), now / 1000).items():
+        held[account] = max(held.get(account, 0), count)
+    return held
 
 
 def _planned_harness(herdr: HerdrRuntime, task_id: str) -> str | None:

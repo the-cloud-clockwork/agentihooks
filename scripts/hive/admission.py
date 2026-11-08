@@ -3,7 +3,7 @@ for fifteen minutes, three five minute load windows, until its agent joins; a jo
 minute load one window after launch, so its reservation ends there."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.host_budget import MEMORY_PER_AGENT_MB
 from scripts.swarm.keyspace import ROOT
@@ -73,16 +73,10 @@ class Room:
     detail: str
 
 
-def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
+def _host(measured: dict[str, Any], pending: int) -> list[tuple[int, str, str]]:
     cpus, load5 = measured["cpus"], measured["load5"]
     held = _held(pending)
-    limits = [
-        (
-            _cpu_room(cpus, load5, pending),
-            CPU,
-            f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
-        )
-    ]
+    limits = [_host_cpu(cpus, load5, measured.get("used_cpus"), pending)]
     if all(field in measured for field in RAM_FIELDS):
         available, total = measured["available_mb"], measured["total_mb"]
         limits.append(
@@ -93,6 +87,23 @@ def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
             )
         )
     return limits
+
+
+def _host_cpu(cpus: float, load5: float, used: float | None, pending: int) -> tuple[int, str, str]:
+    """The node CPU line: CPU used when the hive reads it, the five minute load only as a fallback and a guard that
+    binds while used CPU is at or above the swarm share."""
+    held = _held(pending)
+    loaded = f"five minute load {load5:.2f} on {cpus} CPUs"
+    if used is None:
+        return (
+            _cpu_room(cpus, load5, pending),
+            CPU,
+            f"{loaded}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}",
+        )
+    shown = f"{used:.2f} of {cpus} CPUs used, {loaded}"
+    if 100 * load5 > HOST_PERCENT * cpus and 100 * used >= SWARM_PERCENT * cpus:
+        return 0, CPU, f"{shown} with CPU used at or above the {SWARM_PERCENT} percent swarm share, fits {{}} more"
+    return _cpu_room(cpus, used, pending), CPU, f"{shown}, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {LINE}"
 
 
 def _held(pending: int) -> str:

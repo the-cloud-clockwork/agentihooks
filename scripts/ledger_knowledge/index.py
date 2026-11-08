@@ -14,6 +14,7 @@ from typing import Protocol
 from .chunks import Chunk
 
 DIMENSION = 512
+HASH = "hash"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chunks (
     key TEXT PRIMARY KEY,
@@ -37,6 +38,12 @@ class Embedder(Protocol):
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
+def unit(vector: list[float]) -> list[float]:
+    """The vector scaled to unit length, so a dot product ranks by cosine; a zero vector stays zero."""
+    norm = math.sqrt(sum(value * value for value in vector))
+    return [value / norm for value in vector] if norm else vector
+
+
 class HashEmbedder:
     """Deterministic local embedder: hashed word counts, unit length."""
 
@@ -47,8 +54,7 @@ class HashEmbedder:
         vector = [0.0] * self.dimension
         for word in re.findall(r"[a-z0-9]+", text.lower()):
             vector[int(hashlib.sha256(word.encode()).hexdigest()[:8], 16) % self.dimension] += 1.0
-        norm = math.sqrt(sum(value * value for value in vector))
-        return [value / norm for value in vector] if norm else vector
+        return unit(vector)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._vector(text) for text in texts]
