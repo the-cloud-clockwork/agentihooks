@@ -2082,7 +2082,9 @@
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_checkout_replaces_a_connection_killed_by_database_restart",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_pool_bounds_checked_out_connections_by_server_share",
         "tests/swarm_ledger/test_postgres_pool_liveness.py::test_failed_rollback_is_recorded_as_a_probe_failure",
-        "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running"
+        "tests/swarm_ledger/test_postgres_pool_liveness.py::test_pool_notifications_do_not_extend_the_checkout_deadline",
+        "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
+        "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
       ]
     }
   ],

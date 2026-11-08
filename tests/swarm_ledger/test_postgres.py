@@ -22,7 +22,7 @@ class Cursor:
         self.raw = raw
 
     def execute(self, sql: str, parameters: Any) -> None:
-        self.capacity_query = sql.startswith("SELECT current_setting(")
+        self.capacity_query = sql == postgres.LIVENESS or sql.startswith("SELECT current_setting(")
         if self.capacity_query:
             self.raw.capacity_query = True
             return
@@ -681,7 +681,9 @@ def test_a_stream_reads_through_a_named_server_cursor_two_thousand_rows_at_a_tim
             return self.batches.pop(0)
 
     class Streaming(Raw):
-        def cursor(self, name=None):
+        def cursor(self, name: str | None = None) -> Any:
+            if name is None:
+                return super().cursor()
             made.append(Named(name))
             return made[-1]
 

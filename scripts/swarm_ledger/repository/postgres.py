@@ -21,6 +21,7 @@ LEDGER_LOCK = 0x4C454453
 LEDGER_WRITE = f"SELECT pg_advisory_xact_lock_shared({WRITER_LOCK})"
 LEDGER_ONLY = f"SELECT pg_advisory_xact_lock({LEDGER_LOCK}, hashtext(?))"
 KEPT = 8
+LIVENESS = "SELECT 1 AS alive"
 STREAM_ROWS = 2000
 STREAMS = itertools.count()
 LOCK_WAIT = 10
@@ -213,7 +214,7 @@ class Pool:
                         if raw.closed:
                             raise errors().InterfaceError("connection already closed")
                         with raw.cursor() as cursor:
-                            cursor.execute("SELECT 1", ())
+                            cursor.execute(LIVENESS, ())
                         raw.rollback()
                         return raw
                     except errors().Error:
