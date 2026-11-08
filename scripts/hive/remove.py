@@ -233,10 +233,10 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
         raise auth.HiveError(f"hive {hive} has no record to drain")
     deadline_at = int((host.wall() + wait_s) * 1000)
     drain = registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at)
-    shared = bool(member) and registry.leave(store.redis, hive, member, drain)
-    if not shared:
+    own = host.namespace() if member else ""
+    if not (own and registry.leave(store.redis, hive, member, drain)):
+        own = ""
         registry.update(store.redis, hive, ["draining=yes"], drain=drain)
-    own = host.namespace() if shared else ""
     inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
     while remaining := _unhanded(store, hive, own):
@@ -248,7 +248,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
     else:
         ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
     _withdraw(inbox, ordered, hive)
-    return ended
+    return f"{ended}; only member {member} drained, the hive stays open for its other members" if own else ended
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:

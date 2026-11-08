@@ -89,6 +89,27 @@ def test_a_sole_or_stale_replacement_drains_the_whole_hive_as_before(client):
 
 
 @pytest.mark.feature("hive-roll-member-drain")
+def test_a_replacement_last_heard_exactly_one_live_window_ago_still_keeps_the_hive_open(client):
+    registry.join(client, HIVE, NEW, NOW - registry.LIVE_MS)
+
+    assert registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping")) is True
+
+    record = _shown(client)
+    assert record.get("draining") != "yes"
+    assert record["members"][OLD] == {"heartbeat_at": NOW, "draining": "yes"}
+
+
+@pytest.mark.feature("hive-roll-member-drain")
+def test_a_draining_member_whose_beats_lapsed_keeps_its_drain_on_its_next_beat(client):
+    registry.join(client, HIVE, OLD, NOW - registry.LIVE_MS - 5_000)
+    registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping"))
+
+    registry.join(client, HIVE, OLD, NOW + registry.LIVE_MS + 2)
+
+    assert _shown(client)["members"][OLD] == {"heartbeat_at": NOW + registry.LIVE_MS + 2, "draining": "yes"}
+
+
+@pytest.mark.feature("hive-roll-member-drain")
 def test_a_draining_replacement_takes_no_agents_so_the_hive_drains(client):
     registry.join(client, HIVE, OLD, NOW - 5_000)
     registry.join(client, HIVE, NEW, NOW - 1_000)
@@ -144,7 +165,9 @@ def test_the_old_pod_drain_orders_only_its_own_agents_to_hand_off(client, monkey
     monkeypatch.setattr(remove, "_recover", lambda store, hive, wait, remaining, host: f"recovered {_names(remaining)}")
     host = remove.Host(wall=lambda: NOW / 1000, clock=lambda: 0.0, sleep=lambda s: None, namespace=lambda: "boot/old")
 
-    assert remove.settle(store, HIVE, 0, host, OLD) == "recovered ['old@1']"
+    assert remove.settle(store, HIVE, 0, host, OLD) == (
+        f"recovered ['old@1']; only member {OLD} drained, the hive stays open for its other members"
+    )
     assert ordered == [["old@1"]]
     assert _shown(client).get("draining") != "yes"
 
@@ -166,7 +189,33 @@ def test_a_drain_with_no_member_named_still_waits_on_every_agent_of_the_hive(cli
     host = remove.Host(wall=lambda: NOW / 1000, clock=lambda: 0.0, sleep=lambda s: None, namespace=lambda: "boot/old")
 
     assert remove.settle(store, HIVE, 0, host) == "recovered ['old@1', 'new@1']"
-    assert _shown(client)["draining"] == "yes"
+    record = _shown(client)
+    assert record["draining"] == "yes"
+    assert "members" not in record
+
+
+@pytest.mark.feature("hive-roll-member-drain")
+def test_a_member_drain_whose_pod_namespace_is_unreadable_drains_the_whole_hive(client, monkeypatch):
+    registry.join(client, HIVE, OLD, NOW - 5_000)
+    registry.join(client, HIVE, NEW, NOW - 1_000)
+    agents = [_agent("old@1", "boot/old"), _agent("new@1", "boot/new")]
+    store = cast(
+        RedisStore,
+        SimpleNamespace(
+            redis=client,
+            slugs=lambda: ["fixture"],
+            agents=lambda slug: agents,
+            handoff_envelope=lambda slug, task: None,
+        ),
+    )
+    monkeypatch.setattr(remove, "_order", lambda inbox, sent, remaining, text, hive: None)
+    monkeypatch.setattr(remove, "_recover", lambda store, hive, wait, remaining, host: f"recovered {_names(remaining)}")
+    host = remove.Host(wall=lambda: NOW / 1000, clock=lambda: 0.0, sleep=lambda s: None, namespace=lambda: "")
+
+    assert remove.settle(store, HIVE, 0, host, OLD) == "recovered ['old@1', 'new@1']"
+    record = _shown(client)
+    assert record["draining"] == "yes"
+    assert record["members"][OLD]["draining"] == "no"
 
 
 def _names(remaining: list[tuple[str, AgentRecord]]) -> list[str]:
@@ -253,6 +302,24 @@ def test_the_daemon_first_beat_clears_its_drain_and_a_draining_member_polls_no_l
 
     assert polled == [HIVE]
     assert _shown(client)["members"][OLD] == {"heartbeat_at": NOW, "draining": "yes"}
+
+
+@pytest.mark.feature("hive-roll-member-drain")
+def test_a_fenced_member_that_is_not_draining_still_polls_no_launch_order(client, monkeypatch):
+    from scripts.hive import daemon
+
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    monkeypatch.setattr(daemon, "observe", lambda **kwargs: report)
+    monkeypatch.setattr(daemon.time, "time", lambda: NOW / 1000)
+    monkeypatch.setattr(daemon, "fence", lambda redis, hive, runtime: True)
+    monkeypatch.setattr(registry, "member_name", lambda: NEW)
+    polled: list[str] = []
+    monkeypatch.setattr(daemon.dispatch, "poll", lambda consumer: polled.append(consumer.hive))
+
+    daemon.beat(client, HIVE)
+
+    assert polled == []
+    assert _shown(client)["members"][NEW]["draining"] == "no"
 
 
 @pytest.mark.feature("hive-roll-member-drain")

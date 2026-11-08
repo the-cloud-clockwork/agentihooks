@@ -323,12 +323,9 @@ def join(client: Any, hive_id: str, member: str, now_ms: int, started: bool = Fa
     def write(stored: dict[str, Any] | None) -> object:
         if not stored:
             return hive_state.KEEP
-        kept = {
-            name: entry
-            for name, entry in stored.get("members", {}).items()
-            if now_ms - entry["heartbeat_at"] <= LIVE_MS
-        }
-        draining = "no" if started else kept.get(member, {}).get("draining", "no")
+        members = stored.get("members", {})
+        kept = {name: entry for name, entry in members.items() if now_ms - entry["heartbeat_at"] <= LIVE_MS}
+        draining = "no" if started else members.get(member, {}).get("draining", "no")
         return {**stored, "members": {**kept, member: {"heartbeat_at": now_ms, "draining": draining}}}
 
     _amend(client, hive_id, write)
