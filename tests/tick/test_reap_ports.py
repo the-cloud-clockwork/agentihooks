@@ -1,3 +1,4 @@
+from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -259,18 +260,25 @@ def test_pass_binds_the_fenced_runtime_to_the_port(monkeypatch: pytest.MonkeyPat
 
     token = PASS_TOOLS.set(replace(tools, runtime=runtime))
     try:
-        assert cli._Wrapper._fence(wrapper) is True
+        assert cli._Wrapper._fence(cast(Any, wrapper)) is True
         assert runtime.legacy is fenced
     finally:
         PASS_TOOLS.reset(token)
     assert wrapper.state == {"runtime": fenced}
     assert seen == [(store, "sw", held, raw, "deployment")]
     wrapper.state["runtime"] = raw
-    assert cli._Wrapper._fence(wrapper) is True
+    assert cli._Wrapper._fence(cast(Any, wrapper)) is True
     assert wrapper.state == {"runtime": fenced}
 
 
-@pytest.mark.parametrize("warning,expected", [(["guard changed"], "guard changed"), ([], "['update']")])
+@pytest.mark.parametrize(
+    "warning,expected",
+    [
+        (["guard changed"], "guard changed"),
+        (["guard changed", "lease lost", "owner gone"], "guard changed; lease lost; owner gone"),
+        ([], "['update']"),
+    ],
+)
 def test_resource_ledger_refuses_rejected_updates_without_invalidating_the_view(
     warning: list[str], expected: str
 ) -> None:
@@ -389,7 +397,7 @@ def test_resource_ledger_missing_tasks_and_server_errors_keep_their_meaning(stat
     from scripts.tick.adapters.ledger import ClientLedger
 
     def request(*args: object) -> dict[str, object]:
-        raise HTTPError("http://ledger", status, "missing", None, None)
+        raise HTTPError("http://ledger", status, "missing", Message(), None)
 
     adapter = ClientLedger("sw", lambda remaining: cast(Any, SimpleNamespace(request=request)))
     if status == 404:
@@ -433,9 +441,55 @@ def test_pass_tools_bind_the_supplied_clients(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(cli.classifier_settings, "load", lambda: SimpleNamespace(models=["model"], url="url"))
     ledger, runtime = object(), object()
     store = SimpleNamespace(redis=object(), agents=lambda slug: [])
-    tools = cli._pass_tools(store, "sw", "tick", ledger, runtime)
+    tools = cli._pass_tools(cast(Any, store), "sw", "tick", ledger, runtime)
     assert isinstance(tools.ledger, PassLedger)
     assert tools.ledger.client is ledger
     assert tools.ledger.slug == "sw"
     assert isinstance(tools.runtime, RouterRuntime)
     assert tools.runtime.legacy is runtime
+
+
+def test_reap_facade_defaults_keep_empty_homes_and_no_task_guards() -> None:
+    from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
+
+    runtime, ledger = FakeRuntime({"retire": True}), FakeLedger({"update_task": {"id": "task"}})
+    deadline = Deadline.after(10)
+    agent = AgentRecord("eng", "eng", "task")
+    assert RuntimeCalls(runtime, deadline).retire(agent) is True
+    assert runtime.calls[0].args == (agent, ())
+    assert LedgerCalls(ledger, deadline).update_task("sw", "task", {}) == {"id": "task"}
+    assert ledger.calls[0].args == ("task", {}, (), None)
+
+
+@pytest.mark.parametrize(
+    "operation,args,write",
+    [
+        ("task", ("task",), False),
+        ("notify", ("notice",), True),
+        ("question", ("question", "eng", "id"), True),
+    ],
+)
+def test_reap_ledger_reads_and_messages_obey_effects_and_deadlines(
+    operation: str, args: tuple[object, ...], write: bool
+) -> None:
+    from scripts.tick.ports import UndeclaredEffect
+
+    tools = fake_tools()
+    port = cast(FakeLedger, tools.ledger)
+    port.answers["task"] = {"id": "task"}
+    deadline = Deadline.after(10)
+    read_only = tools.for_effects(frozenset()).ledger
+    if write:
+        with pytest.raises(UndeclaredEffect) as error:
+            getattr(read_only, operation)(*args, deadline=deadline)
+        assert str(error.value) == "ledger is not a declared effect"
+        assert port.calls == []
+    else:
+        assert getattr(read_only, operation)(*args, deadline=deadline) == {"id": "task"}
+        port.calls.clear()
+    getattr(tools.for_effects(frozenset({"ledger"})).ledger, operation)(*args, deadline=deadline)
+    assert len(port.calls) == 1
+    assert (port.calls[0].args, port.calls[0].deadline) == (args, deadline)
+    with pytest.raises(TimeoutError):
+        getattr(port, operation)(*args, deadline=Deadline(0, lambda: 0))
+    assert len(port.calls) == 1
