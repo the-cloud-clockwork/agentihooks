@@ -2805,6 +2805,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "always() && steps.mutate.outcome != 'skipped'",
         "needs.mutation-refine.result == 'success'",
         "needs.mutation-replan.result == 'success'",
+        "steps.stats-arrival.outputs.missing != ''",
     )
     for job in (stats, mutation):
         guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
