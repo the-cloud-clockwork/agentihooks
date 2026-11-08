@@ -1,6 +1,7 @@
 """A restarted hive controller reads account quota from the hive reports in Redis, never a pod local cache."""
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -29,22 +30,22 @@ def empty_pod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("scripts.routing.reservation.current", lambda harness, environ: None)
 
 
-def _report(redis: Any, hive: str, sessions: int, used: int) -> None:
+def _report(redis: Any, hive: str, sessions: int, used: int, now: float = NOW) -> None:
     registry.update(redis, hive, ["max-agents=8"])
     registry.beat(
         redis,
         hive,
         {
-            "heartbeat_at": int(NOW * 1000),
+            "heartbeat_at": int(now * 1000),
             "slots": [{"harness": "claude", "account": "one", "kind": "subscription"}],
         },
     )
     redis.set(f"{registry.key(hive)}:sessions", json.dumps({"claude:one": sessions}), ex=45)
     quota = {
         "claude:one": {
-            "five_hour": {"used": used, "resets_at": NOW + 3600},
-            "seven_day": {"used": 10, "resets_at": NOW + 86400},
-            "observed_at": NOW - 5,
+            "five_hour": {"used": used, "resets_at": now + 3600},
+            "seven_day": {"used": 10, "resets_at": now + 86400},
+            "observed_at": now - 5,
         }
     }
     redis.set(f"{registry.key(hive)}:quota", json.dumps(quota), ex=45)
@@ -85,7 +86,7 @@ def test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows(redi
 
     from scripts.swarm.runtime import HerdrRuntime
 
-    _report(redis, "remote", 1, 20)
+    _report(redis, "remote", 1, 20, time.time())
     herdr = HerdrRuntime(choose=Mock(side_effect=AssertionError("the rotation must not read the pod cache")))
     herdr.quota_accounts = capacity.hive_accounts(redis)
     assert herdr._rotation("", {}) == ("claude", "rotation")
