@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.752 · 2026-11-08
+
+### 2026-11-08 · 91969b1713ec · #10200 · @nestorcolt
+
+**Controller reads account quota from the hive reports after a restart**
+
+After a controller restart, hive placements were stalling with waits like "sessions of None" because the fallback path read the pod-local balancer cache, which starts empty and reports every account as UNKNOWN. This fix makes the fallback and rotation logic read quota directly from the hive reports stored in Redis via capacity.hive_accounts, falling back only when no runtime quota reader is set, so controllers immediately see fresh account quotas after a roll instead of waiting on a cold local cache. The wait message is also renamed to "no fresh quota reading" for clarity.
+
 ## v2.17.751 · 2026-11-08
 
 ### 2026-11-08 · 3be08c9c40f7 · #10160 · @agenticore-app
