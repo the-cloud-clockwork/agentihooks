@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, hive_state, machine, nats_grant, registry
+from scripts.hive import auth, create, create_github, create_render, hive_state, machine, nats_grant, registry
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -54,6 +54,7 @@ Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledge
 
 <!-- handoff complete -->
 """
+PREFIXED = "agentihooks-hive-{label}"
 MANIFESTS = (
     "k8s/argocd/apps/{release}.yaml",
     "k8s/manifests/{release}/",
@@ -71,6 +72,7 @@ class Plan:
     repo: str = create.Options.repo
     base: str = create.Options.base
     wait_s: int = 3600
+    merge_s: int = create.Options.timeout_s
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
 
@@ -294,24 +296,49 @@ def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> 
     return [f"deleted OpenBao {openbao_kv.MOUNT}/{path}"]
 
 
-def unmanifest(plan: Plan, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
-    release = plan.label if plan.label.startswith(machine.NAME_PREFIX) else f"agentihooks-hive-{plan.label}"
-    owned = [pattern.format(release=release) for pattern in MANIFESTS]
+def unmanifest(
+    plan: Plan,
+    run: Callable[..., subprocess.CompletedProcess],
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[str]:
+    template = create_github.read(run, plan.repo, create_render.TEMPLATE_PATH, plan.base)
+    written = create_render.paths(template, plan.label)
+    prefixed = [pattern.format(release=PREFIXED.format(label=plan.label)) for pattern in MANIFESTS]
     tree = create_github.gh(run, ["api", f"repos/{plan.repo}/git/trees/{plan.base}?recursive=1", "--jq", TREE])
     paths = [
         path
         for path in tree.splitlines()
-        if any(path == own or own.endswith("/") and path.startswith(own) for own in owned)
+        if path in written or any(path == own or own.endswith("/") and path.startswith(own) for own in prefixed)
     ]
     if not paths:
-        return [f"{plan.repo} {plan.base} holds no manifests of {release}"]
+        return [f"{plan.repo} {plan.base} holds no manifests of hive {plan.label}"]
     listed = ", ".join(paths)
     if plan.dry_run:
-        return [f"would open a pull request into {plan.repo} {plan.base} deleting {listed}"]
+        return [
+            f"would open a pull request into {plan.repo} {plan.base} deleting {listed} and merge it once its checks pass"
+        ]
     message = f"Remove worker hive {plan.label}\n\nOpened by agentihooks hive remove."
     url = create_github.open_pr(run, plan.repo, plan.base, f"remove-{plan.label}", dict.fromkeys(paths), message)
-    merging = "it merges once its checks pass" if create_github.merge(run, url) else "merge it once its checks pass"
-    return [f"opened pull request {url} deleting {listed}; {merging}"]
+    if create_github.merge(run, url):
+        return [f"opened pull request {url} deleting {listed}; it merges once its checks pass"]
+    required = create_github.required_checks(run, plan.repo, plan.base)
+    waits = (sleep, clock, plan.merge_s)
+    _until(waits, f"pull request {url} checks to pass", lambda: create_github.checks_passed(run, url, required))
+    create_github.squash(run, url)
+    _until(waits, f"pull request {url} to merge", lambda: create_github.pr_state(run, url) == "MERGED")
+    return [f"opened pull request {url} deleting {listed} and merged it"]
+
+
+def _until(
+    waits: tuple[Callable[[float], None], Callable[[], float], int], what: str, check: Callable[[], bool]
+) -> None:
+    sleep, clock, limit_s = waits
+    deadline = clock() + limit_s
+    while not check():
+        if clock() >= deadline:
+            raise auth.HiveError(f"timed out after {limit_s}s waiting for {what}; rerun hive remove to resume")
+        sleep(POLL_S)
 
 
 STEPS = (
@@ -319,7 +346,7 @@ STEPS = (
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
     ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
-    ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run)),
+    ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run, host.sleep, host.clock)),
     ("openbao", lambda store, bao, plan, host: unbank(bao, plan.bao_path, plan.dry_run)),
 )
 
