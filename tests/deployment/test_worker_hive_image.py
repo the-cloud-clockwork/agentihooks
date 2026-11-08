@@ -536,11 +536,11 @@ def test_a_newer_release_at_move_time_keeps_the_release_tag_and_still_tags_the_v
     assert result.returncode == 0, result.stderr
     assert all(":release " not in command for command in commands)
     assert commands[-1] == "docker buildx imagetools create --tag registry/hive:2.1.7 registry/hive:abc123"
-    assert f"{newest} is newer than v2.1.7" in result.stdout
+    assert f"the newest release is {newest}, not v2.1.7" in result.stdout
     assert (tmp_path / "git").read_text().splitlines() == ["git ls-remote --tags --refs origin"]
 
 
-def test_the_newest_release_is_read_only_when_the_image_job_named_it_latest(tmp_path: Path) -> None:
+def test_a_release_the_image_job_did_not_name_latest_reads_no_tags(tmp_path: Path) -> None:
     result, commands = release_hive(tmp_path, version="not found", candidate="published", latest="false")
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / "git").exists()

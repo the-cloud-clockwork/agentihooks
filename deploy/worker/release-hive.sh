@@ -37,7 +37,7 @@ if [[ "$latest" == true ]]; then
   if [[ "$newest" == "$release" ]]; then
     docker buildx imagetools create --tag "$image:release" "$image:$ref"
   else
-    echo "$newest is newer than $release; leaving the release tag where it is"
+    echo "the newest release is $newest, not $release; leaving the release tag where it is"
   fi
 fi
 docker buildx imagetools create --tag "$image:$version" "$image:$ref"
