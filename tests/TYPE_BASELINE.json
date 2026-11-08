@@ -1707,7 +1707,7 @@
   "tests/test_ci_forwarded_mutation.py": 2,
   "tests/test_ci_gate_queue.py": 1,
   "tests/test_ci_hive_nats_grants.py": 3,
-  "tests/test_ci_lost_runner.py": 44,
+  "tests/test_ci_lost_runner.py": 43,
   "tests/test_ci_mutation_identity.py": 1,
   "tests/test_ci_mutation_killers.py": 11,
   "tests/test_ci_mutation_plan.py": 3,
