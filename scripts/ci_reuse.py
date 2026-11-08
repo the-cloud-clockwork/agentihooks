@@ -244,6 +244,34 @@ def retried_summary(steps: list[dict]) -> list[dict]:
     return retried
 
 
+PEAK_MEMORY = {
+    "name": "Record the job peak memory",
+    "if": "always()",
+    "shell": "bash",
+    "run": (
+        'read_cgroup() { cat "/sys/fs/cgroup/$1" 2>/dev/null || cat "/sys/fs/cgroup/memory/$2" 2>/dev/null'
+        " || echo unknown; }\n"
+        "peak=$(read_cgroup memory.peak memory.max_usage_in_bytes)\n"
+        "limit=$(read_cgroup memory.max memory.limit_in_bytes)\n"
+        "kills=$(awk '$1 == \"oom_kill\" { print $2 }' /sys/fs/cgroup/memory.events 2>/dev/null || true)\n"
+        '[[ "$peak" =~ ^[0-9]+$ ]] && peak="$((peak / 1048576)) MiB"\n'
+        '[[ "$limit" =~ ^[0-9]+$ ]] && limit="$((limit / 1048576)) MiB"\n'
+        'echo "Job peak memory of $GITHUB_JOB: $peak, limit $limit, out of memory kills ${kills:-unknown}"'
+        ' | tee -a "$GITHUB_STEP_SUMMARY"\n'
+    ),
+}
+
+
+def peak_memory(steps: list[dict]) -> list[dict]:
+    """Return the steps followed by the step that writes the whole job peak memory to the run summary."""
+    return [*steps, PEAK_MEMORY]
+
+
+def without_peak_memory(steps: list[dict]) -> list[dict]:
+    """Return the steps without a trailing job peak memory step."""
+    return steps[:-1] if steps and steps[-1] == PEAK_MEMORY else steps
+
+
 def selection_diagnostic(steps: list[dict]) -> list[dict]:
     [aggregation, *rest] = steps
     prefix = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
