@@ -150,12 +150,10 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     ordered: dict[tuple[str, str], str] = {}
     seen: dict[tuple[str, str], "AgentRecord"] = {}
     deadline = host.clock() + plan.wait_s
-    still: list[tuple[str, "AgentRecord"]] = []
     while remaining := hosted(store, plan.hive):
         seen.update(((slug, agent.name), agent) for slug, agent in remaining)
         _order(inbox, ordered, remaining, ORDER, plan.hive)
         if host.clock() >= deadline:
-            still = remaining
             break
         host.sleep(POLL_S)
     handed = sorted(name for (slug, name), agent in seen.items() if agent.task and _handed(store, slug, agent))
@@ -166,8 +164,8 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
         f"{len(released)} claims released: {', '.join(released) or 'none'}; "
         f"{len(retired)} agents retired: {', '.join(retired) or 'none'}"
     ]
-    if still:
-        names = ", ".join(sorted(agent.name for _, agent in still))
+    if remaining:
+        names = ", ".join(sorted(agent.name for _, agent in remaining))
         lines.append(f"{names} still ran after {plan.wait_s} seconds and were retired")
     return lines
 
@@ -177,12 +175,11 @@ def release(store: "RedisStore", hive: str, host: Host) -> tuple[list[str], list
     every unfinished agent on the hive; return the released tasks and the retired agents."""
     released: list[str] = []
     retired: list[str] = []
-    ledger: TaskLedger | None = None
+    ledger = host.ledger()
     for slug, agent in on_hive(store, hive):
         if agent.state == FINISHED:
             continue
         if agent.task and not _handed(store, slug, agent):
-            ledger = ledger or host.ledger()
             if _release_claim(store, ledger, slug, agent):
                 released.append(agent.task)
         if not store.drop_agent(slug, agent.name):

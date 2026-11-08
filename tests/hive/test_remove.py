@@ -68,6 +68,8 @@ class Swarm:
         self.rows = [row for row in self.rows if row.name != agent.name] + [agent]
 
     def drop_agent(self, slug: str, name: str) -> bool:
+        if slug != SLUG:
+            return False
         self.rows = [row for row in self.rows if row.name != name]
         return True
 
@@ -75,10 +77,10 @@ class Swarm:
         return self.redis.get(self.key(slug, "claim", task))
 
     def claim_generation(self, slug: str, task: str) -> int:
-        return 1
+        return int(self.redis.get(self.key(slug, "claim", task, "generation")) or 0)
 
     def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
-        self.redis.hset(self.key(slug, "refunded"), task, agent)
+        self.redis.hset(self.key(slug, "refunded"), task, f"{agent}:{generation}")
         return True
 
     def release(self, slug: str, task: str, agent: str) -> bool:
@@ -93,9 +95,11 @@ class Ledger:
         self.updates = []
 
     def task(self, slug: str, task_id: str) -> dict | None:
-        return self.rows.get(task_id)
+        return self.rows.get(task_id) if slug == SLUG else None
 
     def update_task(self, slug: str, task_id: str, fields: dict, if_state: tuple[str, ...] = ()) -> None:
+        if slug != SLUG:
+            return
         self.updates.append((task_id, fields, if_state))
         self.rows[task_id].update(fields)
 
@@ -403,9 +407,10 @@ class Drill(Clock):
         self.slept += 1
         self.now += seconds
         if self.slept == 1:
-            handed = next(agent for agent in self.store.agents(SLUG) if agent.name == "engineer@1")
-            self.store.envelopes[(SLUG, "t1")] = {"agent": "engineer@1"}
-            self.store.put_agent(SLUG, replace(handed, state="ended"))
+            for name, task in (("engineer@1", "t1"), ("engineer@7", "t7")):
+                handed = next(agent for agent in self.store.agents(SLUG) if agent.name == name)
+                self.store.envelopes[(SLUG, task)] = {"agent": name}
+                self.store.put_agent(SLUG, replace(handed, state="ended"))
             crashed = next(agent for agent in self.store.agents(SLUG) if agent.name == "ci@2")
             self.store.put_agent(SLUG, replace(crashed, state="ended"))
 
@@ -413,6 +418,7 @@ class Drill(Clock):
 def _claimed(store: Swarm, member: str, name: str, task: str, lane: str = "eng", state: str = "working") -> dict:
     store.put_agent(SLUG, AgentRecord(name, lane, task, seat=f"{lane}-{task}@{SLUG}", hive=member, state=state))
     store.redis.set(store.key(SLUG, "claim", task), name)
+    store.redis.set(store.key(SLUG, "claim", task, "generation"), 7)
     return {"id": task, "state": "claimed", "claimed_by": name}
 
 
@@ -425,9 +431,12 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
     rows = [
         _claimed(store, member, "engineer@1", "t1"),
         _claimed(store, member, "ci@2", "t2", lane="ci"),
-        _claimed(store, member, "engineer@3", "t3"),
+        {**_claimed(store, member, "engineer@3", "t3"), "state": "pr"},
         {**_claimed(store, member, "engineer@4", "t4", state="finished"), "state": "pr"},
+        {**_claimed(store, member, "ci@6", "t6", lane="ci", state="ended"), "claimed_by": "engineer@8"},
+        _claimed(store, member, "engineer@7", "t7"),
     ]
+    store.redis.delete(store.key(SLUG, "claim", "t3"))
     store.put_agent(SLUG, AgentRecord("engineer@5", "eng", "", seat=f"eng-5@{SLUG}", hive=member, state="working"))
     ledger = Ledger(rows)
     plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", wait_s=30)
@@ -437,8 +446,8 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
     done = remove.remove(store, bao, plan, _host(clock, Run(), tmp_path, ledger))
 
     assert done[:3] == [
-        f"drain: drained {member}: 4 agents ordered to hand off; 1 handed off: engineer@1; 2 claims released: t2, t3; "
-        "4 agents retired: ci@2, engineer@1, engineer@3, engineer@5",
+        f"drain: drained {member}: 5 agents ordered to hand off; 2 handed off: engineer@1, engineer@7; "
+        "3 claims released: t2, t3, t6; 6 agents retired: ci@2, ci@6, engineer@1, engineer@3, engineer@5, engineer@7",
         "drain: engineer@3, engineer@5 still ran after 30 seconds and were retired",
         f"member: revoked member {member} and its Redis user",
     ]
@@ -447,8 +456,10 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
         ("t2", {"state": "open", "claimed_by": ""}, ("claimed", "pr")),
         ("t3", {"state": "open", "claimed_by": ""}, ("claimed", "pr")),
     ]
-    assert [store.claimant(SLUG, task) for task in ("t1", "t2", "t3", "t4")] == ["engineer@1", None, None, "engineer@4"]
-    assert store.redis.hgetall(store.key(SLUG, "refunded")) == {"t2": "ci@2", "t3": "engineer@3"}
+    claims = [store.claimant(SLUG, task) for task in ("t1", "t2", "t3", "t4", "t6", "t7")]
+    assert claims == ["engineer@1", None, None, "engineer@4", None, "engineer@7"]
+    refunded = {"t2": "ci@2:7", "t3": "engineer@3:7", "t6": "ci@6:7"}
+    assert store.redis.hgetall(store.key(SLUG, "refunded")) == refunded
     assert sorted(agent.name for agent in store.agents(SLUG)) == ["engineer@4", "engineer@9"]
     assert not auth.member(store.redis, member)
 
