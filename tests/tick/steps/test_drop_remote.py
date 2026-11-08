@@ -1,7 +1,6 @@
 import json
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.swarm import fencing, tick
@@ -11,6 +10,8 @@ from tests.swarm.test_tick import FakeLedger
 
 @pytest.mark.feature("swarm-tick-dead-remote-budget")
 def test_retiring_an_archived_projection_preserves_its_history_metadata() -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     agent = store.start_execution(
@@ -35,6 +36,8 @@ def test_retiring_an_archived_projection_preserves_its_history_metadata() -> Non
 
 @pytest.mark.feature("swarm-tick-dead-remote-budget")
 def test_ten_dead_remote_seats_drop_without_loading_the_execution_archive(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     ledger = FakeLedger([{"id": f"t{index}"} for index in range(10)])
