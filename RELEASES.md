@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.722 · 2026-11-08
+
+### 2026-11-08 · d8b8fe71d290 · #10056 · @nestorcolt
+
+**Autoscale preview mirrors the tick: placement refusals and the tick host room**
+
+This fixes a mismatch between the autoscale preview and the actual scaling tick: the preview was projecting from stale, mismatched inputs (all ready tasks ignoring fresh placement refusals, and the wrong host room sample) rather than what the tick itself uses, making it look stuck at "pending raise held" when the real tick was already raising seats correctly. The drifting-target theory was disproven by a new regression test. Now the preview subtracts fresh placement refusals from demand and uses the host room the tick last granted, so the preview accurately mirrors real autoscale behavior.
+
 ## v2.17.719 · 2026-11-08
 
 ### 2026-11-07 · d700cb581cda · #10009 · @agenticore-app
