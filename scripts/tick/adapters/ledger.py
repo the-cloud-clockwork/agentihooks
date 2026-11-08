@@ -115,6 +115,10 @@ class ClientLedger:
             [{**operation("add_item", by, {"list": "questions", "text": text}), "id": op_id}], deadline=deadline
         )
 
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.mutate([operation("add", by, {"thread": f"tasks/{task_id}/comments", "text": text})], deadline=deadline)
+
 
 @dataclass(frozen=True)
 class PassLedger:
@@ -161,3 +165,7 @@ class PassLedger:
     def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
         deadline.live()
         self.client.question(self.slug, text, by, op_id)
+
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.client.comment(self.slug, task_id, text, by)

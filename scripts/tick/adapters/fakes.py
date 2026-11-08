@@ -94,6 +94,9 @@ class FakeLedger:
     def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
         _record(self, "question", (text, by, op_id), deadline)
 
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        _record(self, "comment", (task_id, text, by), deadline)
+
 
 @dataclass
 class FakeCoordination:

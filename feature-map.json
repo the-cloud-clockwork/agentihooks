@@ -435,7 +435,7 @@
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
-      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane.",
+      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass.",
       "seam": "scripts.tick.steps.place, re-exported by scripts.swarm.tick",
       "tests": [
         "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
@@ -447,7 +447,15 @@
         "tests/tick/test_place.py::test_the_pass_reclaim_reads_remote_heads_once_and_binds_them",
         "tests/tick/test_place.py::test_the_pass_reclaim_reuses_heads_the_pass_already_read",
         "tests/tick/test_place.py::test_a_legacy_launch_is_admitted_with_the_pass_runtime",
-        "tests/tick/test_place.py::test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims"
+        "tests/tick/test_place.py::test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims",
+        "tests/tick/test_place.py::test_a_spawn_pass_past_its_deadline_stops_and_leaves_every_task_for_the_next_pass",
+        "tests/tick/test_place.py::test_a_spawn_pass_whose_deadline_expires_midway_launches_what_it_prepared_and_leaves_the_rest",
+        "tests/tick/test_place.py::test_a_spawn_pass_inside_its_deadline_prepares_every_task_with_no_stop_notice",
+        "tests/tick/test_place.py::test_the_spawn_step_hands_the_spawn_pass_its_step_deadline",
+        "tests/tick/test_spawn_ports.py::test_the_ledger_facade_comments_through_the_port_with_its_deadline",
+        "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
+        "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
+        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect"
       ]
     },
     {

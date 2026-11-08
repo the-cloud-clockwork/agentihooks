@@ -10,6 +10,8 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
+from scripts.tick.adapters.calls import LedgerCalls
+from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import (
@@ -94,7 +96,7 @@ def _pass(log: list[Any], state: str = "running", engine_name: str = "tick", **e
 
 def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
     def skip_refused(function: Any, *args: Any) -> list[str]:
-        log.append((function, *args))
+        log.append((function, *args, *([place.PASS_DEADLINE.get()] if function == "spawn" else [])))
         return [f"ran {function if isinstance(function, str) else function.__name__}"]
 
     @contextmanager
@@ -116,6 +118,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         EVENTS_ENGINE="events",
         _placement_pass=placement_pass,
         _spawn="spawn",
+        SPAWN_BUDGET_S=60,
         _collect_acks="collect acks",
         _codex_hook_order="codex hook order",
         _ended="ended",
@@ -132,7 +135,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
 
 def _run(group: str, tick: SimpleNamespace, state: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr("scripts.tick.steps.import_module", lambda name: tick)
-    return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0))))
+    return actions(engine.run_group(group, Context(_State(state), Deadline.after(60.0), fake_tools())))
 
 
 @pytest.fixture
@@ -269,11 +272,13 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("places", "tick", ROWS),
         "panic read",
         ("enter pass", "runtime"),
-        ("spawn", "sw", config, store, "ledger", "runtime", ROWS, "doc", 7, calm[7][-1]),
+        ("spawn", "sw", config, store, calm[7][4], "runtime", ROWS, "doc", 7, calm[7][-1]),
         ("leave pass", "runtime"),
         ("delete", "due key"),
     ]
     assert isinstance(calm[7][-1], Deadline)
+    assert isinstance(calm[7][4], LedgerCalls)
+    assert calm[7][4].deadline.expires_at == calm[7][-1].expires_at + tick.SPAWN_BUDGET_S
     spawned = calm[7][6]
     assert spawned is not ROWS and state["box"]["rows"] == ROWS
     assert isinstance(state["box"]["rows"], MappingProxyType)
@@ -556,7 +561,11 @@ def _spawn_with(deadline: Deadline | None) -> list[str]:
     """Run the spawn pass of swarm sw with ``deadline``."""
     store: Any = SimpleNamespace(agents=lambda slug: [])
     config: Any = SimpleNamespace()
-    return place._spawn("sw", config, store, "ledger", "runtime", {}, {}, 7, deadline)
+    token = place.PASS_DEADLINE.set(deadline)
+    try:
+        return place._spawn("sw", config, store, "ledger", "runtime", {}, {}, 7)
+    finally:
+        place.PASS_DEADLINE.reset(token)
 
 
 @pytest.mark.feature("swarm-tick-spawn")
@@ -604,6 +613,13 @@ def test_the_spawn_step_hands_the_spawn_pass_its_step_deadline(
     deadline = Deadline(50.0, _Clock(0.0))
     spawn = next(step for step in place.STEPS if step.name == "spawn")
 
-    spawn.run(Context(_State(_pass(calm)), deadline))
+    state, tools = _pass(calm), fake_tools()
 
-    assert [entry[-1] for entry in calm if isinstance(entry, tuple) and entry[0] == "spawn"] == [deadline]
+    spawn.run(Context(_State(state), deadline, tools))
+
+    [found] = [entry for entry in calm if isinstance(entry, tuple) and entry[0] == "spawn"]
+    ledger = found[4]
+    assert found == ("spawn", "sw", state["config"], state["store"], ledger, "runtime", ROWS, "doc", 7, deadline)
+    assert isinstance(ledger, LedgerCalls) and ledger.port is tools.ledger
+    assert place.PASS_DEADLINE.get() is None
+    assert (ledger.deadline.expires_at, ledger.deadline.clock) == (50.0 + _tick(calm).SPAWN_BUDGET_S, deadline.clock)
