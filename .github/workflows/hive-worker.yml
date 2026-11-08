@@ -55,6 +55,13 @@ jobs:
             sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
           fi
           kind version
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5001"]
+              http = true
       - name: Restore the worker hive image layers
         id: layers
         uses: actions/cache/restore@v4
@@ -91,5 +98,4 @@ jobs:
       - name: Publish the proven hive worker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: |
-          docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
-          docker push ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
+          docker buildx imagetools create --tag ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev localhost:5001/agentihooks-hive-worker:dev

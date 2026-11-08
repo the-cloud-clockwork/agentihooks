@@ -25,7 +25,7 @@ docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/li
   docker network connect kind "$cluster-registry"
   docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001
   printf '[host."http://%s:5000"]\n' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml
-  for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
+  for warm in mirror.gcr.io/library/redis:7-alpine; do
     docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
   done
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
@@ -66,8 +66,8 @@ if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-wo
   worker_image="$(cat "$out/worker-base.ref")"
 else
   worker_base=rebuilt
-  worker_image=local/worker-base:dev
-  docker build -f docker/swarm-node/Dockerfile -t "$worker_image" .
+  worker_image=localhost:5001/worker-base:dev
+  docker buildx build -f docker/swarm-node/Dockerfile --output "type=image,name=$worker_image,push=true,unpack=false" .
 fi
 hive_layers=()
 if [[ -n ${HIVE_LAYER_CACHE:-} ]]; then
@@ -78,9 +78,9 @@ if [[ -n ${HIVE_LAYER_CACHE:-} ]]; then
     hive_layers+=(--cache-to "type=local,dest=$HIVE_LAYER_CACHE.next,mode=max,compression=uncompressed")
   fi
 fi
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" \
+docker buildx build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" \
   --build-arg AGENTIHOOKS_SOURCE=local "${hive_layers[@]}" --output "type=image,name=$image,push=true,unpack=false" .
-docker image inspect --format '{{.Id}}' "$image" > "$out/image.txt"
+docker buildx imagetools inspect "$image" > "$out/image.txt"
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 if [[ -n ${HIVE_LAYER_CACHE:-} && -d $HIVE_LAYER_CACHE.next ]]; then
   if [[ -d $HIVE_LAYER_CACHE ]]; then
