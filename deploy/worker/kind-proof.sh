@@ -15,11 +15,14 @@ cleanup() {
     kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
   kill ${init_pid:-} ${tools_pid:-} ${browser_pid:-} 2>/dev/null || true
-  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
+  if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then
+    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
+  fi
   kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
 docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null
+printf '%s\n' "$cluster-registry" > "$out/registry.txt"
 {
   kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s
   docker network connect kind "$cluster-registry"

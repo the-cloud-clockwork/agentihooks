@@ -161,6 +161,20 @@ def test_kind_proof_keeps_base_layers_in_the_registry_until_the_pods_pull_them()
     assert "docker tag" not in publish["run"]
 
 
+def test_kind_registry_outlives_publication_and_is_always_removed() -> None:
+    steps = hive_jobs()["kind"]["steps"]
+    build = next(step for step in steps if "kind-proof.sh" in step.get("run", ""))
+    assert build["env"]["HIVE_REGISTRY_KEEP"] == "true"
+    publish = next(i for i, step in enumerate(steps) if step.get("name") == "Publish the proven hive worker image")
+    cleanup = next(i for i, step in enumerate(steps) if step.get("name") == "Remove the worker hive image registry")
+    assert cleanup > publish
+    assert steps[cleanup]["if"] == "always()"
+    assert 'docker rm -f "$(cat "$HOME/scratchpad/worker-hive-proof/registry.txt")"' in steps[cleanup]["run"]
+    proof = PROOF.read_text()
+    assert 'if [[ ${HIVE_REGISTRY_KEEP:-false} != true ]]; then\n    docker rm -f "$cluster-registry"' in proof
+    assert proof.index('> "$out/registry.txt"') < proof.index("kind create cluster")
+
+
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
     current, _, stale = PROOF.read_text().partition("\nelse\n")
     assert f'if bash deploy/worker/base-current.sh {BASE} "$out/worker-base.ref"; then' in current
@@ -613,7 +627,8 @@ def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> N
     registry = (
         'docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null'
     )
-    assert lines[start - 1] == registry
+    assert lines[start - 2] == registry
+    assert lines[start - 1] == 'printf \'%s\\n\' "$cluster-registry" > "$out/registry.txt"'
     assert lines[start + 2 : start + 5] == [
         '  docker network connect kind "$cluster-registry"',
         '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
@@ -627,7 +642,7 @@ def test_kind_proof_warms_redis_without_downloading_the_worker_base_twice() -> N
     assert lines[lines.index("EOF") + 1] == '} > "$out/cluster.log" 2>&1 &'
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
-    assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
+    assert lines.index('    docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
         '  kind delete cluster --name "$cluster"'
     )
     assert lines.index('docker buildx imagetools inspect "$image" > "$out/image.txt"') < lines.index(

@@ -74,6 +74,7 @@ jobs:
           AGENTIHOOKS_REF: ${{ github.sha }}
           HIVE_LAYER_CACHE: ${{ runner.temp }}/worker-hive-layers
           HIVE_LAYER_CACHE_HIT: ${{ steps.layers.outputs.cache-hit }}
+          HIVE_REGISTRY_KEEP: 'true'
         run: bash deploy/worker/kind-proof.sh
       - name: Save the worker hive image layers
         if: steps.layers.outputs.cache-hit != 'true'
@@ -99,3 +100,9 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: |
           docker buildx imagetools create --tag ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev localhost:5001/agentihooks-hive-worker:dev
+      - name: Remove the worker hive image registry
+        if: always()
+        run: |
+          if [[ -f "$HOME/scratchpad/worker-hive-proof/registry.txt" ]]; then
+            docker rm -f "$(cat "$HOME/scratchpad/worker-hive-proof/registry.txt")"
+          fi
