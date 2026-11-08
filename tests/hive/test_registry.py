@@ -151,6 +151,18 @@ def test_a_restarted_registration_with_nothing_new_writes_nothing(redis):
     assert _record(redis, "box") == stored
 
 
+def test_a_restarted_worker_adopts_the_charted_agent_cap(redis):
+    start = ["ui=no", "ephemeral=yes", "excluded=master", "prefer="]
+    registry.update(redis, "box", start, keep=True)
+    registry.update(redis, "box", ["max-agents=3"])
+    registry.update(redis, "box", ["max-agents=9"])
+    registry.update(redis, "box", ["excluded=qa"])
+    registry.update(redis, "box", start, keep=True)
+    restarted = registry.update(redis, "box", ["max-agents=12"])
+    assert restarted == {**DEFAULT, "ephemeral": "yes", "excluded": ["qa"], "max_agents": 12}
+    assert _record(redis, "box")["max_agents"] == 12
+
+
 def test_a_declared_name_lands_on_a_new_record_and_survives_reregistration(redis):
     first = registry.update(redis, "box", ["name=swarm-hive-002", "max-agents=9"], keep=True)
     assert first["name"] == "swarm-hive-002"
