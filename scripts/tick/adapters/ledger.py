@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import uuid4
 
-from scripts.swarm import lease
+from scripts.swarm import lease, timing
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.tick.deadline import Deadline
 
@@ -115,6 +115,10 @@ class ClientLedger:
             [{**operation("add_item", by, {"list": "questions", "text": text}), "id": op_id}], deadline=deadline
         )
 
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.mutate([operation("add", by, {"thread": f"tasks/{task_id}/comments", "text": text})], deadline=deadline)
+
 
 @dataclass(frozen=True)
 class PassLedger:
@@ -146,7 +150,9 @@ class PassLedger:
         guard: dict[str, object] = {"if_state": if_state} if if_state else {}
         if if_match is not None:
             guard["if_match"] = if_match
-        row: dict[str, Any] = self.client.update_task(self.slug, task_id, fields, **guard)
+        row: dict[str, Any] = cast(Callable[..., Any], timing.timed)(
+            self.client.update_task, self.slug, task_id, fields, **guard
+        )
         return row
 
     def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
@@ -161,3 +167,7 @@ class PassLedger:
     def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
         deadline.live()
         self.client.question(self.slug, text, by, op_id)
+
+    def comment(self, task_id: str, text: str, by: str, *, deadline: Deadline) -> None:
+        deadline.live()
+        self.client.comment(self.slug, task_id, text, by)

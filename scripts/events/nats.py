@@ -43,6 +43,7 @@ FIRST_CONNECT_S = 2
 _log = logging.getLogger(__name__)
 ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 FIRST_CONNECT_RETRIES = 5
+RECONNECT_WAIT_S = 2
 
 
 def queue_stream(name: str) -> str:
@@ -68,6 +69,22 @@ async def _unreported(error: Exception) -> None:
     """Drop a connection error, which the open or the next call raises; log any other error in one line."""
     if not isinstance(error, (OSError, asyncio.TimeoutError, NoServersError)):
         _log.error("%s", error)
+
+
+@dataclass
+class _Lifecycle:
+    """Log a dropped and a restored bus connection; an intentional close logs nothing."""
+
+    client: Client | None = None
+
+    async def disconnected(self) -> None:
+        """Log a drop only while the client is reconnecting, since close also calls this."""
+        if self.client is not None and self.client.is_reconnecting:
+            _log.warning("NATS bus disconnected")
+
+    async def reconnected(self) -> None:
+        """Log that the shared bus connection came back."""
+        _log.info("NATS bus reconnected")
 
 
 def connect_options(config: BusConfig) -> dict[str, Any]:
@@ -463,15 +480,22 @@ class NatsStateStore:
 
 
 async def _first_connect(url: str, config: BusConfig) -> Client:
-    """Connect within FIRST_CONNECT_RETRIES; a reconnecting client then retries without end."""
+    """Connect within the configured first connect bound; once connected, every client reconnects without end."""
+    lifecycle = _Lifecycle()
     try:
-        client = await nats_client.connect(url, **connect_options(config), **auth_options(config.credentials))
+        client = await nats_client.connect(
+            url,
+            disconnected_cb=lifecycle.disconnected,
+            reconnected_cb=lifecycle.reconnected,
+            **connect_options(config),
+            **auth_options(config.credentials),
+        )
     except NoServersError as error:
         raise ConnectionError(
             f"nats: no server at {url} answered the first connect within {FIRST_CONNECT_RETRIES} retries"
         ) from error
-    if config.reconnect:
-        client.options["max_reconnect_attempts"] = -1
+    lifecycle.client = client
+    client.options.update(allow_reconnect=True, max_reconnect_attempts=-1, reconnect_time_wait=RECONNECT_WAIT_S)
     return client
 
 

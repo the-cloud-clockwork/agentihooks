@@ -1,5 +1,9 @@
 {
- "scenarios": {},
+ "scenarios": {
+  "workflow runner": [
+   "running"
+  ]
+ },
  "unmapped": [
   "automated cleanup",
   "bottleneck remedy",

@@ -20,7 +20,13 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "ledger": (
         frozenset([Ledger.export.__name__, Ledger.task.__name__]),
         frozenset(
-            [Ledger.mutate.__name__, Ledger.update_task.__name__, Ledger.notify.__name__, Ledger.question.__name__]
+            [
+                Ledger.mutate.__name__,
+                Ledger.update_task.__name__,
+                Ledger.notify.__name__,
+                Ledger.question.__name__,
+                Ledger.comment.__name__,
+            ]
         ),
     ),
     "coordination": (

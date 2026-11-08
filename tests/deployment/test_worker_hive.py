@@ -141,6 +141,7 @@ RUN = [
     "init",
     "deps ensure",
     "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= prefer=",
+    "hive set --reason the chart sets the agent cap worker-member max-agents=auto",
     "hive run",
 ]
 
@@ -165,14 +166,13 @@ def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeyp
     ) in commands.splitlines()
 
 
-def test_a_charted_agent_cap_is_registered_after_the_other_settings(tmp_path, monkeypatch):
-    monkeypatch.setenv("HIVE_MAX_AGENTS", "6")
+def test_the_charted_agent_cap_replaces_the_stored_cap_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_MAX_AGENTS", "12")
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
-    assert (
-        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
-        "prefer= max-agents=6"
-    ) in commands.splitlines()
+    lines = commands.splitlines()
+    assert "hive set --reason the chart sets the agent cap worker-member max-agents=12" in lines
+    assert not any(line.startswith("hive set --keep") and "max-agents" in line for line in lines)
 
 
 def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):

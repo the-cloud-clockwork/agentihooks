@@ -528,7 +528,7 @@ A reading holds:
 
 The reading expires after 30 seconds, and a reader treats one older than that as absent. With no fresh reading the
 hive's room is 0, the refusal reads `missing telemetry: no fresh headroom reading`, and `hive list` shows
-`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 700 MB each under 80 percent of the host,
+`headroom=missing`. Otherwise each limit fits whole agents at 0.5 CPU and 850 MB each under 80 percent of the host,
 and of the pod when the cgroup sets a limit; launches reserved on the hive in the last fifteen minutes count against
 each limit, and the smallest limit wins.
 
@@ -1098,9 +1098,11 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
-   prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, and `max-agents=<workers.maxAgents>`
-   only when `HIVE_MAX_AGENTS` is set. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
-   the lowest ranked hive while admission leaves it room.
+   prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, keeping a stored excluded list, ui and ephemeral.
+   `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to the
+   lowest ranked hive while admission leaves it room. A second `hive set` then writes `max-agents=<workers.maxAgents>`
+   without `--keep`, or `max-agents=auto` when the chart sets none, so every start replaces a stored or hand-set cap with
+   the chart value.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
