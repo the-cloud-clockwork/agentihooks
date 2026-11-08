@@ -2,7 +2,6 @@ import hashlib
 import io
 import json
 import urllib.parse
-from dataclasses import replace
 
 import pytest
 
@@ -135,7 +134,7 @@ def test_unassign_reports_an_openbao_failure_as_a_hive_error():
     assert str(error.value) == "OpenBao HTTP 503: sealed"
 
 
-def _unlisting(**given):
+def _unlisting(**given: bool) -> remove.Plan:
     return remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, **given)
 
 
@@ -154,7 +153,7 @@ def test_remove_unlists_nothing_without_a_hub_signer_path_and_only_names_it_on_a
     assert remove.unlist(_bao(fake), _unlisting(dry_run=True)) == [
         f"would unlist m1 from the hub signer record {SIGNER}"
     ]
-    assert remove.unlist(None, replace(_unlisting(), signer_path=None)) == []
+    assert remove.unlist(None, remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9")) == []
     assert fake.written == []
 
 
