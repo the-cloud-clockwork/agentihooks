@@ -227,13 +227,16 @@ def probe(environ: dict[str, str], now: float) -> list[Account]:
     return _claude(environ, now, True) + _codex(environ, now, True)
 
 
-def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
-    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs."""
+def accounts(environ: dict, now: float, refresh: bool = True, hives: bool = False) -> list[Account]:
+    """Every account with its band cap; ``refresh`` probes stale Claude and Codex readings, which runs their CLIs.
+
+    ``hives`` reads the live hive quota reports whatever the runtime backend.
+    """
     from scripts.routing import aggregate, reservation
 
     rows = (
         _global(environ, now)
-        if aggregate.enabled(environ)
+        if hives or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
     store = reservation._store(environ)
@@ -241,6 +244,23 @@ def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
         held = reservation.current(harness, environ)
         rows = latch(reserve(rows, held), held, store)
     return rows
+
+
+def hive_accounts(environ: dict[str, str], now: float, refresh: bool = True) -> list[Account]:
+    """Every account from the live hive quota reports in the shared store, the readings a hive controller places from."""
+    return accounts(environ, now, refresh, hives=True)
+
+
+def rooms(rows: list[Account], harness: str) -> str:
+    """Each ``harness`` account's sessions against its cap, naming a missing quota reading as why it offers no seats."""
+    named = [
+        f"{row.name} {row.sessions} sessions of {row.cap}"
+        if row.cap is not None
+        else f"{row.name} {row.sessions} sessions, no fresh quota reading"
+        for row in rows
+        if row.harness == harness
+    ]
+    return ", ".join(named) or f"no live hive reports a {harness} quota reading"
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:

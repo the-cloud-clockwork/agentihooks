@@ -347,7 +347,7 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         if rows is None:
             if self._quota_accounts is None:
-                self._quota_accounts = capacity.accounts(dict(os.environ), now / 1000, refresh=False)
+                self._quota_accounts = capacity.hive_accounts(dict(os.environ), now / 1000, refresh=False)
             rows = self._quota_accounts
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         if lane == "master" and not task.get("route_kind"):
@@ -379,9 +379,7 @@ class HiveLaunch:
         if not candidates:
             candidates = open_rows
         if not candidates:
-            seats = ", ".join(
-                f"{row.name} {row.sessions} sessions of {row.cap}" for row in rows if row.harness == harness
-            )
+            seats = capacity.rooms(rows, harness)
             pinned = f"; pinned to {account}" if account else ""
             return placement.Wait(
                 f"no {harness.capitalize()} account has room after hive sessions: {seats}{pinned}", role
