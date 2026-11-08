@@ -150,8 +150,13 @@ def test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs(
     swarm, ledger, runtime = env
     run("sw", "create", "--repo", "/repo")
 
+    calls: list[int] = []
+
     def stall_pass(watch: Any, doc: dict[str, Any]) -> list[str]:
-        raise TypeError("'NoneType' object is not callable")
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise TypeError("'NoneType' object is not callable")
+        return ["stall watch ran"]
 
     monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: None)
     monkeypatch.setattr(stall_watch, "stall_pass", stall_pass)
@@ -159,4 +164,5 @@ def test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs(
     assert first == ["pass failed: a step raised TypeError: 'NoneType' object is not callable"]
     assert swarm.redis.get(swarm.key("sw", "tick-lock")) is None
     second = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
-    assert second == first
+    assert calls == [0, 1]
+    assert not any(line.startswith("pass failed") for line in second)

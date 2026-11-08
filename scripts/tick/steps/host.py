@@ -6,6 +6,8 @@ from collections.abc import Callable
 from importlib import import_module
 from typing import Any
 
+from redis.exceptions import RedisError
+
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     delivery,
@@ -70,7 +72,7 @@ def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], A
 def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
     """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
     raise it again."""
-    if not any(box.get("raised") is exc for box in boxes):
+    if isinstance(exc, RedisError) or not any(box.get("raised") is exc for box in boxes):
         raise exc
     return failed_pass(exc)
 
@@ -87,7 +89,7 @@ def end_held(box: dict[str, Any]) -> list[str]:
     raised = box.get("raised")
     if raised is None:
         return []
-    if not isinstance(raised, Exception):
+    if not isinstance(raised, Exception) or isinstance(raised, RedisError):
         raise raised
     return failed_pass(raised)
 

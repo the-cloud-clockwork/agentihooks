@@ -104,7 +104,7 @@ def test_failed_ticks_publish_the_spawn_stall_alarm_for_the_page(stalled):
 
 
 @pytest.mark.parametrize("failed_tick", [True, False])
-def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stalled, monkeypatch, failed_tick):
+def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stalled, monkeypatch, capsys, failed_tick):
     from scripts.swarm import command_runner, timing
 
     store, ledger, runtime, _, tick_error = stalled
@@ -119,7 +119,12 @@ def test_publication_failure_preserves_the_tick_error_and_releases_the_lock(stal
     keeping = timing.BEFORE_STEP.get()
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     failed = [f"pass failed: a step raised RuntimeError: {tick_error}"]
-    assert (actions == failed) is failed_tick
+    reported = capsys.readouterr().err
+    if failed_tick:
+        assert actions == failed
+    else:
+        assert actions != failed
+        assert f"RuntimeError: {publication_error}" in reported
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert timing.BEFORE_STEP.get() is keeping
 
