@@ -114,6 +114,18 @@
       ]
     },
     {
+      "id": "swarm-tick-slow-export",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
+      "behaviour": "A tick pass whose short ledger read times out on a large export reads it again under the export budget when this host stores no view or only a stale one, stores the fresh view for the next pass, and runs offline on a fresh stored view without the long read.",
+      "seam": "scripts.swarm.cli._hold_view against a real HTTP ledger server that pauses mid body longer than the short read budget",
+      "tests": [
+        "tests/tick/test_slow_export_view.py::test_a_first_full_read_slower_than_the_short_budget_is_read_again_and_stored",
+        "tests/tick/test_slow_export_view.py::test_a_stale_stored_view_is_read_again_under_the_export_budget",
+        "tests/tick/test_slow_export_view.py::test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read"
+      ]
+    },
+    {
       "id": "swarm-spawn-claim-before-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
