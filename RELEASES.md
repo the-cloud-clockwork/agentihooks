@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.748 · 2026-11-08
+
+### 2026-11-08 · 9fe0d9519892 · #10195 · @agenticore-app
+
+**Hive create waits only on required checks and the merge path of its manifests pull request**
+
+Hive create's merge step now checks only the status checks the base branch ruleset actually requires before proceeding, so an optional failing check (like Gate — Protected) no longer blocks a create unnecessarily. Once required checks pass, it follows whatever merge path the base branch expects: enqueuing via the `enqueuePullRequest` GraphQL mutation for merge-queue bases (without re-enqueuing an already-queued PR on rerun), or using auto merge when allowed and falling back to squash merge otherwise. Reruns after a timeout correctly resume the same saved pull request and hive member instead of starting over.
+
 ## v2.17.747 · 2026-11-08
 
 ### 2026-11-08 · fe9d758d1ef4 · #10162 · @agenticore-app
