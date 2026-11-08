@@ -285,3 +285,24 @@ def test_the_directive_names_the_planning_default_and_no_review(
 )
 def test_the_doctrine_names_plan_ingest(path: Path) -> None:
     assert "agentihooks plan ingest" in path.read_text(encoding="utf-8")
+
+
+def test_an_empty_plan_path_falls_back_to_a_scratch_copy(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    payload = recorded("claude_plan_accept", session_id="s1")
+    payload["tool_input"] = {"planFilePath": "", "plan": "# Plan é\n"}
+    out = decision.directive(payload)
+    scratch = decision.STATE_DIR / "s1.plan.md"
+    assert scratch.read_bytes() == "# Plan é\n".encode("utf-8")
+    assert (
+        f"without asking: write the accepted plan as markdown to a file, then run `agentihooks plan ingest {scratch}"
+        in out
+    )
+
+
+def test_a_carried_plan_path_needs_no_write_step(isolated: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+    bind(isolated, "s1")
+    out = decision.directive(recorded("claude_plan_accept", session_id="s1"))
+    assert f"without asking: run `agentihooks plan ingest {PLAN_PATH} --ledger rig-grade-swarm`." in out

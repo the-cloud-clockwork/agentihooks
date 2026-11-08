@@ -61,9 +61,8 @@ def _plan_path(payload: Mapping[str, Any], session_id: str) -> str:
     text = tool_input.get("plan")
     if not isinstance(text, str) or not text.strip():
         return PLAN_PLACEHOLDER
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
     scratch = STATE_DIR / f"{session_id}.plan.md"
-    scratch.write_text(text, encoding="utf-8")
+    scratch.write_bytes(text.encode())
     return str(scratch)
 
 
