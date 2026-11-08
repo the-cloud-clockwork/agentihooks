@@ -2211,6 +2211,19 @@ def test_reported_worker_sessions_fill_the_hive_up_to_its_max_agents(setup):
     )
 
 
+def test_a_hive_set_to_zero_max_agents_takes_no_new_agent(setup):
+    from scripts.hive import registry
+    from scripts.hive.placement import Wait
+
+    publish_room(setup.store, "remote", 10)
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).hive == "remote"
+    registry.update(setup.store.redis, "remote", ["max-agents=0"])
+    assert setup.launcher.hives()[0]["room"] == 0
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}) == Wait(
+        "no hive for eng has room: remote max agents: 0 of 0 agents on the hive, fits 0 more"
+    )
+
+
 def test_max_agents_of_mixed_lanes_refuse_the_next_launch_with_its_reason(setup):
     from scripts.hive import placement_waits
     from scripts.swarm.store import AgentRecord

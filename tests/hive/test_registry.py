@@ -52,6 +52,13 @@ def test_a_new_hive_gets_every_field_and_joins_the_index(redis):
     assert stored["max_agents"] == 3
 
 
+def test_hive_set_accepts_zero_max_agents_to_scale_a_hive_fully_down(redis):
+    registry.update(redis, "box", ["max-agents=3"])
+    assert registry.update(redis, "box", ["max-agents=0"]) == {**DEFAULT, "max_agents": 0}
+    assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 0}
+    assert _record(redis, "box")["max_agents"] == 0
+
+
 def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "box")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://localhost:6379/15")
@@ -280,10 +287,10 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
         (["excluded=eng,a:b"], "excluded takes lane roles or profiles, not 'a:b'"),
-        (["max-agents=0"], "max-agents must be a positive whole number, not '0'"),
-        (["max-agents=two"], "max-agents must be a positive whole number, not 'two'"),
-        (["max-agents=-1"], "max-agents must be a positive whole number, not '-1'"),
-        (["max-agents=²"], "max-agents must be a positive whole number, not '²'"),
+        (["max-agents="], "max-agents must be a whole number, not ''"),
+        (["max-agents=two"], "max-agents must be a whole number, not 'two'"),
+        (["max-agents=-1"], "max-agents must be a whole number, not '-1'"),
+        (["max-agents=²"], "max-agents must be a whole number, not '²'"),
         (["prefer=eng"], "prefer takes role:rank, not 'eng'"),
         (["prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
         (["prefer=eng:1:2"], "the rank of eng must be a positive whole number, not '1:2'"),
