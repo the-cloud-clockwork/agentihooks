@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -595,12 +595,19 @@ class HerdrRuntime:
             raise SpawnError("unsupported handoff: router substituted the original harness", "unsupported")
         return agent, reason
 
-    def _profile_decision(self, config, lane, chosen, task, saved, relaunch, environ):
+    def _profile_decision(
+        self,
+        config: SwarmConfig,
+        lane: str,
+        task: dict,
+        saved: dict,
+        relaunch: dict,
+        environ: dict,
+        hosted: Collection[str] = (),
+    ) -> profile_choice.ProfileDecision:
         decision = profile_choice.kept(task, saved, relaunch)
         if decision is None:
-            decision = timing.call(
-                profile_choice.choose, config.slug, lane, chosen, task, environ, getattr(config, "overlays", {})
-            )
+            decision = timing.call(profile_choice.choose, config, lane, task, environ, hosted)
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
             decision = replace(decision, bundle_revision=kept or self._bundle_revision())
@@ -713,7 +720,7 @@ class HerdrRuntime:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
-        decision = self._profile_decision(config, lane, chosen, task, saved, relaunch, environ)
+        decision = self._profile_decision(config, lane, task, saved, relaunch, environ)
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))

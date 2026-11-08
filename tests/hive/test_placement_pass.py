@@ -181,7 +181,7 @@ def test_a_placement_pass_reads_the_bundle_revision_once_and_the_next_pass_reads
     config = SwarmConfig("fixture", "agentihooks", 1, 1)
 
     def revision(task_id):
-        return herdr._profile_decision(config, "eng", {}, {"id": task_id}, {}, {}, {}).bundle_revision
+        return herdr._profile_decision(config, "eng", {"id": task_id}, {}, {}, {}).bundle_revision
 
     assert herdr.pass_memo is None
     assert [revision("one"), revision("two")] == ["first", "second"]

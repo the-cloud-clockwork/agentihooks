@@ -41,7 +41,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "swarm.labels" . | nindent 8 }}
+        {{- include "swarm.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: hive-join
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}

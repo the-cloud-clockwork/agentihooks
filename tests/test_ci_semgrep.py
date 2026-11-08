@@ -165,6 +165,12 @@ def test_charts_run_the_chart_timer_guard():
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
 
 
+def test_charts_render_every_pod_template_at_two_chart_versions():
+    runs = [step.get("run") for step in _jobs()["charts"]["steps"]]
+    assert "python tests/ci_charts/chart_pod_templates.py" in runs
+    assert (_ROOT / "tests/ci_charts/chart_pod_templates.py").is_file()
+
+
 def test_charts_grade_the_guard_rules_against_the_base_floors():
     steps = _jobs()["charts"]["steps"]
     install = next(step for step in steps if step.get("name") == "Install PyYAML and Semgrep")
