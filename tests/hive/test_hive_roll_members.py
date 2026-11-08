@@ -218,6 +218,29 @@ def test_a_member_drain_whose_pod_namespace_is_unreadable_drains_the_whole_hive(
     assert record["members"][OLD]["draining"] == "no"
 
 
+@pytest.mark.feature("hive-roll-member-drain")
+def test_a_sole_member_drain_waits_on_every_agent_of_the_hive(client, monkeypatch):
+    registry.join(client, HIVE, OLD, NOW - 5_000)
+    agents = [_agent("old@1", "boot/old"), _agent("new@1", "boot/new")]
+    store = cast(
+        RedisStore,
+        SimpleNamespace(
+            redis=client,
+            slugs=lambda: ["fixture"],
+            agents=lambda slug: agents,
+            handoff_envelope=lambda slug, task: None,
+        ),
+    )
+    monkeypatch.setattr(remove, "_order", lambda inbox, sent, remaining, text, hive: None)
+    monkeypatch.setattr(remove, "_recover", lambda store, hive, wait, remaining, host: f"recovered {_names(remaining)}")
+    host = remove.Host(wall=lambda: NOW / 1000, clock=lambda: 0.0, sleep=lambda s: None, namespace=lambda: "boot/old")
+
+    assert remove.settle(store, HIVE, 0, host, OLD) == "recovered ['old@1', 'new@1']"
+    record = _shown(client)
+    assert record["draining"] == "yes"
+    assert record["members"][OLD]["draining"] == "yes"
+
+
 def _names(remaining: list[tuple[str, AgentRecord]]) -> list[str]:
     return [agent.name for _, agent in remaining]
 
