@@ -50,13 +50,13 @@ def test_a_hive_short_of_memory_refuses_on_ram():
     assert found == admission.Room(
         0,
         admission.RAM,
-        "13312 of 65536 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+        "13312 of 65536 MB available, 850 MB per agent, fits 0 more under the 80 percent line",
     )
     assert admission.refusal(found).startswith("ram: 13312 of 65536 MB available")
 
 
 def test_ram_room_counts_whole_agents_above_the_twenty_percent_floor():
-    found = admission.room(reading(cpus=64, available_mb=13108 + 2100, total_mb=65536))
+    found = admission.room(reading(cpus=64, available_mb=13108 + 2550, total_mb=65536))
     assert (found.room, found.reason) == (3, admission.RAM)
 
 
@@ -105,11 +105,11 @@ def test_the_workstation_keeps_swarm_agents_to_forty_percent_of_its_cpu():
 
 
 def test_the_workstation_keeps_swarm_agents_to_forty_percent_of_its_ram():
-    found = admission.room(reading(cpus=256, available_mb=30 * GB, total_mb=32 * GB), swarm_agents=16)
+    found = admission.room(reading(cpus=256, available_mb=30 * GB, total_mb=32 * GB), swarm_agents=13)
     assert found == admission.Room(
         2,
         admission.RAM,
-        "16 swarm agents at 700 MB each in 32768 MB, fits 2 more under the 40 percent swarm share",
+        "13 swarm agents at 850 MB each in 32768 MB, fits 2 more under the 40 percent swarm share",
     )
 
 
@@ -152,7 +152,7 @@ def test_the_host_ram_line_still_binds_under_the_hive_max_agents():
     assert found == admission.Room(
         0,
         admission.RAM,
-        "13312 of 65536 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+        "13312 of 65536 MB available, 850 MB per agent, fits 0 more under the 80 percent line",
     )
 
 
@@ -309,13 +309,13 @@ def test_a_recorded_launch_counts_even_past_the_room(redis):
 
 
 def test_the_ram_line_counts_whole_agents_under_eighty_percent_less_pending_launches():
-    measured = reading(cpus=64, available_mb=24_000, total_mb=100_000)
-    line = "700 MB per agent{}, fits {} more under the 80 percent line"
+    measured = reading(cpus=64, available_mb=24_250, total_mb=100_000)
+    line = "850 MB per agent{}, fits {} more under the 80 percent line"
     assert admission.room(measured) == admission.Room(
-        5, admission.RAM, "24000 of 100000 MB available, " + line.format("", 5)
+        5, admission.RAM, "24250 of 100000 MB available, " + line.format("", 5)
     )
     assert admission.room(measured, pending=2) == admission.Room(
-        3, admission.RAM, "24000 of 100000 MB available, " + line.format(" with 2 pending launches", 3)
+        3, admission.RAM, "24250 of 100000 MB available, " + line.format(" with 2 pending launches", 3)
     )
 
 
@@ -335,9 +335,9 @@ def test_an_overloaded_host_floors_its_cpu_line_before_comparing_with_ram():
 
 
 def test_the_swarm_ram_share_counts_whole_agents_under_forty_percent():
-    measured = reading(cpus=64, available_mb=87_500, total_mb=87_500)
+    measured = reading(cpus=64, available_mb=106_250, total_mb=106_250)
     assert admission.room(measured, 0) == admission.Room(
-        50, admission.RAM, "0 swarm agents at 700 MB each in 87500 MB, fits 50 more under the 40 percent swarm share"
+        50, admission.RAM, "0 swarm agents at 850 MB each in 106250 MB, fits 50 more under the 40 percent swarm share"
     )
 
 
@@ -346,14 +346,14 @@ def pod(**fields):
 
 
 def test_a_pod_memory_limit_binds_below_the_node_memory():
-    measured = pod(pod_total_mb=6300, pod_available_mb=5300, pod_cpus=4.0, pod_load=0.0)
+    measured = pod(pod_total_mb=6300, pod_available_mb=5600, pod_cpus=4.0, pod_load=0.0)
     assert admission.room(measured) == admission.Room(
-        5, admission.RAM, "pod 5300 of 6300 MB available, 700 MB per agent, fits 5 more under the 80 percent line"
+        5, admission.RAM, "pod 5600 of 6300 MB available, 850 MB per agent, fits 5 more under the 80 percent line"
     )
     assert admission.room(measured, pending=2) == admission.Room(
         3,
         admission.RAM,
-        "pod 5300 of 6300 MB available, 700 MB per agent with 2 pending launches, "
+        "pod 5600 of 6300 MB available, 850 MB per agent with 2 pending launches, "
         "fits 3 more under the 80 percent line",
     )
 
@@ -389,7 +389,7 @@ def test_a_full_pod_refuses_on_its_memory_and_floors_at_zero():
     found = admission.room(pod(pod_total_mb=6300, pod_available_mb=600))
     assert (found.room, found.reason) == (0, admission.RAM)
     assert admission.refusal(found) == (
-        "ram: pod 600 of 6300 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+        "ram: pod 600 of 6300 MB available, 850 MB per agent, fits 0 more under the 80 percent line"
     )
 
 
@@ -521,7 +521,7 @@ def test_pending_launches_hold_the_last_room_of_a_first_ranked_hive():
     assert found == admission.Room(
         0,
         admission.RAM,
-        "2100 of 10000 MB available, 79 percent used, 700 MB per agent with 2 pending launches, "
+        "2100 of 10000 MB available, 79 percent used, 850 MB per agent with 2 pending launches, "
         "fits 0 more under the 80 percent line",
     )
 
@@ -547,7 +547,7 @@ def test_a_first_ranked_hive_counts_pending_launches_against_pod_memory() -> Non
     assert found == admission.Room(
         0,
         admission.RAM,
-        "pod 5000 of 19600 MB available, 75 percent used, 700 MB per agent with 7 pending launches, "
+        "pod 5000 of 19600 MB available, 75 percent used, 850 MB per agent with 7 pending launches, "
         "fits 0 more under the 80 percent line",
     )
 
@@ -563,12 +563,12 @@ def test_a_first_ranked_hive_still_refuses_below_the_disk_floor_and_without_a_re
 
 
 def test_a_first_ranked_hive_reads_pod_memory_alone_when_the_host_reading_is_partial() -> None:
-    measured = {"cpus": 16, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9000, "pod_total_mb": 19600}
+    measured = {"cpus": 16, "load5": 8.0, "available_mb": 5000, "pod_available_mb": 9900, "pod_total_mb": 19600}
     found = admission.room(measured, first=True)
     assert found == admission.Room(
         7,
         admission.RAM,
-        "pod 9000 of 19600 MB available, 55 percent used, 700 MB per agent, fits 7 more under the 80 percent line",
+        "pod 9900 of 19600 MB available, 50 percent used, 850 MB per agent, fits 7 more under the 80 percent line",
     )
 
 

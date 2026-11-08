@@ -11,7 +11,7 @@ from tests.hive.test_controller_launch import publish_room, write_hive
 from tests.hive.test_controller_launch import setup as setup
 
 FULL = "no hive for eng has room"
-ANTON = "anton ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"
+ANTON = "anton ram: 20000 of 100000 MB available, 850 MB per agent, fits 0 more under the 80 percent line"
 HIVE_FULL = f"{FULL}: {ANTON}"
 
 
