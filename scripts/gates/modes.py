@@ -4,8 +4,15 @@ Inside a swarm the mode is the swarm config's gates entry, set only by the opera
 only outside a swarm.
 """
 
+import hashlib
+import json
+import os
 import re
+import time
+from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 
+CACHE_S = 5.0
 MODES = ("enforce", "observe", "off")
 LABELS = {"enforce": "deny", "observe": "log only", "off": "skip", "coach": "coach"}
 ALIASES = {label: mode for mode, label in LABELS.items()}
@@ -39,14 +46,56 @@ def configured(gate, gates):
     return chosen if chosen in supported(gate.name) else gate.default_mode
 
 
-def swarm_gates(swarm, environ):
+def swarm_gates(swarm: str, environ: MutableMapping[str, str]) -> dict[str, str] | None:
+    """Return the swarm config's gates entry, read through the hook Redis client and kept on disk for CACHE_S."""
     if not swarm:
         return None
+    path = _cache_path(swarm, environ)
+    held = _held(path)
+    if held is not None and 0 <= time.time() - held[0] < CACHE_S:
+        return held[1]
+    gates = _read_gates(swarm, environ)
+    _keep(path, gates)
+    return gates
+
+
+def _held(path: Path) -> tuple[float, dict[str, str] | None] | None:
+    """Return the cached read time and gates entry, or None when the cache file is missing or unreadable."""
+    try:
+        raw = json.loads(path.read_text())
+        return float(raw["at"]), raw["gates"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _keep(path: Path, gates: dict[str, str] | None) -> None:
+    """Write the gates entry for the next gate shims; a write that fails only loses the cache."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        staged = path.with_name(f"{path.name}.{os.getpid()}")
+        staged.write_text(json.dumps({"at": time.time(), "gates": gates}))
+        staged.replace(path)
+    except OSError:
+        return
+
+
+def _cache_path(swarm: str, environ: Mapping[str, str]) -> Path:
+    """Return the file that holds the swarm's gates entry from one Redis between gate shim processes."""
+    from scripts.swarm.store import redis_url
+
+    home = environ.get("AGENTIHOOKS_HOME") or str(Path.home() / ".agentihooks")
+    source = hashlib.sha256(redis_url(environ).encode()).hexdigest()[:12]
+    return Path(home) / "swarm" / swarm / f"gate-modes-{source}.json"
+
+
+def _read_gates(swarm: str, environ: MutableMapping[str, str]) -> dict[str, str] | None:
+    """Read the swarm config's gates entry; an unreadable config falls back to the environment."""
     import redis
 
-    from scripts.swarm.store import RedisStore, SwarmError, redis_client
+    from scripts.swarm.hook_redis import client
+    from scripts.swarm.store import RedisStore, SwarmError
 
     try:
-        return RedisStore(redis_client(environ)).config(swarm).gates
-    except (redis.RedisError, SwarmError, ValueError):  # an unreadable swarm config falls back to the environment
+        return RedisStore(client(environ)).config(swarm).gates
+    except (redis.RedisError, SwarmError, ValueError):
         return None

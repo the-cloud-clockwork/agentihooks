@@ -17,7 +17,7 @@ from typing import Any
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
-from scripts.tick.ports.source_control import RepositoryRun
+from scripts.tick.ports.source_control import ChangeState, RepositoryRun
 
 FLEET = "fleet"
 HOUR_MS = 60 * 60 * 1000
@@ -152,31 +152,41 @@ def port(repository: str) -> SourceControl:
     return GitHubSourceControl(repository, Path.cwd(), "dev")
 
 
-def fix_branch(url: str) -> str:
-    """Return the head branch of a fix pull request, read through the source control port."""
+def fix_change(url: str) -> ChangeState:
+    """Return the state of a fix pull request, read through the source control port."""
     from scripts.swarm import stack
 
-    return stack.change(url, f"cannot read pull request {url}").head_branch
+    return stack.change(url, f"cannot read pull request {url}")
 
 
-def _spared(row: RepositoryRun, branches: set[str]) -> bool:
-    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix or a release tag."""
+def fix_branch(url: str) -> str:
+    """Return the head branch of a fix pull request, read through the source control port."""
+    return fix_change(url).head_branch
+
+
+def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a merged fix's commit
+    or a release tag."""
     return (
         row.status not in ACTIVE
         or row.event in (MERGE_QUEUE, RELEASE_EVENT)
         or row.branch in branches
+        or row.head_sha in commits
         or RELEASE_TAG.fullmatch(str(row.branch)) is not None
     )
 
 
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
-    """Cancels every queued or running Actions run except the merge queue, release tags and the named fixes."""
-    branches = {fix_branch(url) for url in fixes}
+    """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
+    runs on a merged fix's merge commit."""
+    changes = [fix_change(url) for url in fixes]
+    branches = {change.head_branch for change in changes}
+    commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
         provider = ports(repo)
         for row in provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS)):
-            if _spared(row, branches):
+            if _spared(row, branches, commits):
                 continue
             provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
             cancelled.append(f"{repo} run {row.id} on {row.branch}")
