@@ -33,6 +33,11 @@ if ! published "$image:$ref"; then
   docker push "$image:$ref"
 fi
 if [[ "$latest" == true ]]; then
-  docker buildx imagetools create --tag "$image:release" "$image:$ref"
+  newest="$(git ls-remote --tags --refs origin | sed -n 's#^[0-9a-f]*\trefs/tags/\(v[0-9]*\.[0-9]*\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)"
+  if [[ "$newest" == "$release" ]]; then
+    docker buildx imagetools create --tag "$image:release" "$image:$ref"
+  else
+    echo "$newest is newer than $release; leaving the release tag where it is"
+  fi
 fi
 docker buildx imagetools create --tag "$image:$version" "$image:$ref"
