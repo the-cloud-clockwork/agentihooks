@@ -239,6 +239,17 @@ def test_a_sole_member_drain_waits_on_every_agent_of_the_hive(client, monkeypatc
     record = _shown(client)
     assert record["draining"] == "yes"
     assert record["members"][OLD]["draining"] == "yes"
+    [entry] = record["drains"]
+    assert (entry["owner"], entry["reason"], entry["deadline_at"]) == (OLD, "the hive is stopping", NOW)
+
+
+@pytest.mark.feature("hive-roll-member-drain")
+def test_a_member_leaving_a_hive_that_never_recorded_members_drains_the_whole_hive(client):
+    assert registry.leave(client, HIVE, OLD, registry.Drain(OLD, "the hive is stopping")) is False
+
+    record = _shown(client)
+    assert record["draining"] == "yes"
+    assert record["members"] == {OLD: {"heartbeat_at": NOW, "draining": "yes"}}
 
 
 def _names(remaining: list[tuple[str, AgentRecord]]) -> list[str]:

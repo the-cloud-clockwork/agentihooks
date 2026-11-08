@@ -331,12 +331,9 @@ def join(client: Any, hive_id: str, member: str, now_ms: int, started: bool = Fa
     _amend(client, hive_id, write)
 
 
-def _serving(record: dict[str, Any], member: str, now_ms: int) -> bool:
-    """True when a member other than member is live and takes new agents."""
-    return any(
-        name != member and entry["draining"] != "yes" and now_ms - entry["heartbeat_at"] <= LIVE_MS
-        for name, entry in record.get("members", {}).items()
-    )
+def _serving(members: dict[str, dict[str, Any]], now_ms: int) -> bool:
+    """True when a live member takes new agents."""
+    return any(entry["draining"] != "yes" and now_ms - entry["heartbeat_at"] <= LIVE_MS for entry in members.values())
 
 
 def leave(client: Any, hive_id: str, member: str, drain: Drain) -> bool:
@@ -349,13 +346,13 @@ def leave(client: Any, hive_id: str, member: str, drain: Drain) -> bool:
         stored = stored or {}
         members = stored.get("members", {})
         entry = {"heartbeat_at": at, **members.get(member, {}), "draining": "yes"}
-        record: dict[str, Any] = {**_seeded(hive_id), **stored, "members": {**members, member: entry}}
-        if _serving(record, member, at):
+        record: dict[str, Any] = {**stored, "members": {**members, member: entry}}
+        if _serving(record["members"], at):
             return record
         return _drained({**record, "draining": "yes"}, stored, drain)
 
-    written: dict[str, Any] = _amend(client, hive_id, write) or {}
-    return _serving(written, member, at)
+    written: dict[str, Any] = _amend(client, hive_id, write)
+    return _serving(written["members"], at)
 
 
 def member_draining(client: Any, hive_id: str, member: str) -> bool:

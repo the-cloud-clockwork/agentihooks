@@ -235,12 +235,12 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
     deadline_at = int((host.wall() + wait_s) * 1000)
     drain = registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at)
     own = host.namespace() if member else ""
-    if not (own and registry.leave(client, hive, member, drain)):
-        own = ""
+    shared = bool(own) and registry.leave(client, hive, member, drain)
+    if not shared:
         registry.update(client, hive, ["draining=yes"], drain=drain)
     inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive, own):
+    while remaining := _unhanded(store, hive, own if shared else ""):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -249,7 +249,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
     else:
         ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
     _withdraw(inbox, ordered, hive)
-    return f"{ended}; only member {member} drained, the hive stays open for its other members" if own else ended
+    return f"{ended}; only member {member} drained, the hive stays open for its other members" if shared else ended
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
@@ -259,7 +259,7 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str, own: str = "") -> list[tuple[str, "AgentRecord"]]:
+def _unhanded(store: "RedisStore", hive: str, own: str) -> list[tuple[str, "AgentRecord"]]:
     """The hive's agents still to hand off; with own, only those whose process runs in that namespace."""
     return [
         (slug, agent)
