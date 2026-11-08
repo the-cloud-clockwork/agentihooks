@@ -29,7 +29,7 @@ registry.register(
         "workflow runner",
         "wrapper phases",
         _workflow_runner,
-        needs=frozenset({"planning and phase pass", "ledger state", "config load"}),
+        needs=frozenset({"planning and phase pass", "ledger state", "drained resume"}),
         reads=pass_domains("doc", "config"),
         writes=frozenset(),
         lane=Lane("slow"),

@@ -246,9 +246,7 @@ def test_local_host_wires_the_controller_sample_and_both_jobs(monkeypatch: pytes
 
 
 @pytest.mark.feature("swarm-workflow-runner")
-def test_local_host_wires_workflow_job_and_refuses_it_after_deadline(
-    monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_local_host_wires_workflow_job_and_refuses_it_after_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
     from scripts.swarm import workflow_job
