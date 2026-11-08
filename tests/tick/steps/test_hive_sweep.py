@@ -65,7 +65,7 @@ def test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept(
     """The sweep marks the hive draining with its owner and reason, then removes it once its agents end."""
     _hive(store, "proof", "yes", QUIET_AT)
     agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", hive="proof", state="working")
-    store.put_agent("sw", agent)
+    agent = store.start_execution("sw", agent)
     assert sweep.sweep(store, NOW_MS) == [
         "drained quiet ephemeral hive proof",
         "kept quiet hive proof while 1 agent records still run on it",
@@ -116,9 +116,11 @@ def test_purge_counts_only_agents_still_running_on_the_hive(store: RedisStore) -
     for n, (hive, state) in enumerate(
         (("proof", "working"), ("proof", "finished"), ("proof", "ended"), ("x", "working"))
     ):
-        store.put_agent(
-            "sw", AgentRecord(f"engineer@{n}", "eng", f"t{n}", seat=f"eng-{n + 1}@sw", hive=hive, state=state)
+        started = store.start_execution(
+            "sw", AgentRecord(f"engineer@{n}", "eng", f"t{n}", seat=f"eng-{n + 1}@sw", hive=hive, state="working")
         )
+        if state != "working":
+            store.put_agent("sw", replace(started, state=state))
     assert [(slug, agent.name) for slug, agent in purge.hosted(store, "proof")] == [("sw", "engineer@0")]
 
 
