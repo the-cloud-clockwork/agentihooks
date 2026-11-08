@@ -175,7 +175,7 @@ def _codex(environ: dict, now: float, refresh: bool) -> list[Account]:
 def _global(environ: dict, now: float, hives: bool = False) -> list[Account]:
     from scripts.routing import aggregate
 
-    refused = _refused(environ)
+    refused = set() if hives else _refused(environ)
     rows = []
     found = aggregate.swarm_current(now, environ) if hives else aggregate.current(now)
     for row in found.values():
@@ -264,7 +264,7 @@ def rooms(rows: list[Account], harness: str) -> str:
         for row in rows
         if row.harness == harness
     ]
-    return ", ".join(named) or f"no live hive reports a {harness} quota reading"
+    return ", ".join(named) or f"no {harness} account with a hive quota reading is open to this task"
 
 
 def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:

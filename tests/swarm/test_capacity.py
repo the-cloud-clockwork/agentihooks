@@ -2434,7 +2434,11 @@ def test_hive_accounts_read_the_hive_quota_reports_without_a_runtime_backend(mon
     monkeypatch.setattr(store, "redis_client", lambda environ=None: shared)
     monkeypatch.setattr(aggregate, "read", lambda redis, now: {"claude:a": record} if redis is shared else {})
     monkeypatch.setattr(aggregate, "current", lambda now: {})
-    monkeypatch.setattr(balancer, "cached_observations", lambda environ=None: [])
+    refusal = balancer.ProbeResult(
+        "a", "refused", "CLOSED", 0, balancer.QuotaWindow(None, None), balancer.QuotaWindow(None, None)
+    )
+    monkeypatch.setattr(balancer, "cached_observations", lambda environ=None: [(99, refusal)])
+    monkeypatch.setattr(balancer, "refused", lambda result: True)
     assert not aggregate.enabled({})
     (row,) = capacity.hive_accounts({}, 100, refresh=False)
     assert (row.harness, row.name, row.state, row.sessions, row.cap) == ("claude", "a", "OPEN", 5, 8)
@@ -2447,7 +2451,7 @@ def test_a_placement_names_a_missing_quota_reading_instead_of_a_none_cap() -> No
         capacity.Account("codex", "c", "OPEN", 1, 90, 80, 6),
     ]
     assert capacity.rooms(rows, "claude") == "a 5 sessions, no fresh quota reading, b 2 sessions of 8"
-    assert capacity.rooms(rows[2:], "claude") == "no live hive reports a claude quota reading"
+    assert capacity.rooms(rows[2:], "claude") == "no claude account with a hive quota reading is open to this task"
 
 
 @pytest.mark.parametrize(
