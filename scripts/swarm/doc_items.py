@@ -77,8 +77,8 @@ def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadl
     found = digest(text)
     if found == tools.coordination.marked(MARK, deadline=deadline):
         return []
-    mapping = parse(text)
     try:
+        mapping = parse(text)
         changed = changes(tasks, mapping)
     except ValueError as exc:
         tools.coordination.mark(MARK, found, deadline=deadline)

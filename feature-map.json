@@ -2174,6 +2174,7 @@
         "tests/tick/steps/test_doc_items_map.py::test_an_unset_or_missing_copy_runs_nothing",
         "tests/tick/steps/test_doc_items_map.py::test_a_copy_already_on_its_tasks_records_its_digest_without_writes",
         "tests/tick/steps/test_doc_items_map.py::test_unknown_tasks_refuse_the_copy_once_until_it_changes",
+        "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
         "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"

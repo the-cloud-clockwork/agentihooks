@@ -154,6 +154,18 @@ def test_unknown_tasks_refuse_the_copy_once_until_it_changes(tmp_path: Path) -> 
 
 
 @pytest.mark.feature("tick-doc-items-map")
+def test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes(tmp_path: Path) -> None:
+    copy = tmp_path / "watchdog-doc.md"
+    copy.write_text(COPY + "4. [open] Bad tag. [Ledger: nine]\n")
+    values = _values(str(copy), _tasks())
+    assert _step().call(None, values.__getitem__) == [
+        f"refused watchdog doc items of {copy}: Invalid Ledger tag:  nine"
+    ]
+    assert _ledger(values).calls == []
+    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy.read_text())))
+
+
+@pytest.mark.feature("tick-doc-items-map")
 def test_the_step_stops_when_its_deadline_expires(tmp_path: Path) -> None:
     copy = tmp_path / "watchdog-doc.md"
     copy.write_text(COPY)
