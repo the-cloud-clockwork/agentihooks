@@ -31,8 +31,8 @@ def measure(
     pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
     try:
-        load5 = float((proc / "loadavg").read_text().split()[1])
-        available_mb = host_budget._memory_mb(proc)[0]
+        load1, load5 = (float(load) for load in (proc / "loadavg").read_text().split()[:2])
+        available_mb, swap_used_mb, swap_total_mb = host_budget._memory_mb(proc)
         total_mb = _total_mb(proc)
         pod = _pod(CGROUP, now_ms, previous)
         disk_free_gb = _free_gb(Path(os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees"))
@@ -42,10 +42,13 @@ def measure(
     cpus = os.cpu_count() or 1
     return {
         "cpus": cpus,
+        "load1": load1,
         "load5": load5,
         **_usage(proc, cpus, previous),
         "available_mb": available_mb,
         "total_mb": total_mb,
+        "swap_used_mb": swap_used_mb,
+        "swap_total_mb": swap_total_mb,
         **pod,
         "disk_free_gb": disk_free_gb,
         "disk_floor_gb": disk_floor_gb,
