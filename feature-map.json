@@ -476,34 +476,34 @@
         "tests/tick/test_spawn_ports.py::test_the_ledger_facade_comments_through_the_port_with_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_pass_ledger_comments_through_the_domain_client_within_its_deadline",
         "tests/tick/test_spawn_ports.py::test_the_resource_ledger_adds_the_comment_to_the_task_thread",
-        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect"
-        ,"tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks"
-        ,"tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires"
-        ,"tests/tick/steps/test_spawn.py::test_spawn"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_spawn_admission_admits_and_releases_through_the_port"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_keeps_the_optional_runtime_defaults"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_answers_no_launch_room_when_the_pass_runtime_names_none"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_refuses_spawn_operations_past_their_deadline"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_writes_need_the_runtime_effect"
-        ,"tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_reads_pass_without_the_runtime_effect"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_writes_through_the_coordination_port"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reads_through_the_coordination_port"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reaches_redis_seats_and_memory_through_the_port"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_builds_keys_without_a_port_call"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_keeps_the_store_method_names_for_step_timing"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_store_refuses_private_names"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_store_coordination_runs_the_named_store_operation"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_private_operations"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_a_write_named_as_a_read"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_operations_past_their_deadline"
-        ,"tests/tick/test_spawn_store_ports.py::test_spawn_store_writes_need_the_coordination_effect"
-        ,"tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox"
-        ,"tests/tick/test_spawn_store_ports.py::test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports"
+        "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
+        "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
+        "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
+        "tests/tick/steps/test_spawn.py::test_spawn",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_admission_admits_and_releases_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_keeps_the_optional_runtime_defaults",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_answers_no_launch_room_when_the_pass_runtime_names_none",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_refuses_spawn_operations_past_their_deadline",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_writes_need_the_runtime_effect",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_reads_pass_without_the_runtime_effect",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_writes_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reads_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reaches_redis_seats_and_memory_through_the_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_builds_keys_without_a_port_call",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_keeps_the_store_method_names_for_step_timing",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_refuses_private_names",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_runs_the_named_store_operation",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_private_operations",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_a_write_named_as_a_read",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_operations_past_their_deadline",
+        "tests/tick/test_spawn_store_ports.py::test_spawn_store_writes_need_the_coordination_effect",
+        "tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports"
       ]
     },
     {
@@ -2184,6 +2184,17 @@
         "tests/tick/steps/test_workflow_runner.py::test_workflow_runner",
         "tests/tick/test_adapters.py::test_local_host_wires_workflow_job_and_refuses_it_after_deadline",
         "tests/tick/steps/test_workflow_runner.py::test_tick_without_task_collection_starts_no_jobs"
+      ]
+    },
+    {
+      "id": "hive-overrun-progress",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1761",
+      "behaviour": "An overrun report quotes the latest progress published by the execution hive, matching the ledger workspace view even when the workstation folder is empty or stale.",
+      "seam": "Overrun inbox reports and published ledger workspace progress",
+      "tests": [
+        "tests/swarm/test_overrun.py::test_remote_overrun_quotes_the_same_progress_as_the_ledger"
       ]
     }
   ],
