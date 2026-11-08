@@ -66,7 +66,7 @@ from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
@@ -466,6 +466,8 @@ class _Wrapper:
         deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
         runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
         self.state["runtime"] = runtime
+        if tools := PASS_TOOLS.get():
+            cast(Any, tools.runtime).legacy = runtime
         return True
 
     def _watch(self) -> bool:

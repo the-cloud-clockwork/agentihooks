@@ -17,7 +17,7 @@ from scripts.tick.ports.contracts import (
 )
 
 _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
-    "ledger": (frozenset([Ledger.export.__name__]), frozenset([Ledger.mutate.__name__])),
+    "ledger": (frozenset([Ledger.export.__name__]), frozenset([Ledger.mutate.__name__, Ledger.update_task.__name__])),
     "coordination": (
         frozenset([Coordination.read.__name__, Coordination.capacity.__name__]),
         frozenset(
@@ -60,8 +60,25 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
         ),
     ),
     "runtime": (
-        frozenset([Runtime.inspect.__name__, Runtime.panes.__name__]),
-        frozenset([Runtime.launch.__name__, Runtime.stop.__name__]),
+        frozenset(
+            [
+                Runtime.inspect.__name__,
+                Runtime.panes.__name__,
+                Runtime.live_names.__name__,
+                Runtime.observe.__name__,
+                Runtime.refusal.__name__,
+            ]
+        ),
+        frozenset(
+            [
+                Runtime.launch.__name__,
+                Runtime.stop.__name__,
+                Runtime.retire.__name__,
+                Runtime.name_pane.__name__,
+                Runtime.resume.__name__,
+                Runtime.dismiss.__name__,
+            ]
+        ),
     ),
     "processes": (frozenset([Processes.scan.__name__]), frozenset()),
     "inbox": (frozenset([Inbox.read.__name__]), frozenset([Inbox.send.__name__, Inbox.close.__name__])),

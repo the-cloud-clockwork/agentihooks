@@ -4,6 +4,7 @@ bounded by its deadline and every write stamped with the controller epoch of its
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from scripts.swarm import lease
 from scripts.swarm_ledger.api.client import ResourceClient
@@ -37,6 +38,10 @@ def resource_client(slug: str, service: bool = False) -> Clients:
     return build
 
 
+def operation(kind: str, by: str, **fields: object) -> dict[str, object]:
+    return {"op": kind, "id": f"{kind}-{uuid4().hex[:10]}", "by": by, **fields}
+
+
 @dataclass(frozen=True)
 class ClientLedger:
     """Read the export of one ledger and apply operations to it through the mutate route."""
@@ -57,3 +62,23 @@ class ClientLedger:
         ]
         mutated: dict[str, object] = client.mutate(self.slug, stamped)
         return mutated
+
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]:
+        guard: dict[str, object] = {"if_state": list(if_state)} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
+        state = self.mutate(
+            [operation("task_update", "swarm", item=f"tasks/{task_id}", fields=dict(fields), **guard)],
+            deadline=deadline,
+        )
+        tasks: list[dict[str, Any]] = state.get("tasks", [])
+        found: dict[str, Any] = next((task for task in tasks if task["id"] == task_id), {})
+        return found

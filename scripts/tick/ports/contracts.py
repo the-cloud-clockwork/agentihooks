@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from scripts.tick.deadline import Deadline
@@ -21,7 +22,7 @@ from scripts.tick.ports.source_control import (
 )
 
 if TYPE_CHECKING:
-    from scripts.swarm.store import SwarmConfig
+    from scripts.swarm.store import AgentRecord, SwarmConfig
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,16 @@ class Ledger(Protocol):
     def export(self, *, deadline: Deadline) -> object: ...
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object: ...
+
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]: ...
 
 
 @runtime_checkable
@@ -109,6 +120,20 @@ class Runtime(Protocol):
     def stop(self, handle: str, *, deadline: Deadline) -> object: ...
 
     def panes(self, *, deadline: Deadline) -> object: ...
+
+    def live_names(self, *, deadline: Deadline) -> set[str]: ...
+
+    def observe(self, agent: "AgentRecord", *, deadline: Deadline) -> Any: ...
+
+    def retire(self, agent: "AgentRecord", *, homes: Sequence[Path] = (), deadline: Deadline) -> bool: ...
+
+    def name_pane(self, agent: "AgentRecord", *, deadline: Deadline) -> None: ...
+
+    def refusal(self, agent: "AgentRecord", *, deadline: Deadline) -> str: ...
+
+    def resume(self, config: "SwarmConfig", agent: "AgentRecord", text: str, *, deadline: Deadline) -> Any: ...
+
+    def dismiss(self, agent: "AgentRecord", *, deadline: Deadline) -> bool: ...
 
 
 @runtime_checkable

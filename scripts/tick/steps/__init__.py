@@ -69,7 +69,9 @@ class CallStep:
 
 
 def _pass_or_deadline(ctx: Context, key: str) -> Any:
-    """Return the context deadline under ``deadline``, else the pass value under ``key``."""
+    """Return the step deadline or tools, else the pass value under key."""
+    if key == "tools":
+        return ctx.tools
     return ctx.deadline if key == DEADLINE else ctx.view.read(PASS, key)
 
 
