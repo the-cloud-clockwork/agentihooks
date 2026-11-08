@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.parse
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -163,7 +164,7 @@ def test_hive_remove_after_create_unlists_the_hive_and_a_second_hive_remove_stil
     fake = Bao({SIGNER: {"account_seed": "kept", "member_swarms": {"m2": ["rig"]}}})
     bao = _bao(fake)
     member_swarms.assign(bao, SIGNER, ["m1"], ("rig",))
-    store = cast("RedisStore", None)
+    store = cast("RedisStore", SimpleNamespace(redis=None))
     assert remove.remove(store, bao, _unlisting(), remove.Host()) == [
         f"signer: unlisted m1 from the hub signer record {SIGNER}"
     ]
