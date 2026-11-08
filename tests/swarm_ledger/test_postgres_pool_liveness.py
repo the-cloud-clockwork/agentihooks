@@ -115,3 +115,49 @@ def test_failed_rollback_is_recorded_as_a_probe_failure(raws: list[Raw]) -> None
 
     elapsed, failure, refusal = ledger_probe._timed(write, lambda: 0.0)
     assert (elapsed, failure, refusal) == (0.0, ledger_probe.NO_ANSWER, "")
+
+
+@pytest.mark.feature("ledger-pool-liveness")
+def test_pool_notifications_do_not_extend_the_checkout_deadline(
+    raws: list[Raw], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", "0.01")
+    pool = postgres.Pool("database")
+    raw = pool.take()
+    clock = iter((0.0, 0.0, 1.0, 2.0, 3.0, 6.0))
+    waits: list[float] = []
+
+    def wait(timeout: float) -> bool:
+        waits.append(timeout)
+        return True
+
+    monkeypatch.setattr(postgres.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(pool.lock, "wait", wait)
+    with pytest.raises(postgres.sqlite3.OperationalError, match="capacity exhausted"):
+        pool.take()
+    assert waits == [4.0, 2.0]
+    assert len(raws) == 1
+    pool.give(raw)
+
+
+@pytest.mark.parametrize("share, cap", [("0.1", 10), ("0.5", 50), ("0.99", 96)])
+def test_server_reservations_and_configured_share_bound_the_pool(
+    raws: list[Raw], monkeypatch: pytest.MonkeyPatch, share: str, cap: int
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", share)
+    pool = postgres.Pool("database")
+    raw = pool.take()
+    assert pool.cap == cap
+    pool.give(raw)
+
+
+@pytest.mark.parametrize("share", ["0", "1", "-0.1", "nan"])
+def test_an_invalid_share_closes_the_bootstrap_connection(
+    raws: list[Raw], monkeypatch: pytest.MonkeyPatch, share: str
+) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_POOL_SHARE", share)
+    pool = postgres.Pool("database")
+    with pytest.raises(postgres.sqlite3.OperationalError, match="pool share"):
+        pool.take()
+    assert raws[0].closed
+    assert pool.opened == 0

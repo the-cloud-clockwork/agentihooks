@@ -3,6 +3,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
@@ -203,8 +204,9 @@ class Pool:
         return raw
 
     def take(self) -> Any:
+        deadline = time.monotonic() + 5
         with self.lock:
-            while True:
+            while time.monotonic() < deadline:
                 if self.idle:
                     raw = self.idle.pop()
                     try:
@@ -219,8 +221,9 @@ class Pool:
                         self.opened -= 1
                 elif self.opened < self.cap:
                     return self._open()
-                elif not self.lock.wait(timeout=5):
-                    raise sqlite3.OperationalError("ledger database pool capacity exhausted")
+                else:
+                    self.lock.wait(timeout=max(0, deadline - time.monotonic()))
+        raise sqlite3.OperationalError("ledger database pool capacity exhausted")
 
     def give(self, raw: Any) -> None:
         try:
