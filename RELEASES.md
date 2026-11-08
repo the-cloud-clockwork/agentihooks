@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.734 · 2026-11-08
+
+### 2026-11-08 · 87f8576b7e49 · #10126 · @agenticore-app
+
+**Retire the workstation tailnet hive join front**
+
+This change removes the `hive-tailnet` service from the workstation tailnet overlay, since all Anton hives have joined through the hosted endpoint since #5518, leaving the workstation front unused. `start-tailnet.sh` now recreates only the ledger and Redis fronts with `--remove-orphans`, so the next run cleans up the retired join container automatically. Tests and docs were updated accordingly. This closes off the old workstation Redis as a path for minting hive members, reducing attack surface and operational complexity now that joins flow exclusively through the hosted endpoint.
+
 ## v2.17.733 · 2026-11-08
 
 ### 2026-11-08 · 2d484dfd5cf1 · #10105 · @agenticore-app
