@@ -70,10 +70,10 @@
       "id": "swarm-tick-cached-ledger",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/dc4",
-      "behaviour": "A tick pass against a real ledger server made slow or stopped claims and launches a ready task from the last good ledger view inside the pass deadline, and its claim lands on the ledger once the server answers again.",
+      "behaviour": "A tick pass against a real ledger server made slow or stopped runs from the last good ledger view inside the pass deadline without launching, and the next pass that reaches the server claims and launches the ready task.",
       "seam": "scripts.swarm.cli.run_tick with a real ledger server behind a proxy that delays or refuses connections",
       "tests": [
-        "tests/features/test_tick_cached_ledger.py::test_a_tick_launches_from_the_cached_ledger_when_the_ledger_is_slow_or_stopped",
+        "tests/features/test_tick_cached_ledger.py::test_a_tick_holds_launches_while_the_ledger_is_slow_or_stopped_and_claims_before_launching",
         "tests/tick/test_offline_view.py::test_an_offline_pass_holds_the_stored_view_and_queues_its_writes_onto_it",
         "tests/tick/test_offline_view.py::test_an_offline_pass_refuses_fresh_reads_at_once",
         "tests/tick/test_offline_view.py::test_a_host_without_a_stored_view_holds_nothing",
@@ -90,6 +90,17 @@
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
         "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+      ]
+    },
+    {
+      "id": "swarm-spawn-claim-before-launch",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
+      "behaviour": "The spawn pass launches a lane agent only after the ledger server accepted its claim: claimed_by, state claimed and a branch named for the agent unless the task records its own; a pass running from its last good view claims and launches nothing.",
+      "seam": "scripts.tick.steps.place._prepare called with the pass ledger offline and online",
+      "tests": [
+        "tests/tick/test_place_prepare.py::test_an_offline_pass_neither_claims_nor_launches",
+        "tests/tick/test_place_prepare.py::test_the_claim_write_names_the_agent_branch_unless_the_task_holds_its_own"
       ]
     },
     {

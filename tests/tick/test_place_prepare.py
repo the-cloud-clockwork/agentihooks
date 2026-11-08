@@ -208,3 +208,29 @@ def test_a_launch_that_fails_while_priming_reports_the_failed_record(monkeypatch
     assert failed.record.name == NAME
     assert failed.task is run.rows["t1"]
     assert failed.error is error
+
+
+@pytest.mark.feature("swarm-spawn-claim-before-launch")
+def test_an_offline_pass_neither_claims_nor_launches(monkeypatch: pytest.MonkeyPatch) -> None:
+    log: list[Any] = []
+    _seams(monkeypatch, log, {})
+    monkeypatch.setattr(place.ledger_client, "offline", lambda: True)
+    run = _run(_Store(log), _Ledger(log))
+    assert place._prepare(run, "eng", {"id": "t1"}, set(), "", set()) == (None, [f"holding t1: {place.OFFLINE_HOLD}"])
+    assert log == []
+
+
+@pytest.mark.feature("swarm-spawn-claim-before-launch")
+@pytest.mark.parametrize(("recorded", "written"), [("", "engineer-1-1"), ("dev", "engineer-1-1"), ("work-7", None)])
+def test_the_claim_write_names_the_agent_branch_unless_the_task_holds_its_own(
+    monkeypatch: pytest.MonkeyPatch, recorded: str, written: str | None
+) -> None:
+    log: list[Any] = []
+    _seams(monkeypatch, log, {})
+    monkeypatch.setattr(place.ledger_client, "offline", lambda: False)
+    run = _run(_Store(log), _Ledger(log))
+    launch, _ = place._prepare(run, "eng", {"id": "t1", "branch": recorded}, set(), "", set())
+    assert launch is not None
+    [(_, _, fields, conditions)] = _calls(log, "update_task")
+    assert (fields["state"], fields["claimed_by"], fields.get("branch")) == ("claimed", NAME, written)
+    assert conditions["if_state"] == ("open",)
