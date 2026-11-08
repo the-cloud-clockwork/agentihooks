@@ -133,22 +133,24 @@ def test_drop_preserves_history_and_clears_all_agent_indexes(store, state, hando
     assert store.names.entry(agent.name)["retired_at"] == 1234
 
 
-def test_drop_retries_a_changed_projection_without_partial_history(store):
+def test_drop_retries_a_changed_projection_without_partial_history(store: RedisStore) -> None:
     agent = started(store)
     pipe_type = type(store.redis.pipeline())
     execute = pipe_type.execute
-    calls = []
+    calls: list[bool] = []
 
-    def commit(pipe, *args, **kwargs):
-        calls.append(True)
-        if len(calls) == 1:
-            row = json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))
-            store.redis.hset(store.key("fixture", "agents"), agent.name, json.dumps({**row, "pane_id": "new-pane"}))
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
+        dropping = any(command[:2] == ("HDEL", store.key("fixture", "agents")) for command, _ in pipe.command_stack)
+        if dropping:
+            calls.append(True)
+            if len(calls) == 1:
+                row = json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))
+                store.redis.hset(store.key("fixture", "agents"), agent.name, json.dumps({**row, "pane_id": "new-pane"}))
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=10)
-    assert len(calls) == 4
+    assert len(calls) == 2
     assert store.execution("fixture", agent.execution_id).state == "ended"
     history = store.redis.lrange(store.key("fixture", "history"), 0, -1)
     assert len(history) == 1
@@ -436,26 +438,28 @@ def test_orphan_ending_preserves_terminal_executions_and_absent_replacements(sto
     assert store.execution("fixture", terminal.execution_id) == terminal
 
 
-def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
+def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store: RedisStore) -> None:
     from dataclasses import asdict
 
     agent = started(store)
     terminal = replace(agent, state="finished")
     pipe_type = type(store.redis.pipeline())
     execute = pipe_type.execute
-    calls = []
+    calls: list[bool] = []
 
-    def commit(pipe, *args, **kwargs):
-        calls.append(True)
-        if len(calls) == 1:
-            fencing.write(
-                store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(terminal)})
-            )
+    def commit(pipe: Any, *args: Any, **kwargs: Any) -> Any:
+        dropping = any(command[:2] == ("HDEL", store.key("fixture", "agents")) for command, _ in pipe.command_stack)
+        if dropping:
+            calls.append(True)
+            if len(calls) == 1:
+                fencing.write(
+                    store, "fixture", lambda doc: doc["executions"].update({agent.execution_id: asdict(terminal)})
+                )
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
         store.drop_agent("fixture", agent.name, at=40)
-    assert len(calls) == 4
+    assert len(calls) == 2
     assert store.execution("fixture", agent.execution_id) == terminal
     assert store.agents("fixture") == []
     assert store.redis.llen(store.key("fixture", "history")) == 1

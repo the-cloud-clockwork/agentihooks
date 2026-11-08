@@ -17,7 +17,7 @@ DEFAULT = {
     "ephemeral": "no",
     "excluded": ["master"],
     "prefer": {},
-    "max_agents": 20,
+    "max_agents": None,
     "harnesses": [],
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
@@ -28,7 +28,7 @@ DEFAULT = {
     "heartbeat_at": 0,
     "version": "",
 }
-HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": [], "max_agents": 15}
+HEADED = {**DEFAULT, "name": registry.MASTER_NAME, "ui": "yes", "excluded": []}
 
 
 @pytest.fixture
@@ -387,8 +387,8 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3\texcluded=qa\theadroom=missing\n"
-        "pod\tstale\tui=no\tmax-agents=20\texcluded=eng\theadroom=missing\n"
+        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3 (cap 3)\texcluded=qa\theadroom=missing\n"
+        "pod\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng\theadroom=missing\n"
     )
 
 
@@ -435,7 +435,9 @@ def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
     registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=20\texcluded=eng,ci\theadroom=missing\n"
+    assert (
+        capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng,ci\theadroom=missing\n"
+    )
 
 
 @pytest.fixture

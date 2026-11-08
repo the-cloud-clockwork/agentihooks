@@ -7,6 +7,8 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import asdict, is_dataclass, replace
 from itertools import count
 from pathlib import Path
@@ -41,8 +43,9 @@ SCENARIOS = (
     "dependency",
     "interval",
     "interval-slow",
+    "hive-roll",
 )
-PASSES = {"second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
+PASSES = {"hive-roll": (2, 60_000), "second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
 CADENCES = {"interval-slow": "3"}
 LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
@@ -113,9 +116,37 @@ def step_rows(appended: Mock) -> list[dict[str, list[Any]]]:
     return list(passes.values())
 
 
+def prepare_hive_roll(store: RedisStore, ledger: FakeLedger) -> None:
+    from scripts.hive import reports
+
+    for index in range(10):
+        task_id = f"rolled-{index}"
+        agent = store.start_execution(
+            "sw",
+            AgentRecord(
+                store.next_name("sw", "eng"),
+                "eng",
+                task_id,
+                seat=f"eng-{index + 1}@sw",
+                hive="rolled-hive",
+                started_at=BASE_MS - tick_module.STARTUP_GRACE_MS - 1,
+            ),
+        )
+        ledger.rows[task_id] = {
+            "id": task_id,
+            "state": "claimed",
+            "claimed_by": agent.name,
+            "lane": "eng",
+            "out_of_scope": False,
+        }
+    store.redis.set(reports.key("rolled-hive"), json.dumps({"names": [], "started_at": BASE_MS - 1}))
+
+
 def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
     if scenario in {"paused", "stopping", "stopped", "drained"}:
         store.update("sw", state=scenario)
+    if scenario == "hive-roll":
+        prepare_hive_roll(store, ledger)
     if scenario == "failed-spawn":
         runtime.fail = True
     if scenario == "full-capacity":
@@ -214,6 +245,59 @@ def compare(record: dict[str, Any], scenario: str, entry: str) -> None:
     key = f"{entry}/{scenario}"
     expected = json.loads(GOLDENS.read_text()).get(key)
     assert record == expected, "GOLDEN_RECORD=" + json.dumps({key: record}, sort_keys=True)
+
+
+@pytest.mark.feature("swarm-tick-dead-remote-budget")
+@pytest.mark.parametrize("entry", ["tick", "run_tick"])
+def test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes(
+    entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import fencing
+    from scripts.tick.deadline import Deadline
+
+    elapsed = [0.0]
+    dropping: ContextVar[bool] = ContextVar("dropping", default=False)
+    dropped: list[float] = []
+    reaped: list[float] = []
+    drop, reap, read = tick_module._drop_remote, agent_steps._reap, fencing.read
+
+    def clock() -> float:
+        return elapsed[0]
+
+    def deadline(cls: type[Deadline], seconds: float, *, clock: Callable[[], float] = clock) -> Deadline:
+        return cls(clock() + seconds, clock)
+
+    def archive_read(store: Any, slug: str) -> dict[str, Any]:
+        if dropping.get():
+            elapsed[0] += 3.0
+        return read(store, slug)
+
+    def measured_drop(*args: Any, **kwargs: Any) -> str:
+        started = clock()
+        token = dropping.set(True)
+        try:
+            action: str = drop(*args, **kwargs)
+        finally:
+            dropping.reset(token)
+        dropped.append(clock() - started)
+        return action
+
+    def measured_reap(*args: Any, **kwargs: Any) -> list[str]:
+        started = clock()
+        actions: list[str] = reap(*args, **kwargs)
+        reaped.append(clock() - started)
+        return actions
+
+    monkeypatch.setattr(Deadline, "after", classmethod(deadline))
+    monkeypatch.setattr(fencing, "read", archive_read)
+    monkeypatch.setattr(tick_module, "_drop_remote", measured_drop)
+    monkeypatch.setattr(agent_steps, "_reap", measured_reap)
+    record = replay("hive-roll", entry, monkeypatch, tmp_path)
+    assert len(dropped) == 10
+    assert max(dropped) < 5.0
+    assert len(reaped) == 2
+    assert max(reaped) < 22.0
+    assert any(action.startswith("spawned engineer") for actions in record["actions"][:2] for action in actions)
 
 
 @pytest.mark.feature("swarm-tick-characterisation")

@@ -1050,7 +1050,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "ephemeral": "no",
         "excluded": ["master"],
         "prefer": {},
-        "max_agents": 20,
+        "max_agents": None,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},

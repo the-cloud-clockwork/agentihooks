@@ -9,6 +9,7 @@ from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime import codex
+from scripts.tick.adapters.calls import SpawnRuntimeCalls
 from scripts.tick.steps import agents as agent_steps
 from tests.swarm import test_tick
 
@@ -54,7 +55,7 @@ def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
         timing.named(RedisStore.record_launch),
         timing.named(transfers.attach),
         timing.named(tick_module.primed),
-        timing.named(FakeRuntime.spawn),
+        timing.named(SpawnRuntimeCalls.spawn),
         timing.named(codex.admit_legacy),
         timing.named(tick_module._started),
     ]
@@ -84,7 +85,7 @@ def test_a_failed_launch_reports_its_failure_once_under_the_spawn_step(store, ca
     finally:
         timing.ON_FAILURE.reset(token)
     assert [entry for entry in reported if entry[1] == "herdr down"] == [("scripts.swarm.tick._spawn", "herdr down")]
-    (launch,) = [row for row in finished(capsys) if row["step"] == timing.named(FakeRuntime.spawn)]
+    (launch,) = [row for row in finished(capsys) if row["step"] == timing.named(SpawnRuntimeCalls.spawn)]
     assert (launch["outcome"], launch["error"]) == ("error", "scripts.tick.steps.claims.SpawnError")
 
 
