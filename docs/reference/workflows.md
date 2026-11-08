@@ -258,6 +258,7 @@ stdout. `run`, `resume` and `status` print the saved state:
 | `definition`, `harness` | The workflow as loaded at `run`, and the harness every stage uses |
 
 A refusal prints `{"error": "<reason>"}` instead.
+A failed classifier run is the exception: see [Limitations](#limitations).
 
 ### Exit codes
 
@@ -278,6 +279,9 @@ A refusal prints `{"error": "<reason>"}` instead.
 - Runs take no lock: two `resume` commands on the same run launch the same
   stage twice and the later save wins.
 - Every profile run of a stage has a fixed 900 second timeout.
+- A classifier run that times out, exits nonzero or misses its schema twice
+  raises a Python traceback instead of `{"error": ...}`, exit 1. The run stays
+  `running` at that stage, and `resume` launches the stage again.
 
 ## Troubleshooting
 
