@@ -106,7 +106,7 @@ def test_the_spawn_store_refuses_private_names(reach: Any, name: str) -> None:
 
 class _Raw:
     def __init__(self) -> None:
-        self.redis = SimpleNamespace(hget=lambda *args: ("hget", args))
+        self.redis = SimpleNamespace(hget=lambda *args, **kwargs: ("hget", args, kwargs))
 
     def claim(self, *args: object, **kwargs: object) -> tuple[str, tuple[object, ...], dict[str, object]]:
         return "claim", args, kwargs
@@ -128,7 +128,11 @@ def test_the_store_coordination_runs_the_named_store_operation() -> None:
         ("sw", "t1"),
         {"lease": 5},
     )
-    assert adapter.store_read("redis.hget", ("k", "t1"), {}, deadline=DEADLINE) == ("hget", ("k", "t1"))
+    assert adapter.store_read("redis.hget", ("k",), {"field": "t1"}, deadline=DEADLINE) == (
+        "hget",
+        ("k",),
+        {"field": "t1"},
+    )
 
 
 @pytest.mark.feature("swarm-tick-spawn")

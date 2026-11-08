@@ -4,7 +4,7 @@ locks, launch capacity and swarm marks, each call admitted only while its deadli
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm import lease as leases
 from scripts.tick.deadline import Deadline
@@ -83,7 +83,7 @@ class StoreCoordination:
             if part.startswith("_"):
                 raise AttributeError(part)
             target = getattr(target, part)
-        return cast(Callable[..., Any], target)
+        return target
 
     def store_read(
         self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline

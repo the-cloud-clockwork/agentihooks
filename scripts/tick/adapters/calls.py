@@ -104,7 +104,7 @@ _STORE_GROUPS = frozenset({"redis", "seats", "memory", "culture", "execution_reg
 
 
 def _store_operation(port: Coordination, deadline: Deadline, path: str) -> Callable[..., Any]:
-    if path.rsplit(".", 1)[-1].startswith("_"):
+    if path.rpartition(".")[2].startswith("_"):
         raise AttributeError(path)
     send = port.store_read if path in STORE_READS else port.store_write
 
