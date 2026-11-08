@@ -680,7 +680,7 @@
       "tests": [
         "tests/swarm/test_tick_lock.py::test_a_killed_tick_holder_is_replaced_without_waiting_for_expiry",
         "tests/swarm/test_tick_lock.py::test_a_live_tick_holder_keeps_its_lock",
-        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock"
+        "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_stack_close_raises_still_releases_its_tick_lock", "tests/swarm/test_tick_lock.py::test_a_pass_whose_release_failed_leaves_a_lock_the_next_pass_replaces", "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass", "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process", "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
       ]
     },
     {

@@ -373,6 +373,7 @@ def _stat(pid) -> list[str]:
 
 
 CONTAINER_MARKS = ("/.dockerenv", "/run/.containerenv")
+_LIVE: set[str] = set()
 
 
 def _contained() -> bool:
@@ -414,7 +415,12 @@ def _dead(raw: str) -> bool:
         return holder_pod.gone(held.get("pod"), holder_pod.pod(os.environ))
     if not host or "pid" not in held or "start" not in held:
         return False
-    return _gone(held["pid"], held["start"])
+    return _gone(held["pid"], held["start"]) or _forgotten(raw, held)
+
+
+def _forgotten(raw: str, held: Any) -> bool:
+    """Tell whether ``held`` names this very process while no pass in it still holds the token ``raw``."""
+    return held["pid"] == os.getpid() and _stat(os.getpid())[19:20] == [held["start"]] and raw not in _LIVE
 
 
 def _ended_boot(held: dict, host: str) -> bool:
@@ -447,6 +453,7 @@ def take_tick_lock(store: RedisStore, slug: str, held: lease.Lease, ttl_ms: int,
         except WatchError:
             _journal_lock(slug, caller, "refused", raw)
             return None
+        _LIVE.add(token)
         _journal_lock(slug, caller, "replaced a dead holder" if raw else "taken", raw)
         return token
 
@@ -455,6 +462,7 @@ def release_tick_lock(store: RedisStore, slug: str, token: str, caller: str = "u
     from redis.exceptions import WatchError
 
     key = store.key(slug, "tick-lock")
+    _LIVE.discard(token)
     with store.redis.pipeline() as pipe:
         pipe.watch(key)
         raw = _lock_raw(pipe, key)
