@@ -40,7 +40,8 @@ def start(job: Mapping[str, Any]) -> bool:
 def main(argv: list[str]) -> int:
     with os.fdopen(int(argv[0])):
         job = json.loads(Path(argv[1]).read_text())
-        print(workflow_runner.advance_task(connect(), job["task"], Path(job["repo"])))
+        for action in workflow_runner.advance_tasks(connect(), "", {"tasks": [job["task"]]}, Path(job["repo"])):
+            print(action)
     return 0
 
 

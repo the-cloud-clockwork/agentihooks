@@ -68,20 +68,29 @@ def test_pending_head_is_delivered_once_without_consuming_attempt(
     inbox = Mock()
     row = task(tmp_path)
     doc = {"tasks": [row]}
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == ["workflow work waits for its claimant"]
     before = store.load(tmp_path)
     assert (before["stage"], before["status"], before["visit"], before["runs"]) == ("build", "running", 0, {})
     assert before["case"] == "Build the case"
     assert before["definition"] == definition().to_document()
     assert before["harness"] == "auto"
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    assert before["workflow"] == "bridge"
+    assert before["run"] == tmp_path.name
+    assert (tmp_path / "outputs" / "build" / "seat-1-0-0.sent").read_text() == row["claimed_by"]
+    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == ["workflow work waits for its claimant"]
     assert store.load(tmp_path) == before
     assert inbox.send.call_count == 1
     args, kwargs = inbox.send.call_args
     assert args[:2] == ("swarm", row["claimed_by"])
     assert kwargs["task"] == "work"
     assert '"case": "Build the case"' in args[2]
-    assert str(tmp_path / "outputs" / "build" / "seat-1-0-0.json") in args[2]
+    assert args[2] == (
+        "Work the build workflow stage for your claimed task work. "
+        'Inputs: {"case": "Build the case"}\n'
+        f"Write the result to {tmp_path / 'outputs' / 'build' / 'seat-1-0-0.json'} "
+        "as JSON with outcome (pass, retry or enhance) and outputs. "
+        "The tick resumes the workflow after that result exists."
+    )
 
 
 @pytest.mark.feature("swarm-workflow-runner")
@@ -109,7 +118,7 @@ def test_head_result_advances_once_then_other_stage_uses_headless(
         definition().stages["review"], {"case": "Build the case", "build": "built"}, tmp_path
     )
     assert store.load(tmp_path)["status"] == "passed"
-    workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path)
+    assert workflow_runner.advance_tasks(inbox, "proof", doc, tmp_path) == []
     assert fallback.launch.call_count == 1
 
 
@@ -218,3 +227,91 @@ def test_scouter_stage_uses_scout_after_claimant_completion(tmp_path: Path, monk
     scout.assert_called_once_with(flow.stages["review"], {"case": "Build the case", "build": "built"}, tmp_path)
     assert inbox.send.call_count == 1
     assert store.load(tmp_path)["status"] == "passed"
+
+
+@pytest.mark.feature("swarm-workflow-runner")
+def test_new_nested_workspace_forwards_repository_and_records_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import workflow_runner
+
+    flow = definition()
+    loaded = Mock(return_value=({"bridge": SimpleNamespace(workflow=flow)}, []))
+    monkeypatch.setattr(workflow_runner.loader, "resolve", loaded)
+    folder = tmp_path / "missing" / "run"
+    row = task(folder)
+    del row["claim_generation"]
+    inbox = Mock()
+    assert workflow_runner.advance_tasks(inbox, "proof", {"tasks": [row]}, tmp_path) == [
+        "workflow work waits for its claimant"
+    ]
+    loaded.assert_called_once_with(tmp_path)
+    assert store.load(folder)["workflow"] == "bridge"
+    assert store.load(folder)["run"] == "run"
+    assert (folder / "outputs" / "build" / "seat-0-0-0.sent").read_text() == row["claimed_by"]
+    assert str(folder / "outputs" / "build" / "seat-0-0-0.json") in inbox.send.call_args.args[2]
+
+
+@pytest.mark.feature("swarm-workflow-runner")
+def test_definition_errors_preserve_every_message_and_empty_documents_are_idle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import workflow_runner
+
+    monkeypatch.setattr(workflow_runner.loader, "resolve", Mock(return_value=({}, ["first error", "second error"])))
+    assert workflow_runner.advance_tasks(Mock(), "proof", {}, tmp_path) == []
+    assert workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [task(tmp_path)]}, tmp_path) == [
+        "workflow work refused: first error\nsecond error"
+    ]
+
+
+@pytest.mark.feature("swarm-workflow-runner")
+def test_ignored_task_does_not_hide_a_later_claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import workflow_runner
+
+    resolve(monkeypatch)
+    ignored = {**task(tmp_path / "ignored"), "kind": "code"}
+    good = task(tmp_path / "good")
+    assert workflow_runner.advance_tasks(Mock(), "proof", {"tasks": [ignored, good]}, tmp_path) == [
+        "workflow work waits for its claimant"
+    ]
+    assert not (tmp_path / "ignored").exists()
+    assert store.load(tmp_path / "good")["status"] == "running"
+
+
+@pytest.mark.feature("swarm-workflow-runner")
+def test_runner_receives_stored_harness_and_exit_checker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import workflow_runner
+
+    flow = resolve(monkeypatch)
+    row = task(tmp_path)
+    state = workflow_runner.initialize(row, tmp_path, tmp_path)
+    state["harness"] = "codex"
+    store.save(tmp_path, state)
+    profile = Mock()
+    judge = Mock()
+    routed = Mock()
+    construct_profile = Mock(return_value=profile)
+    construct_judge = Mock(return_value=judge)
+    construct_routed = Mock(return_value=routed)
+    engine = Mock()
+    engine.step.return_value = {**state, "stage": "review"}
+    construct_runner = Mock(return_value=engine)
+    monkeypatch.setattr(workflow_runner, "HeadlessProfile", construct_profile)
+    monkeypatch.setattr(workflow_runner, "Judge", construct_judge)
+    monkeypatch.setattr(workflow_runner, "Routed", construct_routed)
+    monkeypatch.setattr(workflow_runner.runner, "Runner", construct_runner)
+    inbox = Mock()
+    assert workflow_runner.advance_task(inbox, row, tmp_path) == (
+        "workflow work advanced from build to review: running"
+    )
+    construct_profile.assert_called_once_with(harness="codex")
+    construct_judge.assert_called_once_with(harness="codex")
+    seat = construct_routed.call_args.args[0]
+    assert seat.inbox is inbox
+    assert seat.task == row
+    assert seat.definition == flow
+    assert seat.fallback is profile
+    construct_routed.assert_called_once_with(seat, judge)
+    construct_runner.assert_called_once_with(flow, routed, workflow_runner.exit_checks.check)
+    engine.step.assert_called_once_with(tmp_path)

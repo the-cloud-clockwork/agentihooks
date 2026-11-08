@@ -9,7 +9,7 @@ from scripts.tick.steps import CallStep, pass_domains
 
 
 def _workflow_runner(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    actions = []
+    actions: list[str] = []
     for task in get("doc").get("tasks", []):
         if (
             task.get("kind") != "workflow"
