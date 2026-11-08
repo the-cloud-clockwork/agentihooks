@@ -38,7 +38,7 @@ def resource_client(slug: str, service: bool = False) -> Clients:
     return build
 
 
-def operation(kind: str, by: str, **fields: object) -> dict[str, object]:
+def operation(kind: str, by: str, fields: Mapping[str, object]) -> dict[str, object]:
     return {"op": kind, "id": f"{kind}-{uuid4().hex[:10]}", "by": by, **fields}
 
 
@@ -85,7 +85,7 @@ class ClientLedger:
         if if_match is not None:
             guard["if_match"] = if_match
         state = self.mutate(
-            [operation("task_update", "swarm", item=f"tasks/{task_id}", fields=dict(fields), **guard)],
+            [operation("task_update", "swarm", {"item": f"tasks/{task_id}", "fields": dict(fields), **guard})],
             deadline=deadline,
         )
         tasks = cast(list[dict[str, Any]], state.get("tasks", []))
@@ -107,11 +107,13 @@ class ClientLedger:
 
     def notify(self, text: str, *, deadline: Deadline) -> None:
         deadline.live()
-        self.mutate([operation("notice", "swarm", text=text)], deadline=deadline)
+        self.mutate([operation("notice", "swarm", {"text": text})], deadline=deadline)
 
     def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
         deadline.live()
-        self.mutate([{**operation("add_item", by, list="questions", text=text), "id": op_id}], deadline=deadline)
+        self.mutate(
+            [{**operation("add_item", by, {"list": "questions", "text": text}), "id": op_id}], deadline=deadline
+        )
 
 
 @dataclass(frozen=True)
