@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier
@@ -46,9 +47,13 @@ def test_launch_uses_parallel_runs_and_keeps_request_order(tmp_path):
         index = int(request.run_dir.name)
         return ProfileResult("ok", index, request.run_dir / "transcript", None, 0)
 
-    with patch("scripts.workflows.launchers.run_profile", side_effect=execute) as run:
+    with (
+        patch("scripts.workflows.launchers.run_profile", side_effect=execute) as run,
+        patch("scripts.workflows.launchers.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool,
+    ):
         result = HeadlessProfile().launch(replace(stage(), count=3), {"case": "parallel"}, tmp_path)
 
+    pool.assert_called_once_with(max_workers=3)
     assert result == StageResult("pass", [0, 1, 2])
     requests = [call.args[0] for call in run.call_args_list]
     assert len(requests) == 3
