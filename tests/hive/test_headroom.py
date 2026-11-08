@@ -272,7 +272,7 @@ def test_hive_list_shows_workers_against_the_limit_without_masters(
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 40_000)
     monkeypatch.setattr(cli, "_local_agents", lambda *_: {"box": ["master 1 · fixture", "engineer@aaaaaa-0002"]})
-    reports = [{"agent": name} for name in ("master@aaaaaa-0001", "master-aaaaaa-0003", "ci@aaaaaa-0004")]
+    reports = [{"slug": "fixture", "agent": name} for name in ("master@aaaaaa-0001", "master-aaaaaa-0003", "ci@aaaaaa-0004")]
     monkeypatch.setattr(join_report, "live", lambda *_: reports)
     monkeypatch.setattr(join_report, "summary", lambda report: report["agent"])
     registry.update(redis, "box", ["ui=no", "max-agents=4"])
