@@ -416,8 +416,8 @@ def _claimed(store: Swarm, member: str, name: str, task: str, lane: str = "eng",
 
 
 def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_released_with_true_counts(
-    store, tmp_path
-):
+    store: Swarm, tmp_path: Path
+) -> None:
     member = _member(store)
     elsewhere = AgentRecord("engineer@9", "eng", "t9", seat=f"eng-9@{SLUG}", hive="other", state="working")
     store.put_agent(SLUG, elsewhere)
@@ -451,7 +451,9 @@ def test_remove_with_running_agents_leaves_every_unfinished_claim_handed_off_or_
     assert not auth.member(store.redis, member)
 
 
-def test_a_retirement_the_store_refuses_stops_remove_before_the_hive_is_deleted(store, tmp_path, monkeypatch):
+def test_a_retirement_the_store_refuses_stops_remove_before_the_hive_is_deleted(
+    store: Swarm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     member = _member(store)
     store.put_agent(SLUG, AgentRecord("ci@2", "ci", "t2", seat=f"ci-2@{SLUG}", hive=member, state="ended"))
     monkeypatch.setattr(store, "drop_agent", lambda slug, name: False)
@@ -465,7 +467,9 @@ def test_a_retirement_the_store_refuses_stops_remove_before_the_hive_is_deleted(
     assert auth.member(store.redis, member)
 
 
-def test_an_ended_agent_whose_task_already_moved_on_is_retired_without_touching_the_task(store, tmp_path):
+def test_an_ended_agent_whose_task_already_moved_on_is_retired_without_touching_the_task(
+    store: Swarm, tmp_path: Path
+) -> None:
     member = _member(store)
     store.put_agent(SLUG, AgentRecord("ci@2", "ci", "t2", seat=f"ci-2@{SLUG}", hive=member, state="ended"))
     ledger = Ledger([{"id": "t2", "state": "claimed", "claimed_by": "ci@5"}])
@@ -495,7 +499,9 @@ def test_the_hive_is_named_by_its_member_or_its_name_and_a_gone_name_stands_for_
 
 
 @pytest.mark.parametrize("state", ["starting", "retiring", "launching", "suspect"])
-def test_an_agent_in_any_state_but_finished_holds_the_drain_until_its_wait_ends(store, tmp_path, state):
+def test_an_agent_in_any_state_but_finished_holds_the_drain_until_its_wait_ends(
+    store: Swarm, tmp_path: Path, state: str
+) -> None:
     member = _member(store)
     row = _claimed(store, member, "engineer@1", "t1", state=state)
     ledger = Ledger([row])
