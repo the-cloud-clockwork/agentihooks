@@ -973,7 +973,7 @@
   "scripts/workflows/exit_checks.py": 8,
   "scripts/workflows/loader.py": 8,
   "scripts/workflows/machine.py": 32,
-  "scripts/workflows/runner.py": 28,
+  "scripts/workflows/runner.py": 26,
   "scripts/workflows/schema.py": 96,
   "scripts/workflows/store.py": 9,
   "tests/auth/test_service_handler.py": 11,
