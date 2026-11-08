@@ -472,7 +472,7 @@ class HiveLaunch:
         )
 
     def hive_refusal(self, selected: Selection) -> str:
-        hive: dict[str, Any] | None = registry.show(self.store.redis, selected.hive)
+        hive: Any = registry.show(self.store.redis, selected.hive)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         if hive is None:
             return f"hive {selected.hive} is no longer registered"
         if hive.get("draining") == placement.YES:
