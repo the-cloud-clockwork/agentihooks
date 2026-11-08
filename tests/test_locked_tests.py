@@ -180,7 +180,7 @@ def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
     assert " is skipped, xfailed or returns early.\n" in out
 
 
-def test_the_skipper_scan_grows_linearly_with_the_functions_in_a_module(
+def test_a_shallow_skipper_chain_scans_each_function_a_bounded_number_of_times(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     count = 300
