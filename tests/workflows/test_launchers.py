@@ -1,5 +1,6 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier
@@ -152,9 +153,13 @@ def test_scout_count_runs_in_parallel_and_keeps_order(tmp_path: Path) -> None:
         barrier.wait(timeout=5)
         return writes_evidence(argv, env, run_dir, timeout)
 
-    with patch("scripts.workflows.launchers.execute", side_effect=execute):
+    with (
+        patch("scripts.workflows.launchers.execute", side_effect=execute),
+        patch("scripts.workflows.launchers.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as pool,
+    ):
         result = Scout().launch(replace(scout_stage(), count=3), {"case": "c"}, tmp_path)
 
+    assert pool.call_args.kwargs == {"max_workers": 3}
     assert result.outcome == "pass"
     assert [output["items"][0]["claim"] for output in result.outputs] == ["0", "1", "2"]
 
@@ -199,6 +204,7 @@ def test_the_profile_launcher_sends_scouter_stages_to_the_scout(tmp_path: Path) 
 
     argv, _, run_dir, timeout = run.call_args.args
     assert profile.call_count == 0
+    assert argv[2] == json.dumps({"case": "c"})
     assert argv[argv.index("--harness") + 1] == "claude"
     assert timeout == 31
     assert result == StageResult("pass", [evidence(run_dir)])

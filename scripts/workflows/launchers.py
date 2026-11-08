@@ -41,7 +41,7 @@ class Scout:
 
     def scout(self, stage: Stage, question: str, folder: Path) -> dict[str, Any] | None:
         """Run one scout into the folder and return its evidence set, or None when it failed."""
-        folder.mkdir(parents=True)
+        folder.mkdir()
         out = folder / EVIDENCE
         argv = ["agentihooks", "scout", question, "--rounds", str(stage.iterations), "--tier", stage.tier]
         argv += ["--harness", self.harness, "--out", str(out)]
