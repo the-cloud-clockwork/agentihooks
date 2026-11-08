@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -190,9 +191,9 @@ def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, Any]:
     if any(row["id"] == plan_id for row in doc["plans"]):
         return report(doc, plan_id, swarm_state(slug, swarm.connect), ingested=False, note="already ingested")
     phases = entries(plan, [p["id"] for p in doc["phases"]], args.planning)
+    placeholder = Links(plan_id, {}, "https://ledger.invalid/plan", "https://ledger.invalid/plan")
+    ops = batch(plan, phases, placeholder, by.name)
     if args.dry_run:
-        placeholder = Links(plan_id, {}, "https://ledger.invalid/plan", "https://ledger.invalid/plan")
-        ops = batch(plan, phases, placeholder, by.name)
         return {
             "dry_run": True,
             "plan": plan_id,
@@ -259,7 +260,8 @@ def notify(slug: str, plan: Normalized, by: str, count: int) -> None:
     from scripts.inbox import cli as inbox
 
     legacy: Any = inbox
-    legacy.main(["send", f"{MASTER}{slug}", "--fyi", f"{by} ingested the plan {plan.title} as {count} phases."])
+    with redirect_stdout(sys.stderr):
+        legacy.main(["send", f"{MASTER}{slug}", "--fyi", f"{by} ingested the plan {plan.title} as {count} phases."])
 
 
 def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:

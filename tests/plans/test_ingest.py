@@ -27,15 +27,15 @@ SEAT = {"AGENTIHOOKS_SWARM": "plan-proof", "AGENTIHOOKS_AGENT_NAME": "planner"}
 
 
 class NoSwarm:
-    def config(self, slug):
+    def config(self, slug: str) -> Any:
         raise SwarmError(f"no swarm {slug}")
 
 
 @pytest.fixture
-def served(plan_ledger, monkeypatch):
+def served(plan_ledger: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     sent = []
 
-    def call(slug, ops=None, service=False):
+    def call(slug: str, ops: list[dict[str, Any]] | None = None, service: bool = False) -> dict[str, Any]:
         state, rejected = core.sync(slug, ops=ops)
         sent.append([op["op"] for op in ops or []])
         return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
@@ -55,20 +55,22 @@ def served(plan_ledger, monkeypatch):
     return {"slug": plan_ledger, "sent": sent, "notes": notes}
 
 
-def run(tmp_path, capsys, *extra, text=MARKED, env=SEAT):
+def run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], *extra: str, text: str = MARKED, env: dict[str, str] = SEAT
+) -> dict[str, Any]:
     path = tmp_path / "plan.md"
     path.write_text(text, encoding="utf-8")
     assert cli.main(["ingest", str(path), "--ledger", "plan-proof", *extra], env) == 0
     return json.loads(capsys.readouterr().out)
 
 
-def test_author_is_the_bound_seat_or_the_operator_on_the_host():
+def test_author_is_the_bound_seat_or_the_operator_on_the_host() -> None:
     assert ingest.author("planner", "plan-proof", "plan-proof", remote=True) == ingest.Author("planner", True)
     assert ingest.author("", "", "plan-proof", remote=False) == ingest.Author("operator", False)
     assert ingest.author("planner", "", "plan-proof", remote=False) == ingest.Author("operator", False)
 
 
-def test_author_refuses_another_swarms_seat_and_an_unbound_remote_session():
+def test_author_refuses_another_swarms_seat_and_an_unbound_remote_session() -> None:
     with pytest.raises(ingest.IngestError) as raised:
         ingest.author("planner", "other", "plan-proof", remote=False)
     assert str(raised.value) == "a seat of swarm other cannot ingest a plan into ledger plan-proof"
@@ -79,7 +81,7 @@ def test_author_refuses_another_swarms_seat_and_an_unbound_remote_session():
     )
 
 
-def test_batch_links_every_phase_and_adds_a_slice_per_anchor():
+def test_batch_links_every_phase_and_adds_a_slice_per_anchor() -> None:
     plan = normalize(MARKED, "plan.md")
     phases = ingest.entries(plan, ["p1"])
     links = ingest.Links("plan-abc", {"id": "f.md"}, "https://l/a", "https://l/u", "t1", {"harness": "claude"})
@@ -106,7 +108,7 @@ def test_batch_links_every_phase_and_adds_a_slice_per_anchor():
     assert (ops[4]["phase"], ops[4]["anchor"]) == ("phases/alpha", "a1")
 
 
-def test_batch_adds_a_not_duplicate_phase_with_phase_add_and_omits_an_empty_source():
+def test_batch_adds_a_not_duplicate_phase_with_phase_add_and_omits_an_empty_source() -> None:
     text = MARKED.replace("planning=manual", 'planning=manual not_duplicate="a different build"')
     plan = normalize(text, "plan.md")
     ops = ingest.batch(plan, ingest.entries(plan, []), ingest.Links("plan-abc", {}, "https://l/a", "https://l/u"), "x")
@@ -115,7 +117,7 @@ def test_batch_adds_a_not_duplicate_phase_with_phase_add_and_omits_an_empty_sour
     assert (ops[3]["phase"], ops[3]["not_duplicate"]) == ("beta", "a different build")
 
 
-def test_batch_refuses_more_than_the_operation_cap():
+def test_batch_refuses_more_than_the_operation_cap() -> None:
     text = "# Big\n\n## Only\n<!-- phase: id=only -->\n\n" + "".join(
         f"<!-- slice: s{n} -->\n### Slice {n}\nx\n\n" for n in range(99)
     )
@@ -125,13 +127,13 @@ def test_batch_refuses_more_than_the_operation_cap():
     assert str(raised.value) == "the plan needs 102 operations; one ingest holds at most 100"
 
 
-def test_planning_override_applies_to_every_phase():
+def test_planning_override_applies_to_every_phase() -> None:
     plan = normalize(MARKED, "plan.md")
     assert [entry["planning"] for entry in ingest.entries(plan, [], "manual")] == ["manual", "manual"]
     assert [entry["planning"] for entry in ingest.entries(plan, [])] == ["auto", "manual"]
 
 
-def test_dry_run_writes_nothing(served, tmp_path, capsys):
+def test_dry_run_writes_nothing(served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     before = core.sync(served["slug"])[0]
     result = run(tmp_path, capsys, "--dry-run")
     assert result == {
@@ -150,7 +152,9 @@ def test_dry_run_writes_nothing(served, tmp_path, capsys):
     assert served["sent"] == [[]] * len(served["sent"])
 
 
-def test_apply_links_phases_and_slices_then_a_rerun_is_already_ingested(served, tmp_path, capsys):
+def test_apply_links_phases_and_slices_then_a_rerun_is_already_ingested(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     plan = ingest.plan_of(MARKED)
     result = run(tmp_path, capsys)
     url = result.pop("plan_url")
@@ -186,12 +190,16 @@ def test_apply_links_phases_and_slices_then_a_rerun_is_already_ingested(served, 
     assert len(core.sync(served["slug"])[0]["phases"]) == 3
 
 
-def test_a_master_author_sends_no_note(served, tmp_path, capsys):
+def test_a_master_author_sends_no_note(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     run(tmp_path, capsys, env={**SEAT, "AGENTIHOOKS_AGENT_NAME": "master@plan-proof"})
     assert served["notes"] == []
 
 
-def test_a_duplicate_phase_rolls_back_every_row(served, tmp_path, capsys):
+def test_a_duplicate_phase_rolls_back_every_row(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     text = MARKED.replace("id=beta", "id=p1")
     with pytest.raises(SystemExit) as raised:
         run(tmp_path, capsys, text=text)
@@ -201,19 +209,23 @@ def test_a_duplicate_phase_rolls_back_every_row(served, tmp_path, capsys):
     assert (state.get("plans", []), state.get("slices", [])) == ([], [])
 
 
-def test_the_command_refuses_another_swarms_seat_before_reading(served, tmp_path, capsys):
+def test_the_command_refuses_another_swarms_seat_before_reading(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as raised:
         run(tmp_path, capsys, env={**SEAT, "AGENTIHOOKS_SWARM": "other"})
     assert str(raised.value) == "a seat of swarm other cannot ingest a plan into ledger plan-proof"
 
 
-def test_the_command_refuses_a_plan_the_normalizer_refuses(served, tmp_path, capsys):
+def test_the_command_refuses_a_plan_the_normalizer_refuses(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as raised:
         run(tmp_path, capsys, text="   \n")
     assert str(raised.value) == "the plan has no content"
 
 
-def test_plan_read_still_routes_through_the_plan_command(monkeypatch):
+def test_plan_read_still_routes_through_the_plan_command(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = []
     monkeypatch.setattr("scripts.swarm_ledger.plan_read.main", lambda argv, environ: seen.append(argv) or 0)
     assert cli.main(["read", "--task", "t1"], {}) == 0
@@ -516,3 +528,43 @@ def test_operator_apply_records_source_without_joining(
     assert served["notes"] == [
         ["send", "master@plan-proof", "--fyi", "operator ingested the plan Ingest proof as 2 phases."]
     ]
+
+
+def test_operation_limit_refuses_before_any_side_effect(
+    served: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = "# Big\n\n## Only\n<!-- phase: id=only -->\n\n" + "".join(
+        f"<!-- slice: s{n} -->\n### Slice {n}\nx\n\n" for n in range(99)
+    )
+    path = tmp_path / "big.md"
+    path.write_text(text)
+
+    def refuse_write(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("over cap plan attempted a write")
+
+    monkeypatch.setattr(ledger, "call", refuse_write)
+    monkeypatch.setattr(ledger, "upload_artifact", refuse_write)
+    monkeypatch.setattr(ledger_publish, "publish", refuse_write)
+    args = ingest.parser().parse_args([str(path), "--ledger", served["slug"]])
+    with pytest.raises(ingest.IngestError, match="^the plan needs 102 operations; one ingest holds at most 100$"):
+        ingest.ingest(args, SEAT)
+    assert served["sent"] == []
+
+
+def test_command_stdout_is_one_json_report_when_notification_prints(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.inbox import cli as inbox
+
+    def notify(argv: list[str]) -> int:
+        assert argv == ["send", "master@plan-proof", "--fyi", "planner ingested the plan Ingest proof as 2 phases."]
+        print(json.dumps({"id": "message-one", "state": "pending"}))
+        return 0
+
+    monkeypatch.setattr(inbox, "main", notify)
+    path = tmp_path / "plan.md"
+    path.write_text(MARKED)
+    assert cli.main(["ingest", str(path), "--ledger", served["slug"]], SEAT) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out)["ingested"] is True
+    assert json.loads(output.err) == {"id": "message-one", "state": "pending"}
