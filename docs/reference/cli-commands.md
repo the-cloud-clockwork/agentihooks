@@ -378,6 +378,8 @@ agentihooks knowledge refresh                                # embed what change
 
 `--ledger` defaults to `AGENTIHOOKS_SWARM`. Each hit carries its parents, nearest first, so a task hit names its phase and a comment hit names its task and phase.
 
+`AGENTIHOOKS_KNOWLEDGE_EMBEDDER` chooses the embedder: `hash` (default) or `semantic`, which matches by meaning, so a question worded differently from a task still finds it. `semantic` calls an OpenAI-compatible embeddings endpoint named by `AGENTIHOOKS_KNOWLEDGE_EMBED_URL` (HTTPS, or HTTP on loopback), `AGENTIHOOKS_KNOWLEDGE_EMBED_MODEL`, `AGENTIHOOKS_KNOWLEDGE_EMBED_DIMENSION` and `AGENTIHOOKS_KNOWLEDGE_EMBED_TOKEN`, sending at most 32 texts per request and ranking by cosine. A provider outage exits 1 with the reason. Each embedder and model keeps its own index file, so switching rebuilds rather than mixing vectors.
+
 ---
 
 ## `agentihooks claude` / `agenti`
