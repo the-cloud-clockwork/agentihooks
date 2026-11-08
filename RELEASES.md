@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.725 · 2026-11-08
+
+### 2026-11-08 · be13269b2622 · #9976 · @agenticore-app
+
+**Type the profiles package for the strict checker**
+
+This change adds type annotations throughout every module in the scripts/profiles package so it passes the strict basedpyright checker, reducing strict errors from 813 to just 29 remaining items tied to other untyped modules and a few deprecated client calls. No logic was altered—only annotations, casts, and type-checking imports were added, verified by comparing the annotation-free syntax tree against the current dev branch. This strengthens static type safety across the profiles package, making future bugs easier to catch automatically and clearing the path toward full strict-mode coverage for the project.
+
 ## v2.17.723 · 2026-11-08
 
 ### 2026-11-08 · 751c9cf7af31 · #10061 · @agenticore-app
