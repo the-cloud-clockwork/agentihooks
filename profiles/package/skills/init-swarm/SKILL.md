@@ -70,7 +70,14 @@ source path exists.
 
 ### A plan that continues an existing ledger
 
-When the plan adds work to a ledger that already exists, write only the
+When the plan adds work to a ledger that already exists, ingest the plan file
+itself, marked or raw markdown or init swarm JSON, in one atomic call:
+
+```bash
+agentihooks plan ingest <plan file> --ledger <slug>
+```
+
+To append a hand built phases list instead, write only the
 `phases` list in the same shape (an optional `id` per phase; one based positions
 in `depends_on` point inside this plan, existing ids such as `p3` at the ledger)
 and append it instead of building a ledger:

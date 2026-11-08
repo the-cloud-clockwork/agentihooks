@@ -205,6 +205,37 @@ def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(
     assert spec == {"containers": [{"name": "tools", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]}
 
 
+def test_hive_image_links_the_headless_browser_libraries_onto_the_base() -> None:
+    libraries = worker_stage("browser-libs")
+    for package in ("libglib2.0-0", "libnss3", "libnspr4", "libgbm1", "libxkbcommon0", "libasound2", "libatspi2.0-0"):
+        assert f" {package} " in libraries, package
+    assert "comm -13 /base-packages -" in libraries
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    hive = dockerfile[dockerfile.rindex("\nFROM ${WORKER_IMAGE}\n") + 1 :]
+    assert "COPY --link=true --from=browser-libs /browser-libs/ /\n" in hive
+
+
+def test_kind_proof_launches_the_headless_browser_at_the_checked_viewport(tmp_path: Path) -> None:
+    lines = PROOF.read_text().splitlines()
+    probes = [line for line in lines if line.startswith("in_pod browser '")]
+    assert len(probes) == 1
+    assert probes[0].endswith("' &")
+    for check in (
+        "npx playwright install --only-shell chromium",
+        "viewport: {width: 1920, height: 1080}",
+        'page.goto(\\"about:blank\\")',
+        'size !== \\"1920 by 1080\\"',
+        "process.exit(1)",
+    ):
+        assert check in probes[0], check
+    assert lines.index('wait "$cluster_pid"') < lines.index(probes[0])
+    assert lines.index('wait "$browser_pid"') < lines.index("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    _, spec = in_pod(tmp_path, "browser", "true")
+    assert spec == {
+        "containers": [{"name": "browser", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]
+    }
+
+
 def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
     dockerfile = (ROOT / "docker/swarm-node/Dockerfile").read_text()
     sources = {s for line in re.findall(r"^COPY (?:--\S+ )*(.+) \S+$", dockerfile, re.M) for s in line.split()}
