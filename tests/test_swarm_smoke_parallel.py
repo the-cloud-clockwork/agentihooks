@@ -14,6 +14,7 @@ SCENARIOS = [
     "scripts/packaging/compose-task-smoke.sh",
     "scripts/packaging/compose-recovery-drill.sh",
     "scripts/packaging/swarm-init-smoke.sh",
+    "scripts/packaging/stability-smoke.sh",
 ]
 
 
