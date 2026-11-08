@@ -34,8 +34,6 @@ def test_the_intent_check_runs_while_the_tick_runs(env, monkeypatch):  # noqa: F
 
 
 def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monkeypatch):  # noqa: F811
-    import pytest
-
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     judged, ticked = RuntimeError("intent failed"), ValueError("tick failed")
@@ -53,10 +51,9 @@ def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monke
 
     monkeypatch.setattr(intent, "Check", Failing)
     _with(monkeypatch, _Marker("failing marker", "agents", tick))
-    with pytest.raises(RuntimeError) as caught:
-        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert caught.value is judged
-    assert caught.value.__context__ is ticked
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised RuntimeError: {judged}"]
+    assert judged.__context__ is ticked
 
 
 def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeypatch):  # noqa: F811

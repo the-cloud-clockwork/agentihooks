@@ -926,11 +926,12 @@ def test_tick_records_failed_stage_and_releases_its_lock(env, monkeypatch, capsy
         raise error
 
     monkeypatch.setattr(cli.phase_planning, "planning_pass", failing)
-    with pytest.raises(ValueError) as caught:
-        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert caught.value is error
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert actions == [f"pass failed: a step raised ValueError: {error}"]
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines() if '"swarm_tick_step"' in line]
-    assert [row["outcome"] for row in rows if row.get("outcome") == "error"] == ["error", "error"]
+    assert [row["outcome"] for row in rows if row.get("outcome") == "error"] == ["error"]
+    passes = store.redis.xrange(store.key("sw", "tick:passes"))
+    assert json.loads(passes[-1][1]["record"])["outcome"] == "error"
     assert rows[-1]["step"] == "run_tick"
     assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert cli.timing.SWARM.get() is None
