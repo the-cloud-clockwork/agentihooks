@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.tick import registry
@@ -137,7 +137,7 @@ def _never_bound(slug: str, store: Any, agent: AgentRecord, now_ms: int) -> bool
     """True once a Kubernetes attempt on the placeholder pod, with no pod uid, has stayed suspect for the lost window."""
     from scripts.swarm_v2.kubernetes.failures import PENDING_POD
 
-    target: dict[str, Any] = agent.runtime_target
+    target = cast(dict[str, Any], agent.runtime_target)
     if agent.runtime_backend != "kubernetes" or agent.state != tick.SUSPECT:
         return False
     if target.get("pod_uid") or target.get("pod_name") != PENDING_POD:

@@ -12,7 +12,7 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.kubernetes.failures import PENDING_POD
 from scripts.tick.steps import agents
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 NOW = 1_800_000_000_000
