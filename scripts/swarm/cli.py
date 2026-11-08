@@ -1505,8 +1505,7 @@ def hive_admission(store: Any, slug: str) -> dict[str, Any]:
 def cmd_status(store: Any, args: Any) -> None:
     if args.json:
         store.config(args.slug)
-        report = status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())
-        print(json.dumps({**report, "hive_admission": hive_admission(store, args.slug)}))
+        print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
         return
     outage.show(args.slug, False)
     config = store.config(args.slug)
