@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.744 · 2026-11-08
+
+### 2026-11-08 · 19249e2e7bb0 · #10142 · @agenticore-app
+
+**Skip hives that begin draining before launch**
+
+This change fixes a race where a cached hive selection could still route a launch to a hive that had already started draining due to removal or a pod preStop hook, causing orders to land on unavailable targets. Admission now rereads the hive registry right before reserving room or publishing an order, so draining or removed hives are caught and routed through the existing retry loop, which picks another eligible hive or waits instead. This closes issue #10140 and prevents orders from being sent to hives that can no longer accept them, improving placement reliability.
+
 ## v2.17.742 · 2026-11-08
 
 ### 2026-11-08 · 44c9796ca964 · #10170 · @agenticore-app
