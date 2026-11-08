@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.747 · 2026-11-08
+
+### 2026-11-08 · fe9d758d1ef4 · #10162 · @agenticore-app
+
+**Record the runner pod kill reason in the lost runner watchdog report**
+
+This change makes the lost runner watchdog read each runner pod's container termination in cluster mode and append the actual kill reason, such as "OOMKilled exit 137", to the report it logs and records when cancelling or rerunning a stalled run. Previously these reports only noted that a runner was lost, with no indication why, which caused a memory-killed job to be misread as a timeout for a full day. The hosted Actions watchdog, which has no pod access, is unaffected since it relies on the organisation runner list, which carries no termination data.
+
+### 2026-11-08 · 01108f73573b · #10164 · @agenticore-app
+
+**Hive create prints each finished step with its time as it happens**
+
+This change fixes hive create so that each step's completion line is written and flushed immediately with its UTC timestamp, instead of sitting buffered in stdout until the process exits. Previously, when stdout was piped, drill timing tables recorded when output happened to arrive rather than when each step actually finished, making timing data unreliable. The fix introduces a stamped, auto-flushing reporter as the default output handler for hive create, verified by a test that pipes stdout through stub steps and confirms each line appears before the next step runs, ensuring accurate, real-time timing visibility.
+
 ## v2.17.744 · 2026-11-08
 
 ### 2026-11-08 · 19249e2e7bb0 · #10142 · @agenticore-app
