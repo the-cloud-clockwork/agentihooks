@@ -2070,6 +2070,15 @@
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_whose_pod_has_a_uid_is_never_past_the_unbound_window",
         "tests/tick/steps/test_reap_ended_executions.py::test_an_attempt_outside_kubernetes_is_never_past_the_unbound_window"
       ]
+    },
+    {
+      "id": "swarm-workflow-runner",
+      "origin": "inventory",
+      "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",
+      "seam": "scripts.tick.steps.workflows._workflow_runner registered as tick step workflow runner",
+      "tests": [
+        "tests/tick/steps/test_workflow_runner.py::test_workflow_runner"
+      ]
     }
   ],
   "unmapped_rules": [
