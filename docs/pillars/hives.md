@@ -419,12 +419,12 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. The host room guard still refuses a spawn when load or free memory leaves no room. A stored value is kept. |
+| `max-agents` | whole number, 1 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `auto` clears it. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
-role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
-`max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
+role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded`
+follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
 
 ### Capabilities and task needs
@@ -1098,8 +1098,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
-   max-agents=<workers.maxAgents> prefer=<workers.prefer>`, by default `excluded=master master-swarms= max-agents=20
-   prefer=`. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
+   prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, and `max-agents=<workers.maxAgents>`
+   only when `HIVE_MAX_AGENTS` is set. `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to
    the lowest ranked hive while admission leaves it room.
 6. Runs `agentihooks hive run`.
 
@@ -1227,7 +1227,7 @@ in place and moves the master to another hive.
 | ui, ephemeral | `yes` or `no`, editable. |
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
-| max agents | Whole number, editable. |
+| max agents | The hive's agent ceiling, editable, marked `cap` when the operator set a cap and `auto` when it is computed from the hive's own resources. |
 | agents | Working agents against max agents, such as `1/3`. |
 | slots | One line per slot: harness, account and the sessions the hive reports on it. |
 | master | The live master running on the hive, from any swarm, or `—`. |
@@ -1260,7 +1260,7 @@ The page converts what was typed before it sends it:
 |---|---|---|
 | excluded | `master, qa` | `["master", "qa"]` |
 | prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
-| max agents | `4` | `4`; anything other than digits is sent as text and refused |
+| max agents | `4` | `4`; an empty box sends `auto`, anything else other than digits is sent as text and refused |
 
 Only the operator can edit. An agent's credential gets
 `403 Hive settings need the operator`.

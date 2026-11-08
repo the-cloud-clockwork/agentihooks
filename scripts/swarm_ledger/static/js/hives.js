@@ -35,10 +35,16 @@ function moveButton(hive) {
     "aria-label": `Move master to ${hive.id}`, text: "move master" });
 }
 
+function ceilingCell(hive) {
+  const capped = hive.cap != null;
+  return h("span", { title: capped ? `capped at ${hive.cap}` : "computed from the hive's own memory, swap and load" },
+    text(hive, "max_agents", String(hive.max_agents), true), label(capped ? "cap" : "auto", capped ? "pending" : "auto"));
+}
+
 function hiveRow(hive) {
   const values = [h("span", { class: "sw-id", title: hive.id, text: hive.name || hive.id }), label(hive.live ? "live" : "quiet", hive.live ? "live" : "stalled"),
     flag(hive, "ui"), flag(hive, "ephemeral"), text(hive, "excluded", (hive.excluded || []).join(",")),
-    text(hive, "max_agents", String(hive.max_agents), true), `${hive.agents}/${hive.max_agents}`,
+    ceilingCell(hive), `${hive.agents}/${hive.max_agents}`,
     hive.master ? h("span", { class: "sw-id", title: hive.master.name, text: hive.master.name }) : "—", moveButton(hive)];
   return h("tr", { id: `hive-${hive.id}` }, ...values.map((v) => (v.nodeType ? h("td", {}, v) : h("td", { text: v }))));
 }
@@ -55,7 +61,7 @@ export function renderHives(force) {
 function value(input) {
   const raw = input.value.trim(), field = input.dataset.hiveField;
   if (field === "excluded") return raw.split(",").map((name) => name.trim()).filter(Boolean);
-  if (field === "max_agents") return /^\d+$/.test(raw) ? Number(raw) : raw;
+  if (field === "max_agents") return /^\d+$/.test(raw) ? Number(raw) : raw || "auto";
   return raw;
 }
 

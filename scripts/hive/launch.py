@@ -9,7 +9,7 @@ from typing import Any
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
-from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
+from scripts.hive import admission, ceiling, headroom, orders, placement, placement_waits, registry
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
@@ -104,6 +104,8 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             used = max(hive["agents"], taken)
             held = max(held, used - hive["agents"])
         reading = headroom.read(store.redis, hive["id"], now)
+        hive["cap"] = hive["max_agents"]
+        hive["max_agents"] = ceiling.ceiling(hive["cap"], reading)
         found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)

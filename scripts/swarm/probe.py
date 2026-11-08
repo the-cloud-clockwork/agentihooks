@@ -150,7 +150,7 @@ def guarded(name: str, read: Callable[[], list[Probe]]) -> list[Probe]:
 def run(
     store: "RedisStore", slug: str, ledger: "LedgerClient", now_ms: int, limits: Thresholds = THRESHOLDS
 ) -> list[Probe]:
-    from scripts.hive import join_report, registry
+    from scripts.hive import ceiling, headroom, join_report, registry
     from scripts.swarm import local_slots
     from scripts.swarm.commands import hive_id
     from scripts.swarm.health import merge_stall
@@ -178,7 +178,7 @@ def run(
         here = hive_id()
         if here != ROOT:
             raise SwarmError(f"counted only on the {ROOT} hive, this host is {here}")
-        cap = registry.show(store.redis, ROOT)["max_agents"]
+        cap = ceiling.ceiling(registry.show(store.redis, ROOT)["max_agents"], headroom.read(store.redis, ROOT, now_ms))
         return [workstation(local_slots.occupancy(store, ROOT)[0], cap, config.local_max_agents)]
 
     def released() -> list[Probe]:

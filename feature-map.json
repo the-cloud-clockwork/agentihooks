@@ -2099,6 +2099,27 @@
         "tests/swarm/test_ledger_probe.py::test_a_database_connection_closed_during_a_write_keeps_the_tick_running",
         "tests/swarm/test_time_left.py::test_a_closed_database_connection_is_a_refused_ledger_write"
       ]
+    },
+    {
+      "id": "hive-agent-ceiling",
+      "origin": "operator",
+      "operator_words": "a hive's max agents must not be a fixed number such as the default twenty or ten. With no cap set, the ceiling is computed each tick from the hive's own reported memory, swap and load, the same host room rule the workstation autoscale uses, and placement uses that number. A cap set by the operator through the hive command or the page bounds it from above.",
+      "behaviour": "A hive with no operator cap takes its agent ceiling from its own heartbeat reading of memory, swap and one minute load under the workstation host room rule, placement admits by that ceiling, a set cap holds it lower, auto clears the cap, and the Hives panel shows the ceiling and marks a set cap.",
+      "seam": "The hive registry max agents setting, the hive headroom heartbeat, the hive placement load and the Hives panel max agents cell",
+      "tests": [
+        "tests/hive/test_hive_ceiling.py::test_an_uncapped_ceiling_moves_with_the_hives_free_memory",
+        "tests/hive/test_hive_ceiling.py::test_swap_in_use_counts_against_the_free_memory",
+        "tests/hive/test_hive_ceiling.py::test_a_load_above_the_high_watermark_holds_the_ceiling_at_the_agents_running",
+        "tests/hive/test_hive_ceiling.py::test_the_one_minute_load_falls_back_to_the_five_minute_load_of_an_older_daemon",
+        "tests/hive/test_hive_ceiling.py::test_the_pod_memory_limit_binds_when_it_is_lower_than_the_node",
+        "tests/hive/test_hive_ceiling.py::test_a_set_cap_holds_the_ceiling_lower",
+        "tests/hive/test_hive_ceiling.py::test_without_a_reading_the_ceiling_is_the_cap_or_none",
+        "tests/hive/test_hive_ceiling.py::test_a_reading_without_agents_counts_none_running",
+        "tests/hive/test_hive_ceiling.py::test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one",
+        "tests/hive/test_hive_ceiling.py::test_placement_reads_the_computed_ceiling_and_keeps_the_cap",
+        "tests/swarm_ledger/test_hives_panel.py::test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap",
+        "tests/swarm_ledger/test_hives_panel.py::test_clearing_max_agents_writes_auto"
+      ]
     }
   ],
   "unmapped_rules": [

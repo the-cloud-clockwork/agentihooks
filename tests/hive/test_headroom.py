@@ -75,9 +75,12 @@ def test_measure_reads_the_five_minute_load_and_available_memory(proc, monkeypat
     monkeypatch.setattr(headroom.os, "cpu_count", lambda: 8)
     assert headroom.measure(3, 77_000, proc) == {
         "cpus": 8,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "disk_free_gb": 9,
         "disk_floor_gb": 50,
         "pending": 3,
@@ -159,9 +162,12 @@ def test_publish_counts_waiting_launch_orders_and_expires_with_the_heartbeat(red
     headroom.publish(redis, "box", 5_000, proc)
     assert json.loads(redis.get(f"{registry.key('box')}:headroom")) == {
         "cpus": 4,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "disk_free_gb": 9,
         "disk_floor_gb": 50,
         "pending": 2,
@@ -259,8 +265,8 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     redis.set(headroom.key("old"), json.dumps({**record, "measured_at": 9_999}))
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tstale\tui=no\tmax-agents=20\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tmax-agents=20\texcluded=master\theadroom=missing\n"
+        "box\tstale\tui=no\tmax-agents=0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
+        "old\tstale\tui=no\tmax-agents=0 (auto)\texcluded=master\theadroom=missing\n"
     )
 
 
@@ -301,9 +307,12 @@ def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc
     limit(cgroup, POD_LIMITS)
     assert headroom.measure(0, 5, proc) == {
         "cpus": 8,
+        "load1": 9.1,
         "load5": 3.456,
         "available_mb": 8000,
         "total_mb": 15625,
+        "swap_used_mb": 1000,
+        "swap_total_mb": 2000,
         "pod_total_mb": 6300,
         "pod_available_mb": 5400,
         "pod_cpus": 2.5,

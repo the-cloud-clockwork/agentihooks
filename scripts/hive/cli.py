@@ -370,7 +370,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _list() -> None:
-    from scripts.hive import headroom, join_report
+    from scripts.hive import ceiling, headroom, join_report
 
     now = now_ms()
     redis = redis_client()
@@ -380,11 +380,13 @@ def _list() -> None:
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
-        room = headroom.summary(headroom.read(redis, record["id"], now))
+        reading = headroom.read(redis, record["id"], now)
+        room = headroom.summary(reading)
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
+        top = ceiling.ceiling(record["max_agents"], reading)
+        cap = registry.AUTO if record["max_agents"] is None else f"cap {record['max_agents']}"
         print(
-            f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={record['max_agents']}\texcluded={excluded}\t{room}"
+            f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top} ({cap})\texcluded={excluded}\t{room}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
