@@ -2232,7 +2232,8 @@ def test_status_hive_admission_names_the_refusing_hive_limit_while_quota_and_hos
 
     store = _store()
     store.redis.set(store.key("sw", "quota-capacity"), json.dumps({"host": {"room": 4}}))
-    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: [account(cap=6)] if not refresh else [])
+    observed = [account(cap=6), account("warned", cap=6, left=1)]
+    monkeypatch.setattr(capacity, "accounts", lambda env, now, refresh=True: observed if not refresh else [])
     hives = [{"id": "workstation", "room": 0, "limit": "max agents: 6 of 6", "refusal": "max agents: 6 of 6"}]
     monkeypatch.setattr(launch, "live_hives", lambda found: hives if found is store else [])
     assert status.hive_admission(store, "sw") == {

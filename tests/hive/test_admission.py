@@ -279,10 +279,12 @@ def test_binding_names_hive_admission_and_each_refusal_when_no_hive_has_room():
         hive_row("vm", 0, "disk: low", "disk: low"),
     ]
     others = {"quota seats": 9, "host room": 4, "unknown": None}
-    assert admission.binding(hives, others) == (
+    refused = (
         "binding limit hive admission, room 0: hive anton cpu: load high; "
         "hive workstation max agents: 6 of 6; hive vm disk: low"
     )
+    assert admission.binding(hives, others) == refused
+    assert admission.binding(hives, {"host room": 0}) == refused
     assert (
         admission.binding(hives[:1], {"host room": 0})
         == "binding limit hive admission, room 0: hive anton cpu: load high"

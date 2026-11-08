@@ -300,7 +300,9 @@ def hive_admission(store: RedisStore, slug: str) -> dict[str, Any]:
     hives = live_hives(store)
     record: dict[str, Any] = capacity.read(store, slug)
     host: dict[str, Any] = record.get("host") or {}
-    seats = capacity.quota_seats(capacity.accounts(dict(os.environ), time.time(), refresh=False), {})
+    environ = dict(os.environ)
+    observed = capacity.accounts(environ, time.time(), refresh=False)
+    seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
     others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
     rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
     return {"hives": rows, "lines": admission.view_lines(hives, others)}
