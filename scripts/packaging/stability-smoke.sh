@@ -95,7 +95,6 @@ for seat in (1, 2):
     )
     store.start_execution(slug, agent)
     store.seats.occupy(agent.seat, name, started)
-    store.record_launch(slug, agent, "started")
     print(name)
 PY
 )"
@@ -103,23 +102,40 @@ mapfile -t placed <<< "$agents"
 printf 'launched %s on hive %s\n' "${placed[*]}" "$member_id"
 for agent in "${placed[@]}"; do
   docker exec -e AGENTIHOOKS_AGENT_NAME="$agent" "$run-member" sh -c \
-    'set -a; . "$HOME/.agentihooks/hive.env"; set +a; exec python -c "$0"' \
+    'set -a; . "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env"; set +a; exec python -c "$0"' \
     'import os; from hooks.context import hive_join; hive_join.run({"session_id": os.environ["AGENTIHOOKS_AGENT_NAME"]}, "start")'
 done
-printf 'every launched agent ran its hive join session start checks\n'
+"${hub[@]}" -e SLUG="$slug" swarm python - <<'PY'
+import os
+
+from scripts.hive import join_report
+from scripts.swarm.store import connect
+
+store, slug = connect(), os.environ["SLUG"]
+for agent in store.agents(slug):
+    report = join_report.read(store.redis, agent)
+    store.record_launch(slug, agent, "started" if report else "failed", "" if report else "no hive join report")
+    print(f"launch {'started' if report else 'failed'} for {agent.name}: " + (join_report.summary(report) if report else "no hive join report"))
+PY
 
 live=""
+live_row="$member_id"$'\t'live$'\t'
 for _ in $(seq 60); do
   live="$(docker exec "$run-member" agentihooks hive list 2>/dev/null || true)"
-  if [[ $live == *"$member_id"* ]]; then
+  if [[ $live == *"$live_row"* ]]; then
     break
   fi
   sleep 1
 done
 printf 'hive list: %s\n' "$live"
+if [[ $live != *"$live_row"* ]]; then
+  docker exec "$run-member" sh -c 'tail -n 40 "$HOME/hive-run.log"' >&2 || true
+  printf 'member hive %s never reported live\n' "$member_id" >&2
+  exit 1
+fi
 
 graded=0
-"${hub[@]}" -e SLUG="$slug" -e PLACED="${#placed[@]}" swarm python - <<'PY' || graded=$?
+"${hub[@]}" -e SLUG="$slug" -e PLACED="${#placed[@]}" -e MEMBER_ID="$member_id" swarm python - <<'PY' || graded=$?
 import os
 import sys
 import time
@@ -130,17 +146,20 @@ from scripts.swarm.store import connect
 
 GRADED = ("every hive live", "every hive agent joins and writes the ledger", "full task list reads per minute")
 HOST_ONLY = ("workstation agents at or under the root cap", "merge queue groups moving", "release age")
-slug, placed = os.environ["SLUG"], int(os.environ["PLACED"])
+slug, placed, member = os.environ["SLUG"], int(os.environ["PLACED"]), os.environ["MEMBER_ID"]
 found = probe.run(connect(), slug, LedgerClient(), int(time.time() * 1000))
 for result in found:
-    print(("not graded here\t" if result.name in HOST_ONLY else "") + result.line())
+    print(f"skipped\t{result.name}\treads the root hive or GitHub" if result.name in HOST_ONLY else result.line())
 graded = [result for result in found if result.name in GRADED or result.name.startswith("launch success hive")]
 missing = [name for name in GRADED if name not in {result.name for result in graded}]
 launched = [result for result in graded if result.name.startswith("launch success hive")]
 joined = next((result for result in graded if result.name == GRADED[1]), None)
 failed = [result.name for result in graded if not result.passed]
-if missing or not launched or joined is None or not joined.measured.startswith(f"{placed} of {placed} "):
-    failed.append(f"probe coverage: missing {missing}, launch rows {len(launched)}, join {joined}")
+launch = f"launch success hive {member} harness claude"
+if [result.name for result in launched] != [launch] or f"{placed} of {placed} started" not in launched[0].measured:
+    failed.append(f"launch rows {[result.line() for result in launched]}, expected one {launch} with {placed} started")
+if missing or joined is None or not joined.measured.startswith(f"{placed} of {placed} "):
+    failed.append(f"probe coverage: missing {missing}, join {joined}")
 if failed:
     sys.exit(f"stability invariants failed: {failed}")
 print(f"every stability invariant held on a swarm with one hive and {placed} agents")
