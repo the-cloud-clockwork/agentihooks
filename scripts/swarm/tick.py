@@ -277,13 +277,20 @@ NUDGE = (
 
 @reaper.scanning_pass
 def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -> list[str]:
-    box: dict[str, Any] = steps.PassBox()
-    state: dict[str, Any] = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "box": box}
-    sites = tick_sites.TickSites(state, box, task_steps.appliers(state), lambda: now_ms)
-    gate = engine.SiteGate(sites.hooks(), sites.shut)
-    records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
-    observe_steps.raise_held(box)
-    return [] if sites.left else steps.actions(records)
+    from scripts.swarm.cli import _pass_tools
+    from scripts.tick.ports.tools import PASS_TOOLS
+
+    token = PASS_TOOLS.set(_pass_tools(store, slug, "tick", ledger, runtime))
+    try:
+        box: dict[str, Any] = steps.PassBox()
+        state: dict[str, Any] = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "box": box}
+        sites = tick_sites.TickSites(state, box, task_steps.appliers(state), lambda: now_ms)
+        gate = engine.SiteGate(sites.hooks(), sites.shut)
+        records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
+        observe_steps.raise_held(box)
+        return [] if sites.left else steps.actions(records)
+    finally:
+        PASS_TOOLS.reset(token)
 
 
 def _acknowledging_error(exc):

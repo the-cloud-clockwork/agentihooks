@@ -1,8 +1,10 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts.inbox.store import InboxError, close_reason
+from scripts.swarm.store import AgentRecord
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import Tools, Unsupported
 from scripts.tick.ports.source_control import (
@@ -71,6 +73,26 @@ class FakeLedger:
 
     def mutate(self, operations: Sequence[Mapping[str, object]], *, deadline: Deadline) -> object:
         return _record(self, "mutate", (operations,), deadline)
+
+    def update_task(
+        self,
+        task_id: str,
+        fields: Mapping[str, object],
+        *,
+        if_state: Sequence[str] = (),
+        if_match: Mapping[str, object] | None = None,
+        deadline: Deadline,
+    ) -> dict[str, Any]:
+        return _record(self, "update_task", (task_id, fields, if_state, if_match), deadline)
+
+    def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "task", (task_id,), deadline)
+
+    def notify(self, text: str, *, deadline: Deadline) -> None:
+        _record(self, "notify", (text,), deadline)
+
+    def question(self, text: str, by: str, op_id: str, *, deadline: Deadline) -> None:
+        _record(self, "question", (text, by, op_id), deadline)
 
 
 @dataclass
@@ -200,6 +222,27 @@ class FakeRuntime:
 
     def panes(self, *, deadline: Deadline) -> object:
         return _record(self, "panes", (), deadline)
+
+    def live_names(self, *, deadline: Deadline) -> set[str]:
+        return _record(self, "live_names", (), deadline)
+
+    def observe(self, agent: AgentRecord, *, deadline: Deadline) -> Any:
+        return _record(self, "observe", (agent,), deadline)
+
+    def retire(self, agent: AgentRecord, *, homes: Sequence[Path] = (), deadline: Deadline) -> bool:
+        return _record(self, "retire", (agent, homes), deadline)
+
+    def name_pane(self, agent: AgentRecord, *, deadline: Deadline) -> None:
+        _record(self, "name_pane", (agent,), deadline)
+
+    def refusal(self, agent: AgentRecord, *, deadline: Deadline) -> str:
+        return _record(self, "refusal", (agent,), deadline)
+
+    def resume(self, config: "SwarmConfig", agent: AgentRecord, text: str, *, deadline: Deadline) -> Any:
+        return _record(self, "resume", (config, agent, text), deadline)
+
+    def dismiss(self, agent: AgentRecord, *, deadline: Deadline) -> bool:
+        return _record(self, "dismiss", (agent,), deadline)
 
 
 @dataclass

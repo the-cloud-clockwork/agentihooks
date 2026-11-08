@@ -8,6 +8,8 @@ import pytest
 from scripts.hub import reconciler
 from scripts.swarm import tick
 from scripts.swarm.store import AgentRecord
+from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
+from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
 from scripts.tick.steps import agents
@@ -155,7 +157,10 @@ def test_the_reap_step_hands_the_pass_runtime_ledger_and_its_deadline_to_the_rea
     deadline = Deadline(50.0, _Clock(0.0))
     step = next(found for found in agents.STEPS if found.name == "reap")
 
-    result = step.run(Context(_View(state), deadline, None))
+    tools = fake_tools()
+    result = step.run(Context(_View(state), deadline, tools))
 
-    assert seen == [("sw", store, ledger, runtime, rows, 7, deadline)]
+    assert seen == [
+        ("sw", store, LedgerCalls(tools.ledger, deadline), RuntimeCalls(tools.runtime, deadline), rows, 7, deadline)
+    ]
     assert [write.value for write in result.writes] == [["reaped"]]
