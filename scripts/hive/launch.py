@@ -106,6 +106,7 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         reading = headroom.read(store.redis, hive["id"], now)
         hive["cap"] = hive["max_agents"]
         hive["max_agents"] = ceiling.ceiling(hive["cap"], reading)
+        hive["unread"] = hive["cap"] is None and ceiling.computed(reading) is None
         found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)

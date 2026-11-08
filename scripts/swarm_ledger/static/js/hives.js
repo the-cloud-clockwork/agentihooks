@@ -38,7 +38,13 @@ function moveButton(hive) {
 function ceilingCell(hive) {
   const capped = hive.cap != null;
   return h("span", { title: capped ? `capped at ${hive.cap}` : "computed from the hive's own memory, swap and load" },
-    text(hive, "max_agents", String(hive.max_agents), true), label(capped ? "cap" : "auto", capped ? "pending" : "auto"));
+    ceilingBox(hive), label(capped ? "cap" : "auto", capped ? "pending" : "auto"));
+}
+
+function ceilingBox(hive) {
+  const box = text(hive, "max_agents", hive.unread ? "" : String(hive.max_agents), true);
+  if (hive.unread) box.placeholder = "unknown";
+  return box;
 }
 
 function hiveRow(hive) {

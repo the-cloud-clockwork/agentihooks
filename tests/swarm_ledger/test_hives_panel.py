@@ -256,3 +256,19 @@ def test_clearing_max_agents_writes_auto(hives_page: Any) -> None:
     box.press("Enter")
     wait_for(page, lambda: page.patches)
     assert page.patches == [("pod", {"max_agents": "auto"}, None, "__LEDGER_SLUG__")]
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling(browser: Any) -> None:
+    page = HivesPage(browser, status(), 1920)
+    page.hives = [listed for listed in page.hives if listed["id"] != "lab"]
+    page.hives.append(hive("lab", True, ui="no", max_agents=0, cap=None, unread=True, agents=0))
+    page.tab.reload()
+    try:
+        page.tab.locator("#swarm-hives tr#hive-lab").wait_for(timeout=3000)
+        box = page.tab.locator('#hive-lab [data-hive-field="max_agents"]')
+        assert (box.input_value(), box.get_attribute("placeholder")) == ("", "unknown")
+        assert page.table("swarm-hives")[2][5].lower() == "auto"
+        assert page.errors == []
+    finally:
+        page.context.close()

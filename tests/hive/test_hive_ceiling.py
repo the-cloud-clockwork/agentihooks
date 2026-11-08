@@ -119,5 +119,9 @@ def test_placement_reads_the_computed_ceiling_and_keeps_the_cap(redis: Any, monk
     found = {hive["id"]: hive for hive in launch.loaded_hives(store)}
     assert (found["free"]["max_agents"], found["free"]["cap"]) == (15, None)
     assert (found["capped"]["max_agents"], found["capped"]["cap"]) == (4, 4)
+    assert (found["free"]["unread"], found["capped"]["unread"]) == (False, False)
+    registry.update(redis, "dark", ["ui=no"])
+    dark = {hive["id"]: hive for hive in launch.loaded_hives(store)}["dark"]
+    assert (dark["max_agents"], dark["unread"]) == (0, True)
     redis.set(headroom.key("free"), json.dumps(reading(available_mb=2 * per, measured_at=10)))
     assert {hive["id"]: hive for hive in launch.loaded_hives(store)}["free"]["max_agents"] == 5
