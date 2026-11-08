@@ -285,7 +285,7 @@ REQUIRED_RUNNING = {"__typename": "CheckRun", "name": "Gate — Required", "stat
 OPTIONAL_FAILED = {"__typename": "CheckRun", "name": "Gate — Protected", "status": "COMPLETED", "conclusion": "FAILURE"}
 
 
-def test_a_base_without_required_checks_waits_on_no_check_and_squash_merges(world):
+def test_a_base_without_required_checks_waits_on_no_check_and_squash_merges(world: SimpleNamespace) -> None:
     world.run.merge_error = AUTO_REFUSED
     world.run.checks = [[OPTIONAL_FAILED]]
     create.create(world.tools, create.Options(timeout_s=60))
@@ -294,7 +294,9 @@ def test_a_base_without_required_checks_waits_on_no_check_and_squash_merges(worl
     assert f"hive create {NAME}: merge: merged {PR}" in world.lines
 
 
-def test_a_queued_base_enqueues_once_the_required_checks_pass_despite_a_failed_optional_check(world):
+def test_a_queued_base_enqueues_once_the_required_checks_pass_despite_a_failed_optional_check(
+    world: SimpleNamespace,
+) -> None:
     world.run.queued = True
     world.run.required = ["Gate — Required"]
     world.run.checks = [[REQUIRED_RUNNING, OPTIONAL_FAILED], [REQUIRED_PASSED, OPTIONAL_FAILED]]
@@ -305,7 +307,7 @@ def test_a_queued_base_enqueues_once_the_required_checks_pass_despite_a_failed_o
     assert f"hive create {NAME}: merge: merged {PR}" in world.lines
 
 
-def test_a_pull_request_already_in_the_queue_is_not_enqueued_again(world):
+def test_a_pull_request_already_in_the_queue_is_not_enqueued_again(world: SimpleNamespace) -> None:
     world.run.queued = True
     world.run.entry = {"id": "MQE_1"}
     with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} to merge; rerun hive create"):
@@ -314,7 +316,7 @@ def test_a_pull_request_already_in_the_queue_is_not_enqueued_again(world):
     assert ENQUEUE not in world.run.calls
 
 
-def test_a_rerun_after_a_checks_timeout_resumes_the_same_member_and_pull_request(world):
+def test_a_rerun_after_a_checks_timeout_resumes_the_same_member_and_pull_request(world: SimpleNamespace) -> None:
     world.run.queued = True
     world.run.required = ["Gate — Required"]
     world.run.checks = [[REQUIRED_RUNNING, OPTIONAL_FAILED]]

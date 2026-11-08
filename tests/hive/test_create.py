@@ -110,7 +110,7 @@ class Run:
             self.posted = getattr(self, "posted", []) + [(argv[3], json.loads(stdin))]
         return "sha"
 
-    def _rules(self, argv):
+    def _rules(self, argv: list[str]) -> str:
         if argv[1] != "graphql":
             return json.dumps(
                 getattr(self, "queued", False) if "merge_queue" in argv[-1] else getattr(self, "required", [])
