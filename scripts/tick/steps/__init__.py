@@ -153,6 +153,7 @@ MODULES = (
     "scripts.tick.steps.report",
     "scripts.tick.steps.tasks",
     "scripts.tick.steps.territory",
+    "scripts.tick.steps.workflows",
 )
 
 for _module in MODULES:
