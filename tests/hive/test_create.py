@@ -87,17 +87,8 @@ class Run:
         if argv[:2] == ["api", f"repos/{REPO}/git/trees/dev?recursive=1"]:
             assert argv[2:] == ["--jq", create_github.TREE]
             return "\n".join(getattr(self, "tree", []))
-        if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"] and "merge_queue" in argv[-1]:
-            return json.dumps(getattr(self, "queued", False))
-        if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
-            return json.dumps(getattr(self, "required", []))
-        if argv[:2] == ["api", "graphql"] and argv[3].startswith("query=mutation"):
-            self.state = "MERGED"
-            self.on_merge()
-            return "{}"
-        if argv[:2] == ["api", "graphql"]:
-            entry = getattr(self, "entry", None)
-            return json.dumps({"id": "PR_node", "headRefOid": "headsha", "mergeQueueEntry": entry})
+        if argv[:2] in (["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"], ["api", "graphql"]):
+            return self._rules(argv)
         if argv[:2] == ["pr", "list"] and "open" in argv:
             return "\n".join(getattr(self, "open_heads", []))
         if argv[:2] == ["pr", "list"]:
@@ -118,6 +109,17 @@ class Run:
         if argv[:3] == ["api", "-X", "POST"]:
             self.posted = getattr(self, "posted", []) + [(argv[3], json.loads(stdin))]
         return "sha"
+
+    def _rules(self, argv):
+        if argv[1] != "graphql":
+            return json.dumps(
+                getattr(self, "queued", False) if "merge_queue" in argv[-1] else getattr(self, "required", [])
+            )
+        if argv[3].startswith("query=mutation"):
+            self.state = "MERGED"
+            self.on_merge()
+            return "{}"
+        return json.dumps({"id": "PR_node", "headRefOid": "headsha", "mergeQueueEntry": getattr(self, "entry", None)})
 
     def named(self, *prefix):
         return [argv for argv in self.calls if argv[: len(prefix)] == list(prefix)]
