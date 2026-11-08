@@ -125,3 +125,66 @@ def test_placement_reads_the_computed_ceiling_and_keeps_the_cap(redis: Any, monk
     assert (dark["max_agents"], dark["unread"]) == (0, True)
     redis.set(headroom.key("free"), json.dumps(reading(available_mb=2 * per, measured_at=10)))
     assert {hive["id"]: hive for hive in launch.loaded_hives(store)}["free"]["max_agents"] == 5
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_a_reading_without_swap_counts_none_and_a_reported_swap_counts() -> None:
+    per = host_budget.MEMORY_PER_AGENT_MB
+    older = reading(available_mb=5 * per)
+    del older["swap_used_mb"], older["swap_total_mb"]
+    assert ceiling.ceiling(None, older) == 3 + 5
+    assert ceiling.ceiling(None, reading(available_mb=5 * per, swap_used_mb=per, swap_total_mb=40 * per)) == 3 + 4
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_shown_is_none_only_without_a_cap_and_a_reading() -> None:
+    per = host_budget.MEMORY_PER_AGENT_MB
+    assert ceiling.shown(None, None) is None
+    assert ceiling.shown(4, None) == 4
+    assert ceiling.shown(None, reading(available_mb=6 * per)) == 9
+    assert ceiling.shown(4, reading(available_mb=6 * per)) == 4
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_auto_removes_the_stored_cap(redis: Any) -> None:
+    registry.update(redis, "box", ["max-agents=6"])
+    registry.update(redis, "box", ["max-agents=auto"])
+    assert "max_agents" not in (registry._stored(redis, "box") or {})  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_the_hive_list_shows_the_ceiling_and_how_it_is_set(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import cli
+
+    per = host_budget.MEMORY_PER_AGENT_MB
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 20)
+    for hive_id, pairs in (("a", ["ui=no"]), ("b", ["ui=no", "max-agents=3"]), ("c", ["ui=no", "max-agents=30"])):
+        registry.update(redis, hive_id, pairs)
+        redis.set(headroom.key(hive_id), json.dumps(reading(available_mb=7 * per, measured_at=10)))
+    registry.update(redis, "d", ["ui=no"])
+    assert cli.main(["list"]) == 0
+    columns = {line.split("\t")[0]: line.split("\t")[3] for line in capsys.readouterr().out.splitlines()}
+    assert columns == {
+        "a": "max-agents=10 (auto)",
+        "b": "max-agents=3 (cap 3)",
+        "c": "max-agents=10 (cap 30)",
+        "d": "max-agents=unknown (auto)",
+    }
+
+
+@pytest.mark.feature("hive-agent-ceiling")
+def test_the_root_probe_ceiling_follows_the_cap_the_reading_or_the_local_limit(redis: Any) -> None:
+    from scripts.swarm import probe
+
+    per = host_budget.MEMORY_PER_AGENT_MB
+    registry.update(redis, probe.ROOT, ["ui=yes"])
+    assert probe.root_ceiling(redis, 20, 15) == 15
+    redis.set(headroom.key(probe.ROOT), json.dumps(reading(available_mb=6 * per, measured_at=10)))
+    assert probe.root_ceiling(redis, 20, 15) == 9
+    registry.update(redis, probe.ROOT, ["max-agents=4"])
+    assert probe.root_ceiling(redis, 20, 15) == 4
+    redis.delete(headroom.key(probe.ROOT))
+    assert probe.root_ceiling(redis, 20, 15) == 4

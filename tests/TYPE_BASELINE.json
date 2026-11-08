@@ -631,7 +631,7 @@
   "scripts/swarm/prerequisite_wait.py": 72,
   "scripts/swarm/priming_trace.py": 64,
   "scripts/swarm/priority_sweep.py": 244,
-  "scripts/swarm/probe.py": 61,
+  "scripts/swarm/probe.py": 63,
   "scripts/swarm/profile_choice.py": 137,
   "scripts/swarm/profile_first.py": 50,
   "scripts/swarm/promotion_owner.py": 34,

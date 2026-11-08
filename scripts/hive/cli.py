@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator, Mapping, MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, bundle_origin, registry, server
@@ -369,8 +369,18 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ceiling_columns(record: Any, reading: Any) -> tuple[str, str]:
+    """The hive list's max agents column, the ceiling and how it is set, and its headroom column."""
+    from scripts.hive import ceiling, headroom
+
+    cap = record["max_agents"]
+    top = ceiling.shown(cap, reading)
+    marked = registry.AUTO if cap is None else f"cap {cap}"
+    return f"{'unknown' if top is None else top} ({marked})", headroom.summary(reading)
+
+
 def _list() -> None:
-    from scripts.hive import ceiling, headroom, join_report
+    from scripts.hive import headroom, join_report
 
     now = now_ms()
     redis = redis_client()
@@ -380,16 +390,9 @@ def _list() -> None:
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
-        reading = cast("dict[str, Any] | None", headroom.read(redis, record["id"], now))
-        room = headroom.summary(reading)
+        top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
-        stored = cast("int | None", record["max_agents"])
-        unread = stored is None and ceiling.computed(reading) is None
-        top = "unknown" if unread else ceiling.ceiling(stored, reading)
-        cap = registry.AUTO if stored is None else f"cap {stored}"
-        print(
-            f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top} ({cap})\texcluded={excluded}\t{room}"
-        )
+        print(f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top}\texcluded={excluded}\t{room}")
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
         for name in local.pop(record["id"], []):
