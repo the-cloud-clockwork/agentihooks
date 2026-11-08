@@ -160,7 +160,7 @@ def test_a_restarted_worker_adopts_the_charted_agent_cap(redis: object) -> None:
     assert registry.update(redis, "box", start, keep=True)["max_agents"] == 9
     restarted = registry.update(redis, "box", ["max-agents=12"])
     assert restarted == {**DEFAULT, "ephemeral": "yes", "excluded": ["qa"], "max_agents": 12}
-    assert _record(redis, "box")["max_agents"] == 12
+    assert _record(redis, "box") == restarted
 
 
 def test_a_declared_name_lands_on_a_new_record_and_survives_reregistration(redis):
