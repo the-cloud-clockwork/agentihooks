@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁspawn:59b128766db64c07006377e90f26c2a2e2e9bbc6bd6bc31d41c823916073bf71": {
+    "reader": "Standards reviewer /root/standards_reader",
+    "reason": "At this spawn call site environ is dict(os.environ), and live_binding.complete and profile_choice.transfer do not mutate the environment before profile selection. Passing None instead makes classifier definitions._environment read os.environ with identical values. Custom mappings supplied directly to _profile_decision remain covered by a regression test. Ruled equivalent against CI run 42431172528 at e65939951."
+  }
+}

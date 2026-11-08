@@ -24,7 +24,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "swarm.labels" . | nindent 8 }}
+        {{- include "swarm.podLabels" . | nindent 8 }}
         app.kubernetes.io/component: hive-home-folders
     spec:
       automountServiceAccountToken: false

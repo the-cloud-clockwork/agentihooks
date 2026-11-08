@@ -78,7 +78,8 @@ def test_autoscale_shows_fifteen_local_slots_on_the_workstation(
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     registry.update(store.redis, "workstation", ["ui=yes"])
     monkeypatch.setattr(capacity, "fixture_inputs", lambda data: data)
-    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs: (None, dict(DECISION)))
+    monkeypatch.setattr(capacity, "tick_host", lambda inputs: None)
+    monkeypatch.setattr(capacity, "autoscaled", lambda config, inputs, host: (None, dict(DECISION)))
     fixture = tmp_path / "inputs.json"
     fixture.write_text("{}")
     cli.cmd_autoscale(store, argparse.Namespace(slug="workstation", fixture=str(fixture), json=json_output))

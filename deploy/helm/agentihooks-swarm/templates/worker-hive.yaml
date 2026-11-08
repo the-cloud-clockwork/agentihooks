@@ -96,7 +96,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "swarm.labels" $root | nindent 8 }}
+        {{- include "swarm.podLabels" $root | nindent 8 }}
         app.kubernetes.io/component: worker-hive{{ $suffix }}
       annotations:
         checksum/worktrees: {{ toJson $worktrees | sha256sum }}
@@ -314,7 +314,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "swarm.labels" $root | nindent 8 }}
+        {{- include "swarm.podLabels" $root | nindent 8 }}
         app.kubernetes.io/component: worker-hive-storage{{ $suffix }}
     spec:
       automountServiceAccountToken: false
