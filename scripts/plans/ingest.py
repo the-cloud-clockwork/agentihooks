@@ -122,7 +122,7 @@ def swarm_state(slug: str, connect: Callable[[], Any]) -> str:
         return "absent"
 
 
-def report(doc: Mapping[str, list[dict[str, Any]]], plan: str, state: str, **extra: object) -> dict[str, Any]:
+def report(doc: Mapping[str, list[dict[str, Any]]], plan: str, state: str) -> dict[str, Any]:
     """The command's JSON: the plan, its phases, each phase's lifecycle and the swarm state."""
     from scripts.swarm import phase_state
 
@@ -133,7 +133,6 @@ def report(doc: Mapping[str, list[dict[str, Any]]], plan: str, state: str, **ext
         "phases": [phase["id"] for phase in linked],
         "lifecycle": {phase["id"]: legacy.lifecycle(phase, doc) for phase in linked},
         "swarm": state,
-        **extra,
     }
 
 
@@ -189,7 +188,7 @@ def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, Any]:
         raise IngestError(str(exc)) from None
     plan_id = plan_of(plan.markdown)
     if any(row["id"] == plan_id for row in doc["plans"]):
-        return report(doc, plan_id, swarm_state(slug, swarm.connect), ingested=False, note="already ingested")
+        return {**report(doc, plan_id, swarm_state(slug, swarm.connect)), "ingested": False, "note": "already ingested"}
     phases = entries(plan, [p["id"] for p in doc["phases"]], args.planning)
     placeholder = Links(plan_id, {}, "https://ledger.invalid/plan", "https://ledger.invalid/plan")
     ops = batch(plan, phases, placeholder, by.name)
@@ -216,7 +215,12 @@ def ingest(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, Any]:
     }
     if not by.name.startswith(MASTER):
         notify(slug, plan, by.name, len(phases))
-    return report(after, plan_id, swarm_state(slug, swarm.connect), ingested=True, plan_url=url, published_to=where)
+    return {
+        **report(after, plan_id, swarm_state(slug, swarm.connect)),
+        "ingested": True,
+        "plan_url": url,
+        "published_to": where,
+    }
 
 
 def publish(

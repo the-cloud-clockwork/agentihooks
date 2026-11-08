@@ -28,6 +28,7 @@ SEAT = {"AGENTIHOOKS_SWARM": "plan-proof", "AGENTIHOOKS_AGENT_NAME": "planner"}
 
 class NoSwarm:
     def config(self, slug: str) -> Any:
+        assert slug == "plan-proof"
         raise SwarmError(f"no swarm {slug}")
 
 
@@ -41,7 +42,13 @@ def served(plan_ledger: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return {**state, "applied": [op["id"] for op in ops or [] if op["id"] not in rejected], "rejected": rejected}
 
     monkeypatch.setattr(ledger, "call", call)
-    monkeypatch.setattr(ledger, "resource", lambda slug, key, collection=True: core.sync(slug)[0].get(key, []))
+
+    def resource(slug: str, key: str, *, collection: bool) -> Any:
+        assert slug == plan_ledger
+        assert collection is True
+        return core.sync(slug)[0].get(key, [])
+
+    monkeypatch.setattr(ledger, "resource", resource)
     monkeypatch.setattr(
         ledger,
         "upload_artifact",
@@ -260,6 +267,15 @@ def test_parser_contract(capsys: pytest.CaptureFixture[str]) -> None:
     assert vars(
         parser.parse_args(["plan.json", "--ledger", "proof", "--planning", "manual", "--dry-run", "--repo", "org/repo"])
     ) == {"path": "plan.json", "ledger": "proof", "planning": "manual", "dry_run": True, "repo": "org/repo"}
+    assert parser.parse_args(["plan.md", "--ledger", "proof", "--planning", "auto"]).planning == "auto"
+    assert {action.dest: action.help for action in parser._actions} == {
+        "help": "show this help message and exit",
+        "path": "plan file, or - for standard input",
+        "ledger": "target ledger slug",
+        "planning": "planning for every phase",
+        "dry_run": "print what would be written and write nothing",
+        "repo": "OWNER/NAME for the plan issue; default the current repo",
+    }
     help_text = parser.format_help()
     for text in [
         "plan file, or - for standard input",
@@ -315,14 +331,17 @@ def test_batch_accepts_exactly_one_hundred_operations() -> None:
 
 @pytest.mark.parametrize("seat", [True, False])
 @pytest.mark.parametrize("path", ["-", "input.txt"])
-@pytest.mark.parametrize("task", ["", "task-one"])
+@pytest.mark.parametrize("task", ["absent", "", "task-one"])
 def test_publish_upload_and_issue_boundary(
     seat: bool, path: str, task: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plan = normalize(MARKED, "plan.md")
     phases = ingest.entries(plan, [])
-    args = SimpleNamespace(ledger="proof", path=path, repo="org/repo")
+    args = ingest.argparse.Namespace(ledger="proof", path=path, repo="org/repo")
     env = {"AGENTIHOOKS_SWARM_TASK": task, "AGENTIHOOKS_TARGET": "codex", "CLAUDE_SESSION_ID": "session-one"}
+    if task == "absent":
+        env.pop("AGENTIHOOKS_SWARM_TASK")
+        task = ""
     by = ingest.Author("planner" if seat else "operator", seat)
     stored = {"id": "file-one.md"}
     expected_name = "stdin.md" if path == "-" else "input.md"
@@ -377,7 +396,7 @@ def test_publish_refusal_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(ledger_publish, "publish", publish)
     plan = normalize(MARKED, "plan.md")
-    args = SimpleNamespace(ledger="proof", path="-", repo="")
+    args = ingest.argparse.Namespace(ledger="proof", path="-", repo="")
     with pytest.raises(ingest.IngestError) as raised:
         ingest.publish(args, {}, plan, ingest.entries(plan, []), ingest.Author("planner", True), "plan-one")
     assert str(raised.value) == "issue publication refused"
@@ -387,7 +406,7 @@ def test_publish_refusal_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_ingest_dry_run_preserves_normalization_and_batch_inputs(path: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import store
 
-    args = SimpleNamespace(ledger="plan-proof", path=path, planning="manual", dry_run=True)
+    args = ingest.argparse.Namespace(ledger="plan-proof", path=path, planning="manual", dry_run=True)
     env = dict(SEAT)
     original = normalize(MARKED, "plan.md")
     phases = [{"phase": "new"}]
@@ -568,3 +587,25 @@ def test_command_stdout_is_one_json_report_when_notification_prints(
     output = capsys.readouterr()
     assert json.loads(output.out)["ingested"] is True
     assert json.loads(output.err) == {"id": "message-one", "state": "pending"}
+
+
+def test_remote_unbound_command_is_refused_before_reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    env: dict[str, str] = {}
+
+    def remote(environ: dict[str, str], *, slug: str) -> bool:
+        assert environ is env
+        assert slug == "remote-proof"
+        return True
+
+    def resource(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("an unbound remote ingest read the ledger")
+
+    monkeypatch.setattr(ledger_link, "remote", remote)
+    monkeypatch.setattr(ledger, "resource", resource)
+    args = ingest.parser().parse_args(["plan.md", "--ledger", "remote-proof"])
+    with pytest.raises(ingest.IngestError) as raised:
+        ingest.ingest(args, env)
+    assert (
+        str(raised.value)
+        == "an unbound session cannot ingest into a remote ledger; the operator credential stays on its host"
+    )
