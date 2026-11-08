@@ -389,6 +389,7 @@ def test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass(loc
     assert json.loads(capsys.readouterr().err)["outcome"] == "replaced a dead holder"
 
 
+@pytest.mark.feature("swarm-tick-lock")
 def test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process(monkeypatch):
     pid = controller.os.getpid()
     asked = []
@@ -400,3 +401,5 @@ def test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process(
     assert asked == [(pid, "21")]
     own = json.dumps({"epoch": 1, "token": "t", "host": "h", "pid": pid, "start": "22"})
     assert controller._dead(own) is True
+    other = json.dumps({"epoch": 1, "token": "t", "host": "h", "pid": pid + 1, "start": "22"})
+    assert controller._dead(other) is False
