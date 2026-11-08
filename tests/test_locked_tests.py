@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -177,6 +178,32 @@ def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert " is skipped, xfailed or returns early.\n" in out
+
+
+def test_the_skipper_scan_grows_linearly_with_the_functions_in_a_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    count = 300
+    calls: list[int] = []
+    disables = locked_tests._disables
+
+    def counted(nodes: list[ast.AST], skippers: set[str]) -> bool:
+        calls.append(1)
+        return disables(nodes, skippers)
+
+    monkeypatch.setattr(locked_tests, "_disables", counted)
+    chain = (
+        "import pytest\n\n\n"
+        "def first():\n    pytest.skip('x')\n\n\n"
+        "def second():\n    first()\n\n\n"
+        "def third():\n    second()\n\n\n"
+        "def test_chained():\n    third()\n    assert True\n"
+    )
+    plain = "".join(f"\n\ndef test_plain_{index}():\n    assert {index} >= 0\n" for index in range(count))
+    measured = _measured(tmp_path, chain + plain)
+    assert measured["test_chained"]["disabled"] is True
+    assert measured["test_plain_0"]["disabled"] is False
+    assert len(calls) < 10 * count
 
 
 def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):

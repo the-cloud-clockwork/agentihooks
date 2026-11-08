@@ -185,11 +185,14 @@ def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
             for alias in node.names
             if alias.name in DISABLING
         }
-        while grown := {
-            function.name
-            for key, function, _ in functions
-            if function.name not in skippers and _disables(bodies[key], skippers)
-        }:
+        while True:
+            grown: set[str] = {
+                function.name
+                for key, function, _ in functions
+                if function.name not in skippers and _disables(bodies[key], skippers)
+            }
+            if not grown:
+                break
             skippers |= grown
         for key, function, context in functions:
             test = function.name.startswith("test")
