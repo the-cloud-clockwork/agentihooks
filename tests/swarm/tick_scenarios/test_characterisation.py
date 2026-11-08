@@ -41,8 +41,9 @@ SCENARIOS = (
     "dependency",
     "interval",
     "interval-slow",
+    "hive-roll",
 )
-PASSES = {"second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
+PASSES = {"hive-roll": (2, 60_000), "second-pass": (2, 1000), "interval": (2, 60_000), "interval-slow": (3, 60_000)}
 CADENCES = {"interval-slow": "3"}
 LEDGER_WRITES = ("update_task", "notify", "mark_swarm", "rank_task", "comment", "join", "notice")
 RUNTIME_WRITES = ("spawn", "retire", "reap_name", "nudge", "name_pane", "close_space", "close_pane")
@@ -113,9 +114,37 @@ def step_rows(appended: Mock) -> list[dict[str, list[Any]]]:
     return list(passes.values())
 
 
+def prepare_hive_roll(store: RedisStore, ledger: FakeLedger) -> None:
+    from scripts.hive import reports
+
+    for index in range(10):
+        task_id = f"rolled-{index}"
+        agent = store.start_execution(
+            "sw",
+            AgentRecord(
+                store.next_name("sw", "eng"),
+                "eng",
+                task_id,
+                seat=f"eng-{index + 1}@sw",
+                hive="rolled-hive",
+                started_at=BASE_MS - tick_module.STARTUP_GRACE_MS - 1,
+            ),
+        )
+        ledger.rows[task_id] = {
+            "id": task_id,
+            "state": "claimed",
+            "claimed_by": agent.name,
+            "lane": "eng",
+            "out_of_scope": False,
+        }
+    store.redis.set(reports.key("rolled-hive"), json.dumps({"names": [], "started_at": BASE_MS - 1}))
+
+
 def prepare(scenario: str, store: RedisStore, ledger: FakeLedger, runtime: FakeRuntime) -> None:
     if scenario in {"paused", "stopping", "stopped", "drained"}:
         store.update("sw", state=scenario)
+    if scenario == "hive-roll":
+        prepare_hive_roll(store, ledger)
     if scenario == "failed-spawn":
         runtime.fail = True
     if scenario == "full-capacity":
