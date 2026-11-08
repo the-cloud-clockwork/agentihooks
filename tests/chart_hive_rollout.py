@@ -1,4 +1,7 @@
+import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -6,12 +9,12 @@ import yaml
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
 
-def render(*settings):
+def render(*settings: str, chart: Path = CHART) -> list[dict]:
     command = [
         "helm",
         "template",
         "proof",
-        str(CHART),
+        str(chart),
         "--namespace",
         "hive",
         "--set",
@@ -120,6 +123,36 @@ def test_the_release_stamp_annotates_only_leased_hive_pods():
     assert "agentihooks.io/release" not in unleased["spec"]["template"]["metadata"]["annotations"]
 
 
+def test_a_chart_version_bump_leaves_hive_pod_templates_unchanged() -> None:
+    with tempfile.TemporaryDirectory() as folder:
+        bumped = Path(folder) / CHART.name
+        shutil.copytree(CHART, bumped)
+        manifest = bumped / "Chart.yaml"
+        manifest.write_text(re.sub(r"(?m)^version: .*$", "version: 9.9.9", manifest.read_text()))
+        before = {d["metadata"]["name"]: d["spec"]["template"] for d in render() if d["kind"] == "Deployment"}
+        after = {
+            d["metadata"]["name"]: d["spec"]["template"] for d in render(chart=bumped) if d["kind"] == "Deployment"
+        }
+    assert before
+    assert before == after
+
+
+def test_no_swarm_pod_template_carries_the_chart_version() -> None:
+    rendered = subprocess.run(
+        ["helm", "template", "proof", str(CHART), "-f", str(CHART / "examples/hub.yaml")],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    documents = [d for d in yaml.safe_load_all(rendered) if d] + render("workers.node=node-one", "hiveStorage.default.homes=/homes")
+    owned = [d for d in documents if d["metadata"].get("labels", {}).get("app.kubernetes.io/name") == CHART.name]
+    workloads = [d for d in owned if "template" in d.get("spec", {})]
+    assert {d["kind"] for d in workloads} >= {"Deployment", "StatefulSet", "Job"}
+    for workload in workloads:
+        assert workload["metadata"]["labels"]["helm.sh/chart"].startswith(f"{CHART.name}-")
+        assert "helm.sh/chart" not in workload["spec"]["template"]["metadata"]["labels"], workload["metadata"]["name"]
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -127,4 +160,6 @@ if __name__ == "__main__":
     test_disabled_rollouts_do_not_require_a_new_worker_image()
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
+    test_a_chart_version_bump_leaves_hive_pod_templates_unchanged()
+    test_no_swarm_pod_template_carries_the_chart_version()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
