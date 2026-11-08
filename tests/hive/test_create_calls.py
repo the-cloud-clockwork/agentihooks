@@ -312,6 +312,7 @@ def test_a_pull_request_already_in_the_queue_is_not_enqueued_again(world: Simple
     world.run.entry = {"id": "MQE_1"}
     with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} to merge; rerun hive create"):
         create.create(world.tools, create.Options(timeout_s=0))
+    assert ROLLUP not in world.run.calls
     assert QUEUE_READ in world.run.calls
     assert ENQUEUE not in world.run.calls
 
