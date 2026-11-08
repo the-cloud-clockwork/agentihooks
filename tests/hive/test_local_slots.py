@@ -122,15 +122,14 @@ def test_each_loaded_hive_names_its_admission_limit_and_live_hives_drop_stale_on
     from tests.hive.test_controller_launch import write_hive
 
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
-    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session("engineer@bbbbbb-0001", "codex")])
     write_hive(setup, id="workstation", ui="yes", max_agents=1)
-    local_slots.claim(setup.store, "workstation", setup.config.slug, "other", "pending", 1)
     write_hive(setup, id="stale", heartbeat_at=lease.now_ms(setup.store) - 2 * registry.LIVE_MS)
     hives = {row["id"]: row for row in launch.loaded_hives(setup.store)}
     assert hives["remote"]["limit"] == (
         "ram: 22550 of 100000 MB available, 850 MB per agent, fits 3 more under the 80 percent line"
     )
-    assert hives["workstation"]["limit"] == hives["workstation"]["refusal"] != ""
+    assert hives["workstation"]["limit"] == "max agents: 1 of 1 agents on the hive, fits 0 more"
     assert sorted(row["id"] for row in launch.live_hives(setup.store)) == ["remote", "workstation"]
 
 

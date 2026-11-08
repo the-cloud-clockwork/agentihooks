@@ -1617,7 +1617,7 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
-    scaled: dict[str, Any] = decision or {}
+    scaled = cast(dict[str, Any], decision)
     host: dict[str, Any] = scaled["host"]
     hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
     others: dict[str, int | None] = {
