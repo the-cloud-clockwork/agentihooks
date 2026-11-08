@@ -37,3 +37,27 @@ rules:
           except OSError as $EXC:
               ...
               _read_long_or_hold_stored(...)
+  - id: offline-write-queued-without-send
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A ledger write in a pass that runs from its last good view is queued in the outbox without being sent, so a
+      server that is only slow while it serves a full export to another client never takes a controller write.
+      Queue without sending only when SLOW is unset, and queue after a send only when that send went unanswered.
+    paths:
+      include:
+        - /scripts/swarm/ledger_client.py
+        - export-read-with-write-timeout.py
+    patterns:
+      - pattern-inside: |
+          def _call(...):
+              ...
+      - pattern-either:
+          - pattern: $LEDGER.queue(...)
+          - pattern: _offline_write(...)
+      - pattern-not-inside: |
+          if <... SLOW.get() ...>:
+              ...
+      - pattern-not-inside: |
+          if <... unreachable ...>:
+              ...

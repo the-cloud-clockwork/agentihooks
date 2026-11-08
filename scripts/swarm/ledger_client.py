@@ -42,6 +42,7 @@ UNREACHABLE = (
 
 
 OFFLINE: ContextVar[bool] = ContextVar("tick_ledger_offline", default=False)
+SLOW: ContextVar[bool] = ContextVar("tick_ledger_slow", default=False)
 OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
 SNAPSHOT_TIMEOUT_S = 3.0
 EXPORT_TIMEOUT_S = 30.0
@@ -80,6 +81,12 @@ def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]
     from scripts.tick import view
 
     return {**view.queued(ops), **answer}
+
+
+def _offline_write(ledger: Any, slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """``ops`` queued in the outbox while the pass runs from its last good view, refused as the server would refuse
+    them against that view."""
+    return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
 
 
 def _accepted(slug, state):
@@ -121,14 +128,16 @@ class LedgerClient:
         if held_offline and not ops:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
-            if held_offline and ops:
-                return _queued(ops, cast(Any, ledger).queue(slug, _guarded(slug, ops), service))
+            if held_offline and ops and not SLOW.get():
+                return _offline_write(ledger, slug, ops, service)
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
             refused = str(exc).startswith("server refused: 4")
             unreachable = str(exc).startswith(UNREACHABLE)
+            if unreachable and held_offline and ops:
+                return _offline_write(ledger, slug, ops, service)
             error = LedgerRefused if refused else LedgerUnreachable if unreachable else SwarmError
             raise error(f"ledger {slug}: {exc}") from exc
         if state.get("rejected"):
