@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-drain-launch-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
+      "behaviour": "A cached launch rechecks hive eligibility after a removal or drain starts, including the pod preStop drain, and orders another eligible hive or waits without reserving the draining hive.",
+      "seam": "HiveLaunch.spawn after a cached selection",
+      "tests": [
+        "tests/hive/test_draining_placement.py::test_a_cached_launch_skips_a_hive_that_started_draining_or_was_removed"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
