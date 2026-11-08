@@ -3,8 +3,6 @@ from typing import Any
 
 import pytest
 
-import pytest
-
 from scripts import terminate_agent
 from scripts.swarm import local_slots
 from scripts.swarm.store import AgentRecord, SwarmConfig
