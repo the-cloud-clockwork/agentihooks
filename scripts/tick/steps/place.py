@@ -7,7 +7,7 @@ import os
 from collections.abc import Callable, Collection, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
 from importlib import import_module
@@ -19,8 +19,10 @@ from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
+from scripts.tick.adapters.calls import LedgerCalls
+from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import AGENTS, SWARM, TASKS, CallStep, budgets, pass_domains
+from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
 from scripts.tick.steps.tasks import RANK, WriteStep, held, placing, rank_writes
 
 transfers: Any = import_module("scripts.handoff.transfers")
@@ -57,6 +59,7 @@ PLACED = frozenset({AGENTS, TASKS})
 
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
+PASS_DEADLINE: ContextVar[Deadline | None] = ContextVar("spawn_pass_deadline", default=None)
 OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
 
 
@@ -114,14 +117,24 @@ def _spawn_step(tick: Any, get: Get) -> Any:
         and tick.readiness.tick_places(config.engine, get("rows"))
         and tick.panic.state(store) is None
     ):
-        rows = dict(get("rows"))
-        args = tuple(rows if key == "rows" else get(key) for key in _SPAWN_KEYS)
-        with tick._placement_pass(get("runtime")):
-            found = tick.skip_refused(tick._spawn, *args)
+        rows, deadline = dict(get("rows")), get(DEADLINE)
+        bound = {"rows": rows, "ledger": LedgerCalls(get("tools").ledger, _recording(tick, deadline))}
+        args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
+        token = PASS_DEADLINE.set(deadline)
+        try:
+            with tick._placement_pass(get("runtime")):
+                found = tick.skip_refused(tick._spawn, *args)
+        finally:
+            PASS_DEADLINE.reset(token)
         get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
         return found
     return []
+
+
+def _recording(tick: Any, deadline: Deadline) -> Deadline:
+    """Return ``deadline`` extended by the launch budget, so a task prepared before it is still recorded on the ledger."""
+    return Deadline(deadline.expires_at + tick.SPAWN_BUDGET_S, deadline.clock)
 
 
 @dataclass(frozen=True)
@@ -401,6 +414,13 @@ def _placement_pass(runtime: Any) -> Generator[None]:
             end()
 
 
+def _past_deadline(deadline: Deadline | None, left: int, total: int) -> list[str]:
+    """Name the ready tasks left for the next pass once ``deadline`` has expired, else nothing."""
+    if deadline is None or not deadline.expired:
+        return []
+    return [f"spawn stopped at the pass deadline, {left} of {total} ready tasks left for the next pass"]
+
+
 def _spawn(
     slug: str,
     config: SwarmConfig,
@@ -411,19 +431,27 @@ def _spawn(
     doc: dict[str, Any],
     now_ms: int,
 ) -> list[str]:
+    deadline = PASS_DEADLINE.get()
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = timing.timed(tick._held_for_master, slug, store, now_ms)
     order, actions = timing.timed(tick._spawn_order, slug, config, store, agents, rows, doc, runtime)
+    if stop := _past_deadline(deadline, len(order), len(order)):
+        return actions + stop
     actions += timing.timed(tick._block_unresolved, slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
     run = tick._Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
     clock = tick._LaunchClock()
     batch: list[Any] = []
-    for lane, task in order:
-        stop = held or [
-            timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch)) or clock.spent(task, batch)
-        ]
+    for index, (lane, task) in enumerate(order):
+        stop = (
+            held
+            or _past_deadline(deadline, len(order) - index, len(order))
+            or [
+                timing.timed(tick._spawn_stop, slug, config, store, runtime, now_ms, len(batch))
+                or clock.spent(task, batch)
+            ]
+        )
         if any(stop):
             return actions + tick._launch_all(run, clock, batch) + stop
         at = tick.time.monotonic()
@@ -676,6 +704,9 @@ def _block_unresolved(
 ) -> list[str]:
     blocked: list[str] = []
     for _, task in order:
+        if deadline := PASS_DEADLINE.get():
+            if deadline.expired:
+                break
         if profile_first.UNRESOLVED in task:
             blocked.append(tick._unresolved(slug, ledger, rows, task["id"], task[profile_first.UNRESOLVED]))
     return blocked
