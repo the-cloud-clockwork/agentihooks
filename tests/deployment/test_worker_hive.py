@@ -141,7 +141,7 @@ RUN = [
     "init",
     "deps ensure",
     "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= prefer=",
-    "hive set --reason the chart sets the agent cap worker-member max-agents=20",
+    "hive set --reason the chart sets the agent cap worker-member max-agents=auto",
     "hive run",
 ]
 

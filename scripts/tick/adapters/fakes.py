@@ -129,6 +129,9 @@ class FakeCoordination:
             deadline,
         )
 
+    def marked(self, name: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "marked", (name,), deadline)
+
     def store_read(
         self, operation: str, args: Sequence[object], kwargs: Mapping[str, object], *, deadline: Deadline
     ) -> Any:
