@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.753 · 2026-11-08
+
+### 2026-11-08 · efceb0164343 · #10198 · @nestorcolt
+
+**Roll a release tag hive worker each time the release image moves**
+
+The release chart build now resolves the digest behind the floating `agentihooks-hive-worker:release` tag and stamps it into the packaged chart's `workers.rollout.imageDigest`, without touching source values. This gives hive worker pods running that tag a template label that changes on every release, so ArgoCD actually rolls them through the existing PreSync lease and `hive drain --wait` preStop hook instead of sitting on a stale pod until someone manually restarts it mid-task. Pinned semver or `dev` tags, and explicit rollout overrides, are unaffected, so only swarm-hive-001 and swarm-hive-003 gain automatic, graceful rollout on release moves.
+
 ## v2.17.752 · 2026-11-08
 
 ### 2026-11-08 · 91969b1713ec · #10200 · @nestorcolt
