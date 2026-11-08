@@ -40,7 +40,7 @@ class StoreInbox:
 
     def settle_exit(self, name: str, seat: str, exit_text: str, *, deadline: Deadline) -> object:
         """Settle the open items of the agent ``name`` leaving, moving them to ``seat`` when it goes on."""
-        from scripts.inbox import exits
+        from scripts.inbox.exits import settle  # pyright: ignore[reportUnknownVariableType]
 
         deadline.live()
-        return exits.settle(self.store, name, seat, exit_text)
+        return settle(self.store, name, seat, exit_text)
