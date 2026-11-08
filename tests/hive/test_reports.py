@@ -1259,6 +1259,7 @@ def test_removed_hive_retirement_requires_expired_host_evidence(
     from scripts.swarm import fencing
     from scripts.tick.steps import agents as agent_steps
 
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: NOW / 1000)
     remote.agent = replace(remote.agent, state="finished")
     remote.store.put_agent("fixture", remote.agent)
     remote.redis.srem(registry.INDEX, HIVE)
@@ -1308,10 +1309,13 @@ def test_a_hive_agent_finished_during_its_reap_stays_finished(remote, monkeypatc
 
 
 @pytest.mark.parametrize("signal", ["index", "heartbeat", "report"])
-def test_a_returning_hive_resets_the_absence_lease(remote, signal):
+def test_a_returning_hive_resets_the_absence_lease(
+    remote: SimpleNamespace, signal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import registry
     from scripts.tick.steps import agents as agent_steps
 
+    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: NOW / 1000)
     remote.agent = replace(remote.agent, state="finished")
     remote.store.put_agent("fixture", remote.agent)
     remote.redis.srem(registry.INDEX, HIVE)
