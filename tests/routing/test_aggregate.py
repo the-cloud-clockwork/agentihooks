@@ -399,3 +399,16 @@ def test_an_account_holding_a_colon_keeps_every_part_in_its_key_and_count(redis,
     assert aggregate.name("codex:tenant_x:one_y") == "codex:tenant-x:one-y"
     assert list(aggregate.read(redis, 100)) == ["codex:tenant-x:one-y"]
     assert aggregate.counts("codex", 100) == {"tenant_x:one_y": 1}
+
+
+def test_held_elsewhere_merges_dashed_and_underscore_spellings_under_the_token_slug(redis: Any) -> None:
+    from scripts.routing.reservation import LaunchSlots
+
+    for hive, counts in (("far", {"claude:one_x": 2, "codex:two_y": 1}), ("near", {"claude:one-x": 1})):
+        registry.update(redis, hive, ["max-agents=8"])
+        registry.beat(redis, hive, {"heartbeat_at": 100000})
+        redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
+    assert LaunchSlots(redis).reserve("claude:one-x", "pending", 9, 1000)
+    assert LaunchSlots(redis).reserve("codex:two-y", "starting", 9, 1000)
+    assert aggregate.elsewhere(redis, "claude", 100, "own") == {"one_x": 4}
+    assert aggregate.elsewhere(redis, "codex", 100, "own") == {"two_y": 2}
