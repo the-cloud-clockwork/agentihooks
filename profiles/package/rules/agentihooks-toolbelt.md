@@ -51,6 +51,9 @@ for compliance.
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
 | A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
 | The operator says remember, yesterday, or names earlier work | `recall_search` (scope a ledger or swarm slug, default this swarm; `all` crosses swarms), then `recall_get <ref>`; `recall_timeline` for a time span, `recall_sources` for what is indexed (`agentihooks recall` in a shell). Recall before reading ledger files. Recall holds swarm and ledger history; fleet lessons stay in the brain |
+| Which specialist profiles exist, or which declare a capability | `agentihooks agents list [--capability <x>]`, `agents show <name>`; MCP `agent_list`, `agent_show`. The installed profiles (built-in, package roles, bundles, linked) are the catalogue: a profile's `profile.yml` `description` and `capabilities` are its card |
+| Run one specialist on an input | MCP `agent_run(profile, input, wait)`, a one-stage workflow through the runner; refused inside a worker run, so runs never nest. `wait=false` returns at once; read it with `agentihooks workflow status <run id>` |
+| Run, inspect or resume a multi-stage workflow | `agentihooks workflow list\|show <name>\|validate <file>`, `workflow run <name> --case <file>`, `workflow status\|resume <run id>` |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
