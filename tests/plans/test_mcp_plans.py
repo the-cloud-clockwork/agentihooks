@@ -43,6 +43,29 @@ def test_arguments_are_refused_before_any_ingest(
     assert plans.run(path, text, "plan-proof", planning, False) == {"success": False, "error": error}
 
 
+def test_inline_text_reaches_ingest_as_a_file_with_the_command_defaults_and_its_output_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, seat: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = []
+
+    def fake(args: Any, env: Any) -> dict[str, Any]:
+        seen.append((Path(args.path).name, Path(args.path).read_bytes(), args.planning, args.repo))
+        print("ingest chatter")
+        return {"plan": "p", "phases": []}
+
+    monkeypatch.setattr(ingest, "ingest", fake)
+    assert plans.run("", "plan é", "plan-proof", "", True) == {
+        "success": True,
+        "plan": "p",
+        "phases": [],
+        "state": "dry run",
+    }
+    assert seen == [("inline.md", "plan é".encode(), "", "")]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "ingest chatter\n"
+
+
 def test_inline_text_dry_run_writes_nothing(served: dict[str, Any], seat: None) -> None:
     result = plans.run("", MARKED, "plan-proof", "", True)
     assert served["sent"] == []

@@ -31,7 +31,7 @@ def run(path: str, text: str, ledger: str, planning: str, dry_run: bool) -> dict
         source = path
         if text:
             source = str(Path(folder) / "inline.md")
-            Path(source).write_text(text, encoding="utf-8")
+            Path(source).write_bytes(text.encode())
         args = Namespace(path=source, ledger=ledger, planning=planning, dry_run=dry_run, repo="")
         try:
             with redirect_stdout(sys.stderr):
@@ -42,18 +42,20 @@ def run(path: str, text: str, ledger: str, planning: str, dry_run: bool) -> dict
     return {"success": True, **result, "state": state}
 
 
+def plan_ingest(ledger: str, path: str = "", text: str = "", planning: str = "", dry_run: bool = False) -> str:
+    """Put a plan into a ledger as linked phases and slices in one atomic batch; a rerun reports already ingested.
+
+    Args:
+        ledger: the target ledger slug.
+        path: a plan file: init-swarm JSON, markdown with phase markers, or any markdown.
+        text: the plan as inline text, instead of path.
+        planning: auto or manual for every phase; empty keeps each phase's own.
+        dry_run: report what would be written and write nothing.
+    """
+    return json.dumps(run(path, text, ledger, planning, dry_run))
+    return json.dumps(run(path, text, ledger, planning, dry_run))
+
+
 def register(mcp: Any) -> None:
     """Register the plan_ingest tool."""
-
-    @mcp.tool()
-    def plan_ingest(ledger: str, path: str = "", text: str = "", planning: str = "", dry_run: bool = False) -> str:
-        """Put a plan into a ledger as linked phases and slices in one atomic batch; a rerun reports already ingested.
-
-        Args:
-            ledger: the target ledger slug.
-            path: a plan file: init-swarm JSON, markdown with phase markers, or any markdown.
-            text: the plan as inline text, instead of path.
-            planning: auto or manual for every phase; empty keeps each phase's own.
-            dry_run: report what would be written and write nothing.
-        """
-        return json.dumps(run(path, text, ledger, planning, dry_run))
+    mcp.tool()(plan_ingest)
