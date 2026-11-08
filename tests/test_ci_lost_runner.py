@@ -817,3 +817,42 @@ def test_stop_keeps_its_initial_run_when_every_poll_is_skipped(
     assert ci_lost_runner.stop("o/r", 7, {}) == {}
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
     assert no_sleep == []
+
+
+def oom_cluster() -> ci_lost_runner.ClusterRunners:
+    pod = json.loads(json.dumps(CLUSTER["pods"][1]))
+    pod["status"]["containerStatuses"][0]["state"]["terminated"]["reason"] = "OOMKilled"
+    return cluster(pods=[CLUSTER["pods"][0], pod], now=datetime.now(UTC))
+
+
+def test_a_lost_runner_killed_for_memory_names_the_kill_in_its_log_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], no_sleep: list[float]
+) -> None:
+    pages = {
+        RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
+        JOBS: [lines({**CLUSTER["job"], "name": "Gate — Required", "started_at": ago(0.1)}, gate())] * 2,
+    }
+    monkeypatch.setattr(ci_lost_runner, "_api", Api(pages))
+    monkeypatch.setattr(ci_lost_runner, "cluster_runners", lambda _org: oom_cluster())
+    monkeypatch.chdir(ROOT)
+    assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--cluster"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["action"] == "rerun"
+    assert report["reason"] == (
+        "runner lost on Gate — Required; runner pod killed: Gate — Required OOMKilled exit 137; "
+        "first attempt lost its runner"
+    )
+
+
+def test_only_a_terminated_runner_container_records_a_kill() -> None:
+    assert oom_cluster().kills == {"anton-oss-light-cpwxt-runner-clfn7": "OOMKilled exit 137"}
+
+
+def test_a_terminated_runner_without_a_reason_is_named_terminated() -> None:
+    pod = json.loads(json.dumps(CLUSTER["pods"][1]))
+    del pod["status"]["containerStatuses"][0]["state"]["terminated"]["reason"]
+    assert cluster(pods=[pod]).kills == {"anton-oss-light-cpwxt-runner-clfn7": "terminated exit 137"}
+
+
+def test_a_runner_set_source_names_no_kill() -> None:
+    assert ci_lost_runner.killed([CLUSTER["job"]], RUNNERS) == ""

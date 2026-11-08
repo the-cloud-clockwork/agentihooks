@@ -47,6 +47,7 @@ class ClusterRunners:
         away = {node["metadata"]["name"]: _not_ready_for(node, now) for node in nodes}
         self.sets = sets
         self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod, away, bound)}
+        self.kills = {pod["metadata"]["name"]: kill for pod in pods if (kill := _kill(pod))}
 
     def __contains__(self, name: str) -> bool:
         return name in self.live or name.rpartition("-runner-")[0].rpartition("-")[0] not in self.sets
@@ -69,6 +70,22 @@ def _alive(pod: dict[str, Any], away: dict[str, timedelta | None], bound: timede
         return False
     down_for = away.get(node)
     return phase != "Unknown" if down_for is None else down_for < bound
+
+
+def _kill(pod: dict[str, Any]) -> str | None:
+    """Name the runner container's termination reason and exit code, or None while it has not terminated."""
+    runner = [c for c in pod["status"].get("containerStatuses", cast(list[Any], [])) if c["name"] == "runner"]
+    ended = next((c["state"]["terminated"] for c in runner if "terminated" in c["state"]), None)
+    if ended is None:
+        return None
+    return f"{ended.get('reason') or 'terminated'} exit {ended.get('exitCode')}"
+
+
+def killed(lost: list[dict[str, Any]], runners: Container[str]) -> str:
+    """Return the kill reasons of the lost jobs' runner pods as a reason suffix, empty when none is known."""
+    kills = runners.kills if isinstance(runners, ClusterRunners) else {}
+    named = [f"{job['name']} {kills[job['runner_name']]}" for job in lost if job["runner_name"] in kills]
+    return f"; runner pod killed: {', '.join(named)}" if named else ""
 
 
 def _kubectl(*args: str) -> list[dict[str, Any]]:
@@ -189,9 +206,10 @@ def assess(
     cached: bool = False,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
     jobs = jobs_of(repo, run["id"], cached)
-    lost = lost_jobs(jobs, cast(set[str], source(repo.split("/")[0])), datetime.now(UTC), grace)
+    runners = source(repo.split("/")[0])
+    lost = lost_jobs(jobs, cast(set[str], runners), datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
-    return stuck, reason, jobs
+    return stuck, reason + killed(lost, runners), jobs
 
 
 def report(run: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
