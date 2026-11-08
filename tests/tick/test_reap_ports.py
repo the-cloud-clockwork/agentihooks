@@ -76,7 +76,13 @@ def test_reap_step_uses_only_declared_ports(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(agents, "_reap", reap)
     tick = SimpleNamespace(skip_refused=lambda call, *args: call(*args))
     assert agents._reap_step(tick, state.__getitem__) == ["reaped"]
-    assert [call.operation for call in runtime.calls] == ["live_names", "observe", "retire", "name_pane", "refusal"]
+    assert [(call.operation, call.args) for call in runtime.calls] == [
+        ("live_names", ()),
+        ("observe", (agent,)),
+        ("retire", (agent, homes)),
+        ("name_pane", (agent,)),
+        ("refusal", (agent,)),
+    ]
     assert ledger.calls[0].args == ("task", {"state": "open"}, ("claimed",), {"x": 1})
     assert all(call.deadline is deadline for call in runtime.calls + ledger.calls)
 
@@ -493,3 +499,42 @@ def test_reap_ledger_reads_and_messages_obey_effects_and_deadlines(
     with pytest.raises(TimeoutError):
         getattr(port, operation)(*args, deadline=Deadline(0, lambda: 0))
     assert len(port.calls) == 1
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_direct_tick_binds_supplied_clients_and_restores_the_previous_tools(
+    monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    from scripts.swarm import cli, tick
+    from scripts.tick.ports.tools import PASS_TOOLS
+
+    supplied, previous = fake_tools(), fake_tools()
+    store, ledger, runtime = object(), object(), object()
+    calls: list[tuple[object, ...]] = []
+
+    def build(found_store: object, slug: str, owner: str, found_ledger: object, found_runtime: object) -> Any:
+        calls.append((found_store, slug, owner, found_ledger, found_runtime))
+        return supplied
+
+    def run(*args: object) -> list[object]:
+        assert PASS_TOOLS.get() is supplied
+        if fails:
+            raise ValueError("stopped")
+        return []
+
+    monkeypatch.setattr(cli, "_pass_tools", build)
+    sites = SimpleNamespace(hooks=lambda: {}, shut=lambda *args: None, apply=lambda *args: None, left=False)
+    monkeypatch.setattr(tick.tick_sites, "TickSites", lambda *args: sites)
+    monkeypatch.setattr(tick.tick_sites, "run_sites", run)
+    token = PASS_TOOLS.set(previous)
+    try:
+        if fails:
+            with pytest.raises(ValueError) as error:
+                tick.tick("sw", cast(Any, store), ledger, runtime, 7)
+            assert str(error.value) == "stopped"
+        else:
+            assert tick.tick("sw", cast(Any, store), ledger, runtime, 7) == []
+        assert PASS_TOOLS.get() is previous
+    finally:
+        PASS_TOOLS.reset(token)
+    assert calls == [(store, "sw", "tick", ledger, runtime)]
