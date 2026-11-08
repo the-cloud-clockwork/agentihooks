@@ -4,7 +4,7 @@ only its context limit hands it off."""
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, outage
@@ -82,7 +82,7 @@ def _step(watch: Watch, mail: Mail, agent: AgentRecord, mark: dict[str, Any]) ->
 
 
 def _steps(mail: Mail, task: str) -> str:
-    copy = ledger_workspace.published(mail.store, mail.slug, mail.doc).get(task)
+    copy = cast(dict[str, dict[str, str]], ledger_workspace.published(mail.store, mail.slug, mail.doc)).get(task)
     if copy is None:
         copy = ledger_workspace.tails(mail.slug, task)
     lines = copy.get("latest_progress", "").splitlines()
