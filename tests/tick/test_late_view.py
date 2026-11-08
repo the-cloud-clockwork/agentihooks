@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import cli, ledger_events
+from scripts.swarm import cli, ledger_events, stall_watch
 from scripts.tick import engine
 from scripts.tick.step import Context
 from scripts.tick.steps import PASS, budgets, host
@@ -105,3 +105,58 @@ def test_a_late_view_keeps_events_metrics_and_heartbeat_running(
             worker.join(30.0)
         if earlier_run.is_alive():
             earlier_run.join(30.0)
+
+
+@pytest.mark.feature("swarm-tick-late-view")
+def test_an_abandoned_view_skips_the_stall_watch_and_the_pass_ends(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    swarm, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    release: Event = Event()
+    watched: list[Any] = []
+
+    def tick_view(*args: Any) -> Callable[..., Any]:
+        assert release.wait(30.0)
+        return lambda url: None
+
+    def stall_pass(watch: Any, doc: dict[str, Any]) -> list[str]:
+        watched.append(watch.view("https://github.com/o/r/pull/1"))
+        return []
+
+    step = next(step for step in host.STEPS if step.name == "tick view")
+    monkeypatch.setattr(step, "floor_s", 0.01)
+    monkeypatch.setattr(cli, "_intent_pass", lambda *args: (None, []))
+    monkeypatch.setattr(ledger_events, "tick_view", tick_view)
+    monkeypatch.setattr(stall_watch, "stall_pass", stall_pass)
+    try:
+        cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+    finally:
+        release.set()
+        worker = engine._RUNNING.get(("sw", "tick view"))
+        if worker is not None:
+            worker.join(30.0)
+    assert watched == []
+    assert "skipped stall watch: no step stored the tick view this pass" in capsys.readouterr().err
+
+
+@pytest.mark.feature("swarm-tick-late-view")
+def test_an_error_a_step_held_ends_the_pass_failed_and_the_next_pass_runs(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    swarm, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+
+    def stall_pass(watch: Any, doc: dict[str, Any]) -> list[str]:
+        raise TypeError("'NoneType' object is not callable")
+
+    monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: None)
+    monkeypatch.setattr(stall_watch, "stall_pass", stall_pass)
+    first = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+    assert first == ["pass failed: a step raised TypeError: 'NoneType' object is not callable"]
+    assert swarm.redis.get(swarm.key("sw", "tick-lock")) is None
+    second = cli.run_tick(swarm, "sw", ledger, runtime, FakeHerdr({}))
+    assert second == first
