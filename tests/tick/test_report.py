@@ -140,8 +140,6 @@ def test_the_ledger_github_findings_and_metrics_steps_run_in_the_slow_lane() -> 
         "ledger event pass",
         "done recheck",
         "progress checks",
-        "waits end",
-        "merge pass",
         "doc report",
         "priorities sweep",
         "health findings",

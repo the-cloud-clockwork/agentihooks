@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "tick-merged-task-settlement-after-overrun",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2432",
+      "behaviour": "A merged code or ci task closes and its engineer leaves the seat within two passes when an intent or spawn barrier overruns its budget.",
+      "seam": "tick view, waits end and merge pass scheduling after an abandoned dependency, then ended agent reaping",
+      "tests": [
+        "tests/tick/steps/test_merge_pass.py::test_merge_pass",
+        "tests/tick/steps/test_tick_view.py::test_tick_view",
+        "tests/tick/steps/test_waits_end.py::test_waits_end"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
