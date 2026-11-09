@@ -22,6 +22,17 @@
       ]
     },
     {
+      "id": "hive-ready-through-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
+      "behaviour": "The hive headroom thread logs a failed scheduler wait and keeps its cadence until stopped, so the rollout ready marker stays fresh while a slow agent launch holds the beat and the Redis wait times out once.",
+      "seam": "publish_headroom beside run while a beat blocks",
+      "tests": [
+        "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
+        "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",

@@ -535,17 +535,31 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
 
 
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
-def test_headroom_logs_and_ends_when_its_wait_loses_the_connection(monkeypatch, capsys, error):
+@pytest.mark.feature("hive-ready-through-launch")
+def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: str
+) -> None:
     from redis import exceptions
 
-    from scripts.hive import headroom
+    from scripts.hive import headroom, orders
 
-    def wait(seconds, state, timeout):
-        raise getattr(exceptions, error)("gone")
+    stop, waits, published = threading.Event(), [], []
+
+    def wait(seconds: float, state: object, timeout: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 1:
+            raise getattr(exceptions, error)("gone")
+        if len(waits) == 3:
+            stop.set()
 
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
-    monkeypatch.setattr(headroom, "publish", Mock(side_effect=AssertionError("published")))
-    PUBLISH_HEADROOM(object(), object(), "local", threading.Event())
+    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: published.append(hive))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    PUBLISH_HEADROOM(object(), object(), "local", stop)
+    assert len(waits) == 3
+    assert published == ["local"]
     assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
 
 
@@ -634,6 +648,57 @@ def test_the_ready_marker_stays_fresh_while_a_slow_launch_blocks_the_beat(
     assert started
     assert not any(thread.is_alive() for thread in started)
     assert beats == ["local", "local"]
+    assert fresh == [True]
+
+
+@pytest.mark.feature("hive-ready-through-launch")
+def test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+    import time
+
+    from redis.exceptions import TimeoutError
+
+    from scripts.hive import headroom, orders, rollout
+
+    marker = tmp_path / "ready"
+    monkeypatch.setenv("HIVE_READY_FILE", str(marker))
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "publish_headroom", PUBLISH_HEADROOM)
+    monkeypatch.setattr(daemon, "publish_herdr_stats", lambda redis, waiter, hive, stop: None)
+    monkeypatch.setattr(daemon, "HEADROOM_SECONDS", 0.001)
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(orders, "alive", lambda client, hive: None)
+    launching, failed, beats, fresh = threading.Event(), [], [], []
+
+    def wait(seconds: float, state: object, timeout: float) -> None:
+        if launching.is_set() and not failed and threading.current_thread() is not threading.main_thread():
+            stale = time.time() - 120
+            os.utime(marker, (stale, stale))
+            failed.append(True)
+            raise TimeoutError("Timeout reading from socket")
+        threading.Event().wait(0.001)
+
+    def beat(redis: object, hive: str) -> None:
+        beats.append(hive)
+        if len(beats) == 1:
+            return
+        launching.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not (failed and rollout.ready(marker, time.time())):
+            time.sleep(0.01)
+        fresh.append(bool(failed) and rollout.ready(marker, time.time()))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    monkeypatch.setattr(daemon, "beat", beat)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(_once(object()))
+    assert beats == ["local", "local"]
+    assert failed == [True]
     assert fresh == [True]
 
 
