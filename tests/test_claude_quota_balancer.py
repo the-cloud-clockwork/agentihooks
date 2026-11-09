@@ -1365,7 +1365,7 @@ def test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_f
     monkeypatch.setattr(install.shutil, "which", lambda name: "/opt/claude")
     monkeypatch.setattr(balancer, "route_requires_fable", lambda *args: False)
     monkeypatch.setattr(reservation, "for_worker", lambda harness, environ: None)
-    monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"BEST": 6, "MID": 6, "LOW": 4})
+    monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"BEST": 6, "MID": 6, "LOW": 6})
     launched: dict[str, str] = {}
 
     def execvpe(binary: str, argv: list[str], env: dict[str, str]) -> None:
