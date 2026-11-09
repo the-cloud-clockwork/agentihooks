@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.767 · 2026-11-09
+
+### 2026-11-09 · 6279ae288465 · #10251 · @agenticore-app
+
+**Delete the unused assign and taken options of the hive machine name map**
+
+This change removes the unused `assign` and `taken` options from the hive node-to-name map function (`machine.name`), along with the tests that only existed to exercise them. Call-site review confirmed `hive add`, the sole production caller, passes neither option, and `hive create` names machines through a different path entirely, so these options were dead code. The two `taken` tests were rewritten to cover real surviving behavior instead, keeping coverage meaningful while trimming code that no longer serves any caller.
+
 ## v2.17.765 · 2026-11-09
 
 ### 2026-11-09 · 74dba094031e · #10245 · @agenticore-app
