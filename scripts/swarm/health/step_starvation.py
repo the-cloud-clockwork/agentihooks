@@ -16,7 +16,6 @@ from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import timing
 from scripts.swarm.health.findings import Finding
 
 KEY = "step-starvation"
@@ -37,7 +36,6 @@ def read(store: Any, slug: str) -> dict[str, Any]:
 
 
 def _save(store: Any, slug: str, state: Mapping[str, Any]) -> None:
-    timing.keep()
     store.redis.set(store.key(slug, KEY), json.dumps(state))
 
 
@@ -60,18 +58,35 @@ def note(steps: dict[str, dict[str, int]], row: Mapping[str, Any], at: int) -> N
     entry["misses"] = entry.get("misses", 0) + 1
 
 
-def _rows(store: Any, slug: str, cursor: str) -> list[tuple[str, dict[str, Any]]]:
-    found = store.redis.xrange(store.key(slug, RECORDS), min=f"({cursor}", max="+", count=READ_LIMIT)
-    return [(str(entry), dict[str, Any](json.loads(fields["record"]))) for entry, fields in found]
+def _position(entry: str) -> tuple[int, int]:
+    ms, _, seq = entry.partition("-")
+    return int(ms), int(seq or 0)
+
+
+def _read_with_rows(store: Any, slug: str, at: int) -> tuple[dict[str, Any], str, list[tuple[str, dict[str, Any]]]]:
+    """Return the saved state, its cursor and the newest pass record rows after the cursor, oldest first, in one round
+    trip; the first read's cursor is ``at``."""
+    pipe = store.redis.pipeline(transaction=False)
+    pipe.get(store.key(slug, KEY))
+    pipe.xrevrange(store.key(slug, RECORDS), count=READ_LIMIT)
+    raw, newest = pipe.execute()
+    state = dict[str, Any](json.loads(raw)) if raw else {}
+    cursor = str(state.get("cursor") or f"{at}-0")
+    after = _position(cursor)
+    rows = [
+        (str(entry), dict[str, Any](json.loads(fields["record"])))
+        for entry, fields in reversed(newest)
+        if _position(str(entry)) > after
+    ]
+    return state, cursor, rows
 
 
 def observe(store: Any, slug: str, at: int, windows: Mapping[str, float]) -> dict[str, Any]:
     """Read the pass records journaled since the cursor into each step's last completion or misses, keep ``windows``
     and save the state; the first read starts at ``at``."""
-    state = read(store, slug)
-    cursor = str(state.get("cursor") or f"{at}-0")
+    state, cursor, rows = _read_with_rows(store, slug, at)
     steps = dict[str, dict[str, int]](state.get("steps", {}))
-    for entry, row in _rows(store, slug, cursor):
+    for entry, row in rows:
         note(steps, row, int(entry.partition("-")[0]))
         cursor = entry
     state = {"cursor": cursor, "steps": steps, "windows": dict(windows)}
