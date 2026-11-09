@@ -1,4 +1,9 @@
-def spawn_order(tick, timing, pass_args, caps):
+from typing import Any
+
+from scripts.swarm.tick import ready_in_order
+
+
+def spawn_order(tick: Any, timing: Any, pass_args: tuple[Any, ...], caps: dict[str, int]) -> list[Any]:
     queue = []
     for lane, cap in caps.items():
         # ruleid: claim-order-per-lane
@@ -7,7 +12,7 @@ def spawn_order(tick, timing, pass_args, caps):
     return queue
 
 
-def each_lane(pass_args, lanes):
+def each_lane(pass_args: tuple[Any, ...], lanes: list[str]) -> dict[str, Any]:
     found = {}
     for lane in lanes:
         # ruleid: claim-order-per-lane
@@ -15,12 +20,12 @@ def each_lane(pass_args, lanes):
     return found
 
 
-def by_lane(pass_args, lanes):
+def by_lane(pass_args: tuple[Any, ...], lanes: list[str]) -> dict[str, Any]:
     # ruleid: claim-order-per-lane
     return {lane: ready_in_order(*pass_args, lane) for lane in lanes}
 
 
-def once_per_pass(tick, timing, pass_args, caps):
+def once_per_pass(tick: Any, timing: Any, pass_args: tuple[Any, ...], caps: dict[str, int]) -> list[Any]:
     # ok: claim-order-per-lane
     lanes = timing.timed(tick.ready_by_lane, *pass_args, list(caps))
     queue = []
@@ -29,6 +34,6 @@ def once_per_pass(tick, timing, pass_args, caps):
     return queue
 
 
-def one_lane(tick, pass_args, lane):
+def one_lane(tick: Any, pass_args: tuple[Any, ...], lane: str) -> Any:
     # ok: claim-order-per-lane
     return tick.ready_in_order(*pass_args, lane)

@@ -8,7 +8,8 @@
       "seam": "scripts.tick.steps.place._spawn_order over the pass rows and ledger document",
       "tests": [
         "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_computes_its_claim_order_once_for_every_lane",
-        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget"
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget",
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds"
       ]
     },
     {
