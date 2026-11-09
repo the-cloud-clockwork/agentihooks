@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import type_gate
+from scripts import feature_map, type_gate
 
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
@@ -593,3 +593,56 @@ def test_type_record_duplicate_and_invalid_counts_are_refused(tmp_path: Path) ->
         record.write_text(invalid)
         with pytest.raises(ValueError, match="count"):
             type_gate.load(root)
+
+
+@pytest.mark.parametrize("order", [("left", "right"), ("right", "left")])
+@pytest.mark.feature("independent-ci-records")
+def test_independent_source_branches_merge_their_records_in_either_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, order: tuple[str, str]
+) -> None:
+    root = _tree(tmp_path, {"hooks/a.py": "COUNT = 2\n", "hooks/b.py": "COUNT = 2\n"}, {})
+    records = root / "tests/type-baseline/hooks"
+    records.mkdir(parents=True)
+    for source in ("a", "b"):
+        (records / f"{source}.py.json").write_text("2\n")
+    map_path = root / "feature-map.json"
+    map_path.write_text(json.dumps({"features": [], "fragments": True}))
+    for source in ("a", "b"):
+        path = feature_map.entry_path(map_path, source)
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({"id": source, "behaviour": "before"}))
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=True).stdout
+
+    def measured(tree: Path) -> dict[str, int]:
+        return {
+            f"hooks/{source}.py": int((tree / f"hooks/{source}.py").read_text().split()[-1]) for source in ("a", "b")
+        }
+
+    monkeypatch.setattr(type_gate, "measure", measured)
+    git("init", "-b", "base")
+    git("config", "user.name", "CI record proof")
+    git("config", "user.email", "ci-record-proof@example.invalid")
+    git("add", ".")
+    git("commit", "-m", "base")
+    base = git("rev-parse", "HEAD").strip()
+    for branch, source in (("left", "a"), ("right", "b")):
+        git("checkout", "-b", branch, base)
+        (root / f"hooks/{source}.py").write_text("COUNT = 1\n")
+        type_gate.write(root)
+        feature_map.entry_path(map_path, source).write_text(json.dumps({"id": source, "behaviour": "after"}))
+        assert map_path.read_text() == json.dumps({"features": [], "fragments": True})
+        assert (root / type_gate.BASELINE).read_text() == "{}"
+        git("add", ".")
+        git("commit", "-m", branch)
+    git("checkout", order[0])
+    output = git("merge", "--no-edit", order[1])
+    assert "CONFLICT" not in output
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 1}
+    assert type_gate.grade({"hooks/a.py": 2, "hooks/b.py": 2}, measured(root), type_gate.load(root)) == []
+    assert {entry["id"]: entry["behaviour"] for entry in feature_map.load(map_path)["features"]} == {
+        "a": "after",
+        "b": "after",
+    }
+    print(f"independent record merge {order[0]} then {order[1]}: clean, both type and feature changes retained")

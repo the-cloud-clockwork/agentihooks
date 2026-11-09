@@ -103,6 +103,18 @@ def test_a_scaffolded_step_passes_the_catalogue_check_beside_every_registered_st
     assert import_module("scripts.tick.catalogue").check(tree) == [f"Step {STEP}: no scenario lists it"]
 
 
+def test_scaffold_writes_its_feature_fragment_without_touching_the_shared_map(tree: Path) -> None:
+    map_path = tree / "feature-map.json"
+    text = json.dumps({"features": [], "fragments": True})
+    map_path.write_text(text)
+    assert scaffold(tree, STEP) == 0
+    assert map_path.read_text() == text
+    entries = import_module("scripts.feature_map").load(map_path)["features"]
+    assert len(entries) == 1
+    assert entries[0]["tests"] == [f"tests/tick/steps/test_{STEP.replace('-', '_')}.py::test_{STEP.replace('-', '_')}"]
+    assert import_module("scripts.tick.new_step").check(tree, STEP)["feature entry"]
+
+
 def plant(tree: Path, artefact: str) -> None:
     """Remove one artefact of the scaffolded step from ``tree``."""
     copied = {

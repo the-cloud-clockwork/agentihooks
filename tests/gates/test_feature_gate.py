@@ -231,3 +231,27 @@ def test_a_task_without_a_pull_request_reads_only_the_dev_map(ops):
     assert run("sw", "done", *PROOF, "--feature", "f1") == 0
     assert read == ["dev"]
     assert ledger.rows["t1"]["state"] == "done"
+
+
+def test_completion_fetches_only_the_requested_feature_fragment(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    calls: list[tuple[str, str]] = []
+    entry = {"id": "chosen", "tests": ["tests/test_chosen.py::test_it"]}
+    expected = "feature-map.d/" + hashlib.sha256(b"chosen").hexdigest() + ".json"
+
+    def read(ref: str, path: str = feature.MAP) -> dict:
+        calls.append((ref, path))
+        return {"features": [], "fragments": True} if path == feature.MAP else entry
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") == {"features": [entry]}
+    assert calls == [("dev", feature.MAP), ("dev", expected)]
+
+
+def test_completion_refuses_a_fragment_with_the_wrong_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    def read(ref: str, path: str = feature.MAP) -> dict:
+        return {"features": [], "fragments": True} if path == feature.MAP else {"id": "other", "tests": ["x"]}
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") is None

@@ -801,7 +801,24 @@ def test_feature_fragments_preserve_validation_and_retirement(
     (base / "feature-map.json").write_text(path.read_text())
     (base / "feature-map.d").mkdir()
     (base / "feature-map.d" / fragment.name).write_text(fragment.read_text())
-    path.write_text(json.dumps({"features": [], "fragments": True, "retired": [RETIRED]}))
+    path.write_text(json.dumps({"features": [entry], "fragments": True}))
+    with pytest.raises(ValueError, match="duplicate feature login"):
+        feature_map.validate(root, path)
     fragment.unlink()
-    with pytest.raises(ValueError, match="features must be a nonempty list|removed feature"):
+    renamed = {**entry, "id": "logout"}
+    (root / "tests/test_login.py").write_text(
+        'import pytest\n@pytest.mark.feature("logout")\ndef test_shared():\n    assert True\n'
+    )
+    path.write_text(json.dumps({"features": [renamed], "fragments": True}))
+    with pytest.raises(ValueError, match="removed feature needs a retired record"):
         feature_map.validate(root, path, base / "feature-map.json")
+
+
+def test_feature_fragment_filename_must_match_its_id(mapped_repo: tuple[Path, Path, dict]) -> None:
+    root, path, entry = mapped_repo
+    path.write_text(json.dumps({"features": [], "fragments": True}))
+    directory = root / "feature-map.d"
+    directory.mkdir()
+    (directory / "wrong.json").write_text(json.dumps(entry))
+    with pytest.raises(ValueError, match="filename does not match id"):
+        feature_map.load(path)

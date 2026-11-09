@@ -16,7 +16,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from scripts import tick_pattern
+from scripts import feature_map, tick_pattern
 from scripts.tick import catalogue
 from scripts.tick.ports.tools import Tools
 
@@ -88,7 +88,7 @@ def registered_names(source: str) -> set[str]:
 def check(root: Path, name: str) -> dict[str, bool]:
     """Which of the five artefacts of step ``name`` the tree at ``root`` holds."""
     index = _read_json(root / catalogue.INDEX)
-    features = _read_json(root / catalogue.FEATURE_MAP)["features"]
+    features = feature_map.load(root / catalogue.FEATURE_MAP)["features"]
     return {
         "step": any(name in registered_names(path.read_text()) for path in sorted((root / STEPS).glob("*.py"))),
         "budget row": name in tick_pattern.floors((root / BUDGETS).read_text()),
@@ -230,7 +230,7 @@ def _index_text(root: Path, spec: Spec) -> tuple[Path, str]:
 def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
     """The feature map with the step's test added to its entry, a new inventory entry for a new id."""
     path = root / catalogue.FEATURE_MAP
-    data = _read_json(path)
+    data = feature_map.load(path)
     entry = next((entry for entry in data["features"] if entry["id"] == spec.feature), None)
     if entry is None:
         data["features"].append(
@@ -245,6 +245,9 @@ def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
         )
     else:
         entry["tests"] = [*entry.get("tests", []), test_node(spec.name)]
+    if data.get("fragments"):
+        entry = next(entry for entry in data["features"] if entry["id"] == spec.feature)
+        return feature_map.entry_path(path, spec.feature), json.dumps(entry, indent=2) + "\n"
     return path, json.dumps(data, indent=2) + "\n"
 
 
