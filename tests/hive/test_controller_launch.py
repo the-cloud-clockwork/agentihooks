@@ -134,6 +134,7 @@ def test_a_fresh_runtime_places_without_pass_rows_or_pod_quota(
     monkeypatch.setattr(launch.capacity.account_sessions, "sessions_by_account", lambda **kwargs: {})
     monkeypatch.setattr(launch.capacity.account_sessions, "codex_sessions_by_account", lambda: {})
     now = time.time()
+    setup.store.redis.set(f"{launch.registry.key('remote')}:sessions", json.dumps({"claude:account": 0}))
     setup.store.redis.set(
         f"{launch.registry.key('remote')}:quota",
         json.dumps(
