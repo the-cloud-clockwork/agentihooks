@@ -877,19 +877,24 @@ class Check:
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
                 (task, record, moved, future)
-                for task, record, moved, quick, _ in tasks
-                if (future := self._started(doc, task, quick, workers)) is not None
+                for task, record, moved, quick, unmoved, _ in tasks
+                if (future := self._started(doc, task, quick, unmoved, workers)) is not None
             ]
             for task, record, moved, future in pending:
                 actions += self._isolated(task, self._settle, task, record, moved, future, verdicts)
         return actions
 
     def _started(
-        self, doc: dict[str, Any], task: dict[str, Any], quick: bool, workers: ThreadPoolExecutor
+        self,
+        doc: dict[str, Any],
+        task: dict[str, Any],
+        quick: bool,
+        unmoved: dict[str, Any] | None,
+        workers: ThreadPoolExecutor,
     ) -> Future[Any] | None:
         """Return the judgment of ``task`` to settle this pass: on the pass's workers when it is quick or the check
         keeps no judging, else the finished one ``judging`` holds, None while it runs."""
-        judge = partial(copy_context().run, self._judge, doc, task)
+        judge = partial(copy_context().run, self._judge, doc, task, unmoved)
         if quick or self.judging is None:
             return workers.submit(judge)
         return self.judging.take((self.slug, task["id"]), self._key(doc, task), judge)
@@ -913,7 +918,8 @@ class Check:
         )
         if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
             return []
-        quick = self._quick(doc, task)
+        unmoved = self._unmoved(task, _fingerprint(doc, task))
+        quick = unmoved is not None or (self.draft is not None and self.draft(task["pr_url"]))
         held = self.judging is not None and self.judging.holds((self.slug, task["id"]), self._key(doc, task))
         counted = not quick and not held
         if counted and self.limit is not None and sum(queued[-1] for queued in tasks) >= self.limit:
@@ -927,14 +933,8 @@ class Check:
                 phase=task.get("phase"),
                 **_split_fields(task, task["pr_url"]),
             )
-        tasks.append((task, record, moved, quick, counted))
+        tasks.append((task, record, moved, quick, unmoved, counted))
         return []
-
-    def _quick(self, doc: dict[str, Any], task: dict[str, Any]) -> bool:
-        """Return whether ``task`` is judged without a pull request view: its coached verdict stands or its pull is a
-        draft."""
-        drafted = self.draft is not None and self.draft(task["pr_url"])
-        return drafted or self._unmoved(task, _fingerprint(doc, task)) is not None
 
     def _isolated(self, task, step, *args):
         from scripts.swarm.ledger_client import LedgerRefused
@@ -974,10 +974,11 @@ class Check:
         timing.keep()
         return actions
 
-    def _judge(self, doc: dict[str, Any], task: dict[str, Any]) -> _Judgment | None:
-        """Return the judgment of ``task``: its standing coached verdict, a draft, or the answer to its state."""
+    def _judge(self, doc: dict[str, Any], task: dict[str, Any], unmoved: dict[str, Any] | None) -> _Judgment | None:
+        """Return the judgment of ``task``: its standing coached verdict ``unmoved``, a draft, or the answer to its
+        state."""
         inputs = _fingerprint(doc, task)
-        previous = self._unmoved(task, inputs)
+        previous = unmoved
         if previous:
             return _Judgment(None, previous, None, None)
         if self.draft is not None and self.draft(task["pr_url"]):
