@@ -3,7 +3,7 @@ import shlex
 import time
 from uuid import uuid4
 
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 
 def now_ms() -> int:
@@ -125,7 +125,7 @@ def detach(store, slug: str, agent) -> None:
         _change(store, slug, row["id"], change)
 
 
-def observe(store, slug: str, live: set[str]) -> None:
+def observe(store: RedisStore, slug: str, live: set[str]) -> None:
     from scripts.hive import reports
 
     agents = {agent.name: agent for agent in store.agents(slug)}
@@ -138,7 +138,10 @@ def observe(store, slug: str, live: set[str]) -> None:
         if occupancy.occupant != row["successor"] or occupancy.generation != row["generation"]:
             continue
         agent = agents.get(row["successor"])
-        hosted = agent is not None and bool(reports.host(agent)) and bool(hives.execution(agent))
+        report = hives.read(reports.host(agent)) if agent is not None else None
+        hosted = (
+            agent is not None and report is not None and bool(hives.execution(agent)) and agent.name in report["names"]
+        )
         state = "live" if row["successor"] in live or hosted else "absent"
 
         def change(current, state=state):
