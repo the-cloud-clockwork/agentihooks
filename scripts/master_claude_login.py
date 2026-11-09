@@ -700,8 +700,8 @@ def _token_lock(environ: Mapping[str, str]):
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
-    from scripts.claude_quota_balancer import API_ACCOUNT, launch_environment, select_master_credential
-    from scripts.hive.account_slots import execute
+    from scripts.claude_quota_balancer import API_ACCOUNT, RoutingError, launch_environment, select_master_credential
+    from scripts.hive.account_slots import Unavailable, execute
     from scripts.install import _claude_command, _write_route_report
 
     with _token_lock(environ):
@@ -710,18 +710,20 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
         )
         target = token_home(environ)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
-        chain.notification(target, "token", "routed")
-        _write_route_report(
-            report, status="routed", account=decision.account, placement="fallback", remote_control="off"
-        )
-        print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
-        execute(
-            "claude",
-            decision.account,
-            child_env,
-            lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
-            master=True,
-        )
+
+        def invoke(env: dict[str, str]) -> None:
+            chain.notification(target, "token", "routed")
+            _write_route_report(
+                report, status="routed", account=decision.account, placement="fallback", remote_control="off"
+            )
+            print(f"[agenti] account={decision.account} route=token-fallback remote-control=off", flush=True)
+            os.execvpe(binary, _claude_command(binary, _token_args(args)), env)
+
+        try:
+            execute("claude", decision.account, child_env, invoke, master=True)
+        except Unavailable as exc:
+            _write_route_report(report, status="failed", error=str(exc))
+            raise RoutingError(str(exc)) from exc
 
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
