@@ -47,7 +47,7 @@ def sync(target: str | None, run: Callable[..., subprocess.CompletedProcess[str]
         reason = exc.strerror or str(exc)
     else:
         if result.returncode == 0:
-            return [f"forced the sync of the signer record {target}, so hive join sees the change at once"]
+            return [f"requested a sync of the signer record {target}"]
         reason = (result.stderr or "").strip() or f"exit {result.returncode}"
     return [f"could not force the sync of {target} ({reason}), so hive join sees it at the next refresh"]
 

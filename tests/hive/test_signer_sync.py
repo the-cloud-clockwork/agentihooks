@@ -1,4 +1,4 @@
-"""Hive invite, revoke and remove keep the signer member listing hive join mounts current at once."""
+"""Hive membership changes request signer refreshes and join sees the reconciled listing."""
 
 import json
 import subprocess
@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.feature("hive-signer-membership-sync
 SIGNER = "agentihooks/hub/nats-signer"
 TARGET = "agentihooks-swarm/agentihooks-swarm-nats-signer"
 PUBLIC = "rediss://hive.example:6380/2"
-SYNCED = f"forced the sync of the signer record {TARGET}, so hive join sees the change at once"
+SYNCED = f"requested a sync of the signer record {TARGET}"
 SIGNER_FIELDS = ("operator_seed", "account_seed", "system_credentials", "url")
 
 
@@ -32,7 +32,7 @@ def admin() -> Any:
 
 
 class Eso:
-    """Stands in for the external secrets operator: a force sync copies the OpenBao signer record into the mount."""
+    """Separate an acknowledged sync request from the later signer mount projection."""
 
     def __init__(self, fake: Bao, mount: Path) -> None:
         self.fake = fake
@@ -41,7 +41,6 @@ class Eso:
 
     def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
-        self.copy()
         return subprocess.CompletedProcess(command, 0, "", "")
 
     def copy(self) -> None:
@@ -84,6 +83,10 @@ def test_an_invited_member_joins_at_once_through_the_mounted_signer(admin: Any, 
     eso = Eso(fake, tmp_path)
     eso.copy()
     said = invite.invite(admin, openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake), _scoped(), PUBLIC, run=eso)
+    assert said.endswith(f"; {SYNCED}")
+    with pytest.raises(auth.HiveError):
+        _refresh(admin, _mounted(tmp_path, trusted), _ledger_credential(fake))
+    eso.copy()
     grant = _refresh(admin, _mounted(tmp_path, trusted), _ledger_credential(fake))
     assert (grant["bus_scoped"], grant["bus_swarms"]) == (True, ["rig"])
     ((*command, stamp, overwrite),) = eso.commands
