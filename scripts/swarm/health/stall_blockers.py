@@ -2,14 +2,14 @@
 window through the blocker window.
 
 no merge into dev holds while focused pull requests are open, every task in pr when no focus holds, and starts at the
-last dev merge. merged task in pr holds while a task sits in pr twenty minutes after its pull request merged and starts
+later of the last dev merge and the first pass that saw it hold. merged task in pr holds while a task sits in pr twenty minutes after its pull request merged and starts
 at that mark. The stall-blockers gate picks the mode in the swarm config: observe logs each would-be record to the
 swarm gate log, enforce records it in the blocker queue, off skips.
 """
 
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from scripts.gates import Who, modes
@@ -21,6 +21,7 @@ MERGED_IN_PR = "merged task in pr"
 CATEGORIES = (MERGE_STALL, MERGED_IN_PR)
 MERGED_MS = 20 * 60_000
 MERGE_KEY = "merge-stall"
+KEY = "stall-blockers"
 SENDER = "swarm"
 
 
@@ -87,10 +88,15 @@ def merged_in_pr(
     return Held(MERGED_IN_PR, since, f"{len(left)} tasks still in pr after their pull request merged, oldest {title}")
 
 
-def _apply(store: Any, slug: str, category: str, found: Held | None, mode: str, now_ms: int) -> list[str]:
+def _apply(
+    store: Any, slug: str, category: str, found: Held | None, mode: str, now_ms: int, logged: dict[str, int]
+) -> list[str]:
     if mode != "enforce":
-        if found is None:
+        if found is None or logged.get(category) == found.since:
+            if found is None:
+                logged.pop(category, None)
             return []
+        logged[category] = found.since
         reason = f"{category}: {found.detail}"
         gate_log.append(slug, gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=reason, now_ms=now_ms))
         return [f"stall blockers: logged {reason}"]
@@ -113,11 +119,20 @@ def observe(
     now_ms: int,
     held: Callable[[dict[str, Any]], bool],
 ) -> list[str]:
-    """Record, log or skip both categories by the stall-blockers gate mode, clearing a category that stopped holding."""
+    """Record, log once per start or skip both categories by the stall-blockers gate mode, clearing a category that
+    stopped holding; the stall starts at the later of the last dev merge and the first pass that saw it hold."""
     mode = str(modes.configured(GATE, store.config(slug).gates))
     if mode == "off":
         return []
-    rows = list(tasks)
+    rows, key = list(tasks), store.key(slug, KEY)
+    state = json.loads(store.redis.get(key) or "{}")
     stall = merge_stall(store, slug, doc, rows, github)
+    state["open_since"] = (state.get("open_since") or now_ms) if stall else None
+    if stall:
+        stall = replace(stall, since=max(stall.since, state["open_since"]))
     left = merged_in_pr(rows, github, held, now_ms)
-    return _apply(store, slug, MERGE_STALL, stall, mode, now_ms) + _apply(store, slug, MERGED_IN_PR, left, mode, now_ms)
+    logged = state.setdefault("logged", {})
+    lines = _apply(store, slug, MERGE_STALL, stall, mode, now_ms, logged)
+    lines += _apply(store, slug, MERGED_IN_PR, left, mode, now_ms, logged)
+    store.redis.set(key, json.dumps(state))
+    return lines

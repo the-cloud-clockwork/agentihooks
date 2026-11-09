@@ -67,8 +67,10 @@ def _observe(store, tasks, github, now, held=lambda task: False):
 def test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_master_coding_window(store):
     _enforce(store)
     now = _now(store)
-    _merged(store, now - HOUR)
-    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now) == []
+    _merged(store, now - 2 * HOUR)
+    github = _pulls(**{"pr-a": _open()})
+    assert _observe(store, [_task("a", "pr-a")], github, now - HOUR) == []
+    assert _observe(store, [_task("a", "pr-a")], github, now) == []
     found = blockers.sustained(store, SLUG, now)
     assert list(found) == [stall_blockers.MERGE_STALL]
     assert found[stall_blockers.MERGE_STALL].first_seen == now - HOUR
@@ -181,6 +183,7 @@ def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store):
     _enforce(store)
     now = _now(store)
     _merged(store, now - 30 * HOUR)
+    store.redis.set(store.key(SLUG, stall_blockers.KEY), json.dumps({"open_since": now - 29 * HOUR}))
     _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
     found = blockers.sustained(store, SLUG, now)[stall_blockers.MERGE_STALL]
     assert found.first_seen == now - blockers.TTL_MS // 2
@@ -198,7 +201,26 @@ def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store):
     assert [(row["gate"], row["kind"], row["agent"], row["reason"], row["at"]) for row in rows] == [
         ("stall-blockers", "observe", "swarm", reason, now)
     ]
+    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + MINUTE) == []
+    assert len(gate_log.gate_log_path(SLUG).read_text().splitlines()) == 1
     assert _observe(store, [], _pulls(), now) == []
+    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + 2 * MINUTE) == [
+        f"stall blockers: logged {reason}"
+    ]
+
+
+def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(store):
+    _enforce(store)
+    now = _now(store)
+    _merged(store, now - 3 * HOUR)
+    github = _pulls(**{"pr-a": _open()})
+    _observe(store, [_task("a", "pr-a")], github, now - HOUR + 1)
+    _observe(store, [_task("a", "pr-a")], github, now)
+    assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - HOUR + 1
+    assert blockers.sustained(store, SLUG, now) == {}
+    _observe(store, [], github, now)
+    _observe(store, [_task("a", "pr-a")], github, now + MINUTE)
+    assert blockers.active(store, SLUG, now + MINUTE)[stall_blockers.MERGE_STALL].first_seen == now + MINUTE
 
 
 def test_off_skips_both_categories(store):
