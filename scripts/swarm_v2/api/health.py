@@ -8,6 +8,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any, cast
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import telemetry, worker_health
@@ -338,9 +339,9 @@ class HealthAPI:
         deep: bool = True,
     ) -> None:
         self.health, self.grants, self.operator, self.deep = health, grants, operator, deep
-        self.readiness = readiness.Probe(health.store.redis)
+        self.readiness = readiness.Probe(cast(Any, health.store).redis)
 
-    def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
+    def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict[str, Any]]:
         if (method, path) == ("GET", LIVE_PATH):
             return 200, self.health.live()
         if (method, path) == ("GET", READY_PATH):

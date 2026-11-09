@@ -1,7 +1,7 @@
 """Open readiness checks Redis using a separate connection with bounded waits and no retries."""
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 
 def available(client: Any) -> bool:
@@ -20,7 +20,7 @@ def available(client: Any) -> bool:
     }
     pool = ConnectionPool(connection_class=source.connection_class, **options)
     try:
-        return bool(Redis(connection_pool=pool).ping())
+        return bool(cast(Any, Redis(connection_pool=pool)).ping())
     except RedisError:
         return False
     finally:

@@ -5,10 +5,11 @@ import pytest
 
 from scripts.swarm_v2.api import health
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("controller-busy-node-probes")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("available", [True, False])
+@pytest.mark.feature("controller-busy-node-probes")
 def test_readiness_is_open_and_reports_redis_without_deep_diagnostics(available: bool) -> None:
     from scripts.swarm_v2.api import readiness
 
@@ -27,6 +28,7 @@ def test_readiness_is_open_and_reports_redis_without_deep_diagnostics(available:
 
 
 @pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.feature("controller-busy-node-probes")
 def test_readiness_redis_uses_bounded_sockets_without_retries(failure: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     import redis
 
@@ -54,6 +56,9 @@ def test_readiness_redis_uses_bounded_sockets_without_retries(failure: bool, mon
     assert options["socket_timeout"] == 2
     assert options["socket_connect_timeout"] == 2
     assert options["retry"].get_retries() == 0
+    failure_callback = Mock()
+    assert options["retry"].call_with_retry(lambda: True, failure_callback) is True
+    failure_callback.assert_not_called()
     assert options["health_check_interval"] == 0
     assert options["retry_on_timeout"] is False
     assert options["retry_on_error"] == []
@@ -62,6 +67,7 @@ def test_readiness_redis_uses_bounded_sockets_without_retries(failure: bool, mon
     pool.disconnect.assert_called_once_with()
 
 
+@pytest.mark.feature("controller-busy-node-probes")
 def test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm_v2.api import readiness
 
@@ -77,6 +83,13 @@ def test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks(mo
     checker = Mock()
     checker.store.redis = client
     api = health.HealthAPI(checker)
+    running = api.readiness.running
+
+    def acquire(*, blocking: bool) -> bool:
+        assert blocking is False
+        return running.acquire(blocking=False)
+
+    api.readiness.running = SimpleNamespace(acquire=acquire, release=running.release)
 
     assert api.route("GET", "/v2/health/ready", "", None) == (503, {"redis": "unavailable"})
     completion.wait.assert_called_once_with(4)

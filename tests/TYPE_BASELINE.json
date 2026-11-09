@@ -831,7 +831,7 @@
   "scripts/swarm_v2/api/broadcasts.py": 24,
   "scripts/swarm_v2/api/commands.py": 137,
   "scripts/swarm_v2/api/executions.py": 121,
-  "scripts/swarm_v2/api/health.py": 145,
+  "scripts/swarm_v2/api/health.py": 143,
   "scripts/swarm_v2/api/recovery.py": 43,
   "scripts/swarm_v2/api/server.py": 14,
   "scripts/swarm_v2/api/tasks.py": 163,
