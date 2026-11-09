@@ -93,15 +93,22 @@ def _spoken(at_ms: int) -> str:
     return datetime.fromtimestamp(at_ms / 1000, UTC).strftime(SPOKEN)
 
 
-def _finding(name: str, entry: Mapping[str, int], window: float, at: int) -> Finding:
-    since = entry.get("done", entry["missed"])
+def _evidence(entry: Mapping[str, int], window: float) -> tuple[str, ...]:
     last = _spoken(entry["done"]) if "done" in entry else "never since the watch began"
-    evidence = (
+    return (
         f"Last completed run: {last}",
         f"{entry['misses']} passes since ran it without a completed run, the first at {_spoken(entry['missed'])}",
         f"Window {window:g}s from budgets.FLOORS; three windows is {WINDOWS * window:g}s",
     )
-    summary = f"Tick step {name} has not completed for {(at - since) // 60_000} minutes"
+
+
+def _summary(name: str, entry: Mapping[str, int], at: int) -> str:
+    since = entry.get("done", entry["missed"])
+    return f"Tick step {name} has not completed for {(at - since) // 60_000} minutes"
+
+
+def _finding(name: str, entry: Mapping[str, int], window: float, at: int) -> Finding:
+    summary, evidence = _summary(name, entry, at), _evidence(entry, window)
     return Finding(KIND, name.replace(" ", "-"), summary, evidence, "three windows", entry["misses"])
 
 
@@ -115,14 +122,14 @@ def alarm(store: Any, slug: str, state: Mapping[str, Any], at: int) -> list[str]
     master = str(seat_address(slug, MASTER))
     lines: list[str] = []
     for name, entry, window in starved(state, at):
-        found = _finding(name, entry, window, at)
-        text = f"URGENT: {found.summary} on swarm {slug}. Evidence: {'; '.join(found.evidence)}."
+        summary = _summary(name, entry, at)
+        text = f"URGENT: {summary} on swarm {slug}. Evidence: {'; '.join(_evidence(entry, window))}."
         item_id = hashlib.sha256(f"{KEY}:{slug}:{name}:{entry['missed']}".encode()).hexdigest()[:12]
         try:
             InboxStore(store.redis).send(SENDER, master, text, ref=f"{KEY}:{slug}:{name}", item_id=item_id)
         except DuplicateItem:
             continue
-        lines.append(f"step starvation: alarmed {master}: {found.summary}")
+        lines.append(f"step starvation: alarmed {master}: {summary}")
     return lines
 
 
