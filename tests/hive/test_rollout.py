@@ -1,12 +1,15 @@
 import copy
 import importlib
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any
 
 import pytest
 
 
 class Cluster:
-    def __init__(self):
-        self.lease = None
+    def __init__(self) -> None:
+        self.lease: Any = None
         self.calls = []
         self.healthy = True
 
@@ -65,7 +68,7 @@ def test_a_waiting_release_cannot_take_ownership_or_mutate_a_hive():
     )
 
 
-def test_a_failed_replacement_holds_the_lock_without_expiry():
+def test_a_failed_replacement_holds_the_lock_with_an_expiry() -> None:
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -73,7 +76,95 @@ def test_a_failed_replacement_holds_the_lock_without_expiry():
     with pytest.raises(RuntimeError, match="^replacement hive is not serving; rollout ownership retained$"):
         module.release(cluster, "default", "shared", "first", "hive", "hive-worker-hive")
     assert cluster.lease["spec"]["holderIdentity"] == "first"
-    assert "leaseDurationSeconds" not in cluster.lease["spec"]
+    assert cluster.lease["spec"]["leaseDurationSeconds"] == module.LEASE_SECONDS
+
+
+def wall_clock(monkeypatch: pytest.MonkeyPatch, module: ModuleType, step: Callable[[float], None]) -> list[float]:
+    clock = [1_000_000.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+        step(clock[0])
+
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", sleep)
+    return clock
+
+
+@pytest.mark.feature("hive-rollout-lease-failed-sync")
+def test_a_failed_sync_frees_the_lease_for_the_next_hive(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = rollout()
+    cluster = Cluster()
+    cluster.healthy = False
+    failed = []
+
+    def sync_fails(now: float) -> None:
+        if not failed:
+            failed.append(now)
+            module.abandon(cluster, "default", "shared", "second")
+            assert cluster.lease["spec"]["holderIdentity"] == "first"
+            module.abandon(cluster, "default", "shared", "first")
+            assert cluster.lease["spec"]["holderIdentity"] == ""
+
+    clock = wall_clock(monkeypatch, module, sync_fails)
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    module.acquire(cluster, "default", "shared", "second")
+    assert failed == [clock[0]]
+    assert cluster.lease["spec"]["holderIdentity"] == "second"
+
+
+@pytest.mark.feature("hive-rollout-lease-failed-sync")
+def test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = rollout()
+    cluster = Cluster()
+    seen = []
+
+    def sync_died(now: float) -> None:
+        seen.append(cluster.lease["spec"]["holderIdentity"])
+
+    clock = wall_clock(monkeypatch, module, sync_died)
+    start = clock[0]
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    module.acquire(cluster, "default", "shared", "second")
+    assert set(seen) == {"first"}
+    assert module.LEASE_SECONDS < clock[0] - start <= module.LEASE_SECONDS + 5
+    assert module.ACQUIRE_SECONDS > module.LEASE_SECONDS
+    assert cluster.lease["spec"]["holderIdentity"] == "second"
+    assert cluster.lease["spec"]["renewTime"] == module.micro_time(clock[0])
+
+
+def test_a_lease_without_a_renew_time_or_duration_never_expires() -> None:
+    module = rollout()
+    renewed = module.micro_time(100.0)
+    assert not module.expired({"leaseDurationSeconds": 10}, 1e9)
+    assert not module.expired({"renewTime": renewed}, 1e9)
+    assert not module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.0)
+    assert module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.5)
+
+
+def test_lease_times_are_utc_in_any_local_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    module = rollout()
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        assert module.micro_time(0.0) == "1970-01-01T00:00:00.000000Z"
+        renewed = {"renewTime": "1970-01-01T00:00:00.000000Z", "leaseDurationSeconds": 10}
+        assert not module.expired(renewed, 10.0)
+        assert module.expired(renewed, 10.5)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_abandon_without_a_lease_changes_nothing() -> None:
+    module = rollout()
+    cluster = Cluster()
+    module.abandon(cluster, "default", "shared", "first")
+    assert cluster.lease is None
+    assert [call[0] for call in cluster.calls] == ["GET"]
 
 
 def test_only_the_owner_can_release_after_the_current_generation_serves():
@@ -249,9 +340,10 @@ def test_hook_entrypoint_routes_to_the_exclusive_protocol(monkeypatch, tmp_path,
         assert cluster.lease["spec"]["holderIdentity"] == ("first" if action == "acquire" else "")
 
 
-def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection():
+def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
+    monkeypatch.setattr(module.time, "time", lambda: 1794215510.407518)
     module.acquire(cluster, "rolls", "capacity", "hive/app", timeout=0)
     assert cluster.calls == [
         ("GET", "/apis/coordination.k8s.io/v1/namespaces/rolls/leases/capacity", None),
@@ -262,7 +354,11 @@ def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection():
                 "apiVersion": "coordination.k8s.io/v1",
                 "kind": "Lease",
                 "metadata": {"name": "capacity", "namespace": "rolls"},
-                "spec": {"holderIdentity": "hive/app"},
+                "spec": {
+                    "holderIdentity": "hive/app",
+                    "leaseDurationSeconds": 3600,
+                    "renewTime": "2026-11-09T09:11:50.407518Z",
+                },
             },
         ),
     ]
@@ -296,11 +392,11 @@ def test_unobserved_and_zero_capacity_deployments_never_count_as_serving():
 
 
 @pytest.mark.parametrize("timeout", [None, 0])
-def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch, timeout):
+def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch: pytest.MonkeyPatch, timeout: int | None) -> None:
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
-    ticks = iter([0, 1800 if timeout is None else 0])
+    ticks = iter([0, module.ACQUIRE_SECONDS if timeout is None else 0])
     monkeypatch.setattr(module.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(module.time, "sleep", lambda seconds: pytest.fail("slept beyond the acquisition deadline"))
     kwargs = {} if timeout is None else {"timeout": timeout}
@@ -322,8 +418,8 @@ def test_resource_names_are_quoted_as_single_url_segments():
     assert cluster.calls[-2][:2] == ("GET", "/apis/apps/v1/namespaces/team%2Fone/deployments/hive%2Ftwo")
 
 
-@pytest.mark.parametrize("action", ["acquire", "release"])
-def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action):
+@pytest.mark.parametrize("action", ["acquire", "release", "abandon"])
+def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch: pytest.MonkeyPatch, action: str) -> None:
     import sys
 
     module = rollout()
@@ -333,7 +429,7 @@ def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action)
     monkeypatch.setattr(sys, "argv", ["rollout", action])
     module.main()
     defaults = (api, "default", "agentihooks-hive-rollout", "")
-    assert calls == [defaults if action == "acquire" else (*defaults, "", "")]
+    assert calls == [defaults if action != "release" else (*defaults, "", "")]
     calls.clear()
     monkeypatch.setattr(
         sys,
@@ -355,7 +451,7 @@ def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action)
     )
     module.main()
     override = (api, "rolls", "shared", "hive/app")
-    assert calls == [override if action == "acquire" else (*override, "workers", "one,two")]
+    assert calls == [override if action != "release" else (*override, "workers", "one,two")]
 
 
 def test_unknown_hook_actions_never_contact_kubernetes(monkeypatch):

@@ -88,6 +88,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | quiet pass | wrapper events | tick | 2 | 60 | none | none | none |
 | stall watch | wrapper events | tick | 18 | 60 | page relay, tick view | none | none |
 | waits end | wrapper events | slow | 3 | 60 | tick view | none | none |
+| hive sweep | wrapper health | slow | 2 | 600 | none | coordination | hive-quiet-sweep |
 | host pressure | wrapper health | slow | 2 | 120 | none | none | none |
 | ledger probe | wrapper health | slow | 7 | 120 | none | none | none |
 | ledger watchdog | wrapper health | slow | 2 | 120 | none | none | none |
