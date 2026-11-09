@@ -91,7 +91,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
-{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" }}
+{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" "SyncFail" "abandon" }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -102,7 +102,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-1"
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
 spec:
-  activeDeadlineSeconds: 1900
+  activeDeadlineSeconds: 5500
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
   template:
