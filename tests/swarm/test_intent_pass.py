@@ -91,6 +91,85 @@ def test_the_intent_pass_returns_while_its_view_is_still_building(monkeypatch: p
     assert view.result(5) == "view"
 
 
+class _RecordedCheck:
+    """An intent check that records how the pass built it and judges nothing."""
+
+    built: list[dict[str, Any]] = []
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Record the keyword arguments the pass gave."""
+        _RecordedCheck.built.append(kwargs)
+
+    def run(self, doc: dict[str, Any]) -> list[str]:
+        """Judge nothing."""
+        return []
+
+
+def _quiet_pass(monkeypatch: pytest.MonkeyPatch, view: Any) -> None:
+    """Replace the pass view, the mail and the batched pull read with fakes."""
+    from scripts.swarm import ledger_events
+
+    monkeypatch.setattr(ledger_events, "tick_view", view)
+    monkeypatch.setattr(ledger_events, "Mail", lambda *args: None)
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda batch: {})
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    _quiet_pass(monkeypatch, lambda *args: "view")
+    modes: list[str] = []
+
+    def watched(slug: str, doc: dict[str, Any], mode: str) -> list[str]:
+        modes.append(mode)
+        return []
+
+    judging = object()
+    _RecordedCheck.built = []
+    monkeypatch.setattr(intent, "watched_urls", watched)
+    monkeypatch.setattr(intent, "Check", _RecordedCheck)
+    monkeypatch.setattr(intent, "TICK_JUDGING", judging)
+    view, actions = cli._intent_pass(None, None, "sw", {"tasks": []}, None, SimpleNamespace(gates={"intent": "coach"}))
+    [built] = _RecordedCheck.built
+    reader = built["head"].__self__
+    assert view.result(5) == "view" and actions == []
+    assert modes == ["coach"]
+    assert built["judging"] is judging
+    assert isinstance(reader, intent.Pulls)
+    for name in ("text", "merged", "draft"):
+        assert built[name].__self__ is reader
+        assert built[name].__func__ is getattr(intent.Pulls, name)
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_the_intent_pass_builds_its_view_timed_inside_the_callers_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    from contextvars import ContextVar
+    from types import SimpleNamespace
+
+    from scripts.swarm import timing
+
+    probe: ContextVar[str] = ContextVar("probe", default="outside")
+    timed: list[Any] = []
+    call = timing.call
+
+    def recorded(function: Any, *args: Any, **kwargs: Any) -> Any:
+        timed.append(function)
+        return call(function, *args, **kwargs)
+
+    def view(*args: Any) -> str:
+        return probe.get()
+
+    _quiet_pass(monkeypatch, view)
+    monkeypatch.setattr(timing, "call", recorded)
+    probe.set("inside")
+    built, _ = cli._intent_pass(None, None, "sw", {"tasks": []}, None, SimpleNamespace(gates={"intent": "off"}))
+    assert built.result(5) == "inside"
+    assert view in timed
+
+
 def test_a_merge_wait_observes_a_merge_during_a_slow_runtime_launch(env, monkeypatch):  # noqa: F811
     from scripts.swarm import idle
 

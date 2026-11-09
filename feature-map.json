@@ -2751,7 +2751,10 @@
         "tests/gates/test_intent_budget.py::test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name",
         "tests/gates/test_intent_budget.py::test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches",
         "tests/gates/test_intent_budget.py::test_each_minute_judges_the_changed_pulls_from_its_own_turn",
-        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building"
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_builds_its_view_timed_inside_the_callers_context",
+        "tests/gates/test_intent_budget.py::test_a_kept_judging_settles_draft_pulls_inside_the_pass"
       ]
     }
   ],

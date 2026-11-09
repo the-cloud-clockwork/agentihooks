@@ -350,3 +350,14 @@ def test_each_minute_judges_the_changed_pulls_from_its_own_turn(tmp_path: Any, m
     ids = [task["id"] for task in doc["tasks"]]
     judged = {task for task in ids if Verdicts(SLUG, "intent", tmp_path).read(task)}
     assert judged == set((ids[minute:] + ids[:minute])[: intent.JUDGED_PER_PASS])
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_kept_judging_settles_draft_pulls_inside_the_pass(tmp_path: Any) -> None:
+    doc = _doc()
+    pulls, _ = _pulls(doc, draft=True)
+    judging = intent.Judging()
+    replace(_check("coach", pulls, [], tmp_path), judging=judging).run(doc)
+    records = [Verdicts(SLUG, "intent", tmp_path).read(task["id"]) for task in doc["tasks"]]
+    assert judging.running == {}
+    assert all(record and record["reason"] == intent.DRAFT for record in records)
