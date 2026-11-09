@@ -2119,7 +2119,10 @@ def test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_t
     tick_inbox = InboxStore(store.redis, world="")
 
     assert waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 5_000, {}.get) == []
-    assert idle.wait(store.redis, "sw", waiter)["on"] == {"kind": "reply", "target": item.id}
+    assert (held := idle.wait(store.redis, "sw", waiter)) is not None and held["on"] == {
+        "kind": "reply",
+        "target": item.id,
+    }
 
     member.reply(item.id, recipient, "the fix sits on dev")
     [ended] = waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 6_000, {}.get)
@@ -2154,9 +2157,9 @@ def test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see
     idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "reply", "target": item.id})
     member = InboxStore(store.redis)
     assert member.world == "m1" and [a.name for a in store.agents("sw")] == [ME]
-    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "reply", "target": item.id}
+    assert (held := idle.wait(store.redis, "sw", ME)) is not None and held["on"] == {"kind": "reply", "target": item.id}
     with pytest.raises(InboxError):
         member.locate(item.id)
 
     assert waits.end_pass(store, "sw", {}, member, {}.get, 5_000, {}.get) == []
-    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "reply", "target": item.id}
+    assert (held := idle.wait(store.redis, "sw", ME)) is not None and held["on"] == {"kind": "reply", "target": item.id}
