@@ -2606,7 +2606,16 @@
       "tests": [
         "tests/scheduler/test_bounded_history.py::test_abandoned_only_history_is_reaped_without_new_work",
         "tests/scheduler/test_bounded_history.py::test_new_timer_prunes_abandoned_history_and_preserves_live_work",
-        "tests/scheduler/test_bounded_history.py::test_timer_polling_reads_one_record"
+        "tests/scheduler/test_bounded_history.py::test_timer_polling_reads_one_record",
+        "tests/events/test_scheduler_recovery.py::test_streaming_recovery_keeps_active_pending_and_operator_timers",
+        "tests/events/test_scheduler_recovery.py::test_envelope_reads_base64_in_bounded_chunks",
+        "tests/events/test_scheduler_recovery.py::test_raw_redis_field_disconnects_its_dedicated_connection",
+        "tests/events/test_scheduler_recovery.py::test_raw_redis_field_handles_missing_errors_and_truncated_values",
+        "tests/events/test_scheduler_recovery.py::test_existing_oversized_state_is_compacted_without_a_full_hget",
+        "tests/events/test_scheduler_recovery.py::test_recovery_retries_a_concurrent_write_and_keeps_its_live_timer"
+      ],
+      "rules": [
+        "scheduler-legacy-history-materialization"
       ]
     }
   ],

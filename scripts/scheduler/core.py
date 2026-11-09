@@ -27,7 +27,7 @@ ABANDONED = ("ready", "fired", "cancelled", "stopped", "stale")
 T = TypeVar("T")
 
 
-def _abandoned(entry: dict[str, Any], now: float) -> bool:
+def abandoned(entry: dict[str, Any], now: float) -> bool:
     """A process timer no waiter holds: finished or never started, and due ABANDONED_S or more before now."""
     due = entry.get("due")
     return (
@@ -73,10 +73,7 @@ class Entry:
 
     @property
     def record(self) -> dict:
-        entry = self.scheduler.document()["entries"].get(self.id)
-        if entry is None:
-            raise KeyError(self.id)
-        return entry
+        return self.scheduler.record(self.id)
 
     @property
     def state(self) -> str:
@@ -160,6 +157,15 @@ class Scheduler:
 
     def document(self) -> dict:
         return self._read()[0]
+
+    def record(self, entry_id: str) -> dict[str, Any]:
+        reader = getattr(self.state, "scheduler_record", None)
+        entry = reader(self.name("entries"), entry_id) if reader is not None else None
+        if entry is None:
+            entry = self.document()["entries"].get(entry_id)
+        if entry is None:
+            raise KeyError(entry_id)
+        return entry
 
     def _read(self) -> tuple[dict[str, Any], int | None]:
         from scripts.events.scheduler_state import read
@@ -272,7 +278,15 @@ class Scheduler:
             "signal": "limit_reached" if schedule.kind == "stopwatch" else "timeout",
             "slots": [],
         }
-        self.change(lambda document: document["entries"].__setitem__(entry_id, entry))
+        now = schedule.due - schedule.delay if schedule.delay is not None else time.time()
+
+        def insert(document: dict[str, Any]) -> None:
+            for old_id in [key for key, row in document["entries"].items() if abandoned(row, now)]:
+                document["entries"].pop(old_id)
+                document["retired"].pop(old_id, None)
+            document["entries"][entry_id] = entry
+
+        self.change(insert)
         return Entry(self, entry_id)
 
     @staticmethod
@@ -354,7 +368,7 @@ class Scheduler:
             for entry_id in document["retired"]:
                 document["entries"].pop(entry_id, None)
             document["retired"] = {}
-            for entry_id in [key for key, entry in document["entries"].items() if _abandoned(entry, now)]:
+            for entry_id in [key for key, entry in document["entries"].items() if abandoned(entry, now)]:
                 document["entries"].pop(entry_id)
 
         self.change(reap, lease=lease)
@@ -365,7 +379,7 @@ class Scheduler:
         if document["retired"]:
             return True
         return any(
-            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now)
+            entry["state"] == "pending" or (entry["state"] == "active" and entry["due"] <= now) or abandoned(entry, now)
             for entry in document["entries"].values()
         )
 

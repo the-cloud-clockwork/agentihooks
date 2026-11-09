@@ -26,6 +26,7 @@ def finished(scheduler: Scheduler, count: int) -> None:
         scheduler.update(timer.id, lambda row: row.update(state="fired"))
 
 
+@pytest.mark.feature("scheduler-bounded-history")
 def test_abandoned_only_history_is_reaped_without_new_work(scheduler: Scheduler) -> None:
     with patch("scripts.scheduler.core.time.time", return_value=0):
         finished(scheduler, 32)
@@ -34,6 +35,7 @@ def test_abandoned_only_history_is_reaped_without_new_work(scheduler: Scheduler)
     assert scheduler.records() == []
 
 
+@pytest.mark.feature("scheduler-bounded-history")
 def test_new_timer_prunes_abandoned_history_and_preserves_live_work(scheduler: Scheduler) -> None:
     with patch("scripts.scheduler.core.time.time", return_value=0):
         finished(scheduler, 32)
@@ -45,6 +47,7 @@ def test_new_timer_prunes_abandoned_history_and_preserves_live_work(scheduler: S
     assert active.state == "active"
 
 
+@pytest.mark.feature("scheduler-bounded-history")
 def test_timer_polling_reads_one_record() -> None:
     import fakeredis
 

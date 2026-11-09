@@ -37,12 +37,16 @@ def open_scheduler_state(bucket: str) -> StateStore:
             return bus.state(bucket)
     from scripts.swarm.store import redis_client
 
-    from .redis_state import RedisStateStore
+    from .scheduler_records import SchedulerState
 
-    return RedisStateStore(redis_client(), bucket)
+    return SchedulerState(redis_client(), bucket)
 
 
 def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
+    import time
+
+    from scripts.scheduler.core import abandoned as is_abandoned
+
     from .redis_state import WRITE_TRIES, RedisStateStore
 
     for _ in range(WRITE_TRIES):
@@ -52,13 +56,26 @@ def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
         document = json.loads(stored.value) if stored is not None and stored.value else {}
         if "entries" in document:
             return stored
-        entries = state.redis.hgetall(legacy_key)
-        retired = state.redis.hgetall(legacy_key.removesuffix("entries") + "retired")
+        now = time.time()
+        entries = {}
+        abandoned = []
+        for entry_id, raw in state.redis.hscan_iter(legacy_key, count=128):
+            entry = json.loads(raw)
+            if entry.get("owner") == "process" and is_abandoned(entry, now):
+                abandoned.append(entry_id)
+                if len(abandoned) == 128:
+                    state.redis.hdel(legacy_key, *abandoned)
+                    abandoned.clear()
+            else:
+                entries[entry_id] = entry
+        if abandoned:
+            state.redis.hdel(legacy_key, *abandoned)
+        retired = dict(state.redis.hscan_iter(legacy_key.removesuffix("entries") + "retired", count=128))
         if not entries and not retired:
             return stored
         document.update(
             {
-                "entries": {entry_id: json.loads(raw) for entry_id, raw in entries.items()},
+                "entries": entries,
                 "retired": dict.fromkeys(retired, True),
             }
         )
