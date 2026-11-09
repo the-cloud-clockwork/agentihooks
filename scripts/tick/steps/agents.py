@@ -155,7 +155,7 @@ def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
     if not tick.reports.Reports(store.redis).lost(agent, now_ms, tick.reports.LOST_MS):
         return False
     beat = tick.idle_state.heartbeat(store.redis, slug, agent.name)
-    wait = tick.idle_state.wait(store.redis, slug, agent.name)
+    wait = _holding_wait(store, slug, agent.name, now_ms)
     fresh = beat is not None and now_ms - beat["at"] <= tick.reports.LOST_MS
     return not fresh and (wait is None or wait["until"] <= now_ms)
 

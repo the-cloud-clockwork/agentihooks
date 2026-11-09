@@ -5,12 +5,13 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
       "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
-      "seam": "scripts.tick.steps.agents._watch_idle",
+      "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
       "tests": [
         "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
         "tests/tick/steps/test_idle_claim_retire.py::test_eight_codex_hive_owners_with_no_turn_are_retired_within_25_ticks",
         "tests/tick/steps/test_idle_claim_retire.py::test_the_idle_with_claim_finding_fires_on_the_counted_idle_ticks",
-        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs"
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost"
       ]
     },
     {

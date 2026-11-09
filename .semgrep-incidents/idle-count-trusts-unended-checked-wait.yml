@@ -3,13 +3,17 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      The tick idle verdict reads an agent's declared wait raw. On 9 November claim holders sat idle for up to nine
-      hours because the step that ends checked waits had not run for 56 hours, and every 12 hour checked wait the stop
-      gate declared held the idle count at zero. Read the wait through _holding_wait, which drops a checked wait once
-      that step stops running.
+      The tick idle count reads an agent's declared wait raw, so a checked wait the waits end step can no longer end
+      holds the idle count at zero and an idle claim holder is never retired. Read the wait through _holding_wait,
+      which drops a checked wait once that step stops running.
     paths:
       include:
         - /scripts/tick/steps/
         - idle-count-trusts-unended-checked-wait.py
-    pattern-either:
-      - pattern: $IDLE.verdict($PANE, $BEAT, <... $STATE.wait ...>, $NOW)
+    patterns:
+      - pattern-not-inside: |
+          def _holding_wait(...):
+              ...
+      - pattern-either:
+          - pattern: $TICK.idle_state.wait(...)
+          - pattern: $TIMING.timed($TICK.idle_state.wait, ...)

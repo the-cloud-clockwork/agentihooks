@@ -1,4 +1,4 @@
-"""Backtests of 9 November: claim holders idle at their prompts under a checked wait the tick could not end."""
+"""Claim holders idle at their prompts under a checked wait the tick could not end are retired and counted idle."""
 
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -18,7 +18,7 @@ STOPPED = 1_794_216_840_000
 WAITS_END_RAN_S = (STOPPED - 56 * 3_600_000) / 1000
 CHECKS_WAIT_MS = 12 * 3_600_000
 PASSES = 25
-WAITS_END = "waits end"
+WAITS_END = agents.WAITS_END
 
 
 class Redis(dict[str, Any]):
@@ -63,7 +63,7 @@ class Store:
 
 
 def _checked_wait(name: str) -> dict[str, Any]:
-    """Return the 12 hour checks wait the stop gate declared when ``name`` stopped."""
+    """Return the checks wait the stop gate declared when ``name`` stopped."""
     target = f"https://github.com/the-cloud-clockwork/agentihooks/pull/{name[-4:]}"
     return {
         "until": STOPPED + CHECKS_WAIT_MS,
@@ -137,7 +137,7 @@ def _run(store: Store, runtime: Any, crew: list[AgentRecord], passes: int) -> di
 
 
 def _starved(store: Store) -> None:
-    """Record the waits end step's last run 56 hours before the agents stopped, as observed live."""
+    """Record the waits end step's last run long before the agents stopped."""
     timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S)
 
 
@@ -198,3 +198,18 @@ def test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs(monkeypa
     _run(store, runtime, [agent], PASSES)
     assert retired == []
     assert store.saved[agent.name].idle_ticks == 0
+
+
+@pytest.mark.feature("swarm-tick-idle-claim-retire")
+@pytest.mark.parametrize(("starved", "lost"), [(True, True), (False, False)])
+def test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost(
+    monkeypatch: pytest.MonkeyPatch, starved: bool, lost: bool
+) -> None:
+    agent = AgentRecord(name="engineer@323133-7700", lane="eng", task="h0", harness="codex", hive="6d9e2d0c1ed5106d")
+    _seams(monkeypatch, {agent.name: _checked_wait(agent.name)}, [])
+    reports = SimpleNamespace(lost=lambda agent, now_ms, limit: True)
+    monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports, LOST_MS=10 * elapsed.PASS_MS))
+    store = Store()
+    now = STOPPED + PASSES * elapsed.PASS_MS
+    timing.step_ended(store, "rig", WAITS_END, WAITS_END_RAN_S if starved else now / 1000)
+    assert agents._hive_lost("rig", store, agent, now) is lost
