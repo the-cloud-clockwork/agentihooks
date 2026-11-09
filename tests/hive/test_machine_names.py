@@ -1,9 +1,13 @@
 import json
 import subprocess
+from typing import TYPE_CHECKING
 
 import pytest
 
 from scripts.hive import auth, cli, machine, registry, remove
+
+if TYPE_CHECKING:
+    from fakeredis import FakeRedis
 
 pytestmark = pytest.mark.unit
 
@@ -204,14 +208,14 @@ def test_remove_deletes_the_files_of_a_hive_that_hive_create_named() -> None:
     ]
 
 
-def test_a_saved_label_outside_the_hive_pattern_holds_no_ordinal(admin):
+def test_a_saved_label_outside_the_hive_pattern_holds_no_ordinal(admin: "FakeRedis") -> None:
     admin.hset(machine.MACHINES, "worker-001", "anton-9")
 
     assert machine.name(admin, "worker-002") == "swarm-hive-001"
     assert admin.hgetall(machine.MACHINES) == {"worker-001": "anton-9", "worker-002": "swarm-hive-001"}
 
 
-def test_a_known_machine_answers_its_saved_name_and_writes_nothing(admin):
+def test_a_known_machine_answers_its_saved_name_and_writes_nothing(admin: "FakeRedis") -> None:
     admin.hset(machine.MACHINES, "worker-002", "swarm-hive-005")
 
     assert machine.name(admin, "worker-002") == "swarm-hive-005"
