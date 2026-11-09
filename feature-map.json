@@ -2494,6 +2494,17 @@
       ]
     },
     {
+      "id": "scoped-member-inbox-publish",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2151",
+      "behaviour": "A scoped hive member selects its swarm before opening inbox state and publishes immediately; only a real bus failure leaves delivery to the Redis recheck.",
+      "seam": "InboxStore.send through SeatPublisher and SeatInbox on a scoped member bus",
+      "tests": [
+        "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
+        "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
+      ]
+    },
+    {
       "id": "managed-swarm-brain-rendering",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
