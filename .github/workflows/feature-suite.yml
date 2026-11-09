@@ -86,6 +86,39 @@ jobs:
         run: |
           python -m pytest tests/features --confcutdir=tests/features -m feature -n 0 -v -rs --tb=long --basetemp="$RUNNER_TEMP/feature-suite" --junitxml="$RUNNER_TEMP/feature-suite.xml"
 
+      - name: Install the browser that mapped page tests drive
+        if: ${{ !cancelled() }}
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Fetch dev for the mapped tests that grade against their base
+        if: ${{ !cancelled() }}
+        run: git fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev
+
+      - name: Run the mapped tests outside the feature suite
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+        run: |
+          python -m scripts.feature_map --nodes > "$RUNNER_TEMP/mapped-nodes.txt"
+          mapfile -t nodes < <(grep -v '^tests/features/' "$RUNNER_TEMP/mapped-nodes.txt")
+          (( ${#nodes[@]} > 0 ))
+          env -u AGENTIHOOKS_FEATURE_SUITE -u AGENTIHOOKS_SWARM_REDIS_URL -u AGENTIHOOKS_SWARM_DATABASE_URL python -m pytest "${nodes[@]}" -n "$(python -m scripts.ci_cpu_quota)" --dist loadgroup -v -rs --tb=short --timeout=60 --timeout-method=thread -p no:cacheprovider --junitxml="$RUNNER_TEMP/feature-mapped.xml"
+
+      - name: Fail on a mapped test missing, skipped or xfailed at run time
+        if: ${{ !cancelled() }}
+        run: python -m scripts.feature_map --junit "$RUNNER_TEMP/feature-suite.xml" --junit "$RUNNER_TEMP/feature-mapped.xml"
+
+      - name: Upload the feature suite junit reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-suite-junit
+          path: |
+            ${{ runner.temp }}/feature-suite.xml
+            ${{ runner.temp }}/feature-mapped.xml
+          retention-days: 14
+
       - name: Print the service, ledger server and scripted agent logs
         if: failure()
         run: |
