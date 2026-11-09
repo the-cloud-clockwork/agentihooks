@@ -91,13 +91,13 @@ jobs:
           fi
           cd "$grader"
           python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/head" --head "$copy"
+      - name: Hold every tick scenario step to its floor and fail an abandoned step
+        working-directory: head
+        run: python -m pytest tests/swarm/tick_scenarios/test_step_budgets.py -n 0 --tb=short
       - name: Replay tick scenarios on base and head concurrently and check the dropped action
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}
         run: bash head/tests/swarm/tick_equivalence.sh
-      - name: Hold every tick scenario step to its floor and fail an abandoned step
-        working-directory: head
-        run: python -m pytest tests/swarm/tick_scenarios/test_step_budgets.py -n 0 --tb=short
       - name: Hold the simulated tick load to its pass budget
         run: |
           git -C head fetch --no-tags --depth=1 origin +refs/heads/dev:refs/remotes/origin/dev

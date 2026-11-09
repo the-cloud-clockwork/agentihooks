@@ -130,6 +130,7 @@ class PlacingRuntime(FakeRuntime):
         herdr.quota_accounts = capacity.hive_accounts(store)
         herdr.planned_account.return_value = None
         held = lease.acquire(store, "sw", "controller")
+        assert held is not None
         self.launcher = launch.HiveLaunch(store, "sw", held, herdr)
         self.selections = []
 

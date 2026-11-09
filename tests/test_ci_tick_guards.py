@@ -116,6 +116,8 @@ def test_tick_equivalence_holds_every_scenario_step_to_its_floor_unconditionally
     assert step["working-directory"] == "head"
     assert "|| true" not in step["run"]
     assert "continue-on-error" not in step
+    [replay] = [item for item in steps if "bash head/tests/swarm/tick_equivalence.sh" in item.get("run", "")]
+    assert steps.index(step) < steps.index(replay)
 
 
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
