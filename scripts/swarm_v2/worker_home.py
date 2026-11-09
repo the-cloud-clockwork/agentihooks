@@ -9,8 +9,10 @@ import subprocess
 import sys
 import time
 import tomllib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from hooks.context.profile_chain import BUNDLE_PROFILES
@@ -297,7 +299,8 @@ def materialize(attempt: Path, target: str) -> None:
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
     workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
-    adapter.register_mcp(brain_binding.apply(browser.configure(workable, names), os.environ))
+    apply = cast(Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]], brain_binding.apply)
+    adapter.register_mcp(apply(browser.configure(workable, names), os.environ))
 
 
 def _strings(value: object) -> list[str]:

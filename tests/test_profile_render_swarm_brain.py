@@ -74,5 +74,6 @@ def test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch(world: di
 
     out = render.render_claude("rb-role")
 
+    assert out is not None
     assert json.loads((out / ".claude.json").read_text())["mcpServers"]["agentibrain"] == kernel_brain
     assert "SWARM BRAIN MARKER" not in (out / "CLAUDE.md").read_text()
