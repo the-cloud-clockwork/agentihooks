@@ -125,8 +125,13 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
         assert tick_heartbeat.read(swarm, "sw") is not None
         if not any(record.name == "status publish" for record in closing):
             assert published.wait(5.0)
-        assert sorted(record.name for record in closing) == ["heartbeat", "last tick", "status publish"]
-        stamps = [record for record in closing if record.name != "status publish"]
+        assert sorted(record.name for record in closing) == [
+            "heartbeat",
+            "last tick",
+            "status publish",
+            "step starvation",
+        ]
+        stamps = [record for record in closing if record.name in ("heartbeat", "last tick")]
         assert not any(record.abandoned or record.outcome == engine.FAILED for record in stamps)
         publish = next(record for record in closing if record.name == "status publish")
         assert publish.outcome != engine.FAILED
