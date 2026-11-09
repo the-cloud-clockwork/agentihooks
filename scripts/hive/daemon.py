@@ -426,7 +426,7 @@ def claude_signed_in() -> bool:
     return result.returncode == 0 and status.get("loggedIn") is True and status.get("authMethod") == "claude.ai"
 
 
-def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
+def _subscriptions(environ: dict, counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
     claude = {credential.account for credential in balancer.discover_credentials(environ)}
@@ -450,6 +450,8 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
+        if result and balancer.refused(result):
+            quota[f"claude:{account}"]["refused"] = True
     pool = codex_router.routed(
         [
             account

@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
+_PASS_ROWS: list[tuple[object, list["Account"]]] = []
+_PASS_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -193,7 +196,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], account_key(f"{row['account']}")) in refused:
+        if (quota or {}).get("refused") or (row["harness"], account_key(f"{row['account']}")) in refused:
             cap = 0
         rows.append(
             Account(
@@ -215,12 +218,25 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
 
 
 def _refused(environ: dict) -> set[tuple[str, str]]:
-    """Claude accounts whose latest local probe the provider refused; hive quota reports carry no probe status."""
+    """Claude accounts whose latest local probe the provider refused; a hive reading carries its own refusal."""
     latest = {
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
     }
     return {(balancer.HARNESS, account_key(account)) for account, result in latest.items() if balancer.refused(result)}
+
+
+def _pass_global(environ: dict, now: float, redis: Any = None) -> list[Account]:
+    """The hive quota rows of the running tick pass, read once per pass and reused; outside a pass each call reads."""
+    from scripts.tick import pool
+
+    current = pool.active()
+    if current is None:
+        return _global(environ, now, redis)
+    with _PASS_LOCK:
+        if not _PASS_ROWS or _PASS_ROWS[0][0] is not current:
+            _PASS_ROWS[:] = [(current, _global(environ, now, redis))]
+        return list(_PASS_ROWS[0][1])
 
 
 def probe(environ: dict[str, str], now: float) -> list[Account]:
@@ -236,7 +252,7 @@ def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None)
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _global(environ, now, redis)
+        _pass_global(environ, now, redis)
         if redis is not None or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
