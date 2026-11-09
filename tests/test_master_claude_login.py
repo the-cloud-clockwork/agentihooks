@@ -1656,4 +1656,3 @@ def test_the_master_token_route_reports_routed_only_inside_the_admitted_callback
     monkeypatch.setattr(login.os, "execvpe", launch)
     login.launch_token("/opt/claude", [], _environ(rendered), str(report))
     assert executed == ["yes"]
-

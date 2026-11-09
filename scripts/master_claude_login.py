@@ -726,7 +726,6 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
             raise RoutingError(str(exc)) from exc
 
 
-
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
     from scripts.hive.account_slots import execute
