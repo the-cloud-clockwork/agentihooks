@@ -518,7 +518,7 @@ def _prepare(
     if not timing.timed(store.claim, slug, task["id"], name, tick.LEASE_MS):
         tick._release_admission(slug, runtime, task)
         return None, []
-    handoff = store.handoff(slug, task["id"])
+    handoff = ""
     lives = store.earlier_lives(slug, task["id"])
     if handoff:
         task["handoff"] = handoff
