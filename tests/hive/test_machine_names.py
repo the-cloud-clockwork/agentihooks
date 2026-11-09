@@ -220,3 +220,14 @@ def test_a_known_machine_answers_its_saved_name_and_writes_nothing(admin: "FakeR
 
     assert machine.name(admin, "worker-002") == "swarm-hive-005"
     assert admin.hgetall(machine.MACHINES) == {"worker-002": "swarm-hive-005"}
+
+
+@pytest.mark.feature("hive-label-reserves-identifier")
+def test_an_interface_hive_reserves_its_settled_name_and_identifier(admin: "FakeRedis") -> None:
+    registry.update(admin, "swarm-hive-001", ["ui=yes"])
+
+    held = machine.held_names(admin, Run())
+
+    assert registry.show(admin, "swarm-hive-001")["name"] == registry.MASTER_NAME
+    assert registry.MASTER_NAME in held
+    assert "swarm-hive-001" in held
