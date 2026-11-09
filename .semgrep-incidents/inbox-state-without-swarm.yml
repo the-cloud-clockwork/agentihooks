@@ -1,0 +1,17 @@
+rules:
+  - id: inbox-state-without-swarm
+    languages: [python]
+    severity: ERROR
+    message: Select the inbox swarm view before opening state so scoped hive messages publish without Redis fallback.
+    patterns:
+      - pattern-inside: |
+          class SeatInbox:
+              ...
+      - pattern: $BUS.state("inbox")
+      - pattern-not-inside: |
+          def __init__(...):
+              ...
+              self.bus = $ROOT.for_swarm($SWARM)
+              ...
+              self.state = self.bus.state("inbox")
+              ...
