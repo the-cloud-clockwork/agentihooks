@@ -65,7 +65,7 @@ def test_one_pass_makes_one_hive_quota_read_for_every_account(scans: Mock) -> No
         first = read(ENVIRON, 100, refresh=False)
         assert read(ENVIRON, 101, refresh=False) == first
         assert capacity.accounts(ENVIRON, 102, refresh=False) == first
-    assert scans.call_count == 1
+    scans.assert_called_once_with(_Store.redis, 100)
     assert {row.name for row in first} == {"one", "two"}
     with pool.running():
         read(ENVIRON, 103, refresh=False)
