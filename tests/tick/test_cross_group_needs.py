@@ -125,9 +125,9 @@ def test_a_step_is_dropped_when_the_handed_off_step_of_an_earlier_group_it_needs
         release.set()
         assert ended.wait(5.0)
     assert ran == []
-    assert sorted((row.name, row.abandoned) for records in later for row in records) == [
-        ("cross dropped dependent", True),
-        ("cross stuck step", True),
+    assert sorted((row.name, row.abandoned, row.cut) for records in later for row in records) == [
+        ("cross dropped dependent", True, False),
+        ("cross stuck step", False, True),
     ]
     assert [row.wall_s > 0.0 for records in later for row in records if row.name == stuck.name] == [True]
 
