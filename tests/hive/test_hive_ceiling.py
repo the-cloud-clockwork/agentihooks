@@ -168,10 +168,10 @@ def test_the_hive_list_shows_the_ceiling_and_how_it_is_set(
     assert cli.main(["list"]) == 0
     columns = {line.split("\t")[0]: line.split("\t")[3] for line in capsys.readouterr().out.splitlines()}
     assert columns == {
-        "a": "max-agents=10 (auto)",
-        "b": "max-agents=3 (cap 3)",
-        "c": "max-agents=10 (cap 30)",
-        "d": "max-agents=unknown (auto)",
+        "a": "workers=0 of 10 (auto)",
+        "b": "workers=0 of 3 (cap 3)",
+        "c": "workers=0 of 10 (cap 30)",
+        "d": "workers=0 of unknown (auto)",
     }
 
 
