@@ -1416,3 +1416,7 @@ it never prints credentials. The command requires the Redis state backend.
 New member documents omit the agents map. Retirement and authoritative execution ending remove the agent's
 scoped credential record. Compaction indexes older independent token records by agent so ending that agent
 also removes its migrated credentials without scanning every member document. Active peers keep their tokens.
+
+Compaction and token retirement hold the same per member Redis lock. Retirement also removes matching entries
+from a retained legacy map while preserving the map format and active peers. This prevents a concurrent migration
+from recreating a token after its agent ended.

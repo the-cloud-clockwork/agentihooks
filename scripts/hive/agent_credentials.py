@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from functools import partial
 from itertools import islice
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,6 +18,19 @@ if TYPE_CHECKING:
 
 def _without_agents(current: dict[str, Any]) -> dict[str, Any]:
     return {field: value for field, value in current.items() if field != "agents"}
+
+
+@contextmanager
+def _member_guard(client: Any, member_id: str) -> Iterator[None]:
+    with client.lock(f"{auth.PREFIX}:credential-maintenance:{member_id}", timeout=600, blocking_timeout=10):
+        yield
+
+
+def _without_scope(current: dict[str, Any] | None, slug: str, name: str) -> Any:
+    if current is None or "agents" not in current:
+        return hive_state.KEEP
+    kept = {digest: scope for digest, scope in current["agents"].items() if scope != [slug, name]}
+    return hive_state.KEEP if kept == current["agents"] else {**current, "agents": kept}
 
 
 def _compact_member(client: Any, member_id: str) -> int:
@@ -38,7 +54,11 @@ def compact(client: Any, members: list[str], readers_compatible: bool = False) -
         raise auth.HiveError("compaction requires verified readers and an explicit member list")
     if not hive_state.on_redis():
         raise auth.HiveError("credential compaction requires the Redis state backend")
-    return {member_id: _compact_member(client, member_id) for member_id in members}
+    sizes: dict[str, int] = {}
+    for member_id in members:
+        with _member_guard(client, member_id):
+            sizes[member_id] = _compact_member(client, member_id)
+    return sizes
 
 
 def _index_key(member_id: str, slug: str, name: str) -> str:
@@ -64,15 +84,20 @@ def _index_legacy(client: Any, member_id: str) -> None:
 
 
 def retire(client: Any, member_id: str, slug: str, name: str) -> None:
-    """Remove one ended agent's scoped tokens and indexed independent legacy records."""
+    """Remove one ended agent's current and legacy credentials under the compaction fence."""
     if not member_id:
         return
-    store = auth._store(client)
-    index = _index_key(member_id, slug, name)
-    for key in hive_state.read(store, index) or ():
-        hive_state.amend(store, key, lambda _: None)
-    hive_state.amend(store, auth._agent_key(member_id, slug, name), lambda _: None)
-    hive_state.amend(store, index, lambda _: None)
+    with _member_guard(client, member_id):
+        store = auth._store(client)
+        member = auth.member(client, member_id)
+        if member and "agents" in member and hive_state.on_redis():
+            _index_legacy(client, member_id)
+        index = _index_key(member_id, slug, name)
+        for key in hive_state.read(store, index) or ():
+            hive_state.amend(store, key, lambda _: None)
+        hive_state.amend(store, auth._agent_key(member_id, slug, name), lambda _: None)
+        hive_state.amend(store, index, lambda _: None)
+        hive_state.amend(store, f"member.{member_id}", partial(_without_scope, slug=slug, name=name))
 
 
 def retire_named(client: Any, slug: str, name: str, previous: str | None, lives: list[AgentRecord]) -> None:

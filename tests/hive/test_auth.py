@@ -9,6 +9,7 @@ import subprocess
 import threading
 import urllib.error
 import urllib.request
+from typing import Any
 
 import pytest
 
@@ -235,7 +236,7 @@ def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
         assert any(fnmatchcase(key, pattern) for pattern in patterns), key
 
 
-def test_the_grant_sizes_and_member_record(admin, redis_lib):
+def test_the_grant_sizes_and_member_record(admin: Any, redis_lib: Any) -> None:
     grant = auth.mint(admin, "laptop", PUBLIC)
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
 
@@ -246,7 +247,6 @@ def test_the_grant_sizes_and_member_record(admin, redis_lib):
     assert auth.member(admin, grant["id"]) == {
         "name": "laptop",
         "ledger": hashlib.sha256(grant["ledger_credential"].encode()).hexdigest(),
-        "agents": {},
     }
     assert admin.acl_getuser(f"hive-{grant['id']}")["flags"] == ["on"]
 

@@ -76,6 +76,108 @@ def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     assert hive_state.read(auth._store(client), auth._agent_key("m1", "alpha", name)) is None
 
 
+def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: Any) -> None:
+    from scripts.hive import agent_credentials
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(client)
+    store.create(SwarmConfig("alpha", "/repo", 1, 0))
+    name = store.next_name("alpha", "eng")
+    store.start_execution("alpha", AgentRecord(name, "eng", "task", seat="eng-1@alpha", hive="m1"))
+    credentials = auth._store(client)
+    token = "hive.m1.older"
+    key = f"agent.m1.{auth._digest(token)}"
+    hive_state.amend(credentials, key, lambda _: {"ledger": "d", "scope": ["alpha", name]})
+    scoped = auth.issue_agent(client, "m1", "alpha", name)
+    peer = auth.issue_agent(client, "m1", "alpha", "engineer@peer")
+    agent_credentials.compact(client, ["m1"], readers_compatible=True)
+
+    assert auth.agent_member(client, token, "alpha", name) == "m1"
+    assert store.drop_agent("alpha", name)
+    assert hive_state.read(credentials, key) is None
+    assert auth.agent_member(client, token, "alpha", name) is None
+    assert auth.agent_member(client, scoped, "alpha", name) is None
+    assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
+
+
+def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(client: Any) -> None:
+    from scripts.hive import agent_credentials
+
+    credentials = auth._store(client)
+    token = "hive.m1.retained"
+    peer = "hive.m1.retained-peer"
+    hive_state.amend(
+        credentials,
+        "member.m1",
+        lambda _: {
+            "name": "hive",
+            "ledger": "d",
+            "agents": {
+                auth._digest(token): ["alpha", "engineer@1"],
+                auth._digest(peer): ["alpha", "engineer@peer"],
+            },
+        },
+    )
+
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+    assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
+    assert auth.member(client, "m1") == {
+        "name": "hive",
+        "ledger": "d",
+        "agents": {auth._digest(peer): ["alpha", "engineer@peer"]},
+    }
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+    assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
+
+
+def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections.abc import Iterator
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event
+
+    from scripts.hive import agent_credentials
+
+    token = "hive.m1.interleaved"
+    hive_state.amend(
+        auth._store(client),
+        "member.m1",
+        lambda _: {"name": "hive", "ledger": "d", "agents": {auth._digest(token): ["alpha", "engineer@1"]}},
+    )
+    snapshot, release, retirement_attempted = Event(), Event(), Event()
+    original_member, original_lock = auth.member, client.lock
+
+    def read_member(redis: Any, member_id: str) -> Any:
+        found = original_member(redis, member_id)
+        if not snapshot.is_set():
+            snapshot.set()
+            assert release.wait(5)
+        return found
+
+    @contextmanager
+    def observed_lock(name: str, **kwargs: Any) -> Iterator[None]:
+        if snapshot.is_set():
+            retirement_attempted.set()
+        with original_lock(name, **kwargs):
+            yield
+
+    monkeypatch.setattr(auth, "member", read_member)
+    monkeypatch.setattr(client, "lock", observed_lock)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        compacting = pool.submit(agent_credentials.compact, client, ["m1"], True)
+        assert snapshot.wait(5)
+        retiring = pool.submit(agent_credentials.retire, client, "m1", "alpha", "engineer@1")
+        try:
+            assert retirement_attempted.wait(5)
+        finally:
+            release.set()
+        assert compacting.result(timeout=5) == {"m1": 31}
+        assert retiring.result(timeout=5) is None
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
 def test_minted_members_omit_the_obsolete_agents_map(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth, "_set_user", lambda *_: None)
     monkeypatch.setattr(auth.redis_acl, "save", lambda *_: None)
