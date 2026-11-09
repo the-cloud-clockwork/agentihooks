@@ -266,10 +266,11 @@ class FencedRuntime:
         if refused and not workstation:
             raise SwarmError(refused)
         if workstation or self.deployment == LOCAL:
-            from scripts.hive import admission
+            from scripts.hive import admission, placement_waits
             from scripts.swarm.commands import hive_id
 
             admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
+            placement_waits.admitted(self.store, self.slug)
         runtime = self.runtime
         if workstation:
             runtime = runtime.herdr_runtime

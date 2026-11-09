@@ -110,6 +110,10 @@ def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatc
     _, lane, name, sent = setup.herdr.spawn.call_args.args
     assert (lane, name, sent["id"], sent["controller_epoch"]) == ("eng", "eng name", "task", setup.held.epoch)
     fenced.runtime.hive_launch.spawn.assert_not_called()
+    assert setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS)) == {
+        "placement": "1",
+        placement_waits.ADMITTED: "1",
+    }
 
 
 def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatch):
