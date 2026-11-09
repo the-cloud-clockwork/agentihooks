@@ -44,9 +44,10 @@ def _moving(store: InboxStore, old: str, targets: Iterator[str], real: Callable[
     return moved
 
 
+@pytest.mark.parametrize("read", ["mailbox", "pending_mail"])
 @pytest.mark.feature("inbox-alias-store-revision")
 def test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile(
-    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch, read: str
 ) -> None:
     item = store.send("alice", "engineer@abcdef-0002", "review my branch")
     real = store.seats.seat_of
@@ -59,8 +60,27 @@ def test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(store.seats, "seat_of", seat_of)
-    assert [listed.id for listed in store.mailbox("sw-eng-1")] == [item.id]
+    assert [listed.id for listed in getattr(store, read)("sw-eng-1")] == [item.id]
     assert [call[0] for call in calls] == ["sw-eng-1", "engineer@abcdef-0002"]
+
+
+@pytest.mark.feature("inbox-alias-store-revision")
+def test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    item = store.send("alice", "sw-eng-1", "review my branch")
+    real = store.seats.seat_of
+    calls = []
+
+    def seat_of(*args: Any, **kwargs: Any) -> Any:
+        if not calls:
+            store.names.names_state.amend("aliases-of", "engineer@abcdef-0002", lambda _: ["sw-eng-1"], lambda _: None)
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(store.seats, "seat_of", seat_of)
+    assert [listed.id for listed in store.mailbox("engineer@abcdef-0002")] == [item.id]
+    assert [call[0] for call in calls] == ["engineer@abcdef-0002", "engineer@abcdef-0002"]
 
 
 @pytest.mark.feature("inbox-alias-store-revision")
