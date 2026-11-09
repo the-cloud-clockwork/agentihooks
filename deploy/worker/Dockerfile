@@ -13,8 +13,9 @@ COPY scripts /build/scripts
 COPY profiles /build/profiles
 
 FROM source-${AGENTIHOOKS_SOURCE} AS wheel
+ARG AGENTIHOOKS_VERSION=0.0.0
 WORKDIR /build
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels . \
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --wheel-dir /wheels . \
     && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
