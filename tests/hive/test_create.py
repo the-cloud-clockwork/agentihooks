@@ -1134,6 +1134,58 @@ def test_a_failed_port_choice_releases_the_reservation(world, monkeypatch):
     assert _reserved(world, NAME) is None
 
 
+def _crashed_once(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    return crash
+
+
+def test_a_resumed_create_killed_before_its_release_keeps_its_own_reservation(world, monkeypatch):
+    crash = _crashed_once(world, monkeypatch)
+    token = _state(world)["reservation"]
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", token)
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert seen == [token]
+    assert _reserved(world, NAME) is None
+
+
+def test_a_resumed_create_saved_without_a_reservation_reserves_and_releases_one(world, monkeypatch):
+    crash = _crashed_once(world, monkeypatch)
+    saved = _state(world)
+    del saved["reservation"]
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    (token,) = seen
+    assert token.startswith("root:") and _state(world)["reservation"] == token
+    assert _reserved(world, NAME) is None
+
+
+def test_an_explicit_name_lost_to_a_racing_create_is_refused(world, monkeypatch):
+    monkeypatch.setattr(create, "_reserve", lambda tools, name, token: False)
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create refuses {NAME}: it is already held by another hive create run; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
+
+
 @pytest.mark.feature("hive-create-resume-revoke")
 def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(
     world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
