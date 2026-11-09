@@ -219,7 +219,9 @@ def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     for report in end_gone(redis, hive, reports, at):
         if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
-        checks = cheap_checks(redis, report)
+        checks = {
+            name: report["checks"].get(name) is True or passed for name, passed in cheap_checks(redis, report).items()
+        }
         with redis.pipeline() as pipe:
             try:
                 pipe.watch(key(hive))
