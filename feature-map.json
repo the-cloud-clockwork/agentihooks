@@ -2596,6 +2596,18 @@
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
       ]
+    },
+    {
+      "id": "scheduler-bounded-history",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-headed-hive-oom",
+      "behaviour": "Scheduler waits reap abandoned process timers, prune new writes, poll one timer record and recover oversized Redis history without materializing it.",
+      "seam": "Scheduler timer creation, idle dispatch, Entry.state and Redis scheduler state recovery",
+      "tests": [
+        "tests/scheduler/test_bounded_history.py::test_abandoned_only_history_is_reaped_without_new_work",
+        "tests/scheduler/test_bounded_history.py::test_new_timer_prunes_abandoned_history_and_preserves_live_work",
+        "tests/scheduler/test_bounded_history.py::test_timer_polling_reads_one_record"
+      ]
     }
   ],
   "unmapped_rules": [
