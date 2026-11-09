@@ -12,6 +12,7 @@ import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
@@ -21,6 +22,9 @@ from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
 from scripts.swarm_v2 import masters
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 NO_DAEMON = "--no-daemon"
 REQUIRED_HOOKS = ("sessionStart", "userPromptSubmit", "preToolUse", "postToolUse", "stop")
@@ -328,7 +332,15 @@ def _record(launch: Launch, agent: AgentRecord, path: Path) -> TransportRecord:
     )
 
 
-def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tuple[TransportRecord, AgentRecord]:
+def _connect_bound(
+    store: RedisStore,
+    bindings: BindingStore,
+    launch: Launch,
+    agent: AgentRecord,
+    record: TransportRecord,
+    process: subprocess.Popen,
+    deps: Deps,
+) -> tuple[TransportRecord, AgentRecord]:
     path = Path(record.endpoint_ref.removeprefix(UNIX))
     connection, info = wait_ready(path, process, record, launch, deps)
     try:
@@ -531,14 +543,9 @@ def end_join_report(store: RedisStore, agent: AgentRecord, now_ms: int) -> None:
     """End the agent's hive join report so no heartbeat grades its home after removal."""
     from scripts.hive import join_report
 
-    report = join_report.read(store.redis, agent)
+    redis = cast("Redis", store.redis)
+    report: dict[str, str] = join_report.read(redis, agent)
     if report:
         join_report.end(
-            store.redis,
-            join_report.host(agent),
-            agent.execution_id,
-            report["session_id"],
-            TRANSPORT_EXITED,
-            "ended",
-            now_ms,
+            redis, join_report.host(agent), agent.execution_id, report["session_id"], TRANSPORT_EXITED, "ended", now_ms
         )
