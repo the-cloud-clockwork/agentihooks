@@ -126,11 +126,11 @@ def _start(tools: Tools, options: Options) -> dict[str, Any]:
     reserved: dict[str, str] = {} if options.dry_run else {"reservation": token}
     try:
         services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
+        lan_ip = create_render.lan_address(services)
+        port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     except BaseException:
         _release(tools, {"name": name, **reserved})
         raise
-    lan_ip = create_render.lan_address(services)
-    port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     found = {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip}
     return {**found, "node": options.node, **reserved}
 
@@ -142,7 +142,7 @@ def _token(tools: Tools) -> str:
 def _reclaimed(tools: Tools, options: Options, saved: dict[str, Any]) -> dict[str, Any]:
     """Take the saved run's name reservation back until its pull request exists, refusing one another run holds."""
     if options.dry_run or saved.get("pr"):
-        return saved
+        return {key: value for key, value in saved.items() if key != "reservation"}
     name, token = str(saved["name"]), str(saved.get("reservation") or _token(tools))
     if not _reserve(tools, name, token):
         raise auth.HiveError(

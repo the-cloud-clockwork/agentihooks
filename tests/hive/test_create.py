@@ -1080,3 +1080,29 @@ def test_the_dry_run_reserves_nothing(world):
     create.create(world.tools, create.Options(dry_run=True))
 
     assert world.tools.redis.keys(f"{create.RESERVED}:*") == []
+
+
+def test_a_dry_run_of_an_unfinished_create_leaves_its_reservation(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    token = _state(world)["reservation"]
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", token)
+
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert _reserved(world, NAME) == token
+
+
+def test_a_failed_port_choice_releases_the_reservation(world, monkeypatch):
+    def broken(services):
+        raise auth.HiveError("no lan address")
+
+    monkeypatch.setattr(create_render, "lan_address", broken)
+    with pytest.raises(auth.HiveError, match="no lan address"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
