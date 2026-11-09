@@ -2595,7 +2595,14 @@
       "tests": [
         "tests/hive/test_credential_compaction.py::test_compaction_preserves_legacy_tokens_and_removes_member_maps",
         "tests/hive/test_credential_compaction.py::test_ended_agent_tokens_are_removed_and_active_peers_keep_access",
-        "tests/hive/test_credential_compaction.py::test_minted_members_omit_the_obsolete_agents_map"
+        "tests/hive/test_credential_compaction.py::test_minted_members_omit_the_obsolete_agents_map",
+        "tests/hive/test_credential_compaction.py::test_compaction_requires_explicit_members_and_verified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_defaults_to_unverified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_other_backends",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_unknown_members",
+        "tests/hive/test_credential_compaction.py::test_cli_compacts_only_the_selected_members",
+        "tests/hive/test_credential_compaction.py::test_compaction_replaces_large_history_and_preserves_existing_independent_records",
+        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition"
       ]
     }
   ],
