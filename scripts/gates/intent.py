@@ -284,17 +284,26 @@ class Judging:
         self.running: dict[tuple[str, str], tuple[object, Future]] = {}
         self.lock = threading.Lock()
 
-    def holds(self, subject: tuple[str, str]) -> bool:
-        """Return whether a judgment of ``subject`` runs or waits to be taken."""
+    def holds(self, subject: tuple[str, str], key: object) -> bool:
+        """Return whether a judgment of ``subject`` made at ``key`` runs or waits to be taken."""
         with self.lock:
-            return subject in self.running
+            found = self.running.get(subject)
+            return found is not None and found[0] == key
+
+    def keep(self, slug: str, ids: set[str]) -> None:
+        """Drop and cancel the judgments of swarm ``slug`` whose task is not among ``ids``."""
+        with self.lock:
+            for subject in [s for s in self.running if s[0] == slug and s[1] not in ids]:
+                self.running.pop(subject)[1].cancel()
 
     def take(self, subject: tuple[str, str], key: object, start: Callable[[], object]) -> Future | None:
-        """Return the finished judgment of ``subject`` made at ``key``, else start ``start`` when none runs at
-        ``key`` and return None."""
+        """Return the finished judgment of ``subject`` made at ``key``, else start ``start`` in place of any judgment
+        made at another key, cancelling it, and return None."""
         with self.lock:
             found = self.running.get(subject)
             if found is None or found[0] != key:
+                if found is not None:
+                    found[1].cancel()
                 self.running[subject] = (key, self.pool.submit(start))
                 return None
             if not found[1].done():
@@ -861,6 +870,8 @@ class Check:
         verdicts, actions, tasks = Verdicts(self.slug, NAME, self.home), [], []
         states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
         watched = [task for task in doc["tasks"] if task.get("state") in states and task.get("pr_url")]
+        if self.judging is not None:
+            self.judging.keep(self.slug, {task["id"] for task in watched})
         turn = (self.now_ms // TURN_MS) % len(watched) if watched else 0
         for task in watched[turn:] + watched[:turn]:
             actions += self._isolated(task, self._queue, doc, task, verdicts, tasks)
@@ -904,7 +915,8 @@ class Check:
         if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
             return []
         quick = self._quick(doc, task)
-        counted = not quick and not (self.judging and self.judging.holds((self.slug, task["id"])))
+        held = self.judging is not None and self.judging.holds((self.slug, task["id"]), self._key(doc, task))
+        counted = not quick and not held
         if counted and self.limit is not None and sum(queued[-1] for queued in tasks) >= self.limit:
             return []
         if _drafted(record):
