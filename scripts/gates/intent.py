@@ -982,7 +982,7 @@ class Check:
         if previous:
             return _Judgment(None, previous, None, None)
         if self.draft is not None and self.draft(task["pr_url"]):
-            return _Judgment({"draft": True}, None, None, None)
+            return _Judgment(None, None, None, None)
         pr = self.view(task["pr_url"])
         if pr is None or (self.mode == "coach" and not pr.get("head")):
             return None

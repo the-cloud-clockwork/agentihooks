@@ -1,9 +1,11 @@
 """The intent check stays inside its tick step budget with thirty tasks in pr."""
 
+import json
+import re
 import threading
 from concurrent import futures
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -163,6 +165,89 @@ def test_only_a_process_that_keeps_running_passes_judges_off_the_pass(monkeypatc
     kept = intent.TICK_JUDGING
     intent.keep_judging()
     assert isinstance(kept, intent.Judging) and stops == [kept] and intent.TICK_JUDGING is kept
+
+
+class _Graph:
+    """A source that answers each batched pull request text read from ``pulls`` and records each document."""
+
+    def __init__(self, pulls: dict[str, dict[str, Any]]) -> None:
+        """Answer reads of ``pulls``."""
+        self.pulls, self.documents = pulls, []
+
+    def graph(self, document: str, variables: dict[str, str], *, deadline: Any) -> dict[str, Any]:
+        """Answer each alias of ``document`` with its pull, or None when unknown."""
+        self.documents.append(document)
+        aliases = re.findall(r'(p\d+):resource\(url:"([^"]+)"\)', document)
+        return {"data": {alias: self.pulls.get(url) for alias, url in aliases}}
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head():
+    from scripts.swarm import ledger_events
+
+    urls = [f"https://github.com/o/r/pull/{i}" for i in range(25)]
+    raw = {
+        url: {"headRefOid": f"h{i}", "title": f"T{i}", "body": "B", "state": "OPEN", "isDraft": i == 3}
+        for i, url in enumerate(urls)
+    }
+    raw[urls[1]] = {"headRefOid": "h1", "title": None, "body": None}
+    raw[urls[2]] = {"title": "no head"}
+    source = _Graph(raw)
+    found = ledger_events.pull_texts([*urls, urls[0]], cast(Any, source))
+    expected = [
+        "{"
+        + " ".join(f"p{i}:" + ledger_events.PULL_TEXT.replace("$url", json.dumps(url)) for i, url in enumerate(batch))
+        + "}"
+        for batch in (urls[:20], urls[20:])
+    ]
+    assert source.documents == expected
+    assert sorted(found) == sorted(url for url in urls if url != urls[2])
+    assert found[urls[0]] == {"head": "h0", "title": "T0", "body": "B", "state": "OPEN", "draft": False}
+    assert found[urls[1]] == {"head": "h1", "title": "", "body": "", "state": "", "draft": False}
+    assert found[urls[3]]["draft"] is True
+    assert ledger_events.pull_texts([], cast(Any, source)) == {} and len(source.documents) == 2
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_pulls_reads_an_unbatched_url_alone_once():
+    reads: list[list[str]] = []
+    pull = {"head": "h", "title": "T", "body": "", "state": "MERGED", "draft": False}
+
+    def read(urls: list[str]) -> dict[str, dict[str, Any]]:
+        reads.append(urls)
+        return {url: pull for url in urls if url != "unread"}
+
+    pulls = intent.Pulls(read, ["a"])
+    assert (pulls.merged("b"), pulls.head("b"), pulls.head("unread"), pulls.head("unread")) == (True, "h", None, None)
+    assert reads == [["a"], ["b"], ["unread"]]
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one():
+    judging = intent.Judging(workers=1)
+    gate = threading.Event()
+    subject, other = ("sw", "t1"), ("sw", "t2")
+    assert judging.take(("sw", "blocker"), "k", lambda: gate.wait(5)) is None
+    assert judging.take(subject, "old", lambda: "old") is None
+    waiting = judging.running[subject][1]
+    assert judging.holds(subject, "old") and not judging.holds(subject, "new") and not judging.holds(other, "old")
+    assert judging.take(subject, "new", lambda: "new") is None
+    assert waiting.cancelled() and judging.holds(subject, "new")
+    gate.set()
+    futures.wait([judging.running[subject][1]], timeout=5)
+    taken = judging.take(subject, "new", lambda: "again")
+    assert taken is not None and taken.result() == "new" and not judging.holds(subject, "new")
+    judging.keep("sw", {"t1"})
+    assert ("sw", "blocker") not in judging.running
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text(tmp_path):
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    task = doc["tasks"][4]
+    key = _check("coach", pulls, [], tmp_path)._key(doc, task)
+    assert key == (intent._fingerprint(doc, task), "ht4", intent.text_key(TITLE, BODY))
 
 
 @pytest.mark.feature("swarm-intent-check-budget")
