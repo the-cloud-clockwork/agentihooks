@@ -7,7 +7,11 @@ rules:
       include:
         - /scripts/master_claude_login.py
         - master-token-route-before-admission.py
-    pattern: |
-      _write_route_report(..., status="routed", ...)
-      ...
-      execute(...)
+    patterns:
+      - pattern-inside: |
+          def launch_token(...):
+            ...
+      - pattern: |
+          _write_route_report(..., status="routed", ...)
+          ...
+          execute(...)
