@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.764 · 2026-11-09
+
+### 2026-11-09 · 628324ad6ec6 · #10262 · @nestorcolt
+
+**Remove gate declaration expiry and preserve admin recovery**
+
+This change drops the expiry field and date validation from gate wiring declarations, since expiry rules were causing false failures on missing, past, or malformed dates without adding real safety. Admin recovery is preserved by explicitly allowing RepositoryRole 5 via pull requests, matching the payload from #10260. New regression tests cover wiring validation and protected grading, plus a Semgrep rule flags any reintroduced expiry keys. No alerting or renewal automation is added, simplifying gate declarations while keeping recovery access intact.
+
 ## v2.17.762 · 2026-11-09
 
 ### 2026-11-09 · 73508edcf249 · #10260 · @nestorcolt
