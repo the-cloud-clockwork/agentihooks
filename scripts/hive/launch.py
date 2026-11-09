@@ -517,6 +517,7 @@ class HiveLaunch:
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 self._journal_spill(request, selected)
+                placement_waits.admitted(self.store, self.slug)
                 return selected
             print(
                 json.dumps(
