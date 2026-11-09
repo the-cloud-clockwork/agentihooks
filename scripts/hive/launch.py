@@ -853,8 +853,7 @@ class HiveLaunch:
 
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
-        if agent is not None:
-            admission.release(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
+        admission.release(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if ack.status != "live":
             if ack.failure in ("expired", orders.RESTARTED):
                 self.reap(order, agent)

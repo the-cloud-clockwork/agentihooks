@@ -17,7 +17,3 @@ rules:
       - pattern-not-inside: |
           admission.release(...)
           ...
-      - pattern-not-inside: |
-          if $AGENT is not None:
-              admission.release(...)
-          ...
