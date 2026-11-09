@@ -27,6 +27,7 @@ if ! published "$image:$ref"; then
   docker build -f deploy/worker/Dockerfile \
     --build-arg WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:$version" \
     --build-arg AGENTIHOOKS_REF="$ref" \
+    --build-arg AGENTIHOOKS_VERSION="$version" \
     --tag "$image:$ref" .
   docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image:$ref" \
     -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"'

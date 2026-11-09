@@ -124,7 +124,11 @@ jobs:
 
       # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
       - name: Outage rules fire on their planted faults and pass their clean cases
-        run: semgrep --metrics off --test .semgrep-incidents
+        run: |
+          copy="$(mktemp -d -p "$RUNNER_TEMP")"
+          cp -r .semgrep-incidents "$copy/rules"
+          : > "$copy/.semgrepignore"
+          (cd "$copy" && semgrep --metrics off --test --config rules rules)
 
   charts:
     concurrency:
