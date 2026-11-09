@@ -2690,7 +2690,9 @@
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
         "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
         "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
-        "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text"
+        "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
+        "tests/gates/test_intent_budget.py::test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another",
+        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled"
       ]
     }
   ],

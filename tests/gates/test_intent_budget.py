@@ -251,6 +251,42 @@ def test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text(tmp_path):
 
 
 @pytest.mark.feature("swarm-intent-check-budget")
+def test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another(tmp_path):
+    assert intent.Judging().pool._max_workers == 2
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    released = threading.Event()
+    judging = intent.Judging()
+
+    def ask(state: dict[str, Any]) -> tuple[str, str]:
+        released.wait(5)
+        return "pass", "the phase can use it"
+
+    check = replace(_check("coach", pulls, [], tmp_path), ask=ask, judging=judging, limit=1)
+    check.run(doc)
+    first = set(judging.running)
+    check.run(doc)
+    released.set()
+    assert len(first) == 1 and first < set(judging.running) and len(judging.running) == 2
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_judgment_made_at_an_old_head_is_never_settled(tmp_path):
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    judging = intent.Judging()
+    check = replace(_check("coach", pulls, [], tmp_path), judging=judging, limit=1)
+    check.run(doc)
+    [(subject, (_, started))] = judging.running.items()
+    futures.wait([started], timeout=5)
+    url = next(task["pr_url"] for task in doc["tasks"] if task["id"] == subject[1])
+    pulls.found[url] = {**pulls.found[url], "head": "pushed"}
+    assert check.run(doc) == []
+    assert Verdicts(SLUG, "intent", tmp_path).read(subject[1]) is None
+    assert cast(tuple[Any, ...], judging.running[subject][0])[1] == "pushed"
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
 def test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view(tmp_path):
     doc = _doc()
     pulls, _ = _pulls(doc, draft=True)
