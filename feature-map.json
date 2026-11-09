@@ -2291,6 +2291,17 @@
       ]
     },
     {
+      "id": "hive-release-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2097",
+      "behaviour": "Each hive heartbeat records the agentihooks release the hive runs, and hive list prints it per hive, unknown when the record carries none.",
+      "seam": "daemon.beat and the hive list command",
+      "tests": [
+        "tests/hive/test_daemon.py::test_each_beat_reports_the_release_the_hive_runs",
+        "tests/hive/test_join_display.py::test_hive_list_prints_the_release_each_hive_runs"
+      ]
+    },
+    {
       "id": "controller-quota-after-restart",
       "origin": "regression",
       "ordered_at": "2026-11-08",

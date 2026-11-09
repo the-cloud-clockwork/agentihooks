@@ -265,8 +265,8 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     redis.set(headroom.key("old"), json.dumps({**record, "measured_at": 9_999}))
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tstale\tui=no\tworkers=0 of 0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\n"
+        "box\tstale\tui=no\tworkers=0 of 0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\trelease=unknown\n"
+        "old\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
     )
 
 
@@ -317,7 +317,7 @@ def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgr
     registry.update(redis, "anton-2", ["ui=no"])
     headroom.publish(redis, "anton-2", 5_000, proc)
     assert cli.main(["list"]) == 0
-    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\t" in capsys.readouterr().out
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):

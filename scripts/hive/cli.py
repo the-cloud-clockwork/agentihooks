@@ -408,6 +408,7 @@ def _list() -> None:
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
             f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
+            f"\trelease={record['version'] or 'unknown'}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
