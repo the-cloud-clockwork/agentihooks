@@ -2043,6 +2043,7 @@
         "tests/swarm_ledger/test_live_rows.py::test_marks_agree_with_the_claim_gate_freeze",
         "tests/swarm_ledger/test_live_rows.py::test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state",
         "tests/swarm_ledger/test_live_rows.py::test_a_claimed_task_under_a_freeze_stays_in_the_default_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_a_blocked_task_under_a_freeze_leaves_the_default_rows",
         "tests/swarm_ledger/test_live_rows.py::test_rows_answer_closed_and_frozen_tasks_only_on_request",
         "tests/swarm_ledger/test_live_rows.py::test_the_default_scope_holds_neither_closed_nor_frozen_tasks",
         "tests/swarm_ledger/test_live_rows.py::test_the_scoped_full_export_carries_only_the_scoped_task_rows",

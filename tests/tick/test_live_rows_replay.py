@@ -24,11 +24,13 @@ def _ledger() -> dict[str, Any]:
 
 
 def _live_unfrozen(doc: dict[str, Any]) -> int:
-    """Tasks that are not done and not an open task a freeze holds, counted by the claim gate's own freeze walk."""
+    """Tasks that are not done and not an open or blocked task a freeze holds, counted by the claim gate's own freeze walk."""
     graph = hierarchy.project(doc)[0]
     return sum(
         task["state"] != "done"
-        and not (task["state"] == "open" and freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph)))
+        and not (
+            task["state"] in ("open", "blocked") and freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
+        )
         for task in doc["tasks"]
     )
 
@@ -65,14 +67,14 @@ def test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read() -> None
     doc = _ledger()
     assert len(doc["tasks"]) == 4880
     assert len(doc["freezes"]) == 1332
-    assert _live_unfrozen(doc) == 292
+    assert _live_unfrozen(doc) == 217
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
 def test_a_default_scope_read_holds_only_the_live_unfrozen_tasks_of_the_replayed_ledger(tmp_path: Path) -> None:
     doc = _ledger()
     record = _pass(tmp_path / "view.json", _reader(doc))
-    assert record[view.ROWS_READ] == _live_unfrozen(doc) == 292
+    assert record[view.ROWS_READ] == _live_unfrozen(doc) == 217
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
@@ -81,12 +83,13 @@ def test_a_delta_pass_after_a_task_closes_reads_one_row_fewer(tmp_path: Path) ->
     path = tmp_path / "view.json"
     _pass(path, _reader(doc))
     after = copy.deepcopy(doc)
-    closing = next(task for task in after["tasks"] if task["state"] == "claimed")
+    kept = {row["id"] for row in live_rows.answer(doc, live_rows.Scope()).rows}
+    closing = next(task for task in after["tasks"] if task["id"] in kept)
     closing["state"] = "done"
     after["generation"] = doc["generation"] + 1
     changed = {encode(["tasks", ["id", closing["id"], 0], "state"])}
     record = _pass(path, _reader(after, changed))
-    assert record[view.ROWS_READ] == _live_unfrozen(after) == 291
+    assert record[view.ROWS_READ] == _live_unfrozen(after) == 216
     assert closing["id"] not in {task["id"] for task in view.refreshed(path, _reader(after, changed)).tasks}
 
 
@@ -98,10 +101,10 @@ def test_the_held_view_names_the_frozen_tasks_it_left_out(tmp_path: Path) -> Non
     frozen = {
         task["id"]
         for task in doc["tasks"]
-        if task["state"] == "open" and freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
+        if task["state"] in ("open", "blocked") and freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
     }
     assert held.frozen_ids == frozen
-    assert len(frozen) == 860
+    assert len(frozen) == 935
     assert not {task["id"] for task in held.tasks} & frozen
 
 

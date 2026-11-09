@@ -79,6 +79,16 @@ def test_a_claimed_task_under_a_freeze_stays_in_the_default_rows() -> None:
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
+def test_a_blocked_task_under_a_freeze_leaves_the_default_rows() -> None:
+    doc = _doc()
+    doc["tasks"].append({"id": "g", "state": "blocked", "phase": "p2", "lane": "eng"})
+    answer = live_rows.answer(doc, live_rows.Scope())
+    assert "g" not in {row["id"] for row in answer.rows}
+    assert answer.frozen_ids == ["c", "g"]
+    assert "g" in {row["id"] for row in live_rows.answer(doc, live_rows.Scope(frozen=True)).rows}
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
 @pytest.mark.parametrize(
     ("closed", "frozen", "ids"),
     [

@@ -6,6 +6,7 @@ from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
 
 CLOSED = ("done",)
+HELD = ("open", "blocked")
 SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
 SCOPE_PATHS = ("freezes", "phases", "slices", "plans")
 FROZEN_IDS = "frozen_ids"
@@ -90,7 +91,7 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
         cold, focus = resolved[task["id"]]
         if not scope.closed and task.get("state") in CLOSED:
             continue
-        if cold and task.get("state") == "open" and not scope.frozen:
+        if cold and task.get("state") in HELD and not scope.frozen:
             held.append(task["id"])
             continue
         kept.append({**task, "frozen": cold, "focus_rank": focus})
