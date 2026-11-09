@@ -2746,6 +2746,18 @@
         "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
         "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
       ]
+    },
+    {
+      "id": "swarm-tick-slow-lane-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-slow-lane-runs",
+      "behaviour": "The handed slow lane starts with the pass graph, each handed step once the critical steps it needs end, so a critical step overrunning its lane leaves every other handed step running inside the slow lane, and a reserved step such as spawn holds no later site behind it.",
+      "seam": "scripts.tick.engine run_graph with scripts.tick.pool.Pass tracking, and scripts.tick.registry.site_edges over the pass sites of scripts.swarm.cli",
+      "tests": [
+        "tests/tick/test_slow_lane_start.py::test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_needing_a_lost_critical_step_is_still_dropped",
+        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve"
+      ]
     }
   ],
   "unmapped_rules": [
