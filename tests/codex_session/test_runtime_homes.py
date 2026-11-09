@@ -330,7 +330,7 @@ def test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed(stor
 
     [(present, report)] = seen
     assert present
-    assert (report["ended_at"], report["exit_reason"], report["status"]) == (5000, supervisor.TRANSPORT_EXITED, "ended")
+    assert (report["ended_at"], report["exit_reason"], report["status"]) == (5000, "codex transport exited", "ended")
     assert join_report.read(store.redis, started.agent) == report
     assert not home.exists()
 

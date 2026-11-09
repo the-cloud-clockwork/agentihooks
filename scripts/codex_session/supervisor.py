@@ -50,6 +50,7 @@ STARTUP_FILES = (
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
+TRANSPORT_EXITED = "codex transport exited"
 OPENING_ATTEMPTS = 2
 OPENING_WATCH_S = 30.0
 TURN_COMPLETED = "turn/completed"
@@ -519,7 +520,25 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)
     bindings.put(slug, record)
     bindings.release(slug, record)
+    end_join_report(store, started.agent, now_ms)
     directory = execution_directory(record)
     if directory is not None:
         remove_home(directory)
     return record
+
+
+def end_join_report(store: RedisStore, agent: AgentRecord, now_ms: int) -> None:
+    """End the agent's hive join report so no heartbeat grades its home after removal."""
+    from scripts.hive import join_report
+
+    report = join_report.read(store.redis, agent)
+    if report:
+        join_report.end(
+            store.redis,
+            join_report.host(agent),
+            agent.execution_id,
+            report["session_id"],
+            TRANSPORT_EXITED,
+            "ended",
+            now_ms,
+        )
