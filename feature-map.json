@@ -2596,6 +2596,28 @@
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
       ]
+    },
+    {
+      "id": "controller-quota-read-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "The controller reads the hive quota reports once per tick pass and reuses the rows for every later quota read in that pass; outside a pass each read is fresh.",
+      "seam": "capacity.accounts and capacity.hive_accounts under the tick pass",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_one_pass_makes_one_hive_quota_read_for_every_account",
+        "tests/swarm/test_quota_pass_read.py::test_reads_outside_a_pass_stay_fresh"
+      ]
+    },
+    {
+      "id": "controller-hive-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "A hive publishes a provider refusal with its Claude quota reading and the controller closes that account.",
+      "seam": "hive daemon subscription quota report and capacity.accounts over hive reports",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
+      ]
     }
   ],
   "unmapped_rules": [
