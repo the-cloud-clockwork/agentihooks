@@ -33,12 +33,14 @@ def _live_unfrozen(doc: dict[str, Any]) -> int:
     )
 
 
-def _reader(doc: dict[str, Any], paths: set[str] | None = None) -> view.Reader:
-    """The export route's answer for the tick view's default read of doc: full, or the changes along paths."""
+def _reader(
+    doc: dict[str, Any], paths: set[str] | None = None, scope: live_rows.Scope = live_rows.Scope()
+) -> view.Reader:
+    """The export route's answer for a scope read of doc: full, or the changes along paths."""
 
     def read(since: int, parts: tuple[str, ...]) -> dict[str, Any]:
         named = tuple(sorted(parts))
-        answer = live_rows.answer(doc, live_rows.Scope())
+        answer = live_rows.answer(doc, scope)
         changes = None if paths is None or not since else routes.export_changes(doc, paths, named, answer)
         body = changes if changes is not None else routes.export_text(fragments.document(doc), named, answer)
         return {"generation": doc["generation"], **json.loads(body)}
@@ -67,7 +69,7 @@ def test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read() -> None
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
-def test_a_pass_reads_only_the_live_unfrozen_tasks_of_the_replayed_ledger(tmp_path: Path) -> None:
+def test_a_default_scope_read_holds_only_the_live_unfrozen_tasks_of_the_replayed_ledger(tmp_path: Path) -> None:
     doc = _ledger()
     record = _pass(tmp_path / "view.json", _reader(doc))
     assert record[view.ROWS_READ] == _live_unfrozen(doc) == 292
@@ -101,3 +103,22 @@ def test_the_held_view_names_the_frozen_tasks_it_left_out(tmp_path: Path) -> Non
     assert held.frozen_ids == frozen
     assert len(frozen) == 860
     assert not {task["id"] for task in held.tasks} & frozen
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_the_tick_scope_pass_still_reads_every_task_until_its_readers_move(tmp_path: Path) -> None:
+    doc = _ledger()
+    record = _pass(tmp_path / "view.json", _reader(doc, scope=view.TICK_SCOPE))
+    assert record[view.ROWS_READ] == len(doc["tasks"]) == 4880
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_the_resolved_flag_matches_the_freeze_walk_for_every_replayed_task() -> None:
+    doc = _ledger()
+    graph = hierarchy.project(doc)[0]
+    marks = live_rows.marks(doc)
+    assert [
+        task["id"]
+        for task in doc["tasks"]
+        if marks[task["id"]][0] is not freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
+    ] == []

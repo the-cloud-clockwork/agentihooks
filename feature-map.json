@@ -2041,6 +2041,8 @@
       "tests": [
         "tests/swarm_ledger/test_live_rows.py::test_marks_resolve_freeze_and_focus_per_task",
         "tests/swarm_ledger/test_live_rows.py::test_marks_agree_with_the_claim_gate_freeze",
+        "tests/swarm_ledger/test_live_rows.py::test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state",
+        "tests/swarm_ledger/test_live_rows.py::test_a_claimed_task_under_a_freeze_stays_in_the_default_rows",
         "tests/swarm_ledger/test_live_rows.py::test_rows_answer_closed_and_frozen_tasks_only_on_request",
         "tests/swarm_ledger/test_live_rows.py::test_the_default_scope_holds_neither_closed_nor_frozen_tasks",
         "tests/swarm_ledger/test_live_rows.py::test_the_scoped_full_export_carries_only_the_scoped_task_rows",
@@ -2050,10 +2052,13 @@
         "tests/swarm_ledger/test_live_rows.py::test_a_phase_change_outside_its_plan_link_stays_a_delta",
         "tests/swarm_ledger/test_live_rows.py::test_unscoped_changes_still_carry_closed_task_rows",
         "tests/swarm_ledger/test_live_rows.py::test_the_export_schema_takes_boolean_closed_and_frozen_flags",
+        "tests/swarm_ledger/test_live_rows.py::test_focus_holds_back_work_waiting_on_a_frozen_task_the_view_left_out",
         "tests/tick/test_live_rows_replay.py::test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read",
-        "tests/tick/test_live_rows_replay.py::test_a_pass_reads_only_the_live_unfrozen_tasks_of_the_replayed_ledger",
+        "tests/tick/test_live_rows_replay.py::test_a_default_scope_read_holds_only_the_live_unfrozen_tasks_of_the_replayed_ledger",
         "tests/tick/test_live_rows_replay.py::test_a_delta_pass_after_a_task_closes_reads_one_row_fewer",
         "tests/tick/test_live_rows_replay.py::test_the_held_view_names_the_frozen_tasks_it_left_out",
+        "tests/tick/test_live_rows_replay.py::test_the_tick_scope_pass_still_reads_every_task_until_its_readers_move",
+        "tests/tick/test_live_rows_replay.py::test_the_resolved_flag_matches_the_freeze_walk_for_every_replayed_task",
         "tests/swarm/test_tick_report.py::test_report_names_the_most_task_rows_a_pass_read"
       ]
     },

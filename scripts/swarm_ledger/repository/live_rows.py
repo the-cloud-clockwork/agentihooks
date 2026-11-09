@@ -75,7 +75,7 @@ def marks(doc: dict[str, Any]) -> dict[str, tuple[bool, int | None]]:
             continue
         chain = ancestry(task, graph)
         cold, focus = _nearest(freezes, task, chain), _nearest(focuses, task, chain)
-        found[task["id"]] = (task.get("state") == "open" and cold < focus, None if focus == sys.maxsize else focus)
+        found[task["id"]] = (cold < focus, None if focus == sys.maxsize else focus)
     return found
 
 
@@ -87,7 +87,7 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
         cold, focus = resolved[task["id"]]
         if not scope.closed and task.get("state") in CLOSED:
             continue
-        if cold and not scope.frozen:
+        if cold and task.get("state") == "open" and not scope.frozen:
             held.append(task["id"])
             continue
         kept.append({**task, "frozen": cold, "focus_rank": focus})

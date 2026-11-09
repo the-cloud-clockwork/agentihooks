@@ -45,7 +45,7 @@ def test_marks_resolve_freeze_and_focus_per_task() -> None:
         "a": (False, None),
         "b": (False, None),
         "c": (True, None),
-        "d": (False, None),
+        "d": (True, None),
         "e": (False, 0),
         "f": (False, 2),
     }
@@ -57,8 +57,25 @@ def test_marks_agree_with_the_claim_gate_freeze() -> None:
     graph = hierarchy.project(doc)[0]
     marks = live_rows.marks(doc)
     for task in doc["tasks"]:
-        expected = task["state"] == "open" and freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
+        expected = freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
         assert marks[task["id"]][0] is expected, task["id"]
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state() -> None:
+    doc = _doc()
+    graph = hierarchy.project(doc)[0]
+    for row in live_rows.rows(doc, live_rows.Scope(closed=True, frozen=True)):
+        bare = {key: value for key, value in row.items() if key not in ("frozen", "focus_rank")}
+        walked = freeze.frozen(bare, doc["freezes"], freeze.ancestry(bare, graph))
+        assert freeze.frozen(row, [], []) is walked, row["id"]
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_a_claimed_task_under_a_freeze_stays_in_the_default_rows() -> None:
+    rows = {row["id"]: row for row in live_rows.rows(_doc(), live_rows.Scope())}
+    assert rows["d"]["state"] == "claimed"
+    assert rows["d"]["frozen"] is True
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
@@ -78,7 +95,7 @@ def test_rows_answer_closed_and_frozen_tasks_only_on_request(closed: bool, froze
         "a": (False, None),
         "b": (False, None),
         "c": (True, None),
-        "d": (False, None),
+        "d": (True, None),
         "e": (False, 0),
         "f": (False, 2),
     }.items()
@@ -163,3 +180,18 @@ def test_the_export_schema_takes_boolean_closed_and_frozen_flags() -> None:
     for bad in ({"since": 0, "closed": "yes"}, {"since": 0, "frozen": 1}):
         with pytest.raises(Exception):
             schemas.validate(routes.SINCE_SCHEMA, bad)
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_focus_holds_back_work_waiting_on_a_frozen_task_the_view_left_out() -> None:
+    doc = {
+        "phases": [],
+        "tasks": [{"id": "x", "state": "open", "lane": "eng", "depends_on": ["y"]}],
+        "freezes": [
+            {"id": "f1", "verb": "focus", "target": "tasks/x"},
+            {"id": "f2", "verb": "freeze", "target": "tasks/y"},
+        ],
+    }
+    graph = hierarchy.project(doc)[0]
+    assert freeze.admitted(doc, graph) == frozenset({"x", "y"})
+    assert freeze.admitted({**doc, "frozen_ids": ["y"]}, graph) is None
