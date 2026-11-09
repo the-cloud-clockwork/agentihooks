@@ -72,6 +72,12 @@ def test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_
     assert built == [("sw", hosted.name, EXIT, STOPPED_MS)]
 
     early = tick("sw", store, ledger, runtime, now_ms=STOPPED_MS + reports.LOST_MS)
+    print("DIAG early", early)
+    print("DIAG config", store.config("sw"))
+    print("DIAG agents", workers(store))
+    late = tick("sw", store, ledger, runtime, now_ms=STOPPED_MS + reports.LOST_MS + 120_000)
+    print("DIAG late", late)
+    print("DIAG agents2", workers(store), runtime.spawned)
 
     assert not [action for action in early if action.startswith(f"retired {hosted.name}")]
     assert [agent.name for agent in workers(store)] == [hosted.name]
