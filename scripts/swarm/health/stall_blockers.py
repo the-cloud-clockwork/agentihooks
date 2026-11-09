@@ -15,6 +15,7 @@ from typing import Any
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
 from scripts.swarm import blockers
+from scripts.swarm.health import merge_stall as merge_stall_observation
 
 MERGE_STALL = "no merge into dev"
 MERGED_IN_PR = "merged task in pr"
@@ -22,6 +23,7 @@ CATEGORIES = (MERGE_STALL, MERGED_IN_PR)
 MERGED_MS = 20 * 60_000
 MERGE_KEY = "merge-stall"
 KEY = "stall-blockers"
+STALE_MS = 2 * merge_stall_observation.CACHE_MS
 SENDER = "swarm"
 
 
@@ -51,11 +53,12 @@ def _focused(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> list[dict[str,
 
 
 def merge_stall(
-    store: Any, slug: str, doc: dict[str, Any], tasks: list[dict[str, Any]], github: Callable[[str], Any]
+    store: Any, slug: str, doc: dict[str, Any], tasks: list[dict[str, Any]], github: Callable[[str], Any], now_ms: int
 ) -> Held | None:
-    """Return the merge stall when a focused pull request is open and the last dev merge is known."""
+    """Return the merge stall when a focused pull request is open and a fresh merge observation knows the last dev
+    merge."""
     state = json.loads(store.redis.get(store.key(slug, MERGE_KEY)) or "{}")
-    if not state.get("merged") or state.get("error"):
+    if not state.get("merged") or state.get("error") or now_ms - state.get("tried", 0) > STALE_MS:
         return None
     open_urls = [
         task["pr_url"]
@@ -121,12 +124,15 @@ def observe(
 ) -> list[str]:
     """Record, log once per start or skip both categories by the stall-blockers gate mode, clearing a category that
     stopped holding; the stall starts at the later of the last dev merge and the first pass that saw it hold."""
+    rows, key = list(tasks), store.key(slug, KEY)
+    raw = store.redis.get(key)
+    if raw is None and not any(task.get("state") == "pr" for task in rows):
+        return []
     mode = str(modes.configured(GATE, store.config(slug).gates))
     if mode == "off":
         return []
-    rows, key = list(tasks), store.key(slug, KEY)
-    state = json.loads(store.redis.get(key) or "{}")
-    stall = merge_stall(store, slug, doc, rows, github)
+    state = json.loads(raw or "{}")
+    stall = merge_stall(store, slug, doc, rows, github, now_ms)
     state["open_since"] = (state.get("open_since") or now_ms) if stall else None
     if stall:
         stall = replace(stall, since=max(stall.since, state["open_since"]))

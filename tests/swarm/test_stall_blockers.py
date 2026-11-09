@@ -1,4 +1,7 @@
 import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -18,7 +21,7 @@ HOUR = 60 * MINUTE
 
 
 @pytest.fixture
-def store(monkeypatch, tmp_path):
+def store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> RedisStore:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -31,40 +34,53 @@ def store(monkeypatch, tmp_path):
     return found
 
 
-def _enforce(store):
+def _enforce(store: RedisStore) -> None:
     store.update(SLUG, gates={"stall-blockers": "enforce"})
 
 
-def _now(store):
+def _now(store: RedisStore) -> int:
     return blocker_window._now_ms(store)
 
 
-def _merged(store, at):
-    store.redis.set(store.key(SLUG, "merge-stall"), json.dumps({"repo": "owner/repo", "queue": 0, "merged": at}))
+def _merged(store: RedisStore, at: int, tried: int | None = None) -> None:
+    state = {"repo": "owner/repo", "queue": 0, "merged": at, "tried": _now(store) if tried is None else tried}
+    store.redis.set(store.key(SLUG, "merge-stall"), json.dumps(state))
 
 
-def _pulls(**states):
+def _pulls(**states: PullRequest | None) -> Callable[[str], PullRequest | None]:
     return lambda url: states.get(url)
 
 
-def _open():
+def _open() -> PullRequest:
     return PullRequest("OPEN", None, None, False)
 
 
-def _done(at):
+def _done(at: int) -> PullRequest:
     return PullRequest("MERGED", at, None, False)
 
 
-def _task(task_id, url):
+def _task(task_id: str, url: str) -> dict[str, Any]:
     return {"id": task_id, "title": f"task {task_id}", "state": "pr", "pr_url": url}
 
 
-def _observe(store, tasks, github, now, held=lambda task: False):
+def _never(task: dict[str, Any]) -> bool:
+    return False
+
+
+def _observe(
+    store: RedisStore,
+    tasks: list[dict[str, Any]],
+    github: Callable[[str], PullRequest | None],
+    now: int,
+    held: Callable[[dict[str, Any]], bool] = _never,
+) -> list[str]:
     return stall_blockers.observe(store, SLUG, {"tasks": tasks}, tasks, github, now, held)
 
 
 @pytest.mark.feature("stall-blockers-open-master-coding")
-def test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_master_coding_window(store):
+def test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_master_coding_window(
+    store: RedisStore,
+) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - 2 * HOUR)
@@ -84,7 +100,7 @@ def test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_mast
 
 
 @pytest.mark.feature("stall-blockers-open-master-coding")
-def test_a_task_left_in_pr_eighty_minutes_after_its_merge_opens_the_master_coding_window(store):
+def test_a_task_left_in_pr_eighty_minutes_after_its_merge_opens_the_master_coding_window(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _done(now - 80 * MINUTE)}), now)
@@ -99,7 +115,7 @@ def test_a_task_left_in_pr_eighty_minutes_after_its_merge_opens_the_master_codin
     assert master_coding.is_open(SID)
 
 
-def test_short_of_the_hour_neither_category_is_sustained(store):
+def test_short_of_the_hour_neither_category_is_sustained(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - HOUR + 1)
@@ -111,7 +127,7 @@ def test_short_of_the_hour_neither_category_is_sustained(store):
     assert not master_coding.is_open(SID)
 
 
-def test_a_merge_nineteen_minutes_ago_or_a_held_task_records_nothing(store):
+def test_a_merge_nineteen_minutes_ago_or_a_held_task_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     tasks = [_task("a", "pr-a"), _task("b", "pr-b")]
@@ -120,7 +136,7 @@ def test_a_merge_nineteen_minutes_ago_or_a_held_task_records_nothing(store):
     assert blockers.active(store, SLUG, now) == {}
 
 
-def test_the_oldest_merged_task_starts_the_category(store):
+def test_the_oldest_merged_task_starts_the_category(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     tasks = [_task("a", "pr-a"), _task("b", "pr-b")]
@@ -130,16 +146,32 @@ def test_the_oldest_merged_task_starts_the_category(store):
     assert found.detail == "2 tasks still in pr after their pull request merged, oldest task b"
 
 
-def test_no_open_pull_request_or_no_known_merge_records_no_stall(store):
+def test_no_known_merge_or_no_open_pull_request_records_no_stall(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
+    assert blockers.active(store, SLUG, now) == {}
     _merged(store, now - 2 * HOUR)
     _observe(store, [_task("a", "pr-a"), {"id": "b", "state": "open"}], _pulls(**{"pr-a": None}), now)
     assert blockers.active(store, SLUG, now) == {}
 
 
-def test_a_merge_observation_error_records_no_stall(store):
+def test_a_stale_merge_observation_records_no_stall(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    _merged(store, now - 2 * HOUR, tried=now - stall_blockers.STALE_MS - 1)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
+    assert blockers.active(store, SLUG, now) == {}
+    _merged(store, now - 2 * HOUR, tried=now - stall_blockers.STALE_MS)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
+    assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
+
+
+def test_a_ledger_without_pull_requests_reads_no_swarm_config(store: RedisStore) -> None:
+    assert stall_blockers.observe(store, "no-such-swarm", {}, [{"id": "a", "state": "open"}], _pulls(), 0, _never) == []
+
+
+def test_a_merge_observation_error_records_no_stall(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     state = {"repo": "owner/repo", "merged": now - 2 * HOUR, "error": "rate limited"}
@@ -148,23 +180,23 @@ def test_a_merge_observation_error_records_no_stall(store):
     assert blockers.active(store, SLUG, now) == {}
 
 
-def test_a_focus_counts_only_its_own_pull_requests(store):
+def test_a_focus_counts_only_its_own_pull_requests(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - 2 * HOUR)
     tasks = [_task("a", "pr-a"), _task("b", "pr-b")]
     doc = {"tasks": tasks, "freezes": [{"verb": "focus", "target": "tasks/b"}]}
-    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-a": _open(), "pr-b": _merged_pr(now)}), now, bool)
+    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-a": _open(), "pr-b": _merged_pr(now)}), now, _never)
     assert blockers.active(store, SLUG, now) == {}
-    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-a": _open(), "pr-b": _open()}), now, bool)
+    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-a": _open(), "pr-b": _open()}), now, _never)
     assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
 
 
-def _merged_pr(now):
+def _merged_pr(now: int) -> PullRequest:
     return _done(now - MINUTE)
 
 
-def test_a_new_dev_merge_restarts_the_stall_and_a_resolved_condition_clears_it(store):
+def test_a_new_dev_merge_restarts_the_stall_and_a_resolved_condition_clears_it(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - 2 * HOUR)
@@ -179,7 +211,7 @@ def test_a_new_dev_merge_restarts_the_stall_and_a_resolved_condition_clears_it(s
     assert _observe(store, [], github, now) == []
 
 
-def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store):
+def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - 30 * HOUR)
@@ -190,7 +222,7 @@ def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store):
 
 
 @pytest.mark.feature("stall-blockers-open-master-coding")
-def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store):
+def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store: RedisStore) -> None:
     now = _now(store)
     _merged(store, now - HOUR)
     lines = _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
@@ -209,7 +241,7 @@ def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store):
     ]
 
 
-def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(store):
+def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _merged(store, now - 3 * HOUR)
@@ -223,7 +255,7 @@ def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(stor
     assert blockers.active(store, SLUG, now + MINUTE)[stall_blockers.MERGE_STALL].first_seen == now + MINUTE
 
 
-def test_off_skips_both_categories(store):
+def test_off_skips_both_categories(store: RedisStore) -> None:
     store.update(SLUG, gates={"stall-blockers": "off"})
     now = _now(store)
     _merged(store, now - 2 * HOUR)
@@ -232,7 +264,7 @@ def test_off_skips_both_categories(store):
     assert not gate_log.gate_log_path(SLUG).exists()
 
 
-def test_a_recorded_since_starts_only_a_first_sighting():
+def test_a_recorded_since_starts_only_a_first_sighting() -> None:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -243,7 +275,7 @@ def test_a_recorded_since_starts_only_a_first_sighting():
     assert blockers.active(store, SLUG, 300)["other"].first_seen == 300
 
 
-def test_panic_call_reads_no_stall_category_as_a_tick_step_failure(store):
+def test_panic_call_reads_no_stall_category_as_a_tick_step_failure(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
     _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _done(now - 2 * HOUR)}), now)
