@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.parse
+import urllib.request
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -305,9 +306,16 @@ def test_an_explicit_bus_address_wins_over_the_signer_record(admin: "Redis") -> 
 
 def test_an_unreadable_signer_record_refuses_the_invite_before_any_member_is_minted(admin: "Redis") -> None:
     fake = Bao()
+
+    def sealed_signer(request: urllib.request.Request, timeout: float | None = None) -> io.BytesIO:
+        if request.full_url.endswith(SIGNER):
+            raise http_error(request.full_url, 503, b'{"errors": ["sealed"]}')
+        return fake(request, timeout)
+
     request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER)
-    with pytest.raises(auth.HiveError):
-        invite.invite(admin, _bao(fake), request, PUBLIC)
+    with pytest.raises(auth.HiveError) as refused:
+        invite.invite(admin, openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, sealed_signer), request, PUBLIC)
+    assert str(refused.value) == "OpenBao HTTP 503: sealed"
     assert auth_members(admin) == []
     assert RECORD not in fake.records
 
