@@ -50,11 +50,11 @@ def test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_o
 
 
 @pytest.mark.feature("hive-agent-token-holder-only")
-def test_until_enforced_issue_backfills_and_logs_a_legacy_member_once(
+def test_until_enforced_issue_backfills_and_logs_a_legacy_member_once_even_with_legacy_credentials_off(
     client: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     grant = _legacy(client, "laptop")
-    monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
+    monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "off")
     monkeypatch.delenv("AGENTIHOOKS_HIVE_HOLDERS", raising=False)
 
     first = auth.issue_agent(client, grant["id"], SLUG, WORKER)

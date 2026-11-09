@@ -284,7 +284,7 @@ def backfill_holders(redis: object) -> str:
 
 def _unheld(redis: object, store: StateStore, member_id: str) -> str | None:
     """The ledger digest for a member with no holder record: backfilled and logged until refusal is enforced."""
-    if switch.holders_enforced(os.environ) or not switch.legacy(os.environ):
+    if switch.holders_enforced(os.environ):
         return None
     digest = _backfill(redis, store, member_id)
     print(
