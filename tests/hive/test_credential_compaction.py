@@ -225,7 +225,7 @@ def test_compaction_defaults_to_unverified_readers(client: Any) -> None:
 def test_compaction_refuses_other_backends(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import agent_credentials
 
-    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "nats")
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
     with pytest.raises(auth.HiveError) as raised:
         agent_credentials.compact(client, ["m1"], readers_compatible=True)
     assert str(raised.value) == "credential compaction requires the Redis state backend"
