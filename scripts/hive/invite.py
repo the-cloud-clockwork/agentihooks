@@ -16,6 +16,7 @@ CA_PEM = "ca_pem"
 HIVE_URL = "AGENTIHOOKS_HIVE_URL"
 REDIS_URL = "AGENTIHOOKS_HIVE_REDIS_URL"
 HIVE_ID = "AGENTIHOOKS_HIVE_ID"
+SIGNER_URL = "url"
 
 
 @dataclass(frozen=True)
@@ -51,15 +52,16 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
         CA_PEM: like.get(CA_PEM) or request.ledger_ca,
     }
     entries = {key: value for key, value in entries.items() if value}
+    signer = _read(bao, request.signer_path) if request.signer_path else {}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
     if request.minted is not None:
         request.minted(f"{grant['id']}")
     member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
-    bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
+    bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL") or signer.get(SIGNER_URL)
     if bus_url:
         member_settings.update(AGENTIHOOKS_BUS="nats", AGENTIHOOKS_BUS_URL=bus_url)
     try:
-        scoped = bool(request.signer_path) and member_swarms.listing(bao, request.signer_path)
+        scoped = member_swarms.FIELD in signer
         if scoped:
             member_settings["AGENTIHOOKS_BUS_SCOPED"] = "1"
         entries[CREDENTIAL] = auth.env_text(url, grant) + "".join(

@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,7 +44,7 @@ def hive_name(ordinal: int) -> str:
     return f"{NAME_PREFIX}{ordinal:03d}"
 
 
-def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], Iterable[str]] = tuple) -> str:
+def name(redis: "Redis", machine: str) -> str:
     from redis.exceptions import WatchError
 
     with redis.pipeline() as pipe:
@@ -54,13 +54,12 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], 
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                used = {*named.values(), *taken()}
+                used = set(named.values())
                 ordinals = (ordinal for ordinal, _ in enumerate([*used, None], 1))
                 found = next(hive_name(ordinal) for ordinal in ordinals if hive_name(ordinal) not in used)
-                if assign:
-                    pipe.multi()
-                    pipe.hset(MACHINES, machine, found)
-                    pipe.execute()
+                pipe.multi()
+                pipe.hset(MACHINES, machine, found)
+                pipe.execute()
                 return found
             except WatchError:
                 continue

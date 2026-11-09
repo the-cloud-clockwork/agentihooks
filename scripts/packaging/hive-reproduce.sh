@@ -11,6 +11,16 @@ step_timeout="${HIVE_STEP_TIMEOUT_S:-900}"
 engineer_timeout="${HIVE_ENGINEER_TIMEOUT_S:-1800}"
 out="${HIVE_TIMING_FILE:-}"
 python="${HIVE_PYTHON:-python3}"
+keep="${HIVE_KEEP:-no}"
+remove_wait="${HIVE_REMOVE_WAIT_S:-300}"
+member=""
+
+remove_member() {
+  [[ -n $member && $keep != yes ]] || return 0
+  agentihooks hive remove "$member" --label "$label" --path "$record" --wait "$remove_wait" \
+    || echo "hive-reproduce: hive remove $member failed; run agentihooks hive remove $member --label $label" >&2
+}
+trap remove_member EXIT
 
 start=$(date +%s)
 last=$start
