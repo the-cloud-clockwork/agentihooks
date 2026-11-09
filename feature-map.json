@@ -1254,6 +1254,15 @@
       ]
     },
     {
+      "id": "swarm-handoff-hive-binding",
+      "origin": "inventory",
+      "behaviour": "A hive successor binds live only while its hive report lists its execution at its generation and its name among the hive's live names.",
+      "seam": "scripts.handoff.transfers.observe",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_hive_successor_is_bound_by_its_hive_execution_report"
+      ]
+    },
+    {
       "id": "swarm-intent-wait",
       "origin": "inventory",
       "behaviour": "A wait on intent names the agent's own task pull request and is refused for any other.",
