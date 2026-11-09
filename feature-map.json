@@ -2,7 +2,7 @@
   "features": [
     {
       "id": "swarm-reopened-claim-loss",
-      "origin": "task",
+      "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
       "behaviour": "A reopened or reassigned task ends its former worker through hook exit and tick retirement; a live workstation worker whose claim still names it remains restorable.",
       "seam": "hooks.context.claim_watch.check and scripts.tick.steps.common._current_owner, _ended with scripts.tick.steps.agents._reap_agent",
@@ -10,6 +10,17 @@
         "tests/tick/steps/test_claim_loss.py::test_reopened_or_reassigned_claims_end_the_previous_worker",
         "tests/tick/steps/test_claim_loss.py::test_tick_retires_a_lost_claim_before_restore_or_watch",
         "tests/tick/steps/test_claim_loss.py::test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state"
+      ]
+    },
+    {
+      "id": "master-token-slot-route-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
+      "behaviour": "Master token launch reports routed only after hive account admission; refused slots report the refusal without a routed report.",
+      "seam": "launch_token account slot callback and route report",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
+        "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
       ]
     },
     {
@@ -2427,6 +2438,18 @@
       ]
     },
     {
+      "id": "hive-create-resume-revoke",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
+      "behaviour": "Hive create saves each member it mints before the hive record names it, and a resumed create revokes every saved member the record does not name, removing it from the hive index.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name",
+        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume",
+        "tests/hive/test_create.py::test_cli_create_hands_hive_create_the_nats_signer"
+      ]
+    },
+    {
       "id": "swarm-tick-dead-remote-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
@@ -2503,6 +2526,17 @@
         "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
+      ]
+    },
+    {
+      "id": "scoped-member-inbox-publish",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2151",
+      "behaviour": "A scoped hive member selects its swarm before opening inbox state and publishes immediately; only a real bus failure leaves delivery to the Redis recheck.",
+      "seam": "InboxStore.send through SeatPublisher and SeatInbox on a scoped member bus",
+      "tests": [
+        "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
+        "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
       ]
     }
   ],

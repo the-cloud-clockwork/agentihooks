@@ -1566,3 +1566,93 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(
     assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
     assert account_slots.HIVE_ENV not in executed[0]
     assert account_slots.EXECUTION_ENV not in executed[0]
+
+
+@pytest.mark.feature("master-token-slot-route-report")
+@pytest.mark.parametrize("reason", ["No account slot available", "Account slot admission failed"])
+def test_a_refused_master_token_hive_slot_reports_only_the_refusal(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    from collections.abc import Callable, Mapping
+    from unittest.mock import Mock
+
+    from scripts import claude_quota_balancer as router
+    from scripts import install
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    report = tmp_path / "route"
+    written = Mock(wraps=install._write_route_report)
+    monkeypatch.setattr(install, "_write_route_report", written)
+    executed = Mock()
+    monkeypatch.setattr(login.os, "execvpe", executed)
+
+    def refuse(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        assert master is True
+        assert harness == "claude"
+        assert account == decision.account
+        raise account_slots.Unavailable(reason)
+
+    monkeypatch.setattr(account_slots, "execute", refuse)
+    env = _environ(rendered, AGENTIHOOKS_HIVE="hive", AGENTIHOOKS_EXECUTION_ID="execution")
+    with pytest.raises(router.RoutingError, match=reason):
+        login.launch_token("/opt/claude", [], env, str(report))
+
+    assert report.read_text().splitlines() == ["status=failed", f"error={reason}"]
+    assert [call.kwargs["status"] for call in written.call_args_list] == ["failed"]
+    executed.assert_not_called()
+
+
+@pytest.mark.feature("master-token-slot-route-report")
+def test_the_master_token_route_reports_routed_only_inside_the_admitted_callback(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from collections.abc import Callable, Mapping
+
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    monkeypatch.chdir(tmp_path)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    report = tmp_path / "route"
+    executed = []
+
+    def admit(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        assert master is True
+        assert not report.exists()
+        invoke({**environ, "ADMITTED": "yes"})
+
+    def launch(binary: str, argv: list[str], environ: Mapping[str, str]) -> None:
+        assert report.read_text().splitlines() == [
+            "status=routed",
+            "account=workeratexample_com",
+            "placement=fallback",
+            "remote_control=off",
+        ]
+        executed.append(environ["ADMITTED"])
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    monkeypatch.setattr(login.os, "execvpe", launch)
+    login.launch_token("/opt/claude", [], _environ(rendered), str(report))
+    assert executed == ["yes"]

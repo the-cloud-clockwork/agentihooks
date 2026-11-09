@@ -889,6 +889,32 @@ def test_cli_create_passes_its_name(monkeypatch, capsys):
     assert seen["options"] == create.Options(name="swarm-hive-009")
 
 
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_cli_create_hands_hive_create_the_nats_signer(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, create.Tools] = {}
+
+    def created(tools: create.Tools, options: create.Options) -> str:
+        seen["tools"] = tools
+        return "created"
+
+    def root() -> str:
+        return "root"
+
+    def no_redis() -> None:
+        return None
+
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", no_redis)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", root)
+    monkeypatch.setattr(create, "create", created)
+    assert cli.main(["create"]) == 0
+    assert capsys.readouterr().out == "created\n"
+    assert seen["tools"].signer is cli._signer
+
+
 def test_cli_create_names_its_name_option():
     parser = cli._parser()
     (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
@@ -916,3 +942,73 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
     assert create.create(world.tools, create.Options(dry_run=True)) == (
         "dry run of hive create swarm-hive-002: nothing written"
     )
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import hive_state
+
+    signer, bus = object(), []
+
+    def named() -> object:
+        return signer
+
+    def revoked(redis: object, given: object, member: str) -> str:
+        bus.append((given, member))
+        return f"revoked the NATS credential of {member}"
+
+    world.tools.signer = named
+    monkeypatch.setattr(nats_grant, "revoke", revoked)
+
+    kept = _keep_member(world)
+    stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
+    world.bao.records[SIGNER]["member_swarms"][stray] = ["demo"]
+    state = {**_state(world), "member": stray}
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(state))
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert auth.member(world.tools.redis, kept) is not None
+    assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
+    assert stray not in world.bao.records[SIGNER]["member_swarms"]
+    assert bus == [(signer, stray)]
+    assert f"hive create {NAME}: resume: unlisted {stray} from the hub signer record {SIGNER}" in world.lines
+    assert _state(world)["member"] == kept
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import openbao_kv
+    from scripts.hive import hive_state
+
+    real = openbao_kv.merge
+
+    def killed(bao: openbao_kv.OpenBao, path: str, entries: dict[str, str]) -> int:
+        if path == RECORD and "credential" in entries:
+            raise KeyboardInterrupt
+        return real(bao, path, entries)
+
+    monkeypatch.setattr(openbao_kv, "merge", killed)
+    with pytest.raises(KeyboardInterrupt):
+        create.create(world.tools, create.Options(timeout_s=60))
+    stray = _state(world)["member"]
+    assert auth.member(world.tools.redis, stray) is not None
+    monkeypatch.setattr(openbao_kv, "merge", real)
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert sorted(auth.members(world.tools.redis)) == [
+        invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    ]

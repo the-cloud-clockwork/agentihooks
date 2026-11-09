@@ -95,8 +95,8 @@ streams use `AGENTIHOOKS-EVENTS` and `AGENTIHOOKS-DEAD`; existing `AGENTIHOOKS_E
 `AGENTIHOOKS_DEAD` streams remain selected while present. Workspace lookups likewise reuse old labels
 before creating a normalized label.
 
-Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`
-and `execution-starts`.
+Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`,
+`execution-starts` and `inbox`.
 
 Callers keep their logical names. A scoped bus maps `swarm.<swarm>.ready.<lane>` to the lane queue, `dead.<swarm>`
 to `swarm.<swarm>.dead.event`, and an event subject such as `swarm.*.execution.>` or
