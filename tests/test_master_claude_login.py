@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -1244,7 +1245,8 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
 
-    def admit(harness, account, environ, launch):
+    def admit(harness: str, account: str, environ: Any, launch: Any, *, master: bool) -> Any:
+        assert master is True
         assert (harness, account) == ("claude", "workeratexample_com")
         return launch(environ)
 
@@ -1516,9 +1518,14 @@ def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, t
     assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
 
 
-def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered, tmp_path, monkeypatch):
+@pytest.mark.feature("hive-master-account-seat")
+def test_the_master_token_route_takes_a_seat_past_full_lane_agents(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from hooks.context import account_sessions
     from scripts import claude_quota_balancer as router
+    from scripts.events import factory
+    from scripts.events.config import BusConfig
     from scripts.hive import account_slots
 
     monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
@@ -1526,15 +1533,25 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered,
     full = {"workeratexample_com": 6}
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: full)
     env = _environ(rendered)
+    env.update({account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "master"})
     picked = []
 
-    def overflow(environ, **options):
+    def overflow(environ: Any, **options: Any) -> router.RouteDecision:
         picked.append((environ, options))
         credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
         return router.RouteDecision(credential, None, "master overflow", 6, 6)
 
+    bus = factory.open_bus(BusConfig())
+    report_reading = {
+        "slots": [{"harness": "claude", "account": "workeratexample_com", "cap": 6}],
+        "sessions": {},
+    }
+    slots = account_slots.Slots(bus, "one", lambda: report_reading)
+    for number in range(6):
+        assert slots.take(f"lane-{number}", "claude") == "workeratexample_com"
+    monkeypatch.setattr(factory, "open_bus", lambda _: bus)
+    monkeypatch.setattr(account_slots, "_reading", lambda _: report_reading)
     monkeypatch.setattr(router, "select_master_credential", overflow)
-    monkeypatch.setattr(account_slots, "execute", lambda harness, account, environ, launch: launch(environ))
     executed = []
     monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, environ: executed.append(environ))
     report = tmp_path / "route"
@@ -1547,3 +1564,5 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered,
         "remote_control=off",
     ]
     assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
+    assert account_slots.HIVE_ENV not in executed[0]
+    assert account_slots.EXECUTION_ENV not in executed[0]
