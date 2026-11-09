@@ -117,13 +117,13 @@ def test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_an
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ran: list[str] = []
-    steps = [step("slow sibling", 0.6, 10.0, ran), step("queued reap", 0.01, 10.0, ran)]
+    steps = [step("rank pass", 0.6, 10.0, ran), step("reap", 0.01, 10.0, ran)]
     with recording(), pool.running(workers=1, critical_s=0.3, reserves={}):
         records = {row.name: row for row in engine.run_group("planted", Context(View(), Deadline.after(60.0)), steps)}
-    joined("slow sibling", "queued reap")
+    joined("rank pass", "reap")
     time.sleep(0.3)
-    assert records["queued reap"].skipped
-    assert ran == ["slow sibling"]
+    assert records["reap"].skipped
+    assert ran == ["rank pass"]
     assert abandoned(capsys.readouterr().err) == []
 
 
@@ -132,18 +132,18 @@ def test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_ab
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     ran: list[str] = []
-    steps = [step("slow sibling", 0.5, 10.0, ran), step("late reap", 0.8, 10.0, ran)]
+    steps = [step("grouping release", 0.5, 10.0, ran), step("spawn", 0.8, 10.0, ran)]
     with recording(), pool.running(workers=1, critical_s=1.0, reserves={}):
         records = {row.name: row for row in engine.run_group("planted", Context(View(), Deadline.after(60.0)), steps)}
-    joined("slow sibling", "late reap")
+    joined("grouping release", "spawn")
     err = capsys.readouterr().err
-    assert ran == ["slow sibling", "late reap"]
-    assert records["late reap"].wall_s < 0.9
-    assert records["late reap"].cut and not records["late reap"].abandoned
-    assert records["late reap"].outcome == engine.CUT
-    assert [row["step"] for row in rows(err) if row.get("event") == engine.CUT_EVENT] == ["late reap"]
+    assert ran == ["grouping release", "spawn"]
+    assert records["spawn"].wall_s < 0.9
+    assert records["spawn"].cut and not records["spawn"].abandoned
+    assert records["spawn"].outcome == engine.CUT
+    assert [row["step"] for row in rows(err) if row.get("event") == engine.CUT_EVENT] == ["spawn"]
     assert abandoned(err) == []
-    assert outcomes(err, "late reap") == ["success"]
+    assert outcomes(err, "spawn") == ["success"]
 
 
 @pytest.mark.feature("tick-step-budget-from-start")
@@ -152,14 +152,12 @@ def test_a_step_whose_own_run_overruns_its_budget_is_abandoned_and_never_reports
 ) -> None:
     ran: list[str] = []
     with recording():
-        records = engine.run_group(
-            "planted", Context(View(), Deadline.after(60.0)), [step("overrun spawn", 0.6, 0.2, ran)]
-        )
-    joined("overrun spawn")
+        records = engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step("size pass", 0.6, 0.2, ran)])
+    joined("size pass")
     err = capsys.readouterr().err
     assert records[0].abandoned and not records[0].skipped
-    assert abandoned(err) == ["overrun spawn"]
-    assert outcomes(err, "overrun spawn") == ["abandoned"]
+    assert abandoned(err) == ["size pass"]
+    assert outcomes(err, "size pass") == ["abandoned"]
 
 
 @pytest.mark.feature("tick-step-budget-from-start")
@@ -169,9 +167,9 @@ def test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon(
     ran: list[str] = []
     with recording():
         records = engine.run_group(
-            "planted", Context(View(), Deadline.after(60.0)), [step("quick reap", 0.01, 5.0, ran)]
+            "planted", Context(View(), Deadline.after(60.0)), [step("intent check", 0.01, 5.0, ran)]
         )
     err = capsys.readouterr().err
     assert not records[0].abandoned
     assert abandoned(err) == []
-    assert outcomes(err, "quick reap") == ["success"]
+    assert outcomes(err, "intent check") == ["success"]
