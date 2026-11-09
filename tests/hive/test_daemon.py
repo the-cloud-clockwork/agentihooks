@@ -1,6 +1,7 @@
 import json
 import threading
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -1048,7 +1049,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "ephemeral": "no",
         "excluded": ["master"],
         "prefer": {},
-        "max_agents": 20,
+        "max_agents": None,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -1868,6 +1869,59 @@ def test_named_execution_discovery_requires_a_local_matching_process(redis, monk
     elif mismatch == "missing_harness":
         expected = []
     assert daemon._executions(redis, "hive", processes) == ({"claude:one": expected} if expected else {})
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+def test_a_dashed_agent_account_counts_once_under_its_underscore_process_slug(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, harness: str
+) -> None:
+    from hooks.proc import Process
+    from scripts import terminate_agent
+    from scripts.routing import aggregate, reservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    monkeypatch.setattr("time.time", lambda: 100)
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    agent = store.start_execution(
+        "swarm",
+        AgentRecord(
+            store.next_name("swarm", "eng"),
+            "eng",
+            "task",
+            hive="hive",
+            harness=harness,
+            account="one-x",
+            seat="eng-1@swarm",
+        ),
+    )
+    store.put_agent("swarm", agent)
+    session = terminate_agent.Session(
+        "session", harness, agent.name, Process(10, 1, 10, 10, 7, "S", harness, (harness,)), "", "alive"
+    )
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(daemon.account_sessions, "local_processes", lambda: {harness: {10: "one_x"}})
+    dashed, reported = f"{harness}:one-x", f"{harness}:one_x"
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {
+            "slots": [{"harness": harness, "account": "one_x", "kind": "subscription", "cap": 3}],
+            "interactive": {},
+            "repos": [],
+            "quota": {},
+            "sessions": {reported: 2},
+        },
+    )
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve(dashed, agent.execution_id, 3, 1000)
+    assert slots.acknowledge(agent.execution_id)
+    daemon.beat(redis, "hive")
+    assert json.loads(redis.get(f"{registry.key('hive')}:sessions"))["_executions"] == {reported: [agent.execution_id]}
+    assert aggregate.read(redis, 100)[dashed]["sessions"] == 2
+    assert aggregate.elsewhere(redis, harness, 100, "other") == {"one_x": 2}
+    assert slots.reserve(dashed, "next", 3, 1000)
+    assert not slots.reserve(dashed, "full", 3, 1000)
 
 
 def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):

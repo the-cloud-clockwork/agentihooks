@@ -226,6 +226,10 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.C
     stub.chmod(0o755)
     (tmp_path / "git").symlink_to(stub)
     (tmp_path / "sha256sum").symlink_to(stub)
+    chart = tmp_path / "tree/deploy/helm/agentihooks-swarm"
+    chart.mkdir(parents=True)
+    source = ROOT / "deploy/helm/agentihooks-swarm"
+    (chart / "values.yaml").write_text((source / "values.yaml").read_text())
     calls = tmp_path / "calls"
     env = {
         **os.environ,
@@ -243,7 +247,9 @@ def _publish(tmp_path: Path, version: str, fail: str = "") -> tuple[subprocess.C
     jobs = _workflow()["jobs"]
     steps = [*jobs["package"]["steps"], *jobs["publish"]["steps"]]
     script = "\n".join(step["run"] for step in steps if "run" in step)
-    result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", script], env=env, capture_output=True, text=True, cwd=tmp_path / "tree"
+    )
     return result, [json.loads(line) for line in calls.read_text().splitlines()]
 
 

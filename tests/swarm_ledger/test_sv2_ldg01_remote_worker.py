@@ -216,8 +216,8 @@ def test_remote_resource_and_export_reads_retry_with_fresh_credentials_and_bound
     ):
         assert ledger.resource(SLUG, "metadata") == {"title": "T"}
         assert ledger.export(SLUG) == {}
-    names = ("first", "second", "third", "fourth")
-    assert Client.built == [("https://hub.example", {"X-Ledger-Token": name}, 10) for name in names]
+    budgets = (("first", 10), ("second", 10), ("third", 30), ("fourth", 30))
+    assert Client.built == [("https://hub.example", {"X-Ledger-Token": name}, budget) for name, budget in budgets]
     assert sleep.call_count == 2
 
 

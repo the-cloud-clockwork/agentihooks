@@ -264,6 +264,7 @@ CONFIG_KEYS = {
     "engine": "engine",
     "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
+    "watchdog-document": "watchdog_document",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
 }
@@ -331,7 +332,8 @@ def _bin_stop(store, slug, ledger, runtime):
 
 def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     """Hold the pass's ledger view until beating closes, started with one delta read under a short timeout when the
-    client reads it; a slow or stopped server leaves the pass on the last good view this host stored, writing to
+    client reads it, read again under the export budget when that read timed out without a fresh stored view; a
+    slow or stopped server leaves the pass on the last good view this host stored, writing to
     the outbox and refusing fresh reads, and an address the credential may not travel to leaves it unheld for its
     ledger health probe."""
     beating.enter_context(ledger_view.holding())
@@ -345,7 +347,26 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     except OSError as exc:
         if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
             raise
-        _hold_stored(slug, exc)
+        _read_long_or_hold_stored(slug, ledger, exc)
+
+
+def _timed_out(exc: OSError) -> bool:
+    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
+    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+
+
+def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
+    """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
+    stores no view fresh enough to run from, else hold the stored view."""
+    if _timed_out(exc) and not ledger_view.fresh(slug):
+        try:
+            ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
+            return
+        except OSError as again:
+            if isinstance(again, urllib.error.HTTPError) and again.code < 500:
+                raise
+            exc = again
+    _hold_stored(slug, exc)
 
 
 def _hold_stored(slug: str, exc: OSError) -> None:
@@ -1250,7 +1271,7 @@ def config_value(key, value):
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
-        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
+        or key in ("engine", "tick-mode", "watchdog-address", "watchdog-document", "placement-mode")
     ):
         return value
     if key == HIVE_PLACEMENT:

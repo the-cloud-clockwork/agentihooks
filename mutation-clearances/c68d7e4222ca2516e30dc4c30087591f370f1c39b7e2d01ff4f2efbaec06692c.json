@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/local_slots.py:scripts.swarm.local_slots.x_maximum:1a4b411f8d8c997575f71fe7b319944c7d5c5fbd9723d83b45cd24e8654cc91f": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime and ignores typ, so cast(None, hive[\"max_agents\"]) yields the same value as the original and only the static annotation differs."
+  }
+}

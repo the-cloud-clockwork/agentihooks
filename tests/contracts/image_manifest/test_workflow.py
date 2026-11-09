@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -62,12 +63,16 @@ def test_only_the_registry_login_holds_a_credential(workflow):
     assert named(workflow, "Log in to the registry")["with"]["password"] == "${{ secrets.GITHUB_TOKEN }}"
 
 
-def test_builds_pass_only_the_source_revision(workflow):
+def test_builds_pass_only_the_source_revision(workflow: dict[str, Any]) -> None:
     builds = [step["run"] for step in steps(workflow) if re.search(r"docker build\b", step.get("run", ""))]
 
     assert builds
     for run in builds:
-        assert re.findall(r"--build-arg (\w+)", run) in (["SOURCE_REVISION"], ["WORKER_IMAGE"])
+        assert re.findall(r"--build-arg (\w+)", run) in (
+            ["SOURCE_REVISION"],
+            ["SOURCE_REVISION", "BUILDKIT_INLINE_CACHE"],
+            ["WORKER_IMAGE"],
+        )
 
 
 def test_qualification_precedes_login_and_publication(workflow):
