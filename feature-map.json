@@ -2673,6 +2673,22 @@
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
         "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs"
       ]
+    },
+    {
+      "id": "codex-pump-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
+      "behaviour": "A Codex turn that the provider fails live with an account refusal (HTTP 401, 402 or 403, or unauthorized) ends the push pump degraded with AccountRefused, so codex session serve stops the app server and the seat is relaunched, while an old refused turn in a resumed thread leaves a fresh pump delivering; a usage read answered 402 deactivated_workspace is an expired reading, so routing gives that account no seats.",
+      "seam": "scripts.inbox.codex Pump.step and ThreadState.observe; scripts.codex_usage.read",
+      "tests": [
+        "tests/inbox/test_codex_pump.py::test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded",
+        "tests/inbox/test_codex_pump.py::test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delivering",
+        "tests/inbox/test_codex_pump.py::test_only_a_failed_turn_with_an_account_status_reads_as_an_account_refusal",
+        "tests/inbox/test_codex_pump.py::test_a_live_completion_records_the_refusal_and_a_later_clean_completion_keeps_it",
+        "tests/inbox/test_codex_pump.py::test_a_refreshed_thread_never_records_a_refusal",
+        "tests/test_codex_usage.py::test_a_deactivated_workspace_reads_as_expired",
+        "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status"
+      ]
     }
   ],
   "unmapped_rules": [
