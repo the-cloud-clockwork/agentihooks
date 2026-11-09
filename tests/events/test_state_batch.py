@@ -22,7 +22,7 @@ def test_memory_batch_preserves_order_missing_keys_and_duplicates() -> None:
         assert isinstance(store, StateStore)
         entries = store.get_many(["missing", "a", "a"])
         assert entries == [None, store.get("a"), store.get("a")]
-        assert entries[1].revision == revision
+        assert entries[1] is not None and entries[1].revision == revision
         assert store.get_many([]) == []
     finally:
         bus.close()
