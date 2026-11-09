@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "hive-workstation-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
+      "behaviour": "A hive seat that hands off, parks or readies a workstation task clears its claimant, so a workstation seat can take the task; a workstation seat, or a task without the workstation pin, keeps its claim.",
+      "seam": "swarm handoff, park and ready through the shared hand off step",
+      "tests": [
+        "tests/swarm/test_hive_release.py::test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task",
+        "tests/swarm/test_hive_release.py::test_a_hive_park_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_hive_ready_on_a_workstation_task_leaves_its_pull_request_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
+        "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
+        "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
@@ -55,6 +71,16 @@
         "tests/hive/test_daemon.py::test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval",
         "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
         "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
+      ]
+    },
+    {
+      "id": "hive-stop-recovery-handoff",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2252",
+      "behaviour": "An agent still running when its hive stops for a release gets a recovery handoff; once the hive stops reporting the tick retires the agent, reopens its task and launches the next engineer primed with that recovery handoff.",
+      "seam": "tick over a hive settled by remove.settle",
+      "tests": [
+        "tests/swarm/test_tick_hive_stop_recovery.py::test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer"
       ]
     },
     {
@@ -1265,6 +1291,15 @@
       ]
     },
     {
+      "id": "swarm-handoff-hive-binding",
+      "origin": "inventory",
+      "behaviour": "A hive successor binds live only while its hive report lists its execution at its generation and its name among the hive's live names.",
+      "seam": "scripts.handoff.transfers.observe",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_hive_successor_is_bound_by_its_hive_execution_report"
+      ]
+    },
+    {
       "id": "swarm-intent-wait",
       "origin": "inventory",
       "behaviour": "A wait on intent names the agent's own task pull request and is refused for any other.",
@@ -2105,6 +2140,19 @@
       ]
     },
     {
+      "id": "panic-merged-fix-integration-head",
+      "origin": "regression",
+      "ordered_at": "2026-11-09",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-merged-fix",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the runs on the commit a merge queue run of a registered fix pull request carries, before the pull request reads as merged, and the runs on its integration branch head once it is merged, and still cancels the other runs on that branch.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_each_merged_fix_base",
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
@@ -2595,6 +2643,21 @@
       "tests": [
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
+      ]
+    },
+    {
+      "id": "hive-admission-pending-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
+      "behaviour": "A hive launch stops counting as a pending launch against admission room once the controller collects the hive's answer to it, live, failed or ambiguous, including a live answer that fails its identity check, so admission pending for a hive matches the launches the hive has not yet answered.",
+      "seam": "HiveLaunch.complete and HiveLaunch.finished against admission.pending",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it",
+        "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
       ]
     },
     {
