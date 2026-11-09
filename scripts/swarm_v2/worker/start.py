@@ -206,7 +206,7 @@ def _build(
     bundle: Path | None,
 ) -> dict:
     attempt.parent.mkdir(mode=0o700, exist_ok=True)
-    os.environ[brain_binding.VARIABLE] = json.dumps(brain_binding.decide(os.environ), sort_keys=True)
+    os.environ[brain_binding.VARIABLE] = json.dumps(brain_binding.decide(os.environ))
     record = boot(
         worker_home.Request(
             attempt.parent,
