@@ -85,7 +85,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
-{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" }}
+{{- range $phase, $action := dict "PreSync" "acquire" "PostSync" "release" "SyncFail" "abandon" }}
 ---
 apiVersion: batch/v1
 kind: Job

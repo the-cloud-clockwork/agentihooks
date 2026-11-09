@@ -1,8 +1,11 @@
 import argparse
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
+
+LEASE_SECONDS = 1500
 
 
 class Conflict(Exception):
@@ -40,21 +43,36 @@ def lease_path(namespace: str, name: str) -> str:
     return f"/apis/coordination.k8s.io/v1/namespaces/{quote(namespace, safe='')}/leases/{quote(name, safe='')}"
 
 
+def micro_time(seconds: float) -> str:
+    """Render epoch seconds as a Kubernetes MicroTime string."""
+    return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def expired(spec: dict, now: float) -> bool:
+    """Tell whether a held lease has passed its renew time plus its duration."""
+    renewed, duration = spec.get("renewTime"), spec.get("leaseDurationSeconds")
+    if not renewed or not duration:
+        return False
+    return now > datetime.strptime(renewed, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC).timestamp() + duration
+
+
 def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int = 1800) -> None:
+    """Take the rollout lease for owner, waiting for a free or expired lease until timeout."""
     path = lease_path(namespace, name)
     deadline = time.monotonic() + timeout
     while True:
         lease = api.request("GET", path)
         if lease is not None and lease["spec"].get("holderIdentity") == owner:
             return
-        if lease is None or not lease["spec"].get("holderIdentity"):
+        now = time.time()
+        if lease is None or not lease["spec"].get("holderIdentity") or expired(lease["spec"], now):
             wanted = lease or {
                 "apiVersion": "coordination.k8s.io/v1",
                 "kind": "Lease",
                 "metadata": {"name": name, "namespace": namespace},
                 "spec": {},
             }
-            wanted["spec"]["holderIdentity"] = owner
+            wanted["spec"].update(holderIdentity=owner, leaseDurationSeconds=LEASE_SECONDS, renewTime=micro_time(now))
             try:
                 api.request("PUT" if lease else "POST", path if lease else path.rsplit("/", 1)[0], wanted)
                 return
@@ -63,6 +81,16 @@ def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int
         if time.monotonic() >= deadline:
             raise TimeoutError("another hive rollout owns the lease; no workload was changed")
         time.sleep(5)
+
+
+def abandon(api: Kubernetes, namespace: str, name: str, owner: str) -> None:
+    """Free the rollout lease after a failed sync when owner still holds it."""
+    path = lease_path(namespace, name)
+    lease = api.request("GET", path)
+    if lease is None or lease["spec"].get("holderIdentity") != owner:
+        return
+    lease["spec"]["holderIdentity"] = ""
+    api.request("PUT", path, lease)
 
 
 def release(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespace: str, deployment: str) -> None:
@@ -86,7 +114,7 @@ def ready(marker: Path, now: float) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["acquire", "release", "ready"])
+    parser.add_argument("action", choices=["acquire", "release", "abandon", "ready"])
     parser.add_argument("--namespace", default="default")
     parser.add_argument("--name", default="agentihooks-hive-rollout")
     parser.add_argument("--owner", default="")
@@ -98,6 +126,8 @@ def main() -> None:
     api = Kubernetes()
     if args.action == "acquire":
         acquire(api, args.namespace, args.name, args.owner)
+    elif args.action == "abandon":
+        abandon(api, args.namespace, args.name, args.owner)
     else:
         release(api, args.namespace, args.name, args.owner, args.hive_namespace, args.deployment)
 
