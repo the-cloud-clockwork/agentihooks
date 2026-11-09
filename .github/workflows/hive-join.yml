@@ -18,14 +18,14 @@ jobs:
       SWARM_SMOKE_IMAGE: local/agentihooks-swarm:clients-check
       SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Pull the Python base with bounded retries
         run: bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
       - name: Restore the swarm smoke layers
         id: layers
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/swarm-smoke-layers
           key: swarm-smoke-layers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py') }}

@@ -19,7 +19,7 @@ jobs:
       actors: ${{ steps.actors.outputs.actors }}
       queue_actor: ${{ steps.actors.outputs.queue_actor }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: the-cloud-clockwork/agentihooks
           ref: dev

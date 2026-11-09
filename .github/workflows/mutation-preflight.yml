@@ -43,7 +43,7 @@ jobs:
           count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.open.outputs.open != 'true'
         with:
           fetch-depth: 0
@@ -65,19 +65,19 @@ jobs:
 
       - name: Upload the reused mutation evidence
         if: steps.reuse.outputs.reused == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-preflight-report
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         with:
           version: "0.12.23"
@@ -90,7 +90,7 @@ jobs:
 
       - name: Restore measured statistics timings
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-selection
           path: |
@@ -137,17 +137,17 @@ jobs:
           count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
           if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.open.outputs.open == 'false'
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.open.outputs.open == 'false'
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         if: steps.open.outputs.open == 'false'
         with:
           version: "0.12.23"
@@ -227,15 +227,15 @@ jobs:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -245,7 +245,7 @@ jobs:
         run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-selection
 
@@ -266,7 +266,7 @@ jobs:
           exit 1
 
       - name: Restore the merged test stats
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -282,7 +282,7 @@ jobs:
 
       - name: Save the merged test stats
         if: success() && strategy.job-total == 1
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -314,7 +314,7 @@ jobs:
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: strategy.job-total == 1
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -330,7 +330,7 @@ jobs:
 
       - name: Upload the measured mutation plan
         if: strategy.job-total == 1
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-plan
           path: .mutation-stats/plan.json
@@ -340,7 +340,7 @@ jobs:
 
       - name: Upload stats evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-evidence-stats-${{ matrix.part }}
           path: .mutation-gate/
@@ -362,15 +362,15 @@ jobs:
         id: refinement-start
         run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -380,28 +380,28 @@ jobs:
         run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the shared mutation stats
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
 
       - name: Restore the merged test stats
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-test-stats-v2-${{ runner.os }}-
 
       - name: Download every part's test stats cache
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
@@ -411,7 +411,7 @@ jobs:
         run: python -c 'import sys; from pathlib import Path; from scripts.ci_mutation.stats_dependencies import cap; print(f"Mutation stats cache dropped {cap(Path(sys.argv[1]))} records past the cap")' .mutation-stats-cache
 
       - name: Download planned mutation test selection
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-selection
 
@@ -423,7 +423,7 @@ jobs:
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
 
       - name: Upload the measured mutation plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-plan
           path: .mutation-stats/plan.json
@@ -459,7 +459,7 @@ jobs:
         if: success() && steps.merged-stats.outputs.found == 'true' && steps.cache-budget.outputs.available == 'true'
         timeout-minutes: 1
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with: &refinement-test-stats-cache
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -468,7 +468,7 @@ jobs:
         if: "!cancelled() && steps.save-merged-stats.outcome == 'failure'"
         timeout-minutes: 1
         continue-on-error: true
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with: *refinement-test-stats-cache
 
   probe:
@@ -483,15 +483,15 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -503,7 +503,7 @@ jobs:
       - name: Download planned mutation test selection
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-planned-mutation-test-selection
           name: mutation-selection
 
@@ -516,7 +516,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -539,7 +539,7 @@ jobs:
         timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -555,11 +555,11 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -568,7 +568,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-the-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-the-measured-mutation-plan
           name: mutation-plan
           path: .mutation-stats
@@ -582,7 +582,7 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-the-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-measured-mutation-plan
 
       - name: Run each mutant's early tests once for every shard
@@ -610,15 +610,15 @@ jobs:
     outputs:
       shards: ${{ steps.replan.outputs.shards }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -628,7 +628,7 @@ jobs:
         run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -637,7 +637,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-the-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-measured-mutation-plan
 
       - name: Download the measured mutation plan, wait before attempt 2
@@ -649,11 +649,11 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-the-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-measured-mutation-plan
 
       - name: Download the early mutation results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: mutation-probe-*
           path: .mutation-stats
@@ -666,7 +666,7 @@ jobs:
         run: python -m scripts.ci_mutation.probed --stats .mutation-stats --budget 1080
 
       - name: Upload the probed mutation plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-plan-probed
           path: .mutation-stats/plan.json
@@ -688,15 +688,15 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -708,7 +708,7 @@ jobs:
       - name: Download planned mutation test selection
         id: download-planned-mutation-test-selection
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-planned-mutation-test-selection
 
       - name: Download planned mutation test selection, wait before attempt 2
@@ -720,7 +720,7 @@ jobs:
 
       - name: Download planned mutation test selection, attempt 2
         if: steps.download-planned-mutation-test-selection.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
@@ -743,7 +743,7 @@ jobs:
         timeout-minutes: 1
         id: download-the-shared-mutation-stats
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-shared-mutation-stats
 
       - name: Download the shared mutation stats, wait before attempt 2
@@ -756,11 +756,11 @@ jobs:
       - name: Download the shared mutation stats, attempt 2
         timeout-minutes: 1
         if: steps.download-the-shared-mutation-stats.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-shared-mutation-stats
 
       - name: Restore the tests that killed this branch's earlier mutants
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -769,7 +769,7 @@ jobs:
       - name: Download the measured mutation plan
         id: download-the-measured-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-measured-mutation-plan
 
       - name: Download the measured mutation plan, wait before attempt 2
@@ -781,14 +781,14 @@ jobs:
 
       - name: Download the measured mutation plan, attempt 2
         if: steps.download-the-measured-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-measured-mutation-plan
 
       - name: Download the probed mutation plan
         if: needs.replan.result == 'success'
         id: download-the-probed-mutation-plan
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-the-probed-mutation-plan
           name: mutation-plan-probed
           path: .mutation-stats
@@ -802,7 +802,7 @@ jobs:
 
       - name: Download the probed mutation plan, attempt 2
         if: steps.download-the-probed-mutation-plan.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-probed-mutation-plan
 
       - name: Mutate changed Python files
@@ -860,11 +860,11 @@ jobs:
     env:
       BASE: ${{ inputs.base || 'origin/dev' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -872,7 +872,7 @@ jobs:
         if: needs.plan.outputs.changed != '0'
         id: download-every-mutation-shard-report
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-every-mutation-shard-report
           pattern: mutation-preflight-shard-*
           path: .mutation-shards
@@ -887,12 +887,12 @@ jobs:
 
       - name: Download every mutation shard report, attempt 2
         if: steps.download-every-mutation-shard-report.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-every-mutation-shard-report
 
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.plan.outputs.changed != '0'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -902,7 +902,7 @@ jobs:
         if: needs.plan.outputs.changed != '0'
         id: download-the-tests-that-killed-mutants
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: &download-the-tests-that-killed-mutants
           pattern: mutation-killers-*
           path: .mutation-stats/killers
@@ -917,12 +917,12 @@ jobs:
 
       - name: Download the tests that killed mutants, attempt 2
         if: steps.download-the-tests-that-killed-mutants.outcome == 'failure'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with: *download-the-tests-that-killed-mutants
 
       - name: Keep the tests that killed mutants for this branch's next plan
         if: needs.plan.outputs.changed != '0' && hashFiles('.mutation-stats/killers/*') != ''
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .mutation-stats/killers
           key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}

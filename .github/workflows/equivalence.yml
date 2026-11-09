@@ -13,14 +13,14 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: head
           fetch-depth: 2
       - name: Select the dev parent of the tested merge
         id: comparison-base
         run: echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: base
           ref: ${{ steps.comparison-base.outputs.sha }}
@@ -32,10 +32,10 @@ jobs:
             echo "::warning::The base predates the protected equivalence grader; the head copy grades this run."
             echo "GRADER=$PWD/head" >> "$GITHUB_ENV"
           fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: '0.12.23'
           enable-cache: false
