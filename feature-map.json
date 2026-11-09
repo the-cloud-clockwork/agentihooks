@@ -2673,6 +2673,18 @@
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
         "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs"
       ]
+    },
+    {
+      "id": "ledger-workflow-task-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2428",
+      "behaviour": "Ledger task add accepts workflow and case strings through the API for a master identity, and initial ledger content preserves workflow task kind and inputs.",
+      "seam": "task_add API schema and HTTP mutation; new_ledger.build_doc seed tasks",
+      "tests": [
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_task_add_schema_accepts_workflow_and_case_as_strings",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_a_master_adds_a_workflow_task_through_the_api",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_initial_content_preserves_workflow_task_fields"
+      ]
     }
   ],
   "unmapped_rules": [

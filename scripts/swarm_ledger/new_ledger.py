@@ -133,14 +133,20 @@ def phase_fields(key: str, item: dict) -> dict:
     return fields
 
 
-def build_doc(content, size="small"):
-    def items(key, prefix, fields):
+def build_doc(content: dict, size: str = "small") -> dict:
+    def items(key: str, prefix: str, fields: tuple[str, ...]) -> list[dict]:
         return [
-            {"id": f"{prefix}{n}", **{f: item.get(f, "") for f in fields}, **extra(key), **phase_fields(key, item)}
+            {
+                "id": f"{prefix}{n}",
+                **{f: item.get(f, "") for f in fields},
+                **extra(key),
+                **phase_fields(key, item),
+                **({f: item[f] for f in ("kind", "workflow", "case") if f in item} if key == "tasks" else {}),
+            }
             for n, item in enumerate(content.get(key, []), 1)
         ]
 
-    def extra(key):
+    def extra(key: str) -> dict:
         base = {"comments": []}
         if key in ("phases", "followups", "tasks"):
             base["done"] = False
