@@ -185,7 +185,8 @@ def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
             for alias in node.names
             if alias.name in DISABLING
         }
-        for _ in functions:
+        names = {node.name for node in ast.walk(module) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for _ in names:
             grown: set[str] = {
                 function.name
                 for key, function, _ in functions
