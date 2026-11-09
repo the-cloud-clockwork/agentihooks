@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
-from scripts.hive import account_slots, workstation
+from scripts.hive import account_slots, registry, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
@@ -86,6 +86,12 @@ def run_once(store, bus, runtime, hive: str, taken: Iterable[str], timeout_ms: i
     return [spoke.poll(timeout_ms) for spoke in spokes(store, bus, runtime, hive, taken, held)]
 
 
+def draining(store: Any, hive: str) -> bool:
+    """True while this pod's member of hive takes no new agents; a store without Redis has no members."""
+    redis = getattr(store, "redis", None)
+    return redis is not None and registry.member_draining(redis, hive, registry.member_name())
+
+
 def run(
     store,
     bus,
@@ -97,7 +103,7 @@ def run(
 ) -> None:
     held: dict = {}
     for _ in itertools.count() if passes is None else passes:
-        if "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
+        if draining(store, hive) or "started" not in run_once(store, bus, runtime, hive, taken, TAKE_MS, held):
             wait(IDLE_S)
 
 
