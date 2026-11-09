@@ -140,6 +140,20 @@ def test_a_pass_that_reads_an_empty_view_counts_no_rows() -> None:
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
+def test_a_pass_keeps_the_most_rows_any_of_its_reads_held() -> None:
+    record: dict[str, Any] = {}
+    rows = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+
+    def run() -> None:
+        timing.PASS.set(record)
+        view.counted(view.LedgerView(1, {"tasks": rows}))
+        view.counted(view.LedgerView(2, {"tasks": rows[:1]}))
+
+    copy_context().run(run)
+    assert record == {view.ROWS_READ: 3}
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 

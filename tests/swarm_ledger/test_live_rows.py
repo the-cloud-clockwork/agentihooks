@@ -133,6 +133,17 @@ def test_the_unscoped_full_export_keeps_every_task() -> None:
     assert json.loads(routes.export_text(fragments.document(doc), ("tasks",)))["data"]["tasks"] == doc["tasks"]
 
 
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_a_scoped_full_export_names_frozen_ids_only_when_it_carries_the_tasks() -> None:
+    doc = _doc()
+    answer = live_rows.answer(doc, live_rows.Scope())
+    whole = json.loads(routes.export_text(fragments.document(doc), (), answer))["data"]
+    assert whole["frozen_ids"] == ["c"]
+    assert whole["tasks"] == answer.rows
+    phases = json.loads(routes.export_text(fragments.document(doc), ("phases",), answer))["data"]
+    assert phases == {"phases": doc["phases"]}
+
+
 def _path(*parts: object) -> str:
     """The stored row path of parts."""
     return encode(list(parts))
