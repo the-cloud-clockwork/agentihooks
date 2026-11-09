@@ -126,7 +126,6 @@ def test_two_headed_hives_joining_take_unique_names(redis):
     registry.update(redis, "root", ["ui=yes"])
     joined = registry.update(redis, "vm", ["ui=yes", "name=swarm-master"])
     assert joined["name"] == "swarm-master-2"
-    assert registry.show(redis, "root")["name"] == "swarm-master"
     assert sorted(hive["name"] for hive in registry.hives(redis)) == ["swarm-master", "swarm-master-2"]
     assert registry.update(redis, "vm", ["max-agents=2"])["name"] == "swarm-master-2"
     assert registry.update(redis, "root", ["max-agents=3"])["name"] == "swarm-master"

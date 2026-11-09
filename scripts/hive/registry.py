@@ -199,9 +199,9 @@ def _amend(client, hive_id: str, change):
     return hive_state.amend(hive_state.records(client, hive_id), hive_id, change, _legacy(client, hive_id))
 
 
-def _settle(hive_id: str, record: dict) -> dict:
+def _settle(hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
     """The hive hosting the operator's interface runs the masters and is named MASTER_NAME or a name derived from it."""
-    settled = {**_default(hive_id, record.get("ui", "no")), **record}
+    settled: dict[str, Any] = {**_default(hive_id, record.get("ui", "no")), **record}
     if settled["ui"] != "yes" or DERIVED_MASTER.fullmatch(str(settled["name"])):
         return settled
     return {**settled, "name": MASTER_NAME}
@@ -209,7 +209,8 @@ def _settle(hive_id: str, record: dict) -> dict:
 
 def _held(client: object, hive_id: str) -> set[str]:
     """The names every other registered hive reads as."""
-    return {record["name"] for record in hives(client) if record["id"] != hive_id}
+    registered: list[dict[str, Any]] = hives(client)
+    return {str(record["name"]) for record in registered if record["id"] != hive_id}
 
 
 def _unique(name: str, held: set[str]) -> str:
@@ -269,7 +270,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
-    naming = bool(parsed.keys() & {"name", "ui"})
+    naming = "name" in parsed or "ui" in parsed
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
@@ -280,7 +281,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
         }
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
-        settled = _settle(hive_id, merged)["name"]
+        settled = str(_settle(hive_id, merged)["name"])
         if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
             merged["name"] = derived
         if merged.get("max_agents") is None:
