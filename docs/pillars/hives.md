@@ -419,7 +419,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
+| `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
@@ -1336,7 +1336,7 @@ The PATCH body takes one or more of these fields and nothing else:
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
 | `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
 | `prefer` | object of role to whole number rank |
-| `max_agents` | integer, 1 or more |
+| `max_agents` | integer, 0 or more |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
 UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
