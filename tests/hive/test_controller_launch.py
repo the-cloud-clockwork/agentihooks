@@ -119,6 +119,50 @@ def test_placement_before_the_pass_reads_quota_uses_the_runtime_reader(setup):
     assert setup.herdr.quota_accounts.call_args.kwargs == {"refresh": False}
 
 
+@pytest.mark.feature("controller-fresh-quota-placement")
+@pytest.mark.parametrize("deployment_reader", [True, False], ids=["deployment", "hive-reports"])
+def test_a_fresh_runtime_places_without_pass_rows_or_pod_quota(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, deployment_reader: bool
+) -> None:
+    import time
+
+    from scripts import claude_quota_balancer as balancer
+    from scripts.hive import launch
+    from scripts.swarm.runtime import HerdrRuntime
+
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(launch.capacity.account_sessions, "sessions_by_account", lambda **kwargs: {})
+    monkeypatch.setattr(launch.capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    now = time.time()
+    setup.store.redis.set(f"{launch.registry.key('remote')}:sessions", json.dumps({"claude:account": 0}))
+    setup.store.redis.set(
+        f"{launch.registry.key('remote')}:quota",
+        json.dumps(
+            {
+                "claude:account": {
+                    "five_hour": {"used": 20, "resets_at": now + 3600},
+                    "seven_day": {"used": 10, "resets_at": now + 86400},
+                    "observed_at": now,
+                }
+            }
+        ),
+    )
+    runtime = HerdrRuntime()
+    runtime._profile_decision = setup.herdr._profile_decision
+    reader = Mock(return_value=setup.herdr._quota_accounts)
+    if deployment_reader:
+        runtime.quota_accounts = reader
+    assert not hasattr(runtime, "_quota_accounts")
+    assert balancer.cached_observations() == []
+    launcher = launch.HiveLaunch(setup.store, setup.config.slug, setup.held, runtime)
+    selected = launcher.select(setup.config, "eng", {"id": "task"})
+    assert isinstance(selected, launch.Selection)
+    assert (selected.hive, selected.account.name) == ("remote", "account")
+    if deployment_reader:
+        reader.assert_called_once()
+        assert reader.call_args.kwargs == {"refresh": False}
+
+
 @pytest.mark.feature("controller-quota-after-restart")
 def test_placement_without_a_runtime_reader_reads_the_hive_reports(setup):
     from unittest.mock import patch

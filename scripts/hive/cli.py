@@ -294,7 +294,10 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
-    invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
+    invited.add_argument(
+        "--bus-url",
+        help="NATS address the new hive reaches; copied from --like, else the hub signer record, when omitted",
+    )
     invited.add_argument(
         "--swarm", action="append", default=[], help="swarm the member's bus credential reaches; every swarm if omitted"
     )
@@ -408,6 +411,7 @@ def _list() -> None:
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
             f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
+            f"\trelease={record['version'] or 'unknown'}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

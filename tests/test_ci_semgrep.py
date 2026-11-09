@@ -75,11 +75,15 @@ def test_scan_runs_the_registry_packs_and_the_outage_rules():
     }
 
 
-def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step() -> None:
     assert ".semgrep-incidents" in _jobs()["scan"]["steps"][-1]["env"]["CONFIGS"].split()
     assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
     runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
-    assert "semgrep --metrics off --test .semgrep-incidents" in runs
+    fixture_run = next(run for run in runs if run and "cp -r .semgrep-incidents" in run)
+    assert 'copy="$(mktemp -d -p "$RUNNER_TEMP")"' in fixture_run
+    assert 'cp -r .semgrep-incidents "$copy/rules"' in fixture_run
+    assert ': > "$copy/.semgrepignore"' in fixture_run
+    assert '(cd "$copy" && semgrep --metrics off --test --config rules rules)' in fixture_run
     assert ".semgrep-incidents/" in (_ROOT / ".semgrepignore").read_text().splitlines()
 
 

@@ -1,0 +1,25 @@
+rules:
+  - id: helper-thread-ends-on-wait-failure
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The headroom thread refreshes the rollout ready marker while a launch holds the beat, and only the next beat
+      restarts it. Ending it on a failed scheduler wait leaves the marker stale for the whole launch. Log the failure,
+      wait on the stop event and keep the cadence.
+    paths:
+      include:
+        - /scripts/hive/daemon.py
+        - helper-thread-ends-on-wait-failure.py
+    patterns:
+      - pattern-inside: |
+          def $HELPER(...):
+              ...
+      - metavariable-regex:
+          metavariable: $HELPER
+          regex: ^publish_headroom
+      - pattern: |
+          try:
+              scheduled_wait(...)
+          except $ERRORS as $EXC:
+              ...
+              return

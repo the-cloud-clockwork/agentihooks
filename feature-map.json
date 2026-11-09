@@ -22,6 +22,18 @@
       ]
     },
     {
+      "id": "hive-ready-through-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
+      "behaviour": "The hive headroom thread logs a failed scheduler wait and keeps its cadence until stopped, so the rollout ready marker stays fresh while a slow agent launch holds the beat and the Redis wait times out once.",
+      "seam": "publish_headroom beside run while a beat blocks",
+      "tests": [
+        "tests/hive/test_daemon.py::test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval",
+        "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
+        "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -2291,6 +2303,17 @@
       ]
     },
     {
+      "id": "hive-release-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2097",
+      "behaviour": "Each hive heartbeat records the agentihooks release the hive runs, and hive list prints it per hive, unknown when the record carries none.",
+      "seam": "daemon.beat and the hive list command",
+      "tests": [
+        "tests/hive/test_daemon.py::test_each_beat_reports_the_release_the_hive_runs",
+        "tests/hive/test_join_display.py::test_hive_list_prints_the_release_each_hive_runs"
+      ]
+    },
+    {
       "id": "controller-quota-after-restart",
       "origin": "regression",
       "ordered_at": "2026-11-08",
@@ -2393,6 +2416,39 @@
       "seam": "ci_wiring.check and gate_protected.grade",
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
+      ]
+    },
+    {
+      "id": "hive-rollout-lease-failed-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
+      "behaviour": "A hive whose sync fails after it takes the hive rollout lease frees it through the SyncFail abandon hook, even over an unserving replacement, and a lease whose renew time plus its duration has passed is taken over by a hive still inside its acquire wait, so one stuck hive never holds every other hive on the old release.",
+      "seam": "scripts.hive.rollout acquire and abandon",
+      "tests": [
+        "tests/hive/test_rollout.py::test_a_failed_sync_frees_the_lease_for_the_next_hive",
+        "tests/hive/test_rollout.py::test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive"
+      ]
+    },
+    {
+      "id": "controller-fresh-quota-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-fallback-guard",
+      "behaviour": "A fresh controller pass with no quota rows and an empty pod quota cache places agents using the deployment runtime quota reader or hive quota reports in Redis.",
+      "seam": "HiveLaunch.select with a fresh HerdrRuntime before pass quota rows exist",
+      "tests": [
+        "tests/hive/test_controller_launch.py::test_a_fresh_runtime_places_without_pass_rows_or_pod_quota"
+      ]
+    },
+    {
+      "id": "hive-placement-slot-before-room",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2427",
+      "behaviour": "Placement keeps only the hives that advertise the launch slot before it checks room, so a launch whose slot holders are full waits on their room refusal instead of naming the slot as missing beside a slotless hive with room. A preferred hive without the slot spills on the slot refusal.",
+      "seam": "scripts.hive.placement.choose",
+      "tests": [
+        "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
+        "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
+        "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
     },
     {
