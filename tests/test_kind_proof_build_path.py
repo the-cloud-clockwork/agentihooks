@@ -201,6 +201,9 @@ def test_every_controller_probe_still_runs_and_fails_the_proof() -> None:
     assert "${probe}Probe.httpGet.httpHeaders[0].value" in probes
     failed = probes.index('if [[ $wired != "$want" || $port != api || $host != 127.0.0.1:8780 ]]; then')
     assert failed < probes.index("exit 1", failed)
-    assert 'kubectl exec "$ledger_pod" -- env PROBE_URL=' in probes
+    assert (
+        'kubectl exec "deployment/$release-controller" -c controller -- env PROBE_URL="http://127.0.0.1:8780$wired"'
+        in probes
+    )
     assert "urllib.request.urlopen(request, timeout=8)" in probes
     assert probes.index("urllib.request.urlopen") < probes.index("HTTP probe passed")
