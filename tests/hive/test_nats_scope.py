@@ -206,7 +206,7 @@ def test_scoped_credentials_require_more_than_the_default_control_line(signer, t
     nats_server.wait_logged(tmp_path / "nats.log", "maximum control line exceeded")
 
 
-def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
+def test_scoped_claims_carry_the_canonical_per_resource_policy(signer: nats_grant.Signer) -> None:
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     jwt, user = nkey.parse_creds(nats_grant.mint(scoped, "m1"))
     resources = (
@@ -220,6 +220,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_hive-presence",
         "STATE_hive-executions",
         "STATE_execution-starts",
+        "STATE_inbox",
     )
     expected = {"swarm.rig.>", "slots.rig.m1"}
     from scripts.events.subjects import stream_name
