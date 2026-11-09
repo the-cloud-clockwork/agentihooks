@@ -230,3 +230,50 @@ def test_finding_times_read_in_utc_whatever_the_host_zone(store: RedisStore, mon
         "Last completed run: 06 November 21:19 UTC",
         "4 passes since ran it without a completed run, the first at 06 November 21:21 UTC",
     )
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_one_tick_pass_keeps_the_read_of_every_swarm_it_asked(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reads for two swarms in one pass are both kept; asking either again reads nothing."""
+    replay(store, 4)
+    reads = counted_reads(store, monkeypatch)
+    at = START + 4 * MINUTE + 1_000
+    token = timing.PASS.set({"pass_id": "p1", "start_ms": START})
+    try:
+        assert len(step_starvation.findings(store, SLUG, at)) == 1
+        assert step_starvation.findings(store, "other", at) == []
+        assert len(step_starvation.findings(store, SLUG, at)) == 1
+        assert step_starvation.findings(store, "other", at) == []
+    finally:
+        timing.PASS.reset(token)
+    assert len(reads) == 2
+    assert sorted(step_starvation._PASS_READS) == [("p1", "other"), ("p1", SLUG)]
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_a_swarm_with_nothing_saved_has_no_starvation(store: RedisStore) -> None:
+    """With no saved state there is no window and no starved step, and no finding."""
+    assert step_starvation.starved({}, START) == []
+    assert step_starvation.starved({"steps": {WAITS: {"missed": START, "misses": 9}}}, START + 60 * MINUTE) == []
+    assert step_starvation.findings(store, SLUG, START) == []
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_swarm_status_findings_list_the_starved_step_at_the_status_clock(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Swarm status lists a starved step's finding, measured against its own clock."""
+    from scripts.swarm import status
+    from scripts.swarm.store import SwarmConfig
+
+    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, autonomy="full")
+    store.create(config)
+    store.redis.set(store.key(SLUG, "merge-stall"), json.dumps({"tried": START, "queue": 0}))
+    replay(store, 4)
+    monkeypatch.setattr(status, "now_ms", lambda: START + 6 * MINUTE)
+    rows = [row for row in status.findings(store, SLUG, config, [], []) if row["kind"] == "step starvation"]
+    assert [(row["subject"], row["summary"]) for row in rows] == [
+        ("waits-end", "Tick step waits end has not completed for 5 minutes")
+    ]

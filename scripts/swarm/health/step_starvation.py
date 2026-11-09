@@ -137,7 +137,7 @@ def pass_read(store: Any, slug: str) -> dict[str, Any]:
     key = (str(current["pass_id"]), slug)
     if key not in _PASS_READS:
         for stale in [found for found in _PASS_READS if found[0] != key[0]]:
-            _PASS_READS.pop(stale, None)
+            del _PASS_READS[stale]
         _PASS_READS[key] = read(store, slug)
     return _PASS_READS[key]
 
