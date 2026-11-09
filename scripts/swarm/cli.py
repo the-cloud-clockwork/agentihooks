@@ -340,6 +340,7 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     if not ledger_view.reads(ledger):
         return
     beating.callback(ledger_client.OFFLINE.set, False)
+    beating.callback(ledger_client.SLOW.set, False)
     try:
         ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
     except ledger_link.Cleartext as exc:
@@ -350,15 +351,10 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
         _read_long_or_hold_stored(slug, ledger, exc)
 
 
-def _timed_out(exc: OSError) -> bool:
-    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
-    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
-
-
 def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
     """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
     stores no view fresh enough to run from, else hold the stored view."""
-    if _timed_out(exc) and not ledger_view.fresh(slug):
+    if ledger_view.timed_out(exc) and not ledger_view.fresh(slug):
         try:
             ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
             return
@@ -371,12 +367,13 @@ def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> 
 
 def _hold_stored(slug: str, exc: OSError) -> None:
     """Hold the last good view of ledger ``slug`` for the pass and run it offline, or leave the pass to its ledger
-    health probe when this host stores none."""
+    health probe when this host stores none; a read that only timed out leaves its writes sent to the server first."""
     if ledger_view.hold_stored(slug) is None:
         print(f"ledger {slug} not answering ({exc}) and no view is stored to run from", file=sys.stderr)
         return
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
     ledger_client.OFFLINE.set(True)
+    ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):

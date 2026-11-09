@@ -265,9 +265,27 @@ def test_hive_list_shows_live_headroom_beside_each_hive(redis, monkeypatch, caps
     redis.set(headroom.key("old"), json.dumps({**record, "measured_at": 9_999}))
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tstale\tui=no\tmax-agents=0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\n"
-        "old\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=master\theadroom=missing\n"
+        "box\tstale\tui=no\tworkers=0 of 0 (auto)\texcluded=master\tcpus=8\tload5=1.00\tavailable-mb=512\tpending=1\trelease=unknown\n"
+        "old\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
     )
+
+
+def test_hive_list_shows_workers_against_the_limit_without_masters(
+    redis: "Redis", monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hive import join_report
+
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 40_000)
+    monkeypatch.setattr(cli, "_local_agents", lambda *_: {"box": ["master 1 · fixture", "engineer@aaaaaa-0002"]})
+    reports = [
+        {"slug": "fixture", "agent": name} for name in ("master@aaaaaa-0001", "master-aaaaaa-0003", "ci@aaaaaa-0004")
+    ]
+    monkeypatch.setattr(join_report, "live", lambda *_: reports)
+    monkeypatch.setattr(join_report, "summary", lambda report: report["agent"])
+    registry.update(redis, "box", ["ui=no", "max-agents=4"])
+    assert cli.main(["list"]) == 0
+    assert "\tworkers=2 of 4 (cap 4)\t" in capsys.readouterr().out.splitlines()[0]
 
 
 POD_LIMITS = {
@@ -299,7 +317,7 @@ def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgr
     registry.update(redis, "anton-2", ["ui=no"])
     headroom.publish(redis, "anton-2", 5_000, proc)
     assert cli.main(["list"]) == 0
-    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\t" in capsys.readouterr().out
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):

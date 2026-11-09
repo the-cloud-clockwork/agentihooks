@@ -41,8 +41,10 @@ __all__ = [
     "holding",
     "queued",
     "refreshed",
+    "slow",
     "start",
     "stored",
+    "timed_out",
     "view_file",
     "wrote",
 ]
@@ -133,6 +135,7 @@ class Held:
     renew: Callable[[], LedgerView]
     stale: bool = False
     offline: bool = False
+    slow: bool = False
 
 
 HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
@@ -148,6 +151,12 @@ def offline() -> bool:
     """Whether the held view's server stopped answering in any step of this pass."""
     held = HELD.get()
     return held is not None and held.offline
+
+
+def slow() -> bool:
+    """Whether the held view's server last failed a read by answering too slowly rather than refusing it."""
+    held = HELD.get()
+    return held is not None and held.slow
 
 
 def current() -> LedgerView | None:
@@ -221,12 +230,17 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
             return refresh()
         except urllib.error.HTTPError:
             raise
-        except OSError:
+        except OSError as exc:
             held: Held = HELD.get()  # pyright: ignore[reportAssignmentType]
-            held.offline = True
+            held.offline, held.slow = True, timed_out(exc)
             return held.view
 
     return renew
+
+
+def timed_out(exc: OSError) -> bool:
+    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
+    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
 
 
 def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:

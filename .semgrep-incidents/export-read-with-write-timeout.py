@@ -55,3 +55,33 @@ def short_view_with_retry(slug: str, service: bool) -> None:
         if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
             raise
         _read_long_or_hold_stored(slug, service, exc)
+
+
+def slow() -> bool:
+    return ledger_client.SLOW.get()
+
+
+def _offline_write(store: object, slug: str, ops: list, service: bool) -> dict:
+    del store, slug, ops, service
+    return {}
+
+
+def _call_queued_unsent(slug: str, ops: list, held_offline: bool, service: bool) -> dict:
+    if held_offline and ops:
+        # ruleid: offline-write-queued-without-send
+        return ledger.queue(slug, ops, service)
+    return ledger.call(slug, ops, service=service)
+
+
+def _call_sent_first(slug: str, ops: list, held_offline: bool, service: bool) -> dict:
+    try:
+        if held_offline and ops and not slow():
+            # ok: offline-write-queued-without-send
+            return _offline_write(ledger, slug, ops, service)
+        return ledger.call(slug, ops, service=service)
+    except SystemExit as exc:
+        unreachable = str(exc).startswith("ledger server not answering")
+        if unreachable and held_offline and ops:
+            # ok: offline-write-queued-without-send
+            return _offline_write(ledger, slug, ops, service)
+        raise
