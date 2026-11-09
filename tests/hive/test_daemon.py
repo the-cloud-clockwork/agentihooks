@@ -534,6 +534,14 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
 
 
+@pytest.mark.feature("hive-ready-through-launch")
+def test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval(capsys: pytest.CaptureFixture[str]) -> None:
+    stop = Mock(spec=threading.Event)
+    daemon._headroom_wait_failed(OSError("gone"), stop)
+    stop.wait.assert_called_once_with(daemon.HEADROOM_SECONDS)
+    assert capsys.readouterr().err == "hive headroom wait failed (OSError: gone)\n"
+
+
 @pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "NoPermissionError", "ResponseError", "OSError"])
 @pytest.mark.feature("hive-ready-through-launch")
 def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
@@ -543,7 +551,11 @@ def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
 
     from scripts.hive import headroom, orders
 
-    stop, waits, published = threading.Event(), [], []
+    class Instant(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            return self.is_set()
+
+    stop, waits, published = Instant(), [], []
     failure = {"OSError": OSError}.get(error) or getattr(exceptions, error)
 
     def wait(seconds: float, state: object, timeout: float) -> None:
