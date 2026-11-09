@@ -117,12 +117,6 @@ def _remember_hive_check(key: tuple[str, str, str], member: str) -> None:
             _HIVE_CHECKS.popitem(last=False)
 
 
-def forget_hive_checks() -> None:
-    """Drops every remembered hive token check."""
-    with _HIVE_CHECKS_LOCK:
-        _HIVE_CHECKS.clear()
-
-
 def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
     """principal for this request: a signed auth token, else today's credentials while legacy credentials are on."""
     bearer = headers.get("Authorization")

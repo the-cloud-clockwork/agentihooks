@@ -2455,11 +2455,12 @@
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
-      "behaviour": "The ledger authority checks a hive agent token against the hive credential store once and answers repeated requests with that token from a bounded, time limited cache scoped to its ledger and agent; refusals are never cached, so a revoked token is refused once its check ages out.",
+      "behaviour": "The ledger authority checks a hive agent token against the hive credential store once and answers repeated requests with that token from a bounded cache scoped to its ledger and agent for fifteen seconds; refusals are never cached and the hive placement check stays live, so a revoked token is refused within fifteen seconds and an agent that leaves its hive at once.",
       "seam": "ledger_authority.hive_principal",
       "tests": [
-        "tests/swarm_ledger/test_hive_token_cache.py::test_repeated_requests_with_one_hive_token_make_one_store_read",
-        "tests/swarm_ledger/test_hive_token_cache.py::test_a_revoked_hive_token_is_refused_once_its_check_ages_out",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_repeated_requests_with_one_hive_token_make_one_credential_store_read",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_revoked_hive_token_is_refused_once_its_cached_check_expires",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_is_refused_once_its_agent_leaves_the_hive",
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_check_holds_only_its_own_ledger_and_agent",
         "tests/swarm_ledger/test_hive_token_cache.py::test_the_hive_token_cache_keeps_at_most_its_bound"
       ]
