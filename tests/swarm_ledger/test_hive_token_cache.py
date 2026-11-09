@@ -15,6 +15,11 @@ WORKER = "engineer@1"
 REQUESTS = 20
 
 
+def _placed(member: str, slug: str, name: str) -> bool:
+    """Every agent of member m1 is placed on its hive."""
+    return member == "m1"
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Any:
     import fakeredis
@@ -28,7 +33,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
     hive_state.amend(store, "ledger.d", lambda _: "m1")
     hive_state.amend(store, "holder.m1", lambda _: "d")
     monkeypatch.setattr(ports.swarm().store, "redis_client", lambda: redis)
-    monkeypatch.setattr(authority, "hive_agent", lambda member, slug, name: member == "m1")
+    monkeypatch.setattr(authority, "hive_agent", _placed)
     yield redis
     authority.forget_hive_checks()
 
