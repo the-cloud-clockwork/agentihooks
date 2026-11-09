@@ -172,7 +172,9 @@ def _create(args: argparse.Namespace) -> str:
     bao = openbao_kv.from_env(os.environ)
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
-    tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
+    tools = create.Tools(
+        redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
+    )
     given = {
         "repo": args.repo,
         "base": args.base,
@@ -230,7 +232,7 @@ def _drain(wait_s: int) -> str:
     from scripts.swarm.commands import hive_id
     from scripts.swarm.store import RedisStore
 
-    return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host())
+    return remove.settle(RedisStore(redis_client()), hive_id(), wait_s, remove.Host(), registry.member_name())
 
 
 def _signer() -> "Signer | None":
@@ -413,6 +415,9 @@ def _list() -> None:
             f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
             f"\trelease={record['version'] or 'unknown'}"
         )
+        for member, entry in sorted(record.get("members", {}).items()):
+            taking = "draining" if entry["draining"] == "yes" else "taking agents"
+            print(f"  member {member}\t{taking}\theartbeat {now - entry['heartbeat_at']} ms ago")
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))
         for name in local.pop(record["id"], []):
