@@ -2427,6 +2427,18 @@
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
+    },
+    {
+      "id": "agenti-operator-launch-overflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-agenti-work-launch",
+      "behaviour": "An agentihooks claude launch outside a swarm and outside a hive slot takes the open account with the most room when swarm agents on other hives fill every account's session cap, instead of refusing while the accounts still have quota. Swarm and hive slot launches keep the cap.",
+      "seam": "scripts.claude_quota_balancer.select_launch_credential",
+      "tests": [
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_the_open_account_with_most_room_when_swarm_agents_fill_every_seat",
+        "tests/test_claude_quota_balancer.py::test_a_swarm_or_hive_launch_keeps_the_session_cap_when_every_seat_is_full",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_a_free_seat_the_normal_way"
+      ]
     }
   ],
   "unmapped_rules": [

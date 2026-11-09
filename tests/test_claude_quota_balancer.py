@@ -1314,3 +1314,35 @@ def test_entry_is_fresh_rejects_a_non_dict_entry_even_when_it_looks_fresh() -> N
     entry = _FreshLookingMapping({"observed_at": 999, "result": balancer._result_data(result)})
 
     assert balancer._entry_is_fresh(entry, 1000, False) is False
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_takes_the_open_account_with_most_room_when_swarm_agents_fill_every_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env = _three(monkeypatch)
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    decision = balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("BEST", "master overflow")
+    assert decision.credential == balancer.Credential("AH_CC_TOKEN_BEST", "b")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize("marker", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_SLOT_HIVE"])
+def test_a_swarm_or_hive_launch_keeps_the_session_cap_when_every_seat_is_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, marker: str
+) -> None:
+    env = {**_three(monkeypatch), marker: "x"}
+    full = {"BEST": 6, "MID": 6, "LOW": 4}
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert str(raised.value) == "no Claude account has a free session under its quota band"
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_takes_a_free_seat_the_normal_way(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env = _three(monkeypatch)
+    decision = balancer.select_launch_credential(
+        env, cache_file=tmp_path / "c.json", sessions={"BEST": 6, "MID": 6}, now=1000
+    )
+    assert (decision.account, decision.source) == ("LOW", "cached")
