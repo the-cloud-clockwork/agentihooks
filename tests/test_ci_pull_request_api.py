@@ -202,6 +202,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/swarm/tick.py",
         "scripts/tick/steps/budgets.py",
         "scripts/hive/nats_grant.py",
+        "scripts/hive/rollout.py",
         "scripts/packaging/compose-hive-smoke.sh",
         "scripts/packaging/compose-recovery-drill.sh",
         "scripts/packaging/compose-task-smoke.sh",
