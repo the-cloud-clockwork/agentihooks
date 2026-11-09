@@ -527,7 +527,7 @@ def ready_work(
 
     rows = {task["id"]: task for task in doc["tasks"]}
     dispatched = dispatcher.claim_key(store.config(slug), doc)
-    return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)
+    return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:

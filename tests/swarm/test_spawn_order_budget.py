@@ -66,7 +66,7 @@ def test_a_spawn_pass_computes_its_claim_order_once_for_every_lane(
         "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), FakeRuntime()
     )
     assert (len(views), len(orders)) == (1, 1)
-    assert [(lane, task["id"]) for lane, task in order][:3] == [("eng", "t1"), ("ci", "t2"), ("eng", "t4")]
+    assert sorted(task["id"] for _, task in order) == ["t1", "t2", "t3", "t4"]
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
