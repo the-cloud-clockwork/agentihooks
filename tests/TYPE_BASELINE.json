@@ -360,7 +360,7 @@
   "scripts/herdr_setup.py": 23,
   "scripts/hive/account_slots.py": 151,
   "scripts/hive/admission.py": 51,
-  "scripts/hive/auth.py": 211,
+  "scripts/hive/auth.py": 210,
   "scripts/hive/bundle_origin.py": 5,
   "scripts/hive/cli.py": 104,
   "scripts/hive/config.py": 37,
