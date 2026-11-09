@@ -107,8 +107,8 @@ def test_exit_retires_a_worker_whose_ledger_claim_moved_while_its_store_claim_ho
 
 
 def test_exit_retires_a_workstation_worker_whose_ledger_claim_is_empty(
-    env: tuple[Any, Any, Any],
-    monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from scripts.hive import scope
 
