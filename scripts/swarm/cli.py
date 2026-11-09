@@ -107,6 +107,7 @@ from scripts.swarm import (
     done_gate,
     failed_panes,
     git_https,
+    hive_release,
     idle,
     launch_check,
     ledger_events,
@@ -2435,6 +2436,7 @@ def _hand_off(store, slug, agent, text, reason, ledger):
     transfer = transfers.record(store, slug, agent, reason, text, now_ms())
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
+    hive_release.release(ledger, slug, agent.task, agent.name)
     return envelope, transfer
 
 
