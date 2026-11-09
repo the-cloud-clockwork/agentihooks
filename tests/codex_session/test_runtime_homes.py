@@ -7,6 +7,7 @@ import pytest
 from hooks.context import profile_chain
 from scripts.codex_session import supervisor
 from scripts.swarm import launch_check
+from scripts.swarm.store import RedisStore
 from tests.codex_session.fakes import Clock, Server
 from tests.codex_session.test_supervisor import SLUG, deps, launch_spec
 from tests.codex_session.test_supervisor import root as root
@@ -311,7 +312,9 @@ def test_a_launch_reclaims_dead_homes_after_live_foreign_and_missing_entries(sto
 
 
 @pytest.mark.feature("codex-join-report-ends-before-home-removal")
-def test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed(store, server, root, tmp_path, monkeypatch):
+def test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed(
+    store: RedisStore, server: Server, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import join_report
 
     started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
@@ -335,7 +338,9 @@ def test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed(stor
     assert not home.exists()
 
 
-def test_finish_without_a_hive_join_report_writes_none(store, server, root, tmp_path):
+def test_finish_without_a_hive_join_report_writes_none(
+    store: RedisStore, server: Server, root: Path, tmp_path: Path
+) -> None:
     from scripts.hive import join_report
 
     started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
