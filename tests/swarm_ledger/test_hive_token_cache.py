@@ -1,5 +1,6 @@
 """The ledger authority checks a hive agent token against the credential store once, then from a bounded cache."""
 
+import time
 from collections import OrderedDict
 from types import SimpleNamespace
 from typing import Any
@@ -20,7 +21,7 @@ REQUESTS = 20
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     now = [1000.0]
-    monkeypatch.setattr(authority, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(authority, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time))
     return now
 
 
@@ -39,8 +40,9 @@ def placed(monkeypatch: pytest.MonkeyPatch) -> set[str]:
 def client(monkeypatch: pytest.MonkeyPatch, placed: set[str]) -> Any:
     import fakeredis
 
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
     monkeypatch.setattr(auth, "_LEDGER_OF", {})
-    monkeypatch.setattr(authority, "_HIVE_CHECKS", OrderedDict())
+    monkeypatch.setattr(authority, "_HIVE_CHECKS", OrderedDict(), raising=False)
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
     monkeypatch.setattr(ports.swarm().store, "redis_client", lambda: redis)
     return redis

@@ -720,6 +720,7 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
             decision.account,
             child_env,
             lambda env: os.execvpe(binary, _claude_command(binary, _token_args(args)), env),
+            master=True,
         )
 
 
