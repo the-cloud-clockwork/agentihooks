@@ -21,6 +21,8 @@ AGENT_HEADER = "User-Agent"
 TIMEOUT_S = 20
 FIVE_HOUR_SECONDS = 18000
 EXPIRED_CODE = "token_expired"
+DEACTIVATED_CODE = "deactivated_workspace"
+DEAD_ACCOUNT = frozenset({(401, EXPIRED_CODE), (402, DEACTIVATED_CODE)})
 LIMIT_REACHED = "limit_reached"
 CACHE_FILE = "codex-usage.json"
 CACHE_MODE = 0o600
@@ -52,7 +54,7 @@ def _expired(exc: urllib.error.HTTPError) -> bool:
     if not isinstance(found, dict):
         return False
     nested = found.get("error")
-    return (nested if isinstance(nested, dict) else found).get("code") == EXPIRED_CODE
+    return (exc.code, (nested if isinstance(nested, dict) else found).get("code")) in DEAD_ACCOUNT
 
 
 def read(token: str, account_id: str, now: float, opener: Callable | None = None) -> CodexQuota | None:
@@ -62,7 +64,7 @@ def read(token: str, account_id: str, now: float, opener: Callable | None = None
         with (opener or urllib.request.urlopen)(request, timeout=TIMEOUT_S) as response:
             body = json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        return CodexQuota(now, "?", expired=True) if exc.code == 401 and _expired(exc) else None
+        return CodexQuota(now, "?", expired=True) if _expired(exc) else None
     except (OSError, ValueError):
         return None
     try:

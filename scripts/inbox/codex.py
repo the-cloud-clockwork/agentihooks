@@ -36,6 +36,9 @@ HELD = "thread {} waits on {}; inbox delivery is held"
 DEGRADED_LOG = "codex pump for {} degraded: {}: {}"
 CONTENDED_LOG = "codex pump for {} retries inbox contention: {}"
 BUS_LOST = "codex pump for {} lost its bus inbox, Redis reconcile delivers meanwhile: {}"
+FAILED = "failed"
+UNAUTHORIZED = "unauthorized"
+ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
 
 def steady() -> None:
@@ -54,6 +57,21 @@ class StaleExecution(DispatchError):
     pass
 
 
+class AccountRefused(DispatchError):
+    pass
+
+
+def account_refusal(turn: dict) -> str:
+    """The error message of a turn the provider failed on an account refusal, else empty."""
+    error = turn.get("error") or {}
+    info = error.get("codexErrorInfo")
+    statuses = (
+        {v.get("httpStatusCode") for v in info.values() if isinstance(v, dict)} if isinstance(info, dict) else set()
+    )
+    refused = info == UNAUTHORIZED or bool(statuses & ACCOUNT_STATUSES)
+    return str(error.get("message") or info) if turn.get("status") == FAILED and refused else ""
+
+
 @dataclass
 class ThreadState:
     """The active turn and open server requests, folded from events and refreshed from thread/read."""
@@ -61,6 +79,7 @@ class ThreadState:
     active_turn: str = ""
     requests: dict = field(default_factory=dict)
     ended: str = ""
+    refused: str = ""
 
     def observe(self, message: dict) -> None:
         method, params = message.get("method", ""), message.get("params") or {}
@@ -72,6 +91,7 @@ class ThreadState:
             self.requests.clear()
         elif method == TURN_COMPLETED:
             self.ended = turn
+            self.refused = account_refusal(params.get("turn") or {}) or self.refused
             if turn == self.active_turn:
                 self.active_turn = ""
                 self.requests.clear()
@@ -325,6 +345,8 @@ class Pump:
     def step(self) -> None:
         self.binding.transport.require()
         self.binding.connection.poll(self.timing.poll_s)
+        if self.state.refused:
+            raise AccountRefused(self.state.refused)
         woken = self._hinted()
         if self.timing.clock() >= self.next_reconcile:
             self._reconcile()
