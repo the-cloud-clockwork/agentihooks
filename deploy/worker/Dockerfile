@@ -2,11 +2,19 @@ ARG WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
 ARG AGENTIHOOKS_SOURCE=git
 FROM mirror.gcr.io/library/node:22.20.0-bookworm-slim AS node
 FROM ghcr.io/astral-sh/uv:0.10.9 AS uv
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS source-git
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build-env
+COPY pyproject.toml /build-env/
+RUN python -c "import tomllib; print(*tomllib.load(open('/build-env/pyproject.toml', 'rb'))['build-system']['requires'], sep='\\n')" > /build-env/requires.txt \
+    && python -c "import tomllib; dev = tomllib.load(open('/build-env/pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /build-env/tools.txt \
+    && pip install --no-cache-dir -r /build-env/requires.txt \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -r /build-env/tools.txt
+
+FROM build-env AS source-git
 ARG AGENTIHOOKS_REF=dev
 ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS source-local
+FROM build-env AS source-local
 COPY pyproject.toml README.md /build/
 COPY hooks /build/hooks
 COPY scripts /build/scripts
@@ -15,7 +23,9 @@ COPY profiles /build/profiles
 FROM source-${AGENTIHOOKS_SOURCE} AS wheel
 ARG AGENTIHOOKS_VERSION=0.0.0
 WORKDIR /build
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --wheel-dir /wheels . \
+RUN python -c "import tomllib; print(*tomllib.load(open('pyproject.toml', 'rb'))['build-system']['requires'], sep='\\n')" > /build-env/source-requires.txt \
+    && pip install --no-cache-dir -r /build-env/source-requires.txt \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --no-build-isolation --wheel-dir /wheels . \
     && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
@@ -34,11 +44,10 @@ RUN dpkg-query -W -f='${Package}\n' | sort > /base-packages \
             printf '%s/%s\n' "$(readlink -f "$(dirname "$path")")" "$(basename "$path")"; fi; done \
         | sort -u | tar -cf - --no-recursion -T - | tar -xf - -C /browser-libs
 
-FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS overlay
+FROM build-env AS overlay
 COPY --from=wheel /wheels /wheels
 WORKDIR /opt/venv
-RUN python -m venv /opt/venv \
-    && bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \
+RUN bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \
     && rm -rf bin/python* bin/pip* bin/activate* bin/Activate.ps1 pyvenv.cfg include lib64 lib/python3.12/site-packages/pip lib/python3.12/site-packages/pip-*.dist-info \
     && helper=lib/python3.12/site-packages/profiles/package/skills/worktree/scripts/wt.sh \
     && chmod 0755 "$helper" \
