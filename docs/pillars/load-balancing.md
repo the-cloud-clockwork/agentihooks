@@ -96,7 +96,11 @@ response header carries the fable window.
    after every account that has one. Remaining ties go by harness, then account
    name.
 
-When no account has a free place the launch fails. `agentihooks balance` and the
+When no account has a free place a swarm or hive slot launch fails. A launch
+outside both, such as the operator's own `agenti`, then takes the open account
+with the most room, the way the master does, so swarm agents filling every cap
+never lock him out of an account that still has quota; it fails only when every
+account is closed. `agentihooks balance` and the
 Quota panel on the ledger page show each account's live sessions against its
 computed cap. A lock held until Claude starts keeps two simultaneous launches
 from both taking the last free place.

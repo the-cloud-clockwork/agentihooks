@@ -877,6 +877,13 @@ def select_master_credential(environ: Mapping[str, str], **options: Any) -> Rout
         )
 
 
+def select_launch_credential(environ: Mapping[str, str], **options: Any) -> RouteDecision:
+    """A swarm or hive slot launch keeps the session cap; an operator launch overflows like the master."""
+    if environ.get("AGENTIHOOKS_SWARM") or environ.get("AGENTIHOOKS_SLOT_HIVE"):
+        return select_credential(environ, **options)
+    return select_master_credential(environ, **options)
+
+
 def _api_side(
     environ: Mapping[str, str], sessions: Mapping[str, int], excluded: set[str], now: float
 ) -> tuple[list[Slot], int]:

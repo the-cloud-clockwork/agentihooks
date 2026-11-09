@@ -5329,7 +5329,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         launch_environment,
         render_table,
         route_requires_fable,
-        select_credential,
+        select_launch_credential,
     )
     from scripts.hive.account_slots import execute
     from scripts.master_claude_login import _token_lock
@@ -5364,7 +5364,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         decision = (
             forced(os.environ, route)
             if route
-            else select_credential(
+            else select_launch_credential(
                 os.environ,
                 include_fable=include_fable,
                 claude_bin=claude_bin,
