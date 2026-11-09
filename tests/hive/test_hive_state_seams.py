@@ -370,7 +370,11 @@ def test_agent_tokens_leave_the_member_record_and_revision_unchanged(backend, re
     assert store.get("member.m1") == before
     assert auth.member(client, "m1") == original
     for token, name in ((first, "engineer@1"), (second, "engineer@2")):
-        assert hive_state.read(store, f"agent.m1.{auth._digest(token)}") == {"ledger": "d", "scope": ["alpha", name]}
+        assert hive_state.read(store, auth._agent_key("m1", "alpha", name)) == {
+            "ledger": "d",
+            "scope": ["alpha", name],
+            "tokens": [auth._digest(token)],
+        }
         assert auth.agent_member(client, token, "alpha", name) == "m1"
         assert auth.agent_member(client, token, "other", name) is None
         assert auth.agent_member(client, token, "alpha", "someone@else") is None
@@ -422,7 +426,7 @@ def test_revocation_during_independent_issuance_refuses_the_token(backend, reque
     hive_state.amend(store, "ledger.d", lambda _: "m1")
     monkeypatch.setattr(auth.secrets, "token_urlsafe", lambda: "independent")
     token = "hive.m1.independent"
-    key = f"agent.m1.{auth._digest(token)}"
+    key = auth._agent_key("m1", "alpha", "engineer@1")
     amend = hive_state.amend
     raced = []
 
