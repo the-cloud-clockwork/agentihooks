@@ -125,3 +125,43 @@ def test_the_resolved_flag_matches_the_freeze_walk_for_every_replayed_task() -> 
         for task in doc["tasks"]
         if marks[task["id"]][0] is not freeze.frozen(task, doc["freezes"], freeze.ancestry(task, graph))
     ] == []
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_a_pass_that_reads_an_empty_view_counts_no_rows() -> None:
+    record: dict[str, Any] = {}
+
+    def run() -> None:
+        timing.PASS.set(record)
+        view.counted(view.LedgerView(1, {"tasks": []}))
+
+    copy_context().run(run)
+    assert record == {view.ROWS_READ: 0}
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from scripts.scheduler import service
+    from scripts.swarm import ledger_client
+    from scripts.swarm_ledger.api import client as api
+
+    asked: list[object] = []
+
+    def changes(
+        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+    ) -> dict[str, Any]:
+        """Answer a full read of an empty ledger and record the scope asked for."""
+        asked.append(scope)
+        return {"generation": 3, "data": {"tasks": []}}
+
+    stand_in = SimpleNamespace(
+        base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4
+    )
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: stand_in)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    with view.holding():
+        assert view.start("sw", False) is not None
+    assert asked == [view.TICK_SCOPE]
