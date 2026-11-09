@@ -1,5 +1,6 @@
 """agentihooks hive invite: mint a hive member and write its credential into the OpenBao record a hive mounts."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,7 @@ class Request:
     bus_url: str | None = None
     signer_path: str | None = None
     swarms: tuple[str, ...] = ()
+    minted: Callable[[str], None] | None = None
 
 
 def default_path(label: str) -> str:
@@ -50,6 +52,8 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
     }
     entries = {key: value for key, value in entries.items() if value}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
+    if request.minted is not None:
+        request.minted(grant["id"])
     member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
     bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
     if bus_url:

@@ -31,6 +31,7 @@ COMMAND_TIMEOUT_S = 60
 NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
+SAVED_MEMBERS = ("member", "resynced", "added")
 
 
 def report(line: str, clock: Callable[[], float] = time.time) -> None:
@@ -72,6 +73,7 @@ def create(tools: Tools, options: Options) -> str:
     name = tools.state["name"]
     if not options.dry_run:
         _save(tools)
+        _revoke_unfinished(tools)
     for title, step in STEPS:
         tools.out(f"hive create {name}: {title}: {step(tools, options)}")
         if not options.dry_run:
@@ -153,6 +155,27 @@ def _save(tools: Tools) -> None:
     path.write_text(json.dumps(tools.state, indent=2) + "\n")
 
 
+def _saved_member(tools: Tools, member: str) -> None:
+    """Save a member id the moment invite mints it, before the hive record names it."""
+    tools.state["member"] = member
+    _save(tools)
+
+
+def _revoke_unfinished(tools: Tools) -> None:
+    """Revoke every member the saved create state holds that the hive record does not name."""
+    from scripts.hive import remove
+
+    saved = {tools.state.get(key) for key in SAVED_MEMBERS} - {None}
+    if not saved:
+        return
+    current = _member(tools).get(invite.HIVE_ID)
+    for member in sorted(saved - {current}):
+        for line in remove.revoke(tools.redis, member):
+            tools.out(f"hive create {tools.state['name']}: resume: {line}")
+    tools.state["member"] = current
+    _save(tools)
+
+
 def _kubectl(tools: Tools, argv: list[str]) -> str:
     return machine.run_checked(tools.run, ["kubectl", *argv], None, COMMAND_TIMEOUT_S)
 
@@ -179,7 +202,13 @@ def _invite(tools: Tools, options: Options) -> str:
     else:
         name, record = tools.state["name"], tools.state["record"]
         request = invite.Request(
-            name, record, options.like, ledger_ca=tools.ledger_ca, signer_path=listing.path, swarms=listing.swarms
+            name,
+            record,
+            options.like,
+            ledger_ca=tools.ledger_ca,
+            signer_path=listing.path,
+            swarms=listing.swarms,
+            minted=lambda minted: _saved_member(tools, minted),
         )
         done = invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
         member = _member(tools)[invite.HIVE_ID]
