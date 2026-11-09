@@ -2,13 +2,14 @@ import copy
 import importlib
 from collections.abc import Callable
 from types import ModuleType
+from typing import Any
 
 import pytest
 
 
 class Cluster:
-    def __init__(self):
-        self.lease = None
+    def __init__(self) -> None:
+        self.lease: Any = None
         self.calls = []
         self.healthy = True
 
@@ -104,6 +105,7 @@ def test_a_failed_sync_frees_the_lease_for_the_next_hive(monkeypatch: pytest.Mon
             module.abandon(cluster, "default", "shared", "second")
             assert cluster.lease["spec"]["holderIdentity"] == "first"
             module.abandon(cluster, "default", "shared", "first")
+            assert cluster.lease["spec"]["holderIdentity"] == ""
 
     clock = wall_clock(monkeypatch, module, sync_fails)
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -139,6 +141,22 @@ def test_a_lease_without_a_renew_time_or_duration_never_expires() -> None:
     assert not module.expired({"renewTime": renewed}, 1e9)
     assert not module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.0)
     assert module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.5)
+
+
+def test_lease_times_are_utc_in_any_local_zone(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    module = rollout()
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        assert module.micro_time(0.0) == "1970-01-01T00:00:00.000000Z"
+        renewed = {"renewTime": "1970-01-01T00:00:00.000000Z", "leaseDurationSeconds": 10}
+        assert not module.expired(renewed, 10.0)
+        assert module.expired(renewed, 10.5)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_abandon_without_a_lease_changes_nothing() -> None:

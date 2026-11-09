@@ -3,8 +3,10 @@ import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
+Json = dict[str, Any]
 LEASE_SECONDS = 3600
 ACQUIRE_SECONDS = LEASE_SECONDS + 1800
 
@@ -19,7 +21,7 @@ class Kubernetes:
 
         self.api = KubeHttp.in_cluster(os.environ)
 
-    def request(self, method: str, path: str, body: dict | None = None) -> dict | None:
+    def request(self, method: str, path: str, body: Json | None = None) -> Json | None:
         status, result = self.api.send(method, path, body)
         if status == 409:
             raise Conflict()
@@ -30,7 +32,7 @@ class Kubernetes:
         return result
 
 
-def serving(deployment: dict) -> bool:
+def serving(deployment: Json) -> bool:
     replicas = deployment["spec"].get("replicas", 1)
     status = deployment.get("status", {})
     return (
@@ -49,7 +51,7 @@ def micro_time(seconds: float) -> str:
     return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def expired(spec: dict, now: float) -> bool:
+def expired(spec: Json, now: float) -> bool:
     """Tell whether a held lease has passed its renew time plus its duration."""
     renewed, duration = spec.get("renewTime"), spec.get("leaseDurationSeconds")
     if not renewed or not duration:

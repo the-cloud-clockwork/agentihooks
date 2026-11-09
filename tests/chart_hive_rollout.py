@@ -7,6 +7,7 @@ import yaml
 SPEC = importlib.util.spec_from_file_location(
     "rollout", Path(__file__).resolve().parents[1] / "scripts/hive/rollout.py"
 )
+assert SPEC is not None and SPEC.loader is not None
 ROLLOUT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ROLLOUT)
 
