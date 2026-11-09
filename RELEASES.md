@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.768 · 2026-11-09
+
+### 2026-11-09 · 79a5cbd3c5a0 · #10256 · @agenticore-app
+
+**Guard controller quota fallback from pod local cache regressions**
+
+This change prevents a fresh controller, which starts with no pass quota rows or local observations, from mistakenly falling back to local capacity caches in HiveLaunch, rotation, and controller setup, ensuring it relies only on its runtime quota reader or Redis hive reports. It adds a Semgrep incident rule with red/clean fixtures to catch such fallback references, registers new placement tests for deployment readers and Redis reports, and fixes the fixture check by running it outside an ignored folder so it actually executes, closing a gap where regressions could silently slip through.
+
 ## v2.17.767 · 2026-11-09
 
 ### 2026-11-09 · 6279ae288465 · #10251 · @agenticore-app
