@@ -2492,6 +2492,17 @@
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
+    },
+    {
+      "id": "scoped-member-inbox-publish",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2151",
+      "behaviour": "A scoped hive member selects its swarm before opening inbox state and publishes immediately; only a real bus failure leaves delivery to the Redis recheck.",
+      "seam": "InboxStore.send through SeatPublisher and SeatInbox on a scoped member bus",
+      "tests": [
+        "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
+        "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
+      ]
     }
   ],
   "unmapped_rules": [
