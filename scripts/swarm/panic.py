@@ -28,6 +28,8 @@ RELEASE_ERRORS = THRESHOLD // 4
 CANCEL_EVERY_MS = 60 * 1000
 METRIC = "agentihooks.swarm.errors"
 MERGE_QUEUE = "merge_group"
+QUEUE_BRANCH = "gh-readonly-queue/"
+PUSH = "push"
 RELEASE_EVENT = "release"
 RELEASE_TAG = re.compile(r"v\d+\.\d+\.\d+")
 REPOS = (
@@ -176,17 +178,36 @@ def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
     )
 
 
+def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], repo: str) -> set[str]:
+    """Return the commits a fix in this repository carries onto its base: each merge queue run's head for the fix,
+    and the base branch head once the fix is merged."""
+    found = [change for change in changes if change.reference.repository == repo]
+    queues = tuple(f"{QUEUE_BRANCH}{change.base}/pr-{change.reference.number}-" for change in found)
+    bases = {change.base for change in found if change.merged}
+    heads: dict[str, str] = {}
+    queued: set[str] = set()
+    for row in rows:
+        branch = str(row.branch)
+        if row.event == MERGE_QUEUE and branch.startswith(queues):
+            queued.add(row.head_sha)
+        if row.event == PUSH and branch in bases:
+            heads.setdefault(branch, row.head_sha)
+    return (queued | set(heads.values())) - {""}
+
+
 def cancel_runs(fixes: Iterable[str], repos: Iterable[str], ports: Ports) -> list[str]:
     """Cancels every queued or running Actions run except the merge queue, release tags, the named fixes and the
-    runs on a merged fix's merge commit."""
+    runs on a fix's merge queue commit, merge commit or merged integration branch head."""
     changes = [fix_change(url) for url in fixes]
     branches = {change.head_branch for change in changes}
     commits = {change.merge_commit for change in changes if change.merged and change.merge_commit}
     cancelled: list[str] = []
     for repo in repos:
         provider = ports(repo)
-        for row in provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS)):
-            if _spared(row, branches, commits):
+        rows = provider.latest_runs(deadline=Deadline.after(TOOL_SECONDS))
+        spared = commits | _fix_heads(rows, changes, repo)
+        for row in rows:
+            if _spared(row, branches, spared):
                 continue
             provider.cancel_run(row.id, deadline=Deadline.after(TOOL_SECONDS))
             cancelled.append(f"{repo} run {row.id} on {row.branch}")

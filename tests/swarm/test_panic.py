@@ -475,6 +475,7 @@ def test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged(monk
                 RepositoryRun(7, "gh-readonly-queue/dev/pr-7-abc", "pull_request", "completed", head_sha="t" * 40),
                 RepositoryRun(8, "dev", "push", "in_progress", head_sha="t" * 40),
                 RepositoryRun(9, None, "push", "in_progress", head_sha=""),
+                RepositoryRun(12, "gh-readonly-queue/dev/pr-7-def", "merge_group", "completed", head_sha=""),
             ],
             "o/b": [
                 RepositoryRun(10, "gh-readonly-queue/dev/pr-7-abc", "merge_group", "completed", head_sha="u" * 40),
