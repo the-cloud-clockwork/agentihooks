@@ -199,7 +199,7 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
     try:
         item = inbox.locate(target)
     except Gone:
-        return f"message {target}, gone from the inbox"
+        return "" if scope.member() else f"message {target}, gone from the inbox"
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 

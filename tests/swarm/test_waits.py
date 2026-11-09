@@ -2127,7 +2127,8 @@ def test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_t
     assert member.get(item.id).state in waits.CLOSED
 
 
-def test_a_reply_wait_ends_when_its_item_is_gone_from_every_inbox_world() -> None:
+@pytest.mark.feature("reply-wait-reads-every-inbox-world")
+def test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox() -> None:
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -2136,3 +2137,20 @@ def test_a_reply_wait_ends_when_its_item_is_gone_from_every_inbox_world() -> Non
     assert waits.end_pass(store, "sw", {}, InboxStore(store.redis), {}.get, 5_000, {}.get) == [
         f"ended the wait of {ME}: message nosuchitem, gone from the inbox"
     ]
+
+
+@pytest.mark.feature("reply-wait-reads-every-inbox-world")
+def test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fakeredis
+
+    from scripts.hive import scope
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+    item = InboxStore(store.redis, world="").send(ME, "sw-master-1", "which branch holds the fix")
+    idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "reply", "target": item.id})
+    monkeypatch.setattr(scope, "member", lambda environ=None: "m1")
+    assert waits.end_pass(store, "sw", {}, InboxStore(store.redis), {}.get, 5_000, {}.get) == []
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "reply", "target": item.id}
