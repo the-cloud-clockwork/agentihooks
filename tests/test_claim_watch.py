@@ -135,7 +135,7 @@ def test_an_absent_pushed_claim_keeps_the_session() -> None:
     stop, _, spawn = _check(None)
 
     assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="")
-    assert len(spawn.calls) == 1
+    assert spawn.calls[0][0] == ["agentihooks", "swarm", "sw", "--as", NAME, "exit"]
 
 
 @pytest.mark.parametrize(
