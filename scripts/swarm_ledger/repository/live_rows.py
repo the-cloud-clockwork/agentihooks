@@ -9,6 +9,7 @@ CLOSED = ("done",)
 SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
 SCOPE_PATHS = ("freezes", "phases", "slices", "plans")
 FROZEN_IDS = "frozen_ids"
+TASK_LINKS = ("phase", "slice", "merged_into")
 
 
 @dataclass(frozen=True)
@@ -45,18 +46,20 @@ def covers(target: str, task: dict[str, Any], chain: list[str]) -> bool:
 
 
 def reshapes(path: list[Any]) -> bool:
+    if path[:1] == ["tasks"]:
+        return len(path) >= 3 and path[2] in TASK_LINKS
     if not path or path[0] not in SCOPE_PATHS:
         return False
     return path[0] != "phases" or len(path) < 3 or path[2] == "plan"
 
 
-def _targets(records: list[dict[str, Any]], verb: str) -> tuple[set[str], list[str]]:
+def targets(records: list[dict[str, Any]], verb: str) -> tuple[set[str], list[str]]:
     named = [record["target"] for record in records if record.get("verb") == verb]
     selectors = [target for target in named if target.partition(":")[0] in SELECTORS and target.partition(":")[2]]
     return set(named) - set(selectors), selectors
 
 
-def _nearest(targets: tuple[set[str], list[str]], task: dict[str, Any], chain: list[str]) -> int:
+def nearest(targets: tuple[set[str], list[str]], task: dict[str, Any], chain: list[str]) -> int:
     nodes, selectors = targets
     level = next((index for index, node in enumerate(chain) if node in nodes), sys.maxsize)
     if level == sys.maxsize and any(covers(target, task, chain) for target in selectors):
@@ -66,7 +69,7 @@ def _nearest(targets: tuple[set[str], list[str]], task: dict[str, Any], chain: l
 
 def marks(doc: dict[str, Any]) -> dict[str, tuple[bool, int | None]]:
     records: list[dict[str, Any]] = doc.get("freezes") or []
-    freezes, focuses = _targets(records, "freeze"), _targets(records, "focus")
+    freezes, focuses = targets(records, "freeze"), targets(records, "focus")
     graph = hierarchy.project(doc)[0] if records else {}
     found: dict[str, tuple[bool, int | None]] = {}
     for task in doc.get("tasks") or []:
@@ -74,7 +77,7 @@ def marks(doc: dict[str, Any]) -> dict[str, tuple[bool, int | None]]:
             found[task["id"]] = (False, None)
             continue
         chain = ancestry(task, graph)
-        cold, focus = _nearest(freezes, task, chain), _nearest(focuses, task, chain)
+        cold, focus = nearest(freezes, task, chain), nearest(focuses, task, chain)
         found[task["id"]] = (cold < focus, None if focus == sys.maxsize else focus)
     return found
 
@@ -92,7 +95,3 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
             continue
         kept.append({**task, "frozen": cold, "focus_rank": focus})
     return Answer(kept, held)
-
-
-def rows(doc: dict[str, Any], scope: Scope) -> list[dict[str, Any]]:
-    return answer(doc, scope).rows

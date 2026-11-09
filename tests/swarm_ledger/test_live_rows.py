@@ -65,7 +65,7 @@ def test_marks_agree_with_the_claim_gate_freeze() -> None:
 def test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state() -> None:
     doc = _doc()
     graph = hierarchy.project(doc)[0]
-    for row in live_rows.rows(doc, live_rows.Scope(closed=True, frozen=True)):
+    for row in live_rows.answer(doc, live_rows.Scope(closed=True, frozen=True)).rows:
         bare = {key: value for key, value in row.items() if key not in ("frozen", "focus_rank")}
         walked = freeze.frozen(bare, doc["freezes"], freeze.ancestry(bare, graph))
         assert freeze.frozen(row, [], []) is walked, row["id"]
@@ -73,7 +73,7 @@ def test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state()
 
 @pytest.mark.feature("swarm-tick-live-rows")
 def test_a_claimed_task_under_a_freeze_stays_in_the_default_rows() -> None:
-    rows = {row["id"]: row for row in live_rows.rows(_doc(), live_rows.Scope())}
+    rows = {row["id"]: row for row in live_rows.answer(_doc(), live_rows.Scope()).rows}
     assert rows["d"]["state"] == "claimed"
     assert rows["d"]["frozen"] is True
 
@@ -89,7 +89,7 @@ def test_a_claimed_task_under_a_freeze_stays_in_the_default_rows() -> None:
     ],
 )
 def test_rows_answer_closed_and_frozen_tasks_only_on_request(closed: bool, frozen: bool, ids: list[str]) -> None:
-    rows = live_rows.rows(_doc(), live_rows.Scope(closed, frozen))
+    rows = live_rows.answer(_doc(), live_rows.Scope(closed, frozen)).rows
     assert _ids(rows) == ids
     assert {row["id"]: (row["frozen"], row["focus_rank"]) for row in rows}.items() <= {
         "a": (False, None),
@@ -130,7 +130,7 @@ def _path(*parts: object) -> str:
 @pytest.mark.feature("swarm-tick-live-rows")
 def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
     before = _doc()
-    held = {"tasks": live_rows.rows(before, live_rows.Scope())}
+    held = {"tasks": live_rows.answer(before, live_rows.Scope()).rows}
     after = copy.deepcopy(before)
     after["tasks"][0]["state"] = "done"
     after["tasks"][3]["state"] = "pr"
@@ -145,7 +145,15 @@ def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
 
 @pytest.mark.feature("swarm-tick-live-rows")
 @pytest.mark.parametrize(
-    ("part", "field"), [("freezes", "target"), ("phases", "plan"), ("phases", None), ("slices", "phase")]
+    ("part", "field"),
+    [
+        ("freezes", "target"),
+        ("phases", "plan"),
+        ("phases", None),
+        ("slices", "phase"),
+        ("tasks", "merged_into"),
+        ("tasks", "phase"),
+    ],
 )
 def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str, field: str | None) -> None:
     doc = {**_doc(), "slices": [{"id": "s1", "phase": "phases/p1"}]}

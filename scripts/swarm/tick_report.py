@@ -136,7 +136,7 @@ def command(store: Any, args: argparse.Namespace) -> None:
     for row in report["lanes"]:
         print(f"Lane {row['lane']}  {row['count']} steps  {row['cpu_share']:.2f}% CPU share")
     print(f"Critical lane end p95: {seconds(report['critical_end_p95_s'])}")
-    print(f"Task rows read per pass, most: {report.get('rows_read_max', 'n/a')}")
+    print(f"Task rows read per pass, most: {report.get('rows_read_max') or 'n/a'}")
     print("Step  Records  Late share  Abandoned  Held  Skipped  Dropped")
     for row in report["records"]:
         print(

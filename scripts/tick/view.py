@@ -33,6 +33,7 @@ __all__ = [
     "REFRESH",
     "LedgerView",
     "Reader",
+    "counted",
     "current",
     "document",
     "freeze",
@@ -331,7 +332,7 @@ def document(slug: str) -> dict[str, Any] | None:
     return view.document
 
 
-def scoped(slug: str, scope: live_rows.Scope, service: bool = True) -> dict[str, Any]:
+def scoped(slug: str, scope: live_rows.Scope, service: bool) -> dict[str, Any]:
     """The document of ledger ``slug`` read with ``scope`` from the view this host stores for that scope, patched
     with one delta read, for a reader that needs closed or frozen tasks or reads outside a held pass."""
     from scripts.scheduler import service as scheduler

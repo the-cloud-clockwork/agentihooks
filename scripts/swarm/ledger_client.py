@@ -6,11 +6,14 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.repository import live_rows
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
 SERVICE_AUTHORS = ("swarm", None)
@@ -436,7 +439,7 @@ class LedgerClient:
         return slug in ledger_bin.entries()
 
 
-def pass_state(ledger: Any, slug: str, scope: Any = None) -> dict[str, Any]:
+def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -> dict[str, Any]:
     """The tasks of ledger ``slug`` the tick reads, with its metadata and phases: the tick pass's held view patched
     with one delta read while the pass holds a view of that ledger, else this host's stored view for the scope
     patched with one delta read. ``scope`` names which closed or frozen tasks the reader needs."""
@@ -448,9 +451,9 @@ def pass_state(ledger: Any, slug: str, scope: Any = None) -> dict[str, Any]:
         return held
     wanted = view.TICK_SCOPE if scope is None else scope
     if view.reads(ledger):
-        return view.scoped(slug, wanted)
+        return view.scoped(slug, wanted, ledger.service)
     doc = ledger.state(slug)
-    if wanted == live_rows.Scope(closed=True, frozen=True):
+    if wanted == view.TICK_SCOPE:
         return doc
     answer = live_rows.answer(doc, wanted)
     return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}

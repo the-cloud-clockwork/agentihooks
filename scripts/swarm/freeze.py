@@ -1,7 +1,6 @@
 """Whether a freeze or a focus on the ledger holds an open task back from a claim, and the drain notice naming them."""
 
 import operator
-import sys
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -10,7 +9,7 @@ from scripts.swarm import notice_text
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger.repository import hierarchy
-from scripts.swarm_ledger.repository.live_rows import FROZEN_IDS, SELECTORS, ancestry, covers
+from scripts.swarm_ledger.repository.live_rows import FROZEN_IDS, SELECTORS, ancestry, covers, nearest, targets
 
 DRAINED = "The swarm has no task left to start"
 WATCHED = "watched_focus"
@@ -53,9 +52,7 @@ def frozen(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str]
 
 
 def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
-    targets: list[str] = [r["target"] for r in records if r["verb"] == verb]
-    levels = [chain.index(t) if t in chain else len(chain) for t in targets if covers(t, task, chain)]
-    return min(levels, default=sys.maxsize)
+    return nearest(targets(records, verb), task, chain)
 
 
 def unfocused(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str) -> bool:
