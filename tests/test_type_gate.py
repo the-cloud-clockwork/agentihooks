@@ -180,6 +180,9 @@ def test_grade_holds_drift_only_on_touched_files_and_edited_entries() -> None:
     assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 3}, set()) == [
         f"{type_gate.BASELINE} records 3 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     ]
+    assert type_gate.grade({}, {}, {"a.py": 1}, set()) == [
+        f"{type_gate.BASELINE} records 1 type errors in a.py, the head has 0; run python -m scripts.type_gate --write"
+    ]
     assert type_gate.grade({"a.py": 1}, {"a.py": 1}, {}, set()) == [
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
     ]
