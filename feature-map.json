@@ -2713,10 +2713,16 @@
     {
       "id": "tick-step-starvation",
       "origin": "inventory",
-      "behaviour": "The tick step step starvation runs in group closing on the tick lane every 60 seconds.",
-      "seam": "scripts.tick.steps.report._step_starvation registered as tick step step starvation",
+      "behaviour": "The closing step step starvation records each tick step's last completed run from the pass records; a step that ran without completing for three windows of its budgets.FLOORS interval sends the master seat one urgent inbox item and swarm status lists a step starvation finding naming the step, its last completion and the passes since.",
+      "seam": "scripts.swarm.health.step_starvation.step and findings, registered as tick step step starvation",
       "tests": [
-        "tests/tick/steps/test_step_starvation.py::test_step_starvation"
+        "tests/tick/steps/test_step_starvation.py::test_step_starvation",
+        "tests/tick/steps/test_step_starvation.py::test_a_pass_history_where_waits_end_never_completes_alarms_the_master_once",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_lists_the_starved_step_with_its_last_completion_and_passes_since",
+        "tests/tick/steps/test_step_starvation.py::test_a_step_one_millisecond_short_of_three_windows_is_not_starved",
+        "tests/tick/steps/test_step_starvation.py::test_a_completed_run_clears_the_starvation_and_rested_rows_never_start_it",
+        "tests/tick/steps/test_step_starvation.py::test_failed_held_cut_and_dropped_runs_are_misses",
+        "tests/tick/steps/test_step_starvation.py::test_the_registered_step_records_runs_and_alarms_with_each_step_window"
       ]
     }
   ],
