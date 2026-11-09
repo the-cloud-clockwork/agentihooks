@@ -8,7 +8,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
@@ -63,15 +63,15 @@ class AccountRefused(DispatchError):
     pass
 
 
-def account_refusal(turn: dict) -> str:
+def account_refusal(turn: dict[str, Any]) -> str:
     """The error message of a turn the provider failed on an account refusal, else empty."""
-    error = turn.get("error") or {}
-    info = error.get("codexErrorInfo")
-    statuses = (
-        {v.get("httpStatusCode") for v in info.values() if isinstance(v, dict)} if isinstance(info, dict) else set()
-    )
+    error: dict[str, Any] = turn.get("error") or {}
+    info: object = error.get("codexErrorInfo")
+    variants: list[object] = list(cast(dict[str, object], info).values()) if isinstance(info, dict) else []
+    statuses = {cast(dict[str, object], v).get("httpStatusCode") for v in variants if isinstance(v, dict)}
     refused = info == UNAUTHORIZED or bool(statuses & ACCOUNT_STATUSES)
-    return str(error.get("message") or info) if turn.get("status") == FAILED and refused else ""
+    message = str(error.get("message") or "") or str(info)
+    return message if turn.get("status") == FAILED and refused else ""
 
 
 @dataclass
@@ -85,7 +85,8 @@ class ThreadState:
 
     def observe(self, message: dict) -> None:
         method, params = message.get("method", ""), message.get("params") or {}
-        turn = (params.get("turn") or {}).get("id", "")
+        body = cast(dict[str, Any], params.get("turn") or {})
+        turn = body.get("id", "")
         if "id" in message:
             self.requests[message["id"]] = method
         elif method == TURN_STARTED:
@@ -93,7 +94,7 @@ class ThreadState:
             self.requests.clear()
         elif method == TURN_COMPLETED:
             self.ended = turn
-            self.refused = account_refusal(params.get("turn") or {}) or self.refused
+            self.refused = account_refusal(body) or self.refused
             if turn == self.active_turn:
                 self.active_turn = ""
                 self.requests.clear()
