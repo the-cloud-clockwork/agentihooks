@@ -223,16 +223,16 @@ def timer_state(waiter: "Redis") -> "StateStore":
 
 
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
-    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+    from redis.exceptions import RedisError
 
     from scripts.hive import headroom, orders
 
     while not stop.is_set():
         try:
             scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError) as exc:
-            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
-            return
+        except (RedisError, OSError) as exc:
+            _headroom_wait_failed(exc, stop)
+            continue
         if stop.is_set():
             return
         try:
@@ -243,6 +243,12 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
+    """Logs a failed headroom wait and holds one headroom interval, so only the stop event ends the thread."""
+    print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+    stop.wait(HEADROOM_SECONDS)
 
 
 def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:

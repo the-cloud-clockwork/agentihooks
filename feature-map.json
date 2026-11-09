@@ -22,6 +22,18 @@
       ]
     },
     {
+      "id": "hive-ready-through-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
+      "behaviour": "The hive headroom thread logs a failed scheduler wait and keeps its cadence until stopped, so the rollout ready marker stays fresh while a slow agent launch holds the beat and the Redis wait times out once.",
+      "seam": "publish_headroom beside run while a beat blocks",
+      "tests": [
+        "tests/hive/test_daemon.py::test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval",
+        "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
+        "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -2434,6 +2446,17 @@
       "seam": "ci_wiring.check and gate_protected.grade",
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
+      ]
+    },
+    {
+      "id": "hive-rollout-lease-failed-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
+      "behaviour": "A hive whose sync fails after it takes the hive rollout lease frees it through the SyncFail abandon hook, even over an unserving replacement, and a lease whose renew time plus its duration has passed is taken over by a hive still inside its acquire wait, so one stuck hive never holds every other hive on the old release.",
+      "seam": "scripts.hive.rollout acquire and abandon",
+      "tests": [
+        "tests/hive/test_rollout.py::test_a_failed_sync_frees_the_lease_for_the_next_hive",
+        "tests/hive/test_rollout.py::test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive"
       ]
     },
     {
