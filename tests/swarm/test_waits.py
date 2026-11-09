@@ -2148,9 +2148,15 @@ def test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see
     from scripts.hive import scope
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
     item = InboxStore(store.redis, world="").send(ME, "sw-master-1", "which branch holds the fix")
-    idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "reply", "target": item.id})
     monkeypatch.setattr(scope, "member", lambda environ=None: "m1")
-    assert waits.end_pass(store, "sw", {}, InboxStore(store.redis), {}.get, 5_000, {}.get) == []
+    store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+    idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "reply", "target": item.id})
+    member = InboxStore(store.redis)
+    assert member.world == "m1" and [a.name for a in store.agents("sw")] == [ME]
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "reply", "target": item.id}
+    with pytest.raises(InboxError):
+        member.locate(item.id)
+
+    assert waits.end_pass(store, "sw", {}, member, {}.get, 5_000, {}.get) == []
     assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "reply", "target": item.id}
