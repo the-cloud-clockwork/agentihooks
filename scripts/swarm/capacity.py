@@ -523,11 +523,11 @@ def ready_work(
     slug: str, store: RedisStore, doc: dict[str, Any]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from scripts.swarm import dispatcher
-    from scripts.swarm.tick import ready_in_order
+    from scripts.swarm.tick import ready_by_lane
 
     rows = {task["id"]: task for task in doc["tasks"]}
     dispatched = dispatcher.claim_key(store.config(slug), doc)
-    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
+    return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)
 
 
 def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:

@@ -1,7 +1,8 @@
-"""The spawn order computes its claim order once per pass and fits its budget over the replayed rig-grade-swarm ledger."""
+"""The spawn order computes its claim order once per pass and fits its budget over a replayed swarm ledger."""
 
 import gzip
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 
 from scripts.swarm import fleet_red, freeze, release_wait
 from scripts.swarm import tick as tick_module
+from scripts.swarm.store import RedisStore
 from scripts.tick.steps import budgets
 from tests.swarm import test_tick
 
@@ -21,7 +23,7 @@ BUDGET_SHARE = 33
 
 
 def replay() -> dict[str, Any]:
-    """The rig-grade-swarm ledger of 9 November: 4827 tasks, 997 open, 1322 freeze and focus records."""
+    """A swarm ledger's structure: 4827 tasks, 997 open, 1322 freeze and focus records."""
     with gzip.open(REPLAY, "rt") as raw:
         return json.load(raw)
 
@@ -40,8 +42,17 @@ def offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fleet_red, "read", lambda repo, *args, **kwargs: ())
 
 
+def scanned(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
+    """The nearest covering level as a scan over every record finds it."""
+    targets = [r["target"] for r in records if r["verb"] == verb]
+    levels = [chain.index(t) if t in chain else len(chain) for t in targets if freeze.covers(t, task, chain)]
+    return min(levels, default=sys.maxsize)
+
+
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
-def test_a_spawn_pass_computes_its_claim_order_once_for_every_lane(store, monkeypatch):
+def test_a_spawn_pass_computes_its_claim_order_once_for_every_lane(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ledger = FakeLedger(
         [
             {"id": "t1", "lane": "eng"},
@@ -59,7 +70,9 @@ def test_a_spawn_pass_computes_its_claim_order_once_for_every_lane(store, monkey
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
-def test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget(store, monkeypatch):
+def test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     offline(monkeypatch)
     doc = replay()
     rows = {task["id"]: task for task in doc["tasks"]}
@@ -74,3 +87,20 @@ def test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget(store, monkeypatc
     assert len(orders) == 1
     assert len(covers) < len(rows)
     assert spent < budgets.FLOORS["spawn"].floor_s / BUDGET_SHARE
+
+
+@pytest.mark.feature("swarm-spawn-order-once-per-pass")
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds(verb: str) -> None:
+    other = "freeze" if verb == "focus" else "focus"
+    targets = ("lane:eng", "kind:ops", "lane:", "kind", "tasks/t1", "phases/p1", "plans/q", "lane:ci")
+    records = [{"verb": verb, "target": target} for target in targets] + [{"verb": other, "target": "tasks/t2"}]
+    tasks = [
+        ({"id": "t1", "lane": "eng"}, ["tasks/t1", "slices/s", "phases/p1", "plans/q"]),
+        ({"id": "t2", "lane": "plan", "kind": "ops"}, ["tasks/t2", "phases/p2"]),
+        ({"id": "t3", "lane": "plan"}, ["tasks/t3", "lane:", "phases/p1"]),
+        ({"id": "t4", "lane": "ci"}, ["tasks/t4"]),
+        ({"id": "t5", "lane": "plan"}, ["tasks/t5", "phases/p9"]),
+    ]
+    for task, chain in tasks:
+        assert freeze._nearest(records, verb, task, chain) == scanned(records, verb, task, chain)

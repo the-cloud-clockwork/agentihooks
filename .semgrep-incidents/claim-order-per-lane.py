@@ -15,6 +15,11 @@ def each_lane(pass_args, lanes):
     return found
 
 
+def by_lane(pass_args, lanes):
+    # ruleid: claim-order-per-lane
+    return {lane: ready_in_order(*pass_args, lane) for lane in lanes}
+
+
 def once_per_pass(tick, timing, pass_args, caps):
     # ok: claim-order-per-lane
     lanes = timing.timed(tick.ready_by_lane, *pass_args, list(caps))

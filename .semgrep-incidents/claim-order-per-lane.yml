@@ -3,13 +3,16 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      The claim order is computed inside a loop over lanes. On 9 November the spawn step called ready_in_order once per
+      The claim order is computed inside a loop over lanes. The spawn step called ready_in_order once per
       lane over 997 open tasks and 1322 freeze records, ran past its budget and was abandoned, so urgent tasks never
       launched. Compute every lane's order once per pass with ready_by_lane and read each lane from its result.
     patterns:
-      - pattern-inside: |
-          for $LANE in $LANES:
-              ...
+      - pattern-either:
+          - pattern-inside: |
+              for $LANE in $LANES:
+                  ...
+          - pattern-inside: '{$KEY: $VALUE for $LANE in $LANES}'
+          - pattern-inside: '[$VALUE for $LANE in $LANES]'
       - pattern-either:
           - pattern: $TICK.ready_in_order(...)
           - pattern: ready_in_order(...)
