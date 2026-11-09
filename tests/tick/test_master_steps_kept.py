@@ -75,7 +75,7 @@ def test_a_kept_step_runs_after_its_lane_expired_and_a_step_it_needs_was_dropped
             records = {r.name: r for r in engine.run_graph(steps, Context(View(), Deadline.after(10.0)))}
     finally:
         release.set()
-    assert records["overrun"].abandoned
+    assert records["overrun"].cut and not records["overrun"].abandoned
     assert records["other"].skipped
     assert records["master down"].outcome == engine.OK
 
@@ -108,7 +108,7 @@ def test_an_overrunning_intent_check_still_lets_the_master_steps_run() -> None:
         release.set()
     assert records["master down"].outcome == engine.OK
     assert records["tick master"].outcome == engine.OK
-    assert records["intent check"].abandoned
+    assert records["intent check"].cut and not records["intent check"].abandoned
     assert records["page relay"].skipped
 
 
