@@ -69,9 +69,8 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
     from scripts.swarm.capacity import Account
 
     setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
-    write_hive(
-        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
-    )
+    slots = [*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    write_hive(setup, slots=slots)
     task = {"id": "task", "hive": "remote"}
     config = setup.config
     if pin == "lane":
@@ -82,7 +81,7 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
         setup.herdr._quota_tasks = {"task": "codex"}
     selected = setup.launcher.select(config, "eng", task)
     assert (selected.account.harness, selected.account.name, selected.hive) == ("codex", "codex-account", "remote")
-    write_hive(setup, max_agents=0)
+    write_hive(setup, slots=slots, max_agents=0)
     unavailable = setup.launcher.select(config, "eng", task)
     assert isinstance(unavailable, Wait)
     assert "room" in unavailable.reason

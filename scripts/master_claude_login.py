@@ -720,10 +720,11 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
             os.execvpe(binary, _claude_command(binary, _token_args(args)), env)
 
         try:
-            execute("claude", decision.account, child_env, invoke)
+            execute("claude", decision.account, child_env, invoke, master=True)
         except Unavailable as exc:
             _write_route_report(report, status="failed", error=str(exc))
             raise RoutingError(str(exc)) from exc
+
 
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:

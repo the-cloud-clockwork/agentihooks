@@ -465,3 +465,31 @@ def test_repository_matching_reports_no_path_for_an_unrelated_repository(tmp_pat
     assert place("eng", "claude", "acct", "subscription", str(checkout), [record], NOW) == Wait(
         f"no hive for eng lists the repo {checkout}"
     )
+
+
+SLOTLESS = [{"harness": "claude", "account": "other", "kind": "subscription", "cap": 0}]
+FULL = "max agents: 4 of 4 agents on the hive, fits 0 more"
+
+
+@pytest.mark.feature("hive-placement-slot-before-room")
+def test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room() -> None:
+    hives = [eng("full", agents=4, room=0, refusal=FULL), eng("bare", slots=SLOTLESS)]
+    assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        f"no hive for eng has room: full {FULL}"
+    )
+
+
+@pytest.mark.feature("hive-placement-slot-before-room")
+def test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full() -> None:
+    hives = [eng("pref", prefer={"eng": 1}, agents=4, room=0, refusal=FULL, slots=SLOTLESS), eng("other")]
+    assert placement.choose("eng", "claude", "acct", "subscription", REPO, hives, NOW) == placement.Choice(
+        "other", spill=placement.Spill("pref", "no hive for eng advertises the claude slot acct")
+    )
+
+
+@pytest.mark.feature("hive-placement-slot-before-room")
+def test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full() -> None:
+    hives = [eng("full", agents=4, room=0, slots=SLOTLESS), eng("bare", agents=4, room=0, slots=SLOTLESS)]
+    assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == Wait(
+        "no hive for eng advertises the claude slot acct"
+    )
