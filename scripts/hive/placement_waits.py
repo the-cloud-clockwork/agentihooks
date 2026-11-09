@@ -16,9 +16,9 @@ TOTALS = "admission-outcome-total"
 ADMITTED = "admitted"
 
 
-def admitted(store: RedisStore, slug: str) -> None:
-    """Count one launch a hive admitted for this swarm."""
-    cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED)
+def admitted(store: RedisStore, slug: str, count: int = 1) -> None:
+    """Count launches a hive admitted for this swarm; a negative count takes back a launch that failed."""
+    cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED, count)
 
 
 def _category(reason: str) -> str:

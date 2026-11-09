@@ -7,6 +7,7 @@ import pytest
 from scripts.hive import admission, launch, placement_waits
 from scripts.swarm import metrics_service
 from scripts.swarm.store import RedisStore, SwarmConfig
+from scripts.swarm.tick import ACK_LATER
 from scripts.swarm_v2.runtime.base import Status
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
 
@@ -79,7 +80,9 @@ def test_a_hive_refusal_alone_yields_admission_rows(store: RedisStore) -> None:
 def test_a_hive_launch_counts_admitted_for_its_swarm(setup: SimpleNamespace) -> None:  # noqa: F811
     assert isinstance(setup.launcher, launch.HiveLaunch)
     write_hive(setup)
-    result = setup.launcher.spawn(request_for(setup))
+    request = request_for(setup)
+    request.task[ACK_LATER] = True
+    result = setup.launcher.spawn(request)
     assert result.status is Status.PENDING
     assert setup.store.redis.hgetall(setup.store.key("fixture", placement_waits.TOTALS)) == {
         placement_waits.ADMITTED: "1"

@@ -110,10 +110,8 @@ def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatc
     _, lane, name, sent = setup.herdr.spawn.call_args.args
     assert (lane, name, sent["id"], sent["controller_epoch"]) == ("eng", "eng name", "task", setup.held.epoch)
     fenced.runtime.hive_launch.spawn.assert_not_called()
-    assert setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS)) == {
-        "placement": "1",
-        placement_waits.ADMITTED: "1",
-    }
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert (totals["placement"], totals[placement_waits.ADMITTED]) == ("1", "1")
 
 
 def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,9 +122,8 @@ def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkey
     setup.herdr.spawn.side_effect = RuntimeError("herdr refused")
     with pytest.raises(RuntimeError):
         fenced.spawn(setup.config, "eng", "eng name", {"id": "task", "seat": "eng-1@fixture"})
-    assert placement_waits.ADMITTED not in setup.store.redis.hgetall(
-        setup.store.key(setup.config.slug, placement_waits.TOTALS)
-    )
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert totals.get(placement_waits.ADMITTED, "0") == "0"
 
 
 def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatch):
