@@ -211,7 +211,7 @@ def _held(client: object, hive_id: str) -> set[str]:
         return set()
 
 
-def unique(name: str, held: set[str]) -> str:
+def _unique(name: str, held: set[str]) -> str:
     """The name itself while no other hive holds it, else the name with the first free numeric suffix from 2."""
     if name not in held:
         return name
@@ -268,7 +268,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
-    held = _held(client, hive_id)
+    naming = bool(parsed.keys() & {"name", "ui"})
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
@@ -280,7 +280,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
         settled = _settle(hive_id, merged)["name"]
-        if (derived := unique(settled, held)) != settled:
+        if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
             merged["name"] = derived
         if merged.get("max_agents") is None:
             merged.pop("max_agents", None)

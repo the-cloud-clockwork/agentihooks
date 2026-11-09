@@ -139,6 +139,16 @@ def test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix(redis
     assert sorted(hive["name"] for hive in registry.hives(redis)) == ["box", "box-2", "box-3"]
 
 
+def test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    registry.beat(redis, "vm", {"ui": "yes", "heartbeat_at": 1})
+    hive_state.indexed(redis, "vm", True)
+    assert [hive["name"] for hive in registry.hives(redis)] == ["swarm-master", "swarm-master"]
+    assert registry.update(redis, "vm", ["draining=yes"])["name"] == "swarm-master"
+    assert registry.update(redis, "vm", ["name=swarm-master"])["name"] == "swarm-master-2"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["swarm-master", "swarm-master-2"]
+
+
 def test_a_restarted_registration_keeps_the_stored_settings(redis):
     pod = ["ui=no", "ephemeral=yes", "excluded=master", "max-agents=9"]
     first = registry.update(redis, "box", pod, keep=True)
