@@ -2,6 +2,7 @@ import hashlib
 import io
 import json
 import urllib.parse
+import urllib.request
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -15,6 +16,8 @@ from tests.codex_fakes import BAO_TOKEN, BAO_URL, http_error
 from tests.hive.test_invite import RECORD, URL, Bao
 
 if TYPE_CHECKING:
+    from redis import Redis
+
     from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
@@ -193,7 +196,10 @@ def test_remove_without_an_openbao_client_names_the_hive_and_the_signer_record()
     assert str(error.value) == f"no OpenBao client to unlist m1 from {SIGNER}"
 
 
-def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, monkeypatch):
+def test_the_remove_command_unlists_the_hub_signer_record_create_lists(
+    admin: "Redis",
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr(cli, "_signer", lambda: None)
     monkeypatch.setenv(openbao_kv.URL_ENV, BAO_URL)
@@ -202,7 +208,9 @@ def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, mo
     seen = []
     monkeypatch.setattr(remove, "remove", lambda store, bao, plan, host: seen.append(plan) or [])
     assert cli.main(["remove", "m1", "--label", "anton-9"]) == 0
-    assert seen == [remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER)]
+    assert seen == [
+        remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, sync=member_swarms.SYNC_TARGET)
+    ]
 
 
 def test_remove_unlists_the_signer_record_right_after_it_revokes_the_member():
@@ -278,6 +286,43 @@ def test_invite_lists_the_new_member_in_a_backfilled_signer_record_and_marks_the
     (member,) = auth_members(admin)
     assert fake.records[SIGNER] == {"account_seed": "kept", "member_swarms": {"m0": ["old"], member: ["rig"]}}
     assert _scoped_line(fake) == ["AGENTIHOOKS_BUS_SCOPED=1"]
+
+
+def _bus_lines(fake: Bao) -> list[str]:
+    lines = fake.records[RECORD]["credential"].splitlines()
+    return [line for line in lines if line.startswith(("AGENTIHOOKS_BUS=", "AGENTIHOOKS_BUS_URL="))]
+
+
+def test_invite_carries_the_published_bus_address_of_the_signer_record_when_no_address_is_given(admin: "Redis") -> None:
+    fake = Bao({SIGNER: {"url": "tls://bus.example.test:4222", "member_swarms": {}}})
+    request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER, swarms=("rig",))
+    invite.invite(admin, _bao(fake), request, PUBLIC)
+    assert _bus_lines(fake) == ["AGENTIHOOKS_BUS=nats", "AGENTIHOOKS_BUS_URL=tls://bus.example.test:4222"]
+
+
+def test_an_explicit_bus_address_wins_over_the_signer_record(admin: "Redis") -> None:
+    fake = Bao({SIGNER: {"url": "tls://bus.example.test:4222", "member_swarms": {}}})
+    request = invite.Request(
+        "lab", RECORD, url=URL, redis_url=PUBLIC, bus_url="nats://flag.example.test:4222", signer_path=SIGNER
+    )
+    invite.invite(admin, _bao(fake), request, PUBLIC)
+    assert _bus_lines(fake) == ["AGENTIHOOKS_BUS=nats", "AGENTIHOOKS_BUS_URL=nats://flag.example.test:4222"]
+
+
+def test_an_unreadable_signer_record_refuses_the_invite_before_any_member_is_minted(admin: "Redis") -> None:
+    fake = Bao()
+
+    def sealed_signer(request: urllib.request.Request, timeout: float | None = None) -> io.BytesIO:
+        if request.full_url.endswith(SIGNER):
+            raise http_error(request.full_url, 503, b'{"errors": ["sealed"]}')
+        return fake(request, timeout)
+
+    request = invite.Request("lab", RECORD, url=URL, redis_url=PUBLIC, signer_path=SIGNER)
+    with pytest.raises(auth.HiveError) as refused:
+        invite.invite(admin, openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, sealed_signer), request, PUBLIC)
+    assert str(refused.value) == "OpenBao HTTP 503: sealed"
+    assert auth_members(admin) == []
+    assert RECORD not in fake.records
 
 
 def test_invite_before_the_backfill_leaves_the_record_unscoped_and_the_invite_legacy(admin):

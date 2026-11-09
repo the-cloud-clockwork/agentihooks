@@ -15,7 +15,7 @@ from tests.codex_fakes import BAO_TOKEN, BAO_URL
 from tests.hive.test_invite import RECORD, URL, Bao
 from tests.hive.test_nats_grant import _refresh
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("hive-signer-membership-sync")]
+pytestmark = pytest.mark.unit
 
 SIGNER = "agentihooks/hub/nats-signer"
 TARGET = "agentihooks-swarm/agentihooks-swarm-nats-signer"
@@ -77,6 +77,7 @@ def _missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[s
     raise FileNotFoundError("kubectl")
 
 
+@pytest.mark.feature("hive-signer-membership-sync")
 def test_an_invited_member_joins_at_once_through_the_mounted_signer(admin: Any, tmp_path: Path) -> None:
     record, trusted = _record({"m0": ["old"]})
     fake = Bao({SIGNER: record})
@@ -84,8 +85,8 @@ def test_an_invited_member_joins_at_once_through_the_mounted_signer(admin: Any, 
     eso.copy()
     said = invite.invite(admin, openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake), _scoped(), PUBLIC, run=eso)
     assert said.endswith(f"; {SYNCED}")
-    with pytest.raises(auth.HiveError):
-        _refresh(admin, _mounted(tmp_path, trusted), _ledger_credential(fake))
+    stale = _refresh(admin, _mounted(tmp_path, trusted), _ledger_credential(fake))
+    assert "error" in stale
     eso.copy()
     grant = _refresh(admin, _mounted(tmp_path, trusted), _ledger_credential(fake))
     assert (grant["bus_scoped"], grant["bus_swarms"]) == (True, ["rig"])
@@ -122,9 +123,21 @@ def test_an_invite_without_a_sync_target_or_a_scoped_record_runs_no_sync(admin: 
     record, _ = _record({})
     fake = Bao({SIGNER: record})
     bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake)
-    invite.invite(admin, bao, _scoped(None), PUBLIC, run=lambda command, **kwargs: runs.append(command))
+    invite.invite(
+        admin,
+        bao,
+        _scoped(None),
+        PUBLIC,
+        run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0),
+    )
     del fake.records[SIGNER][member_swarms.FIELD]
-    invite.invite(admin, bao, _scoped(), PUBLIC, run=lambda command, **kwargs: runs.append(command))
+    invite.invite(
+        admin,
+        bao,
+        _scoped(),
+        PUBLIC,
+        run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0),
+    )
     assert runs == []
 
 
@@ -147,12 +160,22 @@ def revoking(admin: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Bao, list[lis
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr(cli, "_signer", lambda: None)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake))
+    host = remove.Host
     monkeypatch.setattr(
-        subprocess, "run", lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0)
+        remove,
+        "Host",
+        lambda: host(
+            run=lambda command, **kwargs: (
+                runs.append(command)
+                or subprocess.CompletedProcess(command, 0)
+                or subprocess.CompletedProcess(command, 0)
+            )
+        ),
     )
     return fake, runs
 
 
+@pytest.mark.feature("hive-signer-membership-sync")
 def test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs(
     admin: Any, revoking: tuple[Bao, list[list[str]]], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -191,11 +214,16 @@ def test_hive_revoke_with_a_hub_signer_but_no_openbao_refuses_before_revoking(
     assert auth.member(admin, member) is not None
 
 
+@pytest.mark.feature("hive-signer-membership-sync")
 def test_hive_remove_syncs_the_signer_record_after_it_unlists() -> None:
     fake = Bao({SIGNER: {member_swarms.FIELD: {"m1": ["rig"]}}})
     runs: list[list[str]] = []
     plan = remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, sync=TARGET)
-    host = remove.Host(run=lambda command, **kwargs: runs.append(command) or subprocess.CompletedProcess(command, 0))
+    host = remove.Host(
+        run=lambda command, **kwargs: (
+            runs.append(command) or subprocess.CompletedProcess(command, 0) or subprocess.CompletedProcess(command, 0)
+        )
+    )
     bao = openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake)
     step = dict(remove.STEPS)["signer"]
     assert step(None, bao, plan, host) == [f"unlisted m1 from the hub signer record {SIGNER}", SYNCED]
