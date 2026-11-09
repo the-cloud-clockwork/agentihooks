@@ -8,7 +8,8 @@
       "seam": "NameRegistry.resolve_many through NameState.get_many to StateStore.get_many",
       "tests": [
         "tests/events/test_state_batch.py::test_memory_batch_preserves_order_missing_keys_and_duplicates",
-        "tests/events/test_state_batch.py::test_name_lookup_uses_one_bus_request"
+        "tests/events/test_state_batch.py::test_name_lookup_uses_one_bus_request",
+        "tests/events/test_nats_batch.py::test_last_per_subject_answers_the_newest_message_of_each_held_subject"
       ]
     },
     {
