@@ -300,7 +300,7 @@ def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgr
     registry.update(redis, "anton-2", ["ui=no"])
     headroom.publish(redis, "anton-2", 5_000, proc)
     assert cli.main(["list"]) == 0
-    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\t" in capsys.readouterr().out
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):
