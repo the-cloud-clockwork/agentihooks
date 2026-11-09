@@ -126,6 +126,19 @@ def test_a_task_returns_to_the_seat_its_handoff_names(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
 
 
+@pytest.mark.feature("swarm-tick-successor-fill")
+def test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range(
+    rig: SimpleNamespace,
+) -> None:
+    rig.store.update(SLUG, lanes={"eng": {"model": "sonnet-lane"}})
+    launch = {"profile": "engineer", "harness": "claude", "model": "", "effort": "", "account": "a1"}
+    rig.store.put_handoff(SLUG, "t1", "handoff", envelope={"reason": "context", "launch": launch})
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted["task"]["handoff_envelope"]["launch"] == {**launch, "model": "sonnet-lane", "effort": "medium"}
+
+
 def test_a_task_whose_dependencies_are_done_is_admitted_with_an_empty_stack_base(rig):
     assert rig.admitter.admit(SLUG, ask())["task"]["stack_base"] == []
 
@@ -331,3 +344,36 @@ def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subjec
         member({"op": "admit", **ask(hive="hive-b")})
     assert len(seen) == 2
     bus.close()
+
+
+@pytest.mark.feature("hive-drain-events-admission")
+def test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining(rig, monkeypatch, capsys):
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, "hive-a", ["draining=no"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is not None
+    assert admitted["hive"] == "hive-a"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.feature("hive-drain-events-admission")
+def test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release(rig, monkeypatch, capsys):
+    from scripts.hive import registry
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    registry.beat(rig.store.redis, "hive-a", {"heartbeat_at": 6_000})
+    registry.update(rig.store.redis, "hive-a", ["draining=yes"])
+
+    admitted = rig.admitter.admit(SLUG, ask())
+
+    assert admitted is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+    assert rig.rows["t1"]["state"] == "open"
+    assert capsys.readouterr().err.splitlines() == [f"hub: events placement swarm={SLUG} task=t1 hive=hive-a: refused"]

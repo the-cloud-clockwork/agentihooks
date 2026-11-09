@@ -9,7 +9,7 @@ from typing import Any
 
 from hooks.context import profile_chain
 from scripts import claude_quota_balancer as balancer
-from scripts.hive import admission, headroom, orders, placement, placement_waits, registry
+from scripts.hive import admission, ceiling, headroom, orders, placement, placement_waits, registry
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
@@ -63,7 +63,7 @@ class _Placing:
 ROOM_DETAILS = {"reason": "", "detail": ""}
 
 
-def loaded_hives(store: RedisStore) -> list[dict]:
+def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
     """Every registered hive with the worker agents it runs or is launching.
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
@@ -107,14 +107,25 @@ def loaded_hives(store: RedisStore) -> list[dict]:
             used = max(hive["agents"], taken)
             held = max(held, used - hive["agents"])
         reading = headroom.read(store.redis, hive["id"], now)
+        hive["cap"] = hive["max_agents"]
+        hive["max_agents"] = ceiling.ceiling(hive["cap"], reading)
+        hive["unread"] = hive["cap"] is None and reading is None
         found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)
+        hive["limit"] = f"{found.reason}: {found.detail}"
         if hive["prefer"]:
             ranked = admission.capped(admission.room(reading, pending=held, first=True), used, hive["max_agents"])
             hive[placement.FIRST_ROOM] = ranked.room
             hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
+
+
+def live_hives(store: RedisStore) -> list[dict[str, Any]]:
+    """The loaded hives whose heartbeat is live."""
+    loaded = loaded_hives(store)
+    now = lease.now_ms(store)
+    return [hive for hive in loaded if registry.live(hive, now)]
 
 
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
@@ -146,6 +157,13 @@ def _master_logins(hives: list[dict], front: bool) -> list[dict]:
 
 def _open_rows(rows: list, harness: str = "claude") -> list:
     return [row for row in rows if row.harness == harness and capacity.free_seats(row) > 0]
+
+
+def seat_text(row: capacity.Account) -> str:
+    """One account's seats in a placement wait, naming a missing quota reading instead of a cap of None."""
+    if row.cap is None:
+        return f"{row.name} {row.sessions} sessions, no fresh quota reading"
+    return f"{row.name} {row.sessions} sessions of {row.cap}"
 
 
 def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
@@ -347,7 +365,10 @@ class HiveLaunch:
         rows = getattr(self.herdr, "_quota_accounts", None)
         if rows is None:
             if self._quota_accounts is None:
-                self._quota_accounts = capacity.accounts(dict(os.environ), now / 1000, refresh=False)
+                read: Callable[..., list[capacity.Account]] = getattr(
+                    self.herdr, "quota_accounts", None
+                ) or capacity.hive_accounts(self.store)
+                self._quota_accounts = read(dict(os.environ), now / 1000, refresh=False)
             rows = self._quota_accounts
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
         if lane == "master" and not task.get("route_kind"):
@@ -379,9 +400,7 @@ class HiveLaunch:
         if not candidates:
             candidates = open_rows
         if not candidates:
-            seats = ", ".join(
-                f"{row.name} {row.sessions} sessions of {row.cap}" for row in rows if row.harness == harness
-            )
+            seats = ", ".join(seat_text(row) for row in rows if row.harness == harness)
             pinned = f"; pinned to {account}" if account else ""
             return placement.Wait(
                 f"no {harness.capitalize()} account has room after hive sessions: {seats}{pinned}", role

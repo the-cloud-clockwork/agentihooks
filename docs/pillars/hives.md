@@ -419,12 +419,12 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `15` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. The host room guard still refuses a spawn when load or free memory leaves no room. A stored value is kept. |
+| `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
-role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
-`max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
+role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded`
+follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
 
 ### Capabilities and task needs
@@ -1101,7 +1101,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, keeping a stored excluded list, ui and ephemeral.
    `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to the
    lowest ranked hive while admission leaves it room. A second `hive set` then writes `max-agents=<workers.maxAgents>`
-   (default 20) without `--keep`, so every start replaces a stored or hand-set cap with the chart value.
+   without `--keep`, or `max-agents=auto` when the chart sets none, so every start replaces a stored or hand-set cap with
+   the chart value.
 6. Runs `agentihooks hive run`.
 
 When the pod stops, for an image update, a rollout or a node drain, its preStop runs `agentihooks hive drain --wait
@@ -1228,7 +1229,7 @@ in place and moves the master to another hive.
 | ui, ephemeral | `yes` or `no`, editable. |
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
-| max agents | Whole number, editable. |
+| max agents | The hive's agent ceiling, editable, marked `cap` when the operator set a cap and `auto` when it is computed from the hive's own resources; empty with an `unknown` hint when there is no cap and no fresh reading. |
 | agents | Working agents against max agents, such as `1/3`: the worker sessions the hive reported at its latest heartbeat, named by the row's `agents_at`, without its interactive master sessions; a row that is not live counts none. |
 | slots | One line per slot: harness, account and the sessions the hive reports on it at its latest heartbeat. |
 | master | The live master running on the hive, from any swarm, or `—`. |
@@ -1275,7 +1276,7 @@ The page converts what was typed before it sends it:
 |---|---|---|
 | excluded | `master, qa` | `["master", "qa"]` |
 | prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
-| max agents | `4` | `4`; anything other than digits is sent as text and refused |
+| max agents | `4` | `4`; an empty box sends `auto`, anything else other than digits is sent as text and refused |
 
 Only the operator can edit. An agent's credential gets
 `403 Hive settings need the operator`.
@@ -1349,7 +1350,7 @@ The PATCH body takes one or more of these fields and nothing else:
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
 | `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
 | `prefer` | object of role to whole number rank |
-| `max_agents` | integer, 1 or more |
+| `max_agents` | integer, 0 or more |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
 UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The

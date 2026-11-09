@@ -39,7 +39,9 @@ def store(monkeypatch):
             heartbeat_at=beat,
             slots=[{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6}],
         )
-        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.hset(
+            registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items() if v is not None}
+        )
         store.redis.sadd(registry.INDEX, hive_id)
     store.redis.set(f"{registry.key('desk')}:sessions", json.dumps({"claude:luna": 2}))
     record = AgentRecord(
@@ -133,7 +135,9 @@ def test_a_hive_that_never_beat_or_went_quiet_past_a_day_is_not_listed_and_keeps
 
     for hive_id, beat in (("never", 0), ("gone", NOW_MS - hives.GONE_MS - 1), ("edge", NOW_MS - hives.GONE_MS)):
         record = {**registry._default(hive_id), "heartbeat_at": beat}
-        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.hset(
+            registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items() if v is not None}
+        )
         store.redis.sadd(registry.INDEX, hive_id)
     reply = dispatch(request("GET", token=None, slug=None), store)
     assert [hive["id"] for hive in reply["data"]] == ["desk", "edge", "pod"]
@@ -243,7 +247,7 @@ def test_settings_become_registry_pairs():
     ("body", "message"),
     [
         ({"prefer": {"master": 1}}, "prefer names master, a role this hive excludes"),
-        ({"max_agents": 0}, "max-agents must be a positive whole number, not '0'"),
+        ({"max_agents": -1}, "max-agents must be a whole number, not '-1'"),
         ({"excluded": ["bad name"]}, "excluded takes lane roles or profiles, not 'bad name'"),
     ],
 )

@@ -4839,6 +4839,40 @@ jobs:
         uses: actions/download-artifact@v4
         with: *mutation-download-the-shared-mutation-stats
 
+      - name: Check every mutation stats producer's part arrived
+        id: stats-arrival
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          STATS_PARTS: ${{ needs.mutation-plan.outputs.stats_parts }}
+        run: python -m scripts.ci_mutation.arrival .mutation-stats "$STATS_PARTS"
+
+      - name: Download the missing mutation stats parts
+        timeout-minutes: 1
+        if: steps.stats-arrival.outputs.missing != ''
+        id: download-the-missing-mutation-stats-parts
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-shared-mutation-stats
+
+      - name: Download the missing mutation stats parts, wait before attempt 2
+        if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the missing mutation stats parts failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the missing mutation stats parts, attempt 2
+        timeout-minutes: 1
+        if: steps.download-the-missing-mutation-stats-parts.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-shared-mutation-stats
+
+      - name: Fail on a mutation stats producer whose part never arrived
+        if: steps.stats-arrival.outputs.missing != ''
+        env:
+          STATS_PARTS: ${{ needs.mutation-plan.outputs.stats_parts }}
+        run: python -m scripts.ci_mutation.arrival .mutation-stats "$STATS_PARTS" --required
+
       - name: Restore the tests that killed this branch's earlier mutants
         if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/restore@v4

@@ -148,6 +148,7 @@ FLOORS: dict[str, Timing] = {
     "status publish": Timing(LIGHT_S, CRITICAL_S),
     "hive sweep": Timing(LIGHT_S, SLOW_S),
     "workflow runner": Timing(LIGHT_S, CRITICAL_S),
+    "doc items map": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

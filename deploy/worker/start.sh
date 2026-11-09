@@ -184,5 +184,5 @@ set_args=(ui=no ephemeral=yes draining=no "excluded=${HIVE_EXCLUDED-master}" "ma
   "prefer=${HIVE_PREFER-}")
 [[ -n "${HIVE_NAME:-}" ]] && set_args+=("name=${HIVE_NAME}")
 agentihooks hive set --keep --reason "the worker started" "$member" "${set_args[@]}"
-agentihooks hive set --reason "the chart sets the agent cap" "$member" "max-agents=${HIVE_MAX_AGENTS:-20}"
+agentihooks hive set --reason "the chart sets the agent cap" "$member" "max-agents=${HIVE_MAX_AGENTS:-auto}"
 exec agentihooks hive run

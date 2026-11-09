@@ -11,6 +11,17 @@
       ]
     },
     {
+      "id": "hive-drain-events-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1896",
+      "behaviour": "The hub refuses an events admission request from a hive whose registry record is draining, such as a hive stopping for a release, before any claim, execution, seat or ledger write.",
+      "seam": "Admission.admit for a hive spoke request",
+      "tests": [
+        "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
+        "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
@@ -100,6 +111,21 @@
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
         "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+      ]
+    },
+    {
+      "id": "swarm-tick-slow-export",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
+      "behaviour": "A tick pass whose short ledger read times out on a large export reads it again under the export budget when this host stores no view or only a stale one, stores the fresh view for the next pass, and runs offline on a fresh stored view without the long read.",
+      "seam": "scripts.swarm.cli._hold_view against a real HTTP ledger server that pauses mid body longer than the short read budget",
+      "tests": [
+        "tests/tick/test_slow_export_view.py::test_a_first_full_read_slower_than_the_short_budget_is_read_again_and_stored",
+        "tests/tick/test_slow_export_view.py::test_a_stale_stored_view_is_read_again_under_the_export_budget",
+        "tests/tick/test_slow_export_view.py::test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read",
+        "tests/tick/test_slow_export_view.py::test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view",
+        "tests/tick/test_slow_export_view.py::test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass",
+        "tests/tick/test_slow_export_view.py::test_a_stored_view_is_fresh_only_until_its_age_reaches_the_limit"
       ]
     },
     {
@@ -456,7 +482,7 @@
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",
-      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass.",
+      "behaviour": "The spawn pass, its order, launch and host spend helpers live in the place step module; the swarm tick module re-exports each one, the moved code reaches names the tick module defines through the tick module so a patched tick seam still applies, and the spawn step declares the ledger, runtime, coordination and inbox effects, its feature and its lane. The spawn step hands the spawn pass its step deadline and writes the ledger through the ledger port, bounded by that deadline plus the launch budget so a task it prepared is still recorded; past the deadline the pass prepares no further task, launches only the batch it prepared and names how many ready tasks it left for the next pass. The spawn helpers reach the runtime only through the runtime port bound to that same recording deadline: placement, capacity, launch room, peer reports, placement refusal, the placement pass bracket, reaping and pending admission are runtime port operations, the placing and admitting ones writes that need the runtime effect. The spawn helpers reach the swarm store only through the coordination port bound to the same deadline: each store method, seat, memory and Redis command is a named store read or store write, the writes needing the coordination effect, and keys are built without a port call. A spawn claim it drops settles the leaving agent's inbox items through the inbox port, and the pending admission it holds, activates and releases goes through the runtime port.",
       "seam": "scripts.tick.steps.place, re-exported by scripts.swarm.tick",
       "tests": [
         "tests/tick/test_place.py::test_tick_reexports_the_moved_spawn_name",
@@ -479,7 +505,42 @@
         "tests/tick/test_spawn_ports.py::test_a_ledger_comment_is_a_write_that_needs_the_ledger_effect",
         "tests/tick/test_place.py::test_an_expired_spawn_pass_never_blocks_unresolved_tasks",
         "tests/tick/test_spawn_ports.py::test_unresolved_tasks_stop_writing_when_the_pass_deadline_expires",
-        "tests/tick/steps/test_spawn.py::test_spawn"
+        "tests/tick/steps/test_spawn.py::test_spawn",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_places_and_reads_capacity_through_the_runtime_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_brackets_the_placement_pass_and_reaps_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_reads_the_router_placement_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_facade_has_no_admission_when_the_runtime_admits_nothing",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_spawn_admission_admits_and_releases_through_the_port",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_forwards_spawn_operations_to_the_pass_runtime",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_keeps_the_optional_runtime_defaults",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_answers_no_launch_room_when_the_pass_runtime_names_none",
+        "tests/tick/test_spawn_runtime_ports.py::test_the_router_runtime_refuses_spawn_operations_past_their_deadline",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_writes_need_the_runtime_effect",
+        "tests/tick/test_spawn_runtime_ports.py::test_spawn_runtime_reads_pass_without_the_runtime_effect",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_writes_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reads_through_the_coordination_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_reaches_redis_seats_and_memory_through_the_port",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_builds_keys_without_a_port_call",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_keeps_the_store_method_names_for_step_timing",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_store_refuses_private_names",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_runs_the_named_store_operation",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_private_operations",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_a_write_named_as_a_read",
+        "tests/tick/test_spawn_store_ports.py::test_the_store_coordination_refuses_operations_past_their_deadline",
+        "tests/tick/test_spawn_store_ports.py::test_spawn_store_writes_need_the_coordination_effect",
+        "tests/tick/test_spawn_store_ports.py::test_a_dropped_spawn_claim_releases_through_coordination_and_settles_through_the_inbox",
+        "tests/tick/test_spawn_store_ports.py::test_the_spawn_step_reaches_the_store_and_runtime_only_through_its_ports"
+      ]
+    },
+    {
+      "id": "swarm-tick-successor-fill",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1793",
+      "behaviour": "A lane successor spawned from a saved handoff launch whose model or effort is empty takes the lane's pinned model, leaving an automatic lane's model to the band pick, and the lane effort clamped into the lane's effort range, else the range floor, before placement; keys the saved launch carries stay as saved and the launch assignment is left as saved.",
+      "seam": "scripts.swarm.successor_fill, called by the place step before runtime spawn and by hub admission before a hive successor is placed",
+      "tests": [
+        "tests/tick/steps/test_successor_fill.py::test_a_successor_from_a_saved_launch_with_neither_field_launches_on_the_lane_model_inside_the_range",
+        "tests/hub/test_admission.py::test_a_hive_successor_from_a_saved_launch_with_neither_field_is_admitted_on_the_lane_model_inside_the_range"
       ]
     },
     {
@@ -2155,6 +2216,45 @@
       ]
     },
     {
+      "id": "hive-agent-ceiling",
+      "origin": "operator",
+      "operator_words": "a hive's max agents must not be a fixed number such as the default twenty or ten. With no cap set, the ceiling is computed each tick from the hive's own reported memory, swap and load, the same host room rule the workstation autoscale uses, and placement uses that number. A cap set by the operator through the hive command or the page bounds it from above.",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1428",
+      "behaviour": "A hive with no operator cap takes its agent ceiling from its own heartbeat reading of memory, swap and one minute load under the workstation host room rule, placement admits no hive past that ceiling, beside the existing headroom admission, a set cap holds it lower, auto clears the cap, and the Hives panel shows the ceiling and marks a set cap.",
+      "seam": "The hive registry max agents setting, the hive headroom heartbeat, the hive placement load and the Hives panel max agents cell",
+      "tests": [
+        "tests/hive/test_hive_ceiling.py::test_an_uncapped_ceiling_moves_with_the_hives_free_memory",
+        "tests/hive/test_hive_ceiling.py::test_swap_in_use_counts_against_the_free_memory",
+        "tests/hive/test_hive_ceiling.py::test_a_load_above_the_high_watermark_holds_the_ceiling_at_the_agents_running",
+        "tests/hive/test_hive_ceiling.py::test_the_one_minute_load_falls_back_to_the_five_minute_load_of_an_older_daemon",
+        "tests/hive/test_hive_ceiling.py::test_the_pod_memory_limit_binds_when_it_is_lower_than_the_node",
+        "tests/hive/test_hive_ceiling.py::test_a_set_cap_holds_the_ceiling_lower",
+        "tests/hive/test_hive_ceiling.py::test_without_a_reading_the_ceiling_is_the_cap_or_none",
+        "tests/hive/test_hive_ceiling.py::test_a_reading_without_agents_counts_none_running",
+        "tests/hive/test_hive_ceiling.py::test_a_new_hive_carries_no_cap_and_auto_clears_a_set_one",
+        "tests/hive/test_hive_ceiling.py::test_placement_reads_the_computed_ceiling_and_keeps_the_cap",
+        "tests/swarm/test_probe.py::test_an_uncapped_unread_root_counts_against_the_swarm_local_limit",
+        "tests/hive/test_hive_ceiling.py::test_a_reading_without_swap_counts_none_and_a_reported_swap_counts",
+        "tests/hive/test_hive_ceiling.py::test_shown_is_none_only_without_a_cap_and_a_reading",
+        "tests/hive/test_hive_ceiling.py::test_auto_removes_the_stored_cap",
+        "tests/hive/test_hive_ceiling.py::test_the_hive_list_shows_the_ceiling_and_how_it_is_set",
+        "tests/hive/test_hive_ceiling.py::test_the_root_probe_ceiling_follows_the_cap_the_reading_or_the_local_limit",
+        "tests/swarm_ledger/test_hives_panel.py::test_the_max_agents_cell_shows_the_computed_ceiling_and_marks_a_set_cap",
+        "tests/swarm_ledger/test_hives_panel.py::test_clearing_max_agents_writes_auto",
+        "tests/swarm_ledger/test_hives_panel.py::test_an_uncapped_hive_without_a_reading_shows_an_unknown_ceiling",
+        "tests/hive/test_workstation_admission.py::test_a_loaded_workstation_ceiling_keeps_the_swarm_share_under_a_higher_cap",
+        "tests/hive/test_workstation_admission.py::test_a_cap_below_the_computed_ceiling_keeps_the_swarm_share_reason"
+      ],
+      "semgrep_rule": "feature-hive-agent-ceiling",
+      "live_check": [
+        "python",
+        "-m",
+        "scripts.hive.cli",
+        "list"
+      ]
+    },
+    {
       "id": "swarm-workflow-runner",
       "origin": "inventory",
       "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",
@@ -2189,6 +2289,86 @@
       "seam": "Overrun inbox reports and published ledger workspace progress",
       "tests": [
         "tests/swarm/test_overrun.py::test_remote_overrun_quotes_the_same_progress_as_the_ledger"
+      ]
+    },
+    {
+      "id": "controller-quota-after-restart",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ctl-quota-empty",
+      "behaviour": "A restarted hive controller reads each routed account's cap from the hive quota reports in Redis within one pass, and a placement wait names an account with no fresh quota reading instead of a cap of None.",
+      "seam": "scripts.swarm.capacity.hive_accounts, the hive controller runtime's quota reader and the hive launch wait text",
+      "tests": [
+        "tests/swarm/test_controller_quota_after_restart.py::test_a_restarted_controller_reads_a_fresh_cap_from_the_hive_quota_reports",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_runtime_reads_quota_from_its_store",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_before_the_pass_has_quota_rows",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_reads_the_hive_reports_without_a_probe",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_rotation_keeps_the_quota_rows_its_pass_already_read",
+        "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
+        "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
+        "tests/hive/test_controller_launch.py::test_placement_without_a_runtime_reader_reads_the_hive_reports",
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
+      ]
+    },
+    {
+      "id": "tick-doc-items-map",
+      "origin": "inventory",
+      "behaviour": "When the watchdog document copy named by the swarm setting watchdog-document changes, the next tick maps its open items onto their tasks once and records the copy digest; an unchanged, unset or missing copy runs nothing.",
+      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed",
+      "tests": [
+        "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
+        "tests/tick/steps/test_doc_items_map.py::test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once",
+        "tests/tick/steps/test_doc_items_map.py::test_an_unchanged_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_an_unset_or_missing_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_copy_already_on_its_tasks_records_its_digest_without_writes",
+        "tests/tick/steps/test_doc_items_map.py::test_unknown_tasks_refuse_the_copy_once_until_it_changes",
+        "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
+        "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
+        "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
+        "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
+      ]
+    },
+    {
+      "id": "hive-pods-not-rolled-by-release-image-digest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
+      "behaviour": "The chart release workflow no longer stamps the hive worker image digest into the Helm chart, so the worker hive pod template carries no per release digest annotation and a release never rolls the worker hives on its own; an explicit workers.rollout.release value still rolls them on request.",
+      "seam": "worker-hive.yaml pod template metadata.annotations and the chart release build",
+      "tests": [
+        "tests/test_swarm_chart_hive_rollout_release.py::test_the_release_annotation_only_follows_an_explicit_rollout_release"
+      ]
+    },
+    {
+      "id": "hive-retire-absence",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
+      "behaviour": "Remote retirement settles without acknowledgement once bounded hive heartbeat loss or a newer member report proves the agent gone, freeing its seat; live hives still acknowledge normally.",
+      "seam": "HerdrRuntime.retire",
+      "tests": [
+        "tests/hive/test_reports.py::test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat",
+        "tests/hive/test_reports.py::test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-dead-remote-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
+      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget and allowing a launch within two passes after a hive roll.",
+      "seam": "remote retirement and the reap/spawn tick passes",
+      "tests": [
+        "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes",
+        "tests/tick/steps/test_drop_remote.py::test_retiring_an_archived_projection_preserves_its_history_metadata"
+      ]
+    },
+    {
+      "id": "gate-admin-recovery-payload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
+      "behaviour": "The frozen dev history ruleset accepts an exact payload allowing repository admins to recover CI through a pull request while preserving its branch protections.",
+      "seam": "Frozen ruleset payload registry",
+      "tests": [
+        "tests/test_gate_recovery_payload.py::test_the_frozen_registry_accepts_the_admin_pull_request_recovery_payload"
       ]
     }
   ],

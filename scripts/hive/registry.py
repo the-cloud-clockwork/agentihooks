@@ -41,6 +41,7 @@ LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
 MASTER_NAME = "swarm-master"
+AUTO = "auto"
 INDEX = hive_state.LEGACY_INDEX
 
 
@@ -57,7 +58,7 @@ def _default(hive_id: str, ui: str = "no") -> dict:
         "ephemeral": "no",
         "excluded": ["master"] if headless else [],
         "prefer": {},
-        "max_agents": 20 if headless else 15,
+        "max_agents": None,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -85,6 +86,15 @@ def _flag(setting: str, value: str) -> str:
 def _count(setting: str, value: str) -> int:
     if not (value.isascii() and value.isdigit()) or int(value) < 1:
         raise HiveError(f"{setting} must be a positive whole number, not {value!r}")
+    return int(value)
+
+
+def _cap(setting: str, value: str) -> int | None:
+    """A whole number cap, zero scaling the hive fully down, or None for auto, which leaves the ceiling to the hive."""
+    if value == AUTO:
+        return None
+    if not (value.isascii() and value.isdigit()):
+        raise HiveError(f"{setting} must be a whole number, not {value!r}")
     return int(value)
 
 
@@ -126,7 +136,7 @@ SETTINGS = {
     "excluded": ("excluded", _excluded),
     "master-swarms": ("master_swarms", _master_swarms),
     "prefer": ("prefer", _prefer),
-    "max-agents": ("max_agents", _count),
+    "max-agents": ("max_agents", _cap),
     "capabilities": ("capabilities", _capabilities),
 }
 
@@ -255,7 +265,10 @@ def update(
             if not (keep and f in stored and (f in KEPT or (f == "name" and stored[f] != hive_id)))
         }
         _check(_settle(hive_id, {**stored, **fields}))
-        return _drained({**_seeded(hive_id), **stored, **fields}, stored, drain)
+        merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
+        if merged.get("max_agents") is None:
+            merged.pop("max_agents", None)
+        return _drained(merged, stored, drain)
 
     record = _settle(hive_id, _amend(client, hive_id, write))
     if hive_id != scope.member():

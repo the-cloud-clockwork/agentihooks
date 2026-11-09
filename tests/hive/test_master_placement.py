@@ -9,6 +9,7 @@ REPO = "agentihooks"
 def hive(name, **fields):
     record = {
         **registry._default(name, "yes"),
+        "max_agents": 15,
         "repos": [REPO],
         "heartbeat_at": NOW,
         "agents": 0,

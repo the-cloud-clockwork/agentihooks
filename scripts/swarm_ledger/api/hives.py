@@ -25,7 +25,7 @@ PATCH = {
         "ephemeral": FLAG,
         "excluded": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "prefer": {"type": "object", "additionalProperties": {"type": "integer"}},
-        "max_agents": {"type": "integer"},
+        "max_agents": {"oneOf": [{"type": "integer"}, {"const": "auto"}]},
     },
 }
 MISSING = "resource_missing"
