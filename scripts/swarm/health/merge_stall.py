@@ -79,8 +79,6 @@ def queue(repo: str, name: str) -> tuple[int, int]:
         page_args = args + (["-f", f"cursor={cursor}"] if cursor else [])
         data = request(repo, page_args)["data"]["repository"]
         length = data["mergeQueue"]["entries"]["totalCount"] if data["mergeQueue"] else 0
-        if not length:
-            return 0, 0
         pulls = data["pullRequests"]
         nodes = pulls["nodes"]
         merged = max([merged, *(timestamp(node["mergedAt"]) for node in nodes)])

@@ -20,6 +20,7 @@ from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage, stack
+from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -632,6 +633,9 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
+        + stall_blockers.observe(
+            store, slug, doc, tasks.values(), github, now_ms, lambda t: _merged_held(mail, t, now_ms)
+        )
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
         + _priorities(mail, doc, raised)
