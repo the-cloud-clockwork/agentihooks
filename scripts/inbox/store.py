@@ -253,6 +253,14 @@ class InboxStore:
     def get(self, item_id):
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
 
+    def locate(self, item_id: str) -> Item:
+        """The item with this id from the first of worlds() that holds it; Gone when none does."""
+        for world in self.worlds():
+            raw = world.redis.hgetall(world.key("item", item_id))
+            if raw:
+                return _parsed(raw)
+        raise Gone(f"no message {item_id}")
+
     def find(self, item_id, by):
         """The item a tick pass stored the id of, or None once its record is gone; by names the pass in the log."""
         raw = self.redis.hgetall(self.key("item", item_id))
