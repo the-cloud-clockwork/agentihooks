@@ -51,7 +51,7 @@ def _stop_hive(swarm: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[tuple
     clock = Clock()
     host = remove.Host(sleep=clock.sleep, clock=clock, wall=lambda: STOPPED_MS / 1000)
     remove.settle(swarm, HIVE, WAIT_S, host)
-    swarm.redis.hset(registry.key(HIVE), "heartbeat_at", STOPPED_MS)
+    registry.beat(swarm.redis, HIVE, {"heartbeat_at": STOPPED_MS, "beat_at": STOPPED_MS})
     return built
 
 
