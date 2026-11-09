@@ -3,7 +3,7 @@ import shlex
 import time
 from uuid import uuid4
 
-from scripts.swarm.store import SwarmError
+from scripts.swarm.store import RedisStore, SwarmError
 
 
 def now_ms() -> int:
@@ -125,7 +125,7 @@ def detach(store, slug: str, agent) -> None:
         _change(store, slug, row["id"], change)
 
 
-def observe(store, slug: str, live: set[str]) -> None:
+def observe(store: RedisStore, slug: str, live: set[str]) -> None:
     from scripts.hive import reports
 
     agents = {agent.name: agent for agent in store.agents(slug)}
