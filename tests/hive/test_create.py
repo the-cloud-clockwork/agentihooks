@@ -916,3 +916,50 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
     assert create.create(world.tools, create.Options(dry_run=True)) == (
         "dry run of hive create swarm-hive-002: nothing written"
     )
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(world):
+    from scripts.hive import hive_state
+
+    kept = _keep_member(world)
+    stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
+    state = {**_state(world), "member": stray}
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(state))
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert auth.member(world.tools.redis, kept) is not None
+    assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
+
+
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume(world, monkeypatch):
+    from scripts import openbao_kv
+    from scripts.hive import hive_state
+
+    real = openbao_kv.merge
+
+    def killed(bao, path, entries):
+        if path == RECORD and "credential" in entries:
+            raise KeyboardInterrupt
+        return real(bao, path, entries)
+
+    monkeypatch.setattr(openbao_kv, "merge", killed)
+    with pytest.raises(KeyboardInterrupt):
+        create.create(world.tools, create.Options(timeout_s=60))
+    stray = _state(world)["member"]
+    assert auth.member(world.tools.redis, stray) is not None
+    monkeypatch.setattr(openbao_kv, "merge", real)
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+    assert auth.member(world.tools.redis, stray) is None
+    assert stray not in hive_state.index(world.tools.redis)
+    assert sorted(auth.members(world.tools.redis)) == [invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]]

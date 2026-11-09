@@ -2333,6 +2333,17 @@
       ]
     },
     {
+      "id": "hive-create-resume-revoke",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
+      "behaviour": "Hive create saves each member it mints before the hive record names it, and a resumed create revokes every saved member the record does not name, removing it from the hive index.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name",
+        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume"
+      ]
+    },
+    {
       "id": "swarm-tick-dead-remote-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
