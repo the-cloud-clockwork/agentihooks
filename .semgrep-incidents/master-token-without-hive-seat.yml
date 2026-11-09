@@ -1,0 +1,15 @@
+rules:
+  - id: master-token-without-hive-seat
+    languages: [python]
+    severity: ERROR
+    message: Master token launches must request the hive master seat so full lane slots do not refuse the front door.
+    paths:
+      include:
+        - /scripts/master_claude_login.py
+        - master-token-without-hive-seat.py
+    patterns:
+      - pattern-inside: |
+          def launch_token(...):
+            ...
+      - pattern: execute(...)
+      - pattern-not: execute(..., master=True, ...)

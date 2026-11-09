@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 import scripts.swarm.cli  # noqa: F401
+from scripts.hive import sweep
 from scripts.inbox import relay
 from scripts.swarm import (
     command_runner,
@@ -149,12 +150,13 @@ def test_the_probes_relay_the_inbox_refresh_slots_and_probe_providers(monkeypatc
 
 def test_the_health_steps_return_pressure_watchdog_and_probe_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
-    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3"]
+    assert _run("wrapper health", calls, _pass(), monkeypatch) == ["ran 1", "ran 2", "ran 3", "ran 5"]
     assert calls == [
         ("skip", incidents.host_pressure, STORE, "sw"),
         ("call", ledger_watchdog.watch, STORE, "sw", "ledger", "runtime"),
         ("call", ledger_probe.observe, STORE, "sw", "ledger", "runtime", 7),
         ("call", prompt_backlog.observe, STORE, "sw", 0),
+        ("call", sweep.sweep, STORE, 7),
     ]
 
 
