@@ -1,6 +1,30 @@
 {
   "features": [
     {
+      "id": "managed-swarm-brain-rendering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
+      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
+      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "tests": [
+        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
+        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+      ]
+    },
+    {
+      "id": "master-token-slot-route-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
+      "behaviour": "Master token launch reports routed only after hive account admission; refused slots report the refusal without a routed report.",
+      "seam": "launch_token account slot callback and route report",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
+        "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
@@ -2415,6 +2439,18 @@
       ]
     },
     {
+      "id": "hive-create-resume-revoke",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
+      "behaviour": "Hive create saves each member it mints before the hive record names it, and a resumed create revokes every saved member the record does not name, removing it from the hive index.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name",
+        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume",
+        "tests/hive/test_create.py::test_cli_create_hands_hive_create_the_nats_signer"
+      ]
+    },
+    {
       "id": "swarm-tick-dead-remote-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
@@ -2505,16 +2541,13 @@
       ]
     },
     {
-      "id": "managed-swarm-brain-rendering",
+      "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
-      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
-      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",
+      "behaviour": "When a Codex app server transport exits, its hive join report ends with the transport exit reason before the execution's scoped Codex home is removed, so no later heartbeat grades a removed home as missing profile, settings, pane or transcript.",
+      "seam": "supervisor.finish before remove_home",
       "tests": [
-        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
-        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
-        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
-        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+        "tests/codex_session/test_runtime_homes.py::test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed"
       ]
     }
   ],
