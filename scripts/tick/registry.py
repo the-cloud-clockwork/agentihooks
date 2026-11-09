@@ -231,9 +231,9 @@ def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, 
     site that holds steps; steps of groups outside ``sites`` keep their own needs.
 
     A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane or
-    reserved step, and every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
-    for the sites between: only the steps of the site it names need it too. The barrier holds whatever a step
-    declares, because site hooks and steps read pass values no declaration names.
+    reserved step, and every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later
+    site is no barrier for the sites between: only the steps of the site it names need it too. The barrier holds
+    whatever a step declares, because site hooks and steps read pass values no declaration names.
     """
     found = _backward(tuple(steps), sites)
     late = _late(found)

@@ -660,6 +660,7 @@ def _eager(
             for future in done:
                 step, _, _ = running.pop(future)
                 records[step.name] = _ended(found, _applied(future.result(), apply))
+                dropped.update({step.name} if records[step.name].skipped else ())
             _expire(running, (dropped, cut), records, found, clock)
     finally:
         for future in submitted:

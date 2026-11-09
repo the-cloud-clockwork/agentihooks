@@ -13,9 +13,9 @@ from scripts.tick.step import Context, Domain, Lane, Result
 
 pytestmark = pytest.mark.unit
 
-CRITICAL_S = 1.5
-SLOW_S = 1.4
-OVERRUN_S = 3.0
+CRITICAL_S = 2.0
+SLOW_S = 1.8
+OVERRUN_S = 4.0
 
 
 class View:
@@ -78,17 +78,21 @@ def test_a_handed_step_needing_a_lost_critical_step_is_still_dropped() -> None:
     steps = (
         Step("overrun", "a", _overrun),
         Step("slow after overrun", "b", needs=frozenset({"overrun"}), lane=engine.SLOW),
+        Step("through the dropped", "c", needs=frozenset({"slow after overrun"}), lane=engine.SLOW),
     )
     ctx = Context(View(), Deadline.after(10.0))
     with pool.running(workers=2, critical_s=CRITICAL_S, slow_s=CRITICAL_S + 0.5):
         engine.run_graph(steps, ctx, finished=later.append)
-    assert [(record.name, record.skipped) for record in later[0]] == [("slow after overrun", True)]
+    assert [(record.name, record.skipped) for record in later[0]] == [
+        ("slow after overrun", True),
+        ("through the dropped", True),
+    ]
 
 
 @pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_spawn_holds_no_later_site_behind_its_reserve() -> None:
     needs = _pass_graph()
-    for name in ("handoff transfers", "close space", "page relay", "outbox migration", "tick view"):
+    for name in ("master alarm", "handoff transfers", "close space", "page relay", "outbox migration", "tick view"):
         assert "spawn" not in needs[name], name
     assert "settle" not in needs["page relay"]
     assert "spawn" in needs["settle"]
