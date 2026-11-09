@@ -7,8 +7,11 @@ import sqlite3
 import sys
 import time
 import urllib.error
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from scripts.inbox.seats import seat_address
 from scripts.swarm import control_notifications, incidents, ledger_host, notice_text, time_left
@@ -28,6 +31,7 @@ RAISED = (
 )
 PAUSED = " Idle and stale claim checks and nudges pause until recovery below four seconds."
 CLEARED = "The ledger server answers fast again: two swarm passes took {took}. Idle and stale claim checks resume."
+READ_ONCE: ContextVar[dict[str, bool] | None] = ContextVar("ledger_probe_read_once", default=None)
 
 
 @dataclass(frozen=True)
@@ -103,8 +107,25 @@ def state(store, slug: str) -> dict:
     return json.loads(raw) if raw else {}
 
 
-def holding(store, slug: str) -> bool:
-    return bool(state(store, slug).get("alert"))
+def holding(store: Any, slug: str) -> bool:
+    """Return whether the ledger slow alert holds for swarm ``slug``; inside ``read_once`` the first read answers every
+    later call for that swarm."""
+    cached = READ_ONCE.get()
+    if cached is None:
+        return bool(state(store, slug).get("alert"))
+    if slug not in cached:
+        cached[slug] = bool(state(store, slug).get("alert"))
+    return cached[slug]
+
+
+@contextmanager
+def read_once() -> Iterator[None]:
+    """Answer every ``holding`` call made inside, workers under copied context included, from one read per swarm."""
+    token = READ_ONCE.set({})
+    try:
+        yield
+    finally:
+        READ_ONCE.reset(token)
 
 
 def master_address(store, slug: str) -> str:

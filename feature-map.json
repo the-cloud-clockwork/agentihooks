@@ -2740,7 +2740,9 @@
         "tests/tick/steps/test_step_starvation.py::test_a_step_one_millisecond_short_of_three_windows_is_not_starved",
         "tests/tick/steps/test_step_starvation.py::test_a_completed_run_clears_the_starvation_and_rested_rows_never_start_it",
         "tests/tick/steps/test_step_starvation.py::test_failed_held_cut_and_dropped_runs_are_misses",
-        "tests/tick/steps/test_step_starvation.py::test_the_registered_step_records_runs_and_alarms_with_each_step_window"
+        "tests/tick/steps/test_step_starvation.py::test_the_registered_step_records_runs_and_alarms_with_each_step_window",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_reads_the_starvation_state_once_per_tick_pass",
+        "tests/tick/steps/test_step_starvation.py::test_inside_one_reap_the_ledger_probe_alert_is_read_once_per_swarm"
       ]
     }
   ],

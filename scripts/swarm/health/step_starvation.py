@@ -16,6 +16,7 @@ from typing import Any
 
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.swarm import timing
 from scripts.swarm.health.findings import Finding
 
 KEY = "step-starvation"
@@ -27,6 +28,7 @@ WINDOWS = 3
 READ_LIMIT = 2000
 COMPLETED = frozenset({"ok", "late"})
 SPOKEN = "%d %B %H:%M UTC"
+_PASS_READS: dict[tuple[str, str], dict[str, Any]] = {}
 
 
 def read(store: Any, slug: str) -> dict[str, Any]:
@@ -127,9 +129,22 @@ def _finding(name: str, entry: Mapping[str, int], window: float, at: int) -> Fin
     return Finding(KIND, name.replace(" ", "-"), summary, evidence, "three windows", entry["misses"])
 
 
+def pass_read(store: Any, slug: str) -> dict[str, Any]:
+    """Return the saved state, read once per tick pass for each swarm and directly outside a pass."""
+    current = timing.PASS.get()
+    if current is None:
+        return read(store, slug)
+    key = (str(current["pass_id"]), slug)
+    if key not in _PASS_READS:
+        for stale in [found for found in _PASS_READS if found[0] != key[0]]:
+            _PASS_READS.pop(stale, None)
+        _PASS_READS[key] = read(store, slug)
+    return _PASS_READS[key]
+
+
 def findings(store: Any, slug: str, at: int) -> list[Finding]:
     """Return one health finding per starved tick step: the step, its last completion and the passes since."""
-    return [_finding(name, entry, window, at) for name, entry, window in starved(read(store, slug), at)]
+    return [_finding(name, entry, window, at) for name, entry, window in starved(pass_read(store, slug), at)]
 
 
 def alarm(store: Any, slug: str, state: Mapping[str, Any], at: int) -> list[str]:

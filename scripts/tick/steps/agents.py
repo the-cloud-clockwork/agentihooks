@@ -51,7 +51,8 @@ def _reap(
                 judged.append((index, tick._reap_agent(judging, agents[index])))
         return judged
 
-    found = dict(pair for pairs in tick.pool.fan_out(one, by_task.values()) for pair in pairs)
+    with tick.ledger_probe.read_once():
+        found = dict(pair for pairs in tick.pool.fan_out(one, by_task.values()) for pair in pairs)
     actions = [action for index in sorted(found) for action in found[index]]
     left = len(agents) - len(found)
     if left:

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, ledger_probe, timing
 from scripts.swarm.health import step_starvation
 from scripts.swarm.store import RedisStore
 from scripts.tick import engine, pool, registry
@@ -152,3 +152,59 @@ def test_the_registered_step_records_runs_and_alarms_with_each_step_window(
     assert saved["windows"][WAITS] == 60.0
     assert saved["windows"]["doc report"] == 600.0
     assert len(items(store)) == 1
+
+
+def counted_reads(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    reads: list[str] = []
+    real = store.redis.get
+
+    def get(key: str) -> Any:
+        reads.append(key)
+        return real(key)
+
+    monkeypatch.setattr(store.redis, "get", get)
+    return reads
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_swarm_status_reads_the_starvation_state_once_per_tick_pass(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every findings call of one tick pass shares one read; a new pass reads again; outside a pass every call reads."""
+    replay(store, 4)
+    reads = counted_reads(store, monkeypatch)
+    at = START + 4 * MINUTE + 1_000
+    token = timing.PASS.set({"pass_id": "p1", "start_ms": START})
+    try:
+        first = step_starvation.findings(store, SLUG, at)
+        assert step_starvation.findings(store, SLUG, at) == first and len(first) == 1
+        assert len(reads) == 1
+    finally:
+        timing.PASS.reset(token)
+    token = timing.PASS.set({"pass_id": "p2", "start_ms": START})
+    try:
+        step_starvation.findings(store, SLUG, at)
+        assert len(reads) == 2
+        assert [key[0] for key in step_starvation._PASS_READS] == ["p2"]
+    finally:
+        timing.PASS.reset(token)
+    step_starvation.findings(store, SLUG, at)
+    step_starvation.findings(store, SLUG, at)
+    assert len(reads) == 4
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_inside_one_reap_the_ledger_probe_alert_is_read_once_per_swarm(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside read_once every holding call after the first answers from it; outside it each call reads the alert."""
+    store.redis.set(ledger_probe._key(store, SLUG), json.dumps({"alert": True}))
+    reads = counted_reads(store, monkeypatch)
+    with ledger_probe.read_once():
+        assert [ledger_probe.holding(store, SLUG) for _ in range(5)] == [True] * 5
+        assert ledger_probe.holding(store, "other") is False
+    assert len(reads) == 2
+    store.redis.set(ledger_probe._key(store, SLUG), json.dumps({}))
+    assert ledger_probe.holding(store, SLUG) is False
+    assert ledger_probe.holding(store, SLUG) is False
+    assert len(reads) == 4
