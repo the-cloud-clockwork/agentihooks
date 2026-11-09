@@ -212,7 +212,6 @@ def pending(redis: "Redis", machine: str) -> int:
     return int(redis.eval(_PENDING, 1, key(machine)))
 
 
-
 def release(redis: "Redis", machine: str, member: str) -> None:
     redis.zrem(key(machine), member)
 
