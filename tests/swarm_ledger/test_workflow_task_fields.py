@@ -22,9 +22,7 @@ crew = authority_crew
 
 @pytest.mark.feature("ledger-workflow-task-fields")
 def test_task_add_schema_accepts_workflow_and_case_as_strings() -> None:
-    task = operation(
-        "task_add", by=MASTER, task="t20", title="Workflow proof", lane="eng", workflow="review"
-    )
+    task = operation("task_add", by=MASTER, task="t20", title="Workflow proof", lane="eng", workflow="review")
     task["kind"] = "workflow"
     schema = schemas.operation_schema("task_add")
     assert schemas.mismatched_field(schema, task) is None
