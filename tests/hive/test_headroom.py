@@ -285,7 +285,7 @@ def test_hive_list_shows_workers_against_the_limit_without_masters(
     monkeypatch.setattr(join_report, "summary", lambda report: report["agent"])
     registry.update(redis, "box", ["ui=no", "max-agents=4"])
     assert cli.main(["list"]) == 0
-    assert "\tworkers=2 of 4\t" in capsys.readouterr().out.splitlines()[0]
+    assert "\tworkers=2 of 4 (cap 4)\t" in capsys.readouterr().out.splitlines()[0]
 
 
 POD_LIMITS = {
