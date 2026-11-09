@@ -7,6 +7,7 @@ import pytest
 from hooks.context import profile_chain
 from scripts.codex_session import supervisor
 from scripts.swarm import launch_check
+from scripts.swarm.store import RedisStore
 from tests.codex_session.fakes import Clock, Server
 from tests.codex_session.test_supervisor import SLUG, deps, launch_spec
 from tests.codex_session.test_supervisor import root as root
@@ -308,3 +309,42 @@ def test_a_launch_reclaims_dead_homes_after_live_foreign_and_missing_entries(sto
     supervisor.launch(store, spec, deps(successor, Clock(), root))
     assert [directory.exists() for directory in directories] == [True, True, False, False]
     assert BindingStore(store).get(SLUG, dead.execution_id).state == "exited"
+
+
+@pytest.mark.feature("codex-join-report-ends-before-home-removal")
+def test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed(
+    store: RedisStore, server: Server, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import join_report
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    join_report.start(store.redis, SLUG, started.agent, "codex-session", {}, {}, 1000)
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+    seen = []
+    remove = supervisor.remove_home
+
+    def observed(directory: Path) -> None:
+        seen.append((home.exists(), join_report.read(store.redis, started.agent)))
+        remove(directory)
+
+    monkeypatch.setattr(supervisor, "remove_home", observed)
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
+
+    [(present, report)] = seen
+    assert present
+    assert (report["ended_at"], report["exit_reason"], report["status"]) == (5000, "codex transport exited", "ended")
+    assert join_report.read(store.redis, started.agent) == report
+    assert not home.exists()
+
+
+def test_finish_without_a_hive_join_report_writes_none(
+    store: RedisStore, server: Server, root: Path, tmp_path: Path
+) -> None:
+    from scripts.hive import join_report
+
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
+
+    assert store.redis.hgetall(join_report.key(join_report.host(started.agent))) == {}
