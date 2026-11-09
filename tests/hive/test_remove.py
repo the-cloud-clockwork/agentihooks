@@ -911,8 +911,10 @@ def test_the_drain_command_settles_this_hive_with_its_wait(store, monkeypatch, c
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "anton-9")
     seen = []
 
-    def settled(swarm, hive, wait_s, host):
-        seen.append((swarm.redis is store.redis, hive, wait_s, type(host)))
+    monkeypatch.setattr(registry, "member_name", lambda: "anton-9-pod")
+
+    def settled(swarm, hive, wait_s, host, member):
+        seen.append((swarm.redis is store.redis, hive, wait_s, type(host), member))
         return "drained"
 
     monkeypatch.setattr(remove, "settle", settled)
@@ -920,7 +922,10 @@ def test_the_drain_command_settles_this_hive_with_its_wait(store, monkeypatch, c
     assert cli.main(["drain"]) == 0
     assert cli.main(["drain", "--wait", "5"]) == 0
     assert capsys.readouterr().out == "drained\ndrained\n"
-    assert seen == [(True, "anton-9", 3600, remove.Host), (True, "anton-9", 5, remove.Host)]
+    assert seen == [
+        (True, "anton-9", 3600, remove.Host, "anton-9-pod"),
+        (True, "anton-9", 5, remove.Host, "anton-9-pod"),
+    ]
 
 
 def test_the_drain_help_names_its_wait(monkeypatch, capsys):
