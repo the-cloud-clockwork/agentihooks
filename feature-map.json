@@ -2394,6 +2394,16 @@
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
       ]
+    },
+    {
+      "id": "controller-fresh-quota-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-fallback-guard",
+      "behaviour": "A fresh controller pass with no quota rows and an empty pod quota cache places agents using the deployment runtime quota reader or hive quota reports in Redis.",
+      "seam": "HiveLaunch.select with a fresh HerdrRuntime before pass quota rows exist",
+      "tests": [
+        "tests/hive/test_controller_launch.py::test_a_fresh_runtime_places_without_pass_rows_or_pod_quota"
+      ]
     }
   ],
   "unmapped_rules": [
