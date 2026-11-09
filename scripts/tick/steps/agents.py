@@ -388,7 +388,7 @@ def _watch_idle(
     state = tick.idle_state.verdict(
         observed.state,
         tick.timing.timed(tick.idle_state.heartbeat, store.redis, slug, agent.name),
-        tick.timing.timed(tick.idle_state.wait, store.redis, slug, agent.name),
+        tick.timing.timed(_holding_wait, store, slug, agent.name, now_ms),
         now_ms,
     )
     if state in {tick.idle_state.WAITING, tick.idle_state.WORKING}:
@@ -428,6 +428,21 @@ def _watch_idle(
     return nudged
 
 
+WAITS_END = "waits end"
+
+
+def _holding_wait(store: Any, slug: str, name: str, now_ms: int) -> Any:
+    """The agent's declared wait as the idle count reads it: a checked wait only while the waits end step, which ends
+    a checked wait once its target resolves, has run within the idle retirement window."""
+    found = tick.idle_state.wait(store.redis, slug, name)
+    if not isinstance(found, dict) or not found.get("on"):
+        return found
+    ended = tick.timing.step_ends(store, slug).get(WAITS_END)
+    if ended is None or now_ms - int(ended * 1000) < tick.IDLE_KILL_MS:
+        return found
+    return None
+
+
 def _stale_nudge(slug: str, store: Any, agent: AgentRecord, observed: Any, pending: bool, now_ms: int) -> list[str]:
     """An open swarm outage and a pending recovery belong to provider recovery; an agent due for retirement gets none."""
     if agent.lane == tick.MASTER or not agent.task or pending or tick.timing.timed(tick.outage.open_records, slug):
@@ -455,7 +470,7 @@ def _stuck_on_provider(slug: Any, store: Any, agent: Any, observed: Any, exhaust
     state = tick.idle_state.verdict(
         observed.state,
         tick.idle_state.heartbeat(store.redis, slug, agent.name),
-        tick.idle_state.wait(store.redis, slug, agent.name),
+        _holding_wait(store, slug, agent.name, now_ms),
         now_ms,
     )
     return state == tick.idle_state.IDLE and tick.outage.held_past_limit(store, slug, agent.name, now_ms)

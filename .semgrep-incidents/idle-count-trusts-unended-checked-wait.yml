@@ -1,0 +1,15 @@
+rules:
+  - id: idle-count-trusts-unended-checked-wait
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The tick idle verdict reads an agent's declared wait raw. On 9 November claim holders sat idle for up to nine
+      hours because the step that ends checked waits had not run for 56 hours, and every 12 hour checked wait the stop
+      gate declared held the idle count at zero. Read the wait through _holding_wait, which drops a checked wait once
+      that step stops running.
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - idle-count-trusts-unended-checked-wait.py
+    pattern-either:
+      - pattern: $IDLE.verdict($PANE, $BEAT, <... $STATE.wait ...>, $NOW)
