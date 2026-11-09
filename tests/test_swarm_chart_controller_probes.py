@@ -13,7 +13,7 @@ CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
     [("startup", "/v2/health/live"), ("liveness", "/v2/health/live"), ("readiness", "/v2/health/ready")],
 )
 def test_controller_api_probes_use_kubelet_http(probe: str, path: str) -> None:
-    template = (CHART / "templates/controller.yaml").read_text()
+    template = (CHART / "templates/controller.yaml").read_text().split("- name: controller\n", 1)[1]
     block = template.split(f"          {probe}Probe:\n", 1)[1].split("            {{- toYaml", 1)[0]
 
     assert "httpGet:" in block

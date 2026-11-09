@@ -11,9 +11,11 @@ from dataclasses import dataclass
 
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import telemetry, worker_health
+from scripts.swarm_v2.api import readiness
 from scripts.swarm_v2.auth_context import GrantRefused
 
 LIVE_PATH = "/v2/health/live"
+READY_PATH = "/v2/health/ready"
 DIAGNOSE_PATH = "/v2/health/diagnose"
 QUALIFY_PATH = "/v2/health/qualify"
 BEARER = "Bearer "
@@ -340,6 +342,9 @@ class HealthAPI:
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         if (method, path) == ("GET", LIVE_PATH):
             return 200, self.health.live()
+        if (method, path) == ("GET", READY_PATH):
+            available = readiness.available(self.health.store.redis)
+            return (200 if available else 503), {"redis": OK if available else UNAVAILABLE}
         if (method, path) not in (("GET", DIAGNOSE_PATH), ("POST", QUALIFY_PATH)):
             return 404, GrantRefused("invalid_request", "no such health endpoint").detail()
         if not self.deep:
