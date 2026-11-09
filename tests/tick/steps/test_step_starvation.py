@@ -102,7 +102,9 @@ def test_a_step_one_millisecond_short_of_three_windows_is_not_starved(store: Red
     at = START + MINUTE + 3 * MINUTE - 1
     assert step_starvation.step(store, SLUG, at, WINDOWS) == []
     assert step_starvation.findings(store, SLUG, at) == []
-    assert step_starvation.findings(store, SLUG, at + 1)[0].measure == 3
+    [found] = step_starvation.findings(store, SLUG, at + 1)
+    assert found.measure == 3
+    assert found.summary == "Tick step waits end has not completed for 3 minutes"
 
 
 @pytest.mark.feature("tick-step-starvation")
