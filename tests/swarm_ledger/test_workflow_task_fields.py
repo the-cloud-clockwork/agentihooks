@@ -2,22 +2,19 @@ import pytest
 
 from scripts.swarm_ledger import new_ledger
 from scripts.swarm_ledger.api import schemas
+from tests.swarm_ledger.test_api_v1 import live as api_live
 from tests.swarm_ledger.test_ledger_authority import (
     MASTER,
     SLUG,
+    admin_put,
     ledger,
     operation,
     pinned,
 )
-from tests.swarm_ledger.test_ledger_authority import (
-    crew as authority_crew,
-)
-from tests.swarm_ledger.test_ledger_authority import (
-    live as authority_live,
-)
+from tests.swarm_ledger.test_ledger_authority import live as authority_fixture
 
-live = authority_live
-crew = authority_crew
+authority_live = authority_fixture
+live = api_live
 
 
 @pytest.mark.feature("ledger-workflow-task-fields")
@@ -32,7 +29,8 @@ def test_task_add_schema_accepts_workflow_and_case_as_strings() -> None:
 
 
 @pytest.mark.feature("ledger-workflow-task-fields")
-def test_a_master_adds_a_workflow_task_through_the_api(crew: dict) -> None:
+def test_a_master_adds_a_workflow_task_through_the_api(live: dict) -> None:
+    assert admin_put(live, operation("join", by=MASTER, role="orchestrator"))[0] == 200
     added = operation(
         "task_add",
         by=MASTER,
@@ -47,7 +45,7 @@ def test_a_master_adds_a_workflow_task_through_the_api(crew: dict) -> None:
     with pinned(MASTER):
         reply = ledger.request(SLUG, [added])
         assert added["id"] not in reply["rejected"]
-        task = next(task for task in ledger.request(SLUG)["doc"]["tasks"] if task["id"] == "t20")
+        task = next(task for task in ledger.request(SLUG)["tasks"] if task["id"] == "t20")
     assert {key: task[key] for key in ("kind", "workflow", "case")} == {
         "kind": "workflow",
         "workflow": "review",
