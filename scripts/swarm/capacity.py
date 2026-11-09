@@ -435,7 +435,7 @@ def _open(observations: list[Account], warned: dict) -> list[Account]:
     return [row for row in observations if (row.harness, row.name) not in warned]
 
 
-def _placeable(rows: list[Account]) -> dict:
+def _placeable(rows: list[Account]) -> dict[str, int]:
     return {
         h: sum(free_seats(row) for row in rows if row.harness == h and row.kind != API) for h in ("claude", "codex")
     }
@@ -478,7 +478,29 @@ def unspent(host: dict, spent: Callable[[int], int]) -> int | None:
     return max(0, host["room"] - spent(host["granted_at"]))
 
 
-def autoscaled(config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None) -> tuple[SwarmConfig, dict | None]:
+def quota_seats(observations: list[Account], warned: dict[tuple[str, str], Any]) -> int:
+    """The free quota seats autoscale places against, warned accounts and API keys left out."""
+    return sum(_placeable(_open(observations, warned)).values())
+
+
+def inputs_seats(inputs: ScaleInputs) -> int:
+    """The free quota seats of the autoscale inputs, their warned accounts left out."""
+    return quota_seats(inputs.observations, inputs.warned)
+
+
+def warned_accounts(observations: list[Account], environ: dict[str, str]) -> dict[tuple[str, str], Any]:
+    """Each observed account past its quota handoff threshold, keyed by harness and name, with the window it crossed."""
+    from scripts.swarm import quota_handoff
+
+    thresholds = quota_handoff.Thresholds.from_env(environ)
+    return {
+        (row.harness, row.name): window for row in observations if (window := quota_handoff.trigger(row, thresholds))
+    }
+
+
+def autoscaled(
+    config: SwarmConfig, inputs: ScaleInputs, host: dict | None = None
+) -> tuple[SwarmConfig, dict[str, Any] | None]:
     if config.scaling != AUTO_SCALING:
         return config, None
     host = host or granted(host_room(config, inputs), inputs.previous, inputs.now_ms)
@@ -510,16 +532,12 @@ def ready_work(
 
 def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:
     """The tick's own scale inputs: ready work less fresh placement refusals, quota without a refresh, live agents."""
-    from scripts.swarm import quota_handoff
     from scripts.swarm.tick import _ended
 
     rows, ready = ready_work(slug, store, freeze.watched(slug, store, ledger, pass_state(ledger, slug)))
     ready, _ = placement_ready(store, slug, ready, now_ms)
     observations = accounts(environ, now_ms / 1000, refresh=False)
-    thresholds = quota_handoff.Thresholds.from_env(environ)
-    warned = {
-        (row.harness, row.name): window for row in observations if (window := quota_handoff.trigger(row, thresholds))
-    }
+    warned = warned_accounts(observations, environ)
     agents = [agent for agent in store.agents(slug) if not _ended(agent, rows)]
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
     spent = spawn_counter(store, now_ms)
