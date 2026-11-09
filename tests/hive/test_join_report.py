@@ -305,7 +305,7 @@ def test_heartbeat_refreshes_cheap_checks_at_cadence(monkeypatch):
 
     redis = FakeRedis(decode_responses=True)
     agent = AgentRecord("engineer", "eng", "task", execution_id="execution", hive="worker")
-    join_report.start(redis, "swarm", agent, "session", passing(), {}, 1000)
+    join_report.start(redis, "swarm", agent, "session", {**passing(), "pane": False, "brain": False}, {}, 1000)
     calls = []
     monkeypatch.setattr(
         join_report, "cheap_checks", lambda *args: calls.append(args) or {"pane": False, "brain": False}
@@ -415,7 +415,8 @@ def test_real_cheap_heartbeat_preserves_expensive_start_evidence(tmp_path):
         "pane": "",
         "transcript_dir": "",
     }
-    join_report.start(redis, "sw", agent, "session", passing(), context, 1000)
+    missing = dict.fromkeys(("transcript", "profile", "settings", "pane", "brain"), False)
+    join_report.start(redis, "sw", agent, "session", {**passing(), **missing}, context, 1000)
     join_report.heartbeat(redis, "worker", 181000)
     report = join_report.read(redis, agent)
     assert report["grade"] == "failed"
