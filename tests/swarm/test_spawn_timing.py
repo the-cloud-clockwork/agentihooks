@@ -37,7 +37,7 @@ def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
         timing.named(dispatcher.claim_key),
         timing.named(preempt.yielding),
         timing.named(tick_module._running),
-        timing.named(tick_module.ready_in_order),
+        timing.named(tick_module.ready_by_lane),
         timing.named(focus_budget.place),
         timing.named(profile_first.placeable),
         timing.named(tick_module._ranked),

@@ -212,6 +212,7 @@ class _Runtime:
 
 def test_capacity_saves_its_decision_and_drops_a_refused_notice(monkeypatch):
     monkeypatch.setattr("scripts.swarm.tick._claimable", lambda *a: [])
+    monkeypatch.setattr("scripts.swarm.tick.claim_view", lambda *a: None)
     store = _Store()
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
     actions = capacity.apply("sw", config, store, _RefusingLedger(), _Runtime(), 1000)
