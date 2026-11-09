@@ -18,7 +18,15 @@ def store(monkeypatch):
         registry,
         "hives",
         lambda client: [
-            {"id": hive, "name": hive, "heartbeat_at": 1000, "excluded": [], "ui": False, "max_agents": 1}
+            {
+                "id": hive,
+                "name": hive,
+                "heartbeat_at": 1000,
+                "excluded": [],
+                "ui": False,
+                "max_agents": 1,
+                "version": "",
+            }
             for hive in ("worker", "old")
         ],
     )
