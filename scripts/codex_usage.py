@@ -46,7 +46,7 @@ def parse(body: dict, now: float) -> CodexQuota | None:
     return CodexQuota(now, str(body.get("plan_type") or "?"), reached=reached, **windows)
 
 
-def _expired(exc: urllib.error.HTTPError) -> bool:
+def _dead_account(exc: urllib.error.HTTPError) -> bool:
     try:
         found = json.loads(exc.read())
     except ValueError:
@@ -64,7 +64,7 @@ def read(token: str, account_id: str, now: float, opener: Callable | None = None
         with (opener or urllib.request.urlopen)(request, timeout=TIMEOUT_S) as response:
             body = json.loads(response.read())
     except urllib.error.HTTPError as exc:
-        return CodexQuota(now, "?", expired=True) if _expired(exc) else None
+        return CodexQuota(now, "?", expired=True) if _dead_account(exc) else None
     except (OSError, ValueError):
         return None
     try:

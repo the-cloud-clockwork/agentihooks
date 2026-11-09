@@ -708,7 +708,7 @@ DEACTIVATED = {
 def test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded(rig):
     rig.server.refusal = DEACTIVATED
     rig.store.send("alice", ME, "hello")
-    assert rig.run(3) == DEGRADED
+    assert rig.run(3) == codex.REFUSED
     assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
     assert rig.logged == [f"codex pump for {ME} degraded: AccountRefused: {DEACTIVATED['message']}"]
     assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "AccountRefused")
@@ -1389,7 +1389,7 @@ def test_stderr_writes_one_prefixed_line(capsys):
     assert (captured.out, captured.err) == ("", "[agentihooks codex-pump] degraded\n")
 
 
-@pytest.mark.parametrize(("status", "code"), [(codex.STOPPED, 0), (DEGRADED, 1)])
+@pytest.mark.parametrize(("status", "code"), [(codex.STOPPED, 0), (DEGRADED, 1), (codex.REFUSED, 4)])
 def test_main_loads_the_bound_execution_and_stops_on_termination(rig, monkeypatch, status, code):
     import signal
 

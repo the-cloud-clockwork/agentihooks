@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from redis.client import Pipeline
 
 STOPPED = "stopped"
+REFUSED = "refused"
+REFUSED_EXIT = 4
 RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
@@ -257,6 +259,9 @@ class Pump:
                 except InboxContention as failure:
                     self.log(CONTENDED_LOG.format(self.binding.recipient, failure))
                     resume = self._resync if resume is steady else resume
+                except AccountRefused as failure:
+                    self._degrade(failure)
+                    return REFUSED
                 except DispatchError as failure:
                     self._degrade(failure)
                     return DEGRADED
@@ -508,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
     store = inbox_connect()
     store.session_id = record.thread_id
     feed = feed_for(store, record.agent_name, record.thread_id)
-    return 0 if Pump(store, binding, feed=feed).run(stopped.is_set) == STOPPED else 1
+    return {STOPPED: 0, REFUSED: REFUSED_EXIT}.get(Pump(store, binding, feed=feed).run(stopped.is_set), 1)
 
 
 if __name__ == "__main__":
