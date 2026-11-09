@@ -2502,7 +2502,8 @@
       "tests": [
         "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
         "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
-        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness"
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
       ]
     }
   ],

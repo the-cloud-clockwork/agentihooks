@@ -223,7 +223,7 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": str(interpreter),
         "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
-        **{key: os.environ[key] for key in (brain_binding.VARIABLE,) if os.environ.get(key)},
+        **({brain_binding.VARIABLE: managed} if (managed := os.environ.get(brain_binding.VARIABLE)) else {}),
     }
 
 

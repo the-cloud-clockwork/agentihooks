@@ -1191,3 +1191,37 @@ def test_the_checkout_clones_its_origin_into_the_attempt_and_names_the_branch_fr
     assert (found.path / "README").read_text() == "fixture\n"
     assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=found.path) == BRANCH
     assert git("--git-dir", str(found.mirror), "config", "remote.origin.url") == f"file://{origin}"
+
+
+class BindingBoot(Boot):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bindings: list[dict] = []
+
+    def __call__(self, request: worker_home.Request) -> dict:
+        from scripts.swarm import brain_binding
+
+        self.bindings.append(json.loads(os.environ[brain_binding.VARIABLE]))
+        return super().__call__(request)
+
+
+@pytest.mark.feature("managed-swarm-brain-rendering")
+@pytest.mark.parametrize("installed", [True, False])
+def test_the_hive_start_decides_the_managed_brain_before_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installed: bool
+) -> None:
+    from tests.test_swarm_brain_binding import _binding
+
+    home = tmp_path / "agentihooks-home"
+    if installed:
+        _binding(home)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+    monkeypatch.setenv("SWARM_BRAIN_API_TOKEN", "fixture-private-api")
+    monkeypatch.setenv("SWARM_BRAIN_MCP_KEY", "fixture-private-mcp")
+    boot = BindingBoot()
+
+    prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)), boot)
+
+    assert [b["status"] for b in boot.bindings] == ["bound" if installed else "refused"]
+    assert "fixture-private" not in json.dumps(boot.bindings)

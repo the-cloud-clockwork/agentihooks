@@ -14,6 +14,7 @@ from pathlib import Path
 from subprocess import SubprocessError
 from urllib.parse import urlsplit
 
+from scripts.swarm import brain_binding
 from scripts.swarm_v2 import filesystem, supervision_runtime, worker_home, workspaces
 from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME, JSON_HEADERS
 from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
@@ -205,6 +206,7 @@ def _build(
     bundle: Path | None,
 ) -> dict:
     attempt.parent.mkdir(mode=0o700, exist_ok=True)
+    os.environ[brain_binding.VARIABLE] = json.dumps(brain_binding.decide(os.environ), sort_keys=True)
     record = boot(
         worker_home.Request(
             attempt.parent,

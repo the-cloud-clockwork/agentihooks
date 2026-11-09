@@ -1146,7 +1146,9 @@ def test_hive_materialization_uses_the_managed_brain_for_each_harness(
     assert "Hive swarm brain marker" in persona.read_text()
     if status == "bound":
         assert servers["agentibrain"]["url"] == binding["mcp"]
-        header = servers["agentibrain"].get("headers", servers["agentibrain"].get("env_http_headers"))
-        assert header == {"X-API-Key": "${SWARM_BRAIN_MCP_KEY}"} or header == {"X-API-Key": "SWARM_BRAIN_MCP_KEY"}
+        if target == "claude":
+            assert servers["agentibrain"]["headers"] == {"X-API-Key": "${SWARM_BRAIN_MCP_KEY}"}
+        else:
+            assert servers["agentibrain"]["env_http_headers"] == {"X-API-Key": "SWARM_BRAIN_MCP_KEY"}
     else:
         assert "agentibrain" not in servers
