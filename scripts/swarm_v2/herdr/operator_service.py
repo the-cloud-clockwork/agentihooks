@@ -35,6 +35,7 @@ class Service:
     ) -> None:
         self.upkeep, self.connect, self.clock = upkeep, connect, clock
         self.synced: float | None = None
+        self.outages: dict[str, hive_lifecycle.Outage] = {}
 
     def _hive_run(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return self.upkeep.terminal.run(command)
@@ -52,7 +53,7 @@ class Service:
         now = self.clock()
         try:
             lines = hive_lifecycle.reconcile(
-                store.redis, terminal.home.root / ".ssh" / "known_hosts", self._hive_run, int(now * 1000)
+                store.redis, terminal.home.root / ".ssh" / "known_hosts", self._hive_run, int(now * 1000), self.outages
             )
         except HiveError as refused:
             return Report(refused={"hives": str(refused)})
@@ -71,11 +72,13 @@ class Service:
             "due": self.upkeep.due,
             "seen": self.upkeep.seen,
             "synced": self.synced,
+            "hive_outages": {label: asdict(outage) for label, outage in self.outages.items()},
             "jump": None if jump is None else asdict(jump),
         }
 
     def resume(self, saved: dict[str, Any]) -> None:
         self.upkeep.due, self.upkeep.seen, self.synced = saved["due"], saved["seen"], saved["synced"]
+        self.outages = {label: hive_lifecycle.Outage(**value) for label, value in saved.get("hive_outages", {}).items()}
         if saved["jump"] is not None:
             terminal = self.upkeep.terminal
             terminal.home = replace(terminal.home, jump=Jump(**saved["jump"]))

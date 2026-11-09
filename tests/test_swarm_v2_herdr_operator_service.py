@@ -291,6 +291,7 @@ def test_a_resumed_service_carries_the_pass_state_of_the_one_before(tmp_path):
         "due": False,
         "seen": {started[0]: started[1]},
         "synced": 1000.0,
+        "hive_outages": {},
         "jump": {"host": "swarm.example", "port": 2223, "host_public": JUMP_KEY, "user": USER},
     }
 

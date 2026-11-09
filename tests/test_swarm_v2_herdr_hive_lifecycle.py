@@ -8,6 +8,7 @@ import pytest
 
 from scripts.hive import auth, machine, registry, remove
 from scripts.swarm.store import RedisStore
+from scripts.swarm_v2.herdr import operator_setup
 from scripts.swarm_v2.herdr.operator_service import Service
 from scripts.swarm_v2.herdr.upkeep import Upkeep
 from tests import sv2_hdr03_cases as cases
@@ -235,7 +236,11 @@ def test_startup_failure_expires_even_when_the_member_has_no_hive_record(tmp_pat
 def test_outage_deadlines_survive_scheduled_service_recreation(tmp_path: Path) -> None:
     service, client, _ = setup(tmp_path, 0)
     service.run_pass()
-    saved = json.loads(json.dumps(service.saved()))
+    placement = operator_setup.Placement(tmp_path / "operator-state")
+    placement.state.parent.mkdir(parents=True)
+    placement.state.write_text(json.dumps(service.saved()))
+    saved = operator_setup._saved(placement)
+    assert saved is not None
     replacement = Service(Upkeep(service.upkeep.terminal), service.connect)
     replacement.resume(saved)
 
@@ -260,3 +265,28 @@ def test_a_successful_connection_resets_the_outage_deadline(tmp_path: Path) -> N
     advance(service, 2 * LIMIT + 1)
     service.run_pass()
     assert [entry["label"] for entry in client.machines] == ["devbox"]
+
+
+def test_replacing_a_saved_target_starts_a_new_outage_grace(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    client.machines[0]["target"] = "ssh://worker@10.10.30.207:2226"
+
+    advance(service, LIMIT)
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+    advance(service, 2 * LIMIT)
+    service.run_pass()
+    assert [entry["label"] for entry in client.machines] == ["devbox"]
+
+
+def test_a_manually_forgotten_machine_loses_its_outage_state(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    assert LABEL in service.saved()["hive_outages"]
+    client.machines.pop(0)
+
+    service.run_pass()
+
+    assert service.saved()["hive_outages"] == {}

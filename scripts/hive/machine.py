@@ -158,8 +158,8 @@ def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict[str, A
         raise auth.HiveError(f"herdr machine list answered with output that is not JSON ({exc})") from exc
 
 
-def labels(run: Callable[..., subprocess.CompletedProcess[str]]) -> set[str]:
-    return {saved["label"] for saved in _listed(run)}
+def targets(run: Callable[..., subprocess.CompletedProcess[str]]) -> dict[str, str]:
+    return {saved["label"]: saved["target"] for saved in _listed(run)}
 
 
 def removed(redis: "Redis") -> dict[str, str]:
