@@ -197,21 +197,21 @@ def test_main_passes_a_clean_head(repo, capsys):
     assert "0 protected gate problems" in capsys.readouterr().out
 
 
-def test_main_reads_declarations_from_the_protected_tip(repo, capsys):
+def test_main_reads_declarations_from_the_protected_tip(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     workflow = _workflow()
     workflow["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
-    expired = {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2000-01-01"}}}
-    _commit(repo, {"test.yml": workflow}, expired, "base")
+    incomplete = {"not_gates": {"test.yml/slow": {"reason": "why", "owner": ""}}}
+    _commit(repo, {"test.yml": workflow}, incomplete, "base")
     _git(repo, "checkout", "-q", "-b", "pr")
     head = copy.deepcopy(workflow)
     head["jobs"]["audit"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate"]["needs"].append("audit")
-    behind = _commit(repo, {"test.yml": head}, expired, "add audit")
+    behind = _commit(repo, {"test.yml": head}, incomplete, "add audit")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 1
-    assert "test.yml/slow expired on 2000-01-01." in capsys.readouterr().out
+    assert "test.yml/slow is declared without its owner." in capsys.readouterr().out
     _commit(
-        repo, {"test.yml": workflow}, {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2999-01-01"}}}, "renew"
+        repo, {"test.yml": workflow}, {"not_gates": {"test.yml/slow": {"reason": "why", "owner": "ci"}}}, "record owner"
     )
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
 
