@@ -312,7 +312,15 @@ class Judging:
             return found[1]
 
 
-TICK_JUDGING = Judging()
+TICK_JUDGING: Judging | None = None
+
+
+def keep_judging() -> None:
+    """Judge changed pull requests off the pass from now on, for a process that runs tick passes until it stops; a
+    process that runs one pass keeps judging inside it, since a judgment it started would never be settled."""
+    global TICK_JUDGING
+    if TICK_JUDGING is None:
+        TICK_JUDGING = Judging()
 
 
 def watched_urls(slug: str, doc: dict, mode: str, home: object = None) -> list[str]:

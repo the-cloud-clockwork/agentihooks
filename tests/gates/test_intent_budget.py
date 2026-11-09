@@ -143,6 +143,27 @@ def test_a_changed_pull_is_judged_off_the_pass_and_settled_by_a_later_pass(tmp_p
 
 
 @pytest.mark.feature("swarm-intent-check-budget")
+def test_only_a_process_that_keeps_running_passes_judges_off_the_pass(monkeypatch):
+    from scripts.swarm import controller
+
+    stops = []
+
+    def stop(*args: object) -> None:
+        stops.append(intent.TICK_JUDGING)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(controller, "_pass", lambda *args: None)
+    assert controller._passes(None, None, None, True, controller.redis_grace.Outage(1.0)) == 0
+    assert intent.TICK_JUDGING is None
+    monkeypatch.setattr(controller, "_cadence_wait", stop)
+    with pytest.raises(KeyboardInterrupt):
+        controller._passes(None, None, None, False, controller.redis_grace.Outage(1.0))
+    kept = intent.TICK_JUDGING
+    intent.keep_judging()
+    assert isinstance(kept, intent.Judging) and stops == [kept] and intent.TICK_JUDGING is kept
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
 def test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view(tmp_path):
     doc = _doc()
     pulls, _ = _pulls(doc, draft=True)
