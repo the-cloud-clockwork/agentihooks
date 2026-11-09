@@ -2435,10 +2435,11 @@ def _hand_off(
     envelope = handoff_envelope.build(store, slug, agent, reason, _own_rows(ledger, slug, agent.task), now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
+    if hive_release.release(ledger, slug, agent.task, agent.name):
+        store.release(slug, agent.task, agent.name)
     transfer = transfers.record(store, slug, agent, reason, text, now_ms())
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")
-    hive_release.release(ledger, slug, agent.task, agent.name)
     return envelope, transfer
 
 

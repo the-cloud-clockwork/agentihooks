@@ -28,11 +28,12 @@ def _started(env: tuple, workstation: bool) -> tuple:
 def test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed(
     env: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _, ledger = _started(env, workstation=True)
+    store, ledger = _started(env, workstation=True)
     _on_hive(monkeypatch, "hive-a")
-    assert ledger.rows["t1"]["claimed_by"] == AGENT
+    assert (ledger.rows["t1"]["claimed_by"], store.claimant("sw", "t1")) == (AGENT, AGENT)
     assert run("sw", "--as", AGENT, "handoff", str(_handoff_doc(tmp_path))) == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert store.claimant("sw", "t1") is None
 
 
 @pytest.mark.feature("hive-workstation-release")
@@ -40,10 +41,11 @@ def test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed(
 def test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task(
     env: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, member: str, workstation: bool
 ) -> None:
-    _, ledger = _started(env, workstation=workstation)
+    store, ledger = _started(env, workstation=workstation)
     _on_hive(monkeypatch, member)
     assert run("sw", "--as", AGENT, "handoff", str(_handoff_doc(tmp_path))) == 0
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", AGENT)
+    assert store.claimant("sw", "t1") == AGENT
 
 
 @pytest.mark.feature("hive-workstation-release")
