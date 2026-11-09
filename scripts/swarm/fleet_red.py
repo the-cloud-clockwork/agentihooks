@@ -111,16 +111,19 @@ def _decoded(saved: str | bytes) -> Pulls | None:
 
 
 def saved_reader(store: Listings, slug: str) -> Reader:
-    """Return a reader serving the repository's saved listing, listing it live without saving when none is saved."""
-    return partial(_saved_or_read, store, slug)
+    """Return a reader serving only the repository's saved listing; nothing saved admits every task in it."""
+    return partial(_saved_only, store, slug)
 
 
-def _saved_or_read(store: Listings, slug: str, repo: str) -> Pulls:
-    """Return the saved listing of ``repo``, nothing for a saved failed listing, else its live listing."""
+def _saved_only(store: Listings, slug: str, repo: str) -> Pulls:
+    """Return the saved listing of ``repo``, or none held when nothing is saved yet or the save records a failure.
+
+    Never lists live: the claim view runs on a budget a live GitHub listing can outlast, so a cold or failed cache
+    admits the task instead of blocking the pass. The dedicated fleet red notice step owns the live listing and its
+    save.
+    """
     saved = store.redis.get(store.key(slug, f"fleet-red-pulls:{repo}"))
-    if saved is None:
-        return read(repo)
-    return _decoded(saved) or ()
+    return (_decoded(saved) or ()) if saved is not None else ()
 
 
 def saver(store: Listings) -> Callable[[Write], None]:
