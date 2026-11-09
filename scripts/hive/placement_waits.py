@@ -1,6 +1,5 @@
 import json
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
@@ -8,6 +7,7 @@ from scripts.swarm.store import RedisStore
 
 if TYPE_CHECKING:
     from redis import Redis
+    from redis.client import Pipeline
 
 WAIT_MS = 30 * 60_000
 FRESH_MS = 5 * 60_000
@@ -21,10 +21,8 @@ def admitted(store: RedisStore, slug: str) -> None:
     cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED)
 
 
-def _outcome(reason: str, lane: str, previous: Mapping[str, object]) -> str:
-    """The refusal category one observation adds when its wait is new or changed, else nothing."""
-    if not reason or (previous.get("reason") == reason and previous.get("lane") == lane):
-        return ""
+def _category(reason: str) -> str:
+    """The admission refusal category a new or changed wait counts under."""
     from scripts.hive import admission
 
     return admission.category(reason)
@@ -43,13 +41,14 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
             try:
                 pipe.watch(key)
                 raw = pipe.hget(key, task)
-                previous = json.loads(raw) if raw else {}
+                previous: dict[str, Any] = json.loads(raw) if raw else {}
                 started = now
-                if reason and previous.get("reason") == reason and previous.get("lane") == lane:
+                same = previous.get("reason") == reason and previous.get("lane") == lane
+                if reason and same:
                     started = previous["started_at"]
                 pipe.multi()
-                if outcome := _outcome(reason, lane, previous):
-                    pipe.hincrby(store.key(slug, TOTALS), outcome)
+                if reason and not same:
+                    cast("Pipeline", pipe).hincrby(store.key(slug, TOTALS), _category(reason))
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
                     if workstation:
