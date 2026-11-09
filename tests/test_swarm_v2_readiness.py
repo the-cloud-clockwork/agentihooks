@@ -89,7 +89,7 @@ def test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks(mo
         assert blocking is False
         return running.acquire(blocking=False)
 
-    api.readiness.running = SimpleNamespace(acquire=acquire, release=running.release)
+    monkeypatch.setattr(api.readiness, "running", SimpleNamespace(acquire=acquire, release=running.release))
 
     assert api.route("GET", "/v2/health/ready", "", None) == (503, {"redis": "unavailable"})
     completion.wait.assert_called_once_with(4)
