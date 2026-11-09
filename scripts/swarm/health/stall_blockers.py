@@ -59,7 +59,7 @@ def merge_stall(
     """Return the merge stall when a focused pull request is open and a fresh merge observation knows the last dev
     merge."""
     state = json.loads(store.redis.get(store.key(slug, MERGE_KEY)) or "{}")
-    if not state.get("merged") or state.get("error") or now_ms - state.get("tried", 0) > STALE_MS:
+    if not state.get("merged") or state.get("error") or now_ms - state["tried"] > STALE_MS:
         return None
     open_urls = [
         task["pr_url"]
@@ -68,7 +68,7 @@ def merge_stall(
     ]
     if not open_urls:
         return None
-    detail = f"{len(open_urls)} focused pull requests open and no merge into dev on {state.get('repo', 'dev')}"
+    detail = f"{len(open_urls)} focused pull requests open and no merge into dev on {state['repo']}"
     return Held(MERGE_STALL, int(state["merged"]), detail)
 
 
