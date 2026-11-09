@@ -323,7 +323,7 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
     store, config, state = rig
     state.update(queue=length, merged=AT - age)
     expected_length = 0 if length is None else length
-    expected_merged = AT - age if length else 0
+    expected_merged = AT - age
     assert merge_stall.observe(config.repo, AT) == {
         "repo": REPO,
         "queue": expected_length,
