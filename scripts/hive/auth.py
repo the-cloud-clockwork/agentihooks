@@ -275,11 +275,10 @@ def _backfill(redis: object, store: StateStore, member_id: str) -> str | None:
 def backfill_holders(redis: object) -> str:
     """Write the holder record of every indexed member that has none and whose ledger credential still maps to it."""
     store = _store(redis)
-    written = [
-        member_id
-        for member_id in hive_state.index(redis)
-        if hive_state.read(store, f"holder.{member_id}") is None and _backfill(redis, store, member_id)
-    ]
+    written: list[str] = []
+    for member_id in hive_state.index(redis):
+        if hive_state.read(store, f"holder.{member_id}") is None and _backfill(redis, store, member_id):
+            written.append(member_id)
     return f"wrote the holder record of {', '.join(written)}" if written else "wrote no holder record"
 
 
