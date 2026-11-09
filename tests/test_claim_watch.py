@@ -174,7 +174,7 @@ def test_the_ci_lane_is_checked() -> None:
 
 
 @pytest.mark.feature("swarm-reopened-claim-loss")
-def test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner() -> None:
+def test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner(hive: list) -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None

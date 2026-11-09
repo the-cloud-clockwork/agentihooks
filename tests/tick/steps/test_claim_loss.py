@@ -16,6 +16,7 @@ def _timed(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 @pytest.fixture(autouse=True)
 def timing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick.timing, "timed", _timed)
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
 
 
 @pytest.mark.feature("swarm-reopened-claim-loss")

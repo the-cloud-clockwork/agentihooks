@@ -76,11 +76,12 @@ def check(
     now = time.time() if now is None else now
     folder = ledger_workspace.folder(slug, task)
     folder.mkdir(parents=True, exist_ok=True)
+    hive = bool(scope.member(env))
     fresh, holder = _cached(folder / CACHE, name, now)
-    if not fresh or holder == name:
+    if not fresh or (hive and holder == name):
         holder = _holder(env, redis, slug, task)
         (folder / CACHE).write_text(json.dumps({"name": name, "at": now, "holder": holder}))
-    if holder is None or not claim_lost.lost(name, {"claimed_by": holder}, bool(scope.member(env))):
+    if holder is None or not claim_lost.lost(name, {"claimed_by": holder}, hive):
         return None
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     with (folder / "progress.md").open("a") as progress:
