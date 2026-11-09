@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.762 · 2026-11-09
+
+### 2026-11-09 · 73508edcf249 · #10260 · @nestorcolt
+
+**Announce the dev history admin recovery payload**
+
+This change announces the upcoming dev-history admin recovery payload, which grants RepositoryRole 5 a bypass in pull_request mode, ahead of actually enforcing the frozen ruleset that depends on it. By registering the new payload now while compatibility tests still accept both the current and announced versions, it lets CI catch regressions early without breaking existing runs. The actual removal of gate declaration expiry and activation of the admin recovery path is deferred to a follow-up PR, keeping this step low-risk and reversible, limited to CI.
+
 ## v2.17.761 · 2026-11-09
 
 ### 2026-11-09 · 9d2473b750dc · #10214 · @agenticore-app
