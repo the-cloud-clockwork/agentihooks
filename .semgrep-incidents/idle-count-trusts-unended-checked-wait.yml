@@ -4,16 +4,14 @@ rules:
     severity: ERROR
     message: >-
       The tick idle count reads an agent's declared wait raw, so a checked wait the waits end step can no longer end
-      holds the idle count at zero and an idle claim holder is never retired. Read the wait through _holding_wait,
+      holds the idle count at zero and an idle claim holder is never retired. Pass the wait through _holding_wait,
       which drops a checked wait once that step stops running.
     paths:
       include:
         - /scripts/tick/steps/
         - idle-count-trusts-unended-checked-wait.py
     patterns:
-      - pattern-not-inside: |
-          def _holding_wait(...):
-              ...
+      - pattern-not-inside: _holding_wait(...)
       - pattern-either:
           - pattern: $TICK.idle_state.wait(...)
           - pattern: $TIMING.timed($TICK.idle_state.wait, ...)

@@ -155,7 +155,7 @@ def _hive_lost(slug: Any, store: Any, agent: Any, now_ms: Any) -> bool:
     if not tick.reports.Reports(store.redis).lost(agent, now_ms, tick.reports.LOST_MS):
         return False
     beat = tick.idle_state.heartbeat(store.redis, slug, agent.name)
-    wait = _holding_wait(store, slug, agent.name, now_ms)
+    wait = _holding_wait(store, slug, tick.idle_state.wait(store.redis, slug, agent.name), now_ms)
     fresh = beat is not None and now_ms - beat["at"] <= tick.reports.LOST_MS
     return not fresh and (wait is None or wait["until"] <= now_ms)
 
@@ -388,7 +388,7 @@ def _watch_idle(
     state = tick.idle_state.verdict(
         observed.state,
         tick.timing.timed(tick.idle_state.heartbeat, store.redis, slug, agent.name),
-        tick.timing.timed(_holding_wait, store, slug, agent.name, now_ms),
+        _holding_wait(store, slug, tick.timing.timed(tick.idle_state.wait, store.redis, slug, agent.name), now_ms),
         now_ms,
     )
     if state in {tick.idle_state.WAITING, tick.idle_state.WORKING}:
@@ -431,10 +431,9 @@ def _watch_idle(
 WAITS_END = "waits end"
 
 
-def _holding_wait(store: Any, slug: str, name: str, now_ms: int) -> Any:
-    """The agent's declared wait as the idle count reads it: a checked wait only while the waits end step, which ends
-    a checked wait once its target resolves, has run within the idle retirement window."""
-    found: Any = tick.timing.timed(tick.idle_state.wait, store.redis, slug, name)
+def _holding_wait(store: Any, slug: str, found: Any, now_ms: int) -> Any:
+    """The declared wait ``found`` as the idle count reads it: a checked wait only while the waits end step, which
+    ends a checked wait once its target resolves, has run within the idle retirement window."""
     if not isinstance(found, dict):
         return found
     held = cast(dict[str, Any], found)
@@ -474,7 +473,7 @@ def _stuck_on_provider(slug: Any, store: Any, agent: Any, observed: Any, exhaust
     state = tick.idle_state.verdict(
         observed.state,
         tick.idle_state.heartbeat(store.redis, slug, agent.name),
-        _holding_wait(store, slug, agent.name, now_ms),
+        _holding_wait(store, slug, tick.idle_state.wait(store.redis, slug, agent.name), now_ms),
         now_ms,
     )
     return state == tick.idle_state.IDLE and tick.outage.held_past_limit(store, slug, agent.name, now_ms)
