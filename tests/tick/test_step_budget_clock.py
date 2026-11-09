@@ -173,3 +173,15 @@ def test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon(
     assert not records[0].abandoned
     assert abandoned(err) == []
     assert outcomes(err, "intent check") == ["success"]
+
+
+@pytest.mark.feature("tick-step-budget-from-start")
+def test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs() -> None:
+    ran: list[str] = []
+    kept = step("tick master", 0.01, 5.0, ran)
+    with recording(), pool.running(workers=1) as found:
+        start = engine._Start(time.monotonic)
+        assert start.close() is None
+        record = engine._kept_after(frozenset(), kept, Context(View(), Deadline.after(60.0)), found, start)
+    assert record == engine.StepRecord("tick master", 0.0, 5.0, abandoned=True, skipped=True)
+    assert ran == []
