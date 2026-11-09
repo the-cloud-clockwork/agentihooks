@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from nats.js import JetStreamContext
 from nats.js.errors import APIError
 
+from . import nats_payload
+
 INACTIVE_NS = 5_000_000_000
 TIMEOUT_S = 5.0
 
@@ -35,7 +37,9 @@ async def last_per_subject(js: JetStreamContext, stream: str, subjects: list[str
             "num_replicas": 1,
         }
         body = json.dumps({"stream_name": stream, "config": config}).encode()
-        reply = await nc.request(f"{js._prefix}.CONSUMER.CREATE.{stream}", body, timeout=TIMEOUT_S)
+        create = f"{js._prefix}.CONSUMER.CREATE.{stream}"
+        nats_payload.validate(nc, create, body)
+        reply = await nc.request(create, body, timeout=TIMEOUT_S)
         info = json.loads(reply.data)
         if "error" in info:
             raise APIError.from_error(info["error"])
