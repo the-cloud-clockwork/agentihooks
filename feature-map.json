@@ -2455,7 +2455,7 @@
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
-      "behaviour": "The ledger authority checks a hive agent token against the hive credential store once and answers repeated requests with that token from a bounded cache scoped to its ledger and agent for fifteen seconds; refusals are never cached and the hive placement check stays live, so a revoked token is refused within fifteen seconds and an agent that leaves its hive at once.",
+      "behaviour": "The ledger authority checks a hive agent token against the hive credential store once and answers repeated requests with that token from a bounded cache scoped to its ledger and agent for fifteen seconds; refusals are never cached and the hive placement check stays live, so a revoked token is refused within fifteen seconds and an agent that leaves its hive is refused at once.",
       "seam": "ledger_authority.hive_principal",
       "tests": [
         "tests/swarm_ledger/test_hive_token_cache.py::test_repeated_requests_with_one_hive_token_make_one_credential_store_read",
