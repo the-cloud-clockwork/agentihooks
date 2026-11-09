@@ -693,10 +693,22 @@ def test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_sl
         fresh.append(bool(failed) and rollout.ready(marker, time.time()))
         raise KeyboardInterrupt
 
+    started = []
+
+    class Recorded(threading.Thread):
+        def start(self) -> None:
+            started.append(self)
+            super().start()
+
+    monkeypatch.setattr(daemon.threading, "Thread", Recorded)
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     monkeypatch.setattr(daemon, "beat", beat)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(object()))
+    for thread in started:
+        thread.join(5)
+    assert started
+    assert not any(thread.is_alive() for thread in started)
     assert beats == ["local", "local"]
     assert failed == [True]
     assert fresh == [True]
