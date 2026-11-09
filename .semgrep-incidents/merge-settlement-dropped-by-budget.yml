@@ -1,0 +1,32 @@
+rules:
+  - id: merge-settlement-dropped-by-budget
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Merge settlement must survive abandoned intent and spawn barriers. Declare
+      tick view, waits end and merge pass as kept steps in the tick lane.
+    paths:
+      include:
+        - /scripts/tick/steps/host.py
+        - /scripts/tick/steps/report.py
+        - merge-settlement-dropped-by-budget.py
+    patterns:
+      - pattern-either:
+          - pattern: CallStep("tick view", ...)
+          - pattern: CallStep("waits end", ...)
+          - pattern: CallStep("merge pass", ...)
+      - pattern-not: CallStep(..., kept=True, ...)
+  - id: merge-settlement-detached-after-budget
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Detached slow work is dropped when a dependency was abandoned. Keep merge
+      wait resolution and task settlement in the tick schedule.
+    paths:
+      include:
+        - /scripts/tick/steps/report.py
+        - merge-settlement-dropped-by-budget.py
+    patterns:
+      - pattern-either:
+          - pattern: CallStep("waits end", ..., lane=SLOW, ...)
+          - pattern: CallStep("merge pass", ..., lane=SLOW, ...)
