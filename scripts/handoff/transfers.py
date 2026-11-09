@@ -138,7 +138,14 @@ def observe(store, slug: str, live: set[str]) -> None:
         if occupancy.occupant != row["successor"] or occupancy.generation != row["generation"]:
             continue
         agent = agents.get(row["successor"])
-        hosted = agent is not None and bool(reports.host(agent)) and bool(hives.execution(agent))
+        host = reports.host(agent) if agent is not None else ""
+        report = hives.read(host) if host else None
+        hosted = (
+            agent is not None
+            and report is not None
+            and bool(hives.execution(agent))
+            and agent.name in report.get("names", [])
+        )
         state = "live" if row["successor"] in live or hosted else "absent"
 
         def change(current, state=state):
