@@ -134,8 +134,8 @@ def test_the_claimant_itself_keeps_working() -> None:
 def test_an_absent_pushed_claim_keeps_the_session() -> None:
     stop, _, spawn = _check(None)
 
-    assert stop is None
-    assert spawn.calls == []
+    assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="")
+    assert spawn.calls[0][0] == ["agentihooks", "swarm", "sw", "--as", NAME, "exit"]
 
 
 @pytest.mark.parametrize(
@@ -258,12 +258,14 @@ def test_a_released_claim_keeps_the_session_until_the_next_claimant_takes_the_ke
 
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
     redis.holder = None
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) is None
+    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
+        task="t1", slug="sw", owner=""
+    )
     redis.holder = OTHER
     assert claim_watch.check(ENV, redis, 1000.0 + 2 * claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
         task="t1", slug="sw", owner=OTHER
     )
-    assert len(spawn.calls) == 1
+    assert len(spawn.calls) == 2
 
 
 @pytest.mark.parametrize("saved", ["[]", "null", '"x"', '{"name": "' + NAME + '", "at": "soon", "holder": null}'])

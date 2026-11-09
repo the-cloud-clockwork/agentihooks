@@ -86,7 +86,7 @@ def test_still_held_needs_active_state_owner_and_generation() -> None:
 def test_current_owner_accepts_an_unclaimed_row_or_its_own_claim() -> None:
     agent = SimpleNamespace(name="a")
     assert common._current_owner(agent, {}) is True
-    assert common._current_owner(agent, {"claimed_by": ""}) is True
+    assert common._current_owner(agent, {"claimed_by": ""}) is False
     assert common._current_owner(agent, {"claimed_by": "a"}) is True
     assert common._current_owner(agent, {"claimed_by": "b"}) is False
 
