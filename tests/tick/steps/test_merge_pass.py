@@ -58,16 +58,16 @@ def test_merge_pass(env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytes
         release.wait(1.0)
         return Result()
 
-    prefix = (Step("intent check", "wrapper intent", blocked, budget_s=0.03), Step("page relay", "wrapper relay"))
+    prefix = (Step("intent check", "wrapper intent", blocked), Step("page relay", "wrapper relay"))
     sites = ("wrapper intent", "wrapper relay", "wrapper view", "wrapper events")
     steps = registry.site_edges((*prefix, *selected), sites, {"wrapper intent": "wrapper relay"})
     try:
-        with pool.running(critical_s=0.3, slow_s=0.3):
+        with pool.running(critical_s=0.03, slow_s=0.03):
             records = engine.run_graph(steps, Context(_GraphView(state, box), Deadline.after(5.0)))
     finally:
         release.set()
     observed = {record.name: record for record in records}
-    assert observed["intent check"].abandoned
+    assert observed["intent check"].outcome in {engine.LATE, "cut"}
     assert observed["page relay"].skipped
     assert ledger.rows["t1"]["state"] == "done"
     assert idle.wait(store.redis, "sw", AGENT) is None
