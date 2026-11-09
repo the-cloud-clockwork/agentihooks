@@ -207,7 +207,6 @@ def test_the_coach_tick_keeps_an_unchanged_head_from_the_batched_pull_request_re
     pull = {"head": "h1", "title": "T", "body": "", "state": "OPEN", "draft": False}
     monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: reads.append(urls) or {URL: pull})
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
-    monkeypatch.setattr(intent, "pr_text", lambda url: pytest.fail("a per task text read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
     assert (reads, views) == ([[URL]], [])

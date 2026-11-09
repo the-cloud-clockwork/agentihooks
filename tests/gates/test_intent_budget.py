@@ -3,6 +3,7 @@
 import threading
 from concurrent import futures
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -152,12 +153,13 @@ def test_only_a_process_that_keeps_running_passes_judges_off_the_pass(monkeypatc
         stops.append(intent.TICK_JUDGING)
         raise KeyboardInterrupt
 
+    nothing: Any = None
     monkeypatch.setattr(controller, "_pass", lambda *args: None)
-    assert controller._passes(None, None, None, True, controller.redis_grace.Outage(1.0)) == 0
+    assert controller._passes(nothing, None, nothing, True, controller.redis_grace.Outage(1.0)) == 0
     assert intent.TICK_JUDGING is None
     monkeypatch.setattr(controller, "_cadence_wait", stop)
     with pytest.raises(KeyboardInterrupt):
-        controller._passes(None, None, None, False, controller.redis_grace.Outage(1.0))
+        controller._passes(nothing, None, nothing, False, controller.redis_grace.Outage(1.0))
     kept = intent.TICK_JUDGING
     intent.keep_judging()
     assert isinstance(kept, intent.Judging) and stops == [kept] and intent.TICK_JUDGING is kept

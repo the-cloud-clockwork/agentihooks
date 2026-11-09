@@ -14,7 +14,7 @@ from contextvars import copy_context
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path, PurePosixPath
-from typing import Callable
+from typing import Any, Callable
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
@@ -220,31 +220,18 @@ def text_key(title: str, body: str | None) -> str:
     return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
 
 
-def pr_text(url: str, run=subprocess.run) -> str | None:
-    found = PULL.search(url)
-    if not found:
-        return None
-    owner, repo, number = found.groups()
-    try:
-        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", "{title, body}"], run)
-        raw = json.loads(result.stdout) if result.returncode == 0 else None
-        return text_key(raw["title"], raw["body"]) if raw else None
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-        return None
-
-
 class Pulls:
     """The heads, text keys, merged and draft flags of pull requests, read in one batch for the urls a pass knows up
     front and once more for each other url asked."""
 
-    def __init__(self, read: Callable[[list[str]], dict], urls: list[str]) -> None:
+    def __init__(self, read: Callable[[list[str]], dict[str, dict[str, Any]]], urls: list[str]) -> None:
         """Read ``urls`` in one batch through ``read``."""
         self.read = read
         self.reading = threading.Lock()
         self.asked = set(urls)
-        self.found = dict(read(list(urls))) if urls else {}
+        self.found: dict[str, dict[str, Any]] = dict(read(list(urls))) if urls else {}
 
-    def _get(self, url: str) -> dict | None:
+    def _get(self, url: str) -> dict[str, Any] | None:
         """Return what the reads found for ``url``, reading it alone the first time it is asked outside the batch,
         one judging worker at a time."""
         with self.reading:
@@ -256,22 +243,22 @@ class Pulls:
     def head(self, url: str) -> str | None:
         """Return the head commit of ``url``, None when no read found it."""
         pull = self._get(url)
-        return pull["head"] if pull else None
+        return str(pull["head"]) if pull else None
 
     def text(self, url: str) -> str | None:
         """Return the text key of the title and body of ``url``, None when no read found it."""
         pull = self._get(url)
-        return text_key(pull["title"], pull["body"]) if pull else None
+        return text_key(str(pull["title"]), str(pull["body"])) if pull else None
 
     def merged(self, url: str) -> bool:
         """Return whether ``url`` is merged."""
         pull = self._get(url)
-        return bool(pull) and pull["state"] == "MERGED"
+        return pull is not None and pull["state"] == "MERGED"
 
     def draft(self, url: str) -> bool:
         """Return whether ``url`` is a draft."""
         pull = self._get(url)
-        return bool(pull) and pull["draft"]
+        return pull is not None and bool(pull["draft"])
 
 
 class Judging:
@@ -281,7 +268,7 @@ class Judging:
     def __init__(self, workers: int = 2) -> None:
         """Start with no judgment and a pool of ``workers``."""
         self.pool = ThreadPoolExecutor(max_workers=workers)
-        self.running: dict[tuple[str, str], tuple[object, Future]] = {}
+        self.running: dict[tuple[str, str], tuple[object, Future[Any]]] = {}
         self.lock = threading.Lock()
 
     def holds(self, subject: tuple[str, str], key: object) -> bool:
@@ -296,7 +283,7 @@ class Judging:
             for subject in [s for s in self.running if s[0] == slug and s[1] not in ids]:
                 self.running.pop(subject)[1].cancel()
 
-    def take(self, subject: tuple[str, str], key: object, start: Callable[[], object]) -> Future | None:
+    def take(self, subject: tuple[str, str], key: object, start: Callable[[], object]) -> Future[Any] | None:
         """Return the finished judgment of ``subject`` made at ``key``, else start ``start`` in place of any judgment
         made at another key, cancelling it, and return None."""
         with self.lock:
@@ -320,19 +307,21 @@ def keep_judging() -> None:
     process that runs one pass keeps judging inside it, since a judgment it started would never be settled."""
     global TICK_JUDGING
     if TICK_JUDGING is None:
-        TICK_JUDGING = Judging()
+        TICK_JUDGING = Judging()  # pyright: ignore[reportConstantRedefinition]
 
 
-def watched_urls(slug: str, doc: dict, mode: str, home: object = None) -> list[str]:
+def watched_urls(slug: str, doc: dict[str, Any], mode: str, home: object = None) -> list[str]:
     """Return the pull requests a pass of the intent check reads: each watched task's own and each pull its stored
     verdicts name as pending."""
     states = ("pr", "claimed") if mode == "coach" else ("pr",)
-    tasks = [task for task in doc["tasks"] if task.get("state") in states and task.get("pr_url")]
+    tasks: list[dict[str, Any]] = [t for t in doc["tasks"] if t.get("state") in states and t.get("pr_url")]
     stores = [Verdicts(slug, NAME, home), Verdicts(slug, "intent-coach", home)]
-    named = [
-        url for task in tasks for store in stores for url in (store.read(task["id"]) or {}).get("named_pending") or []
-    ]
-    return list(dict.fromkeys([task["pr_url"] for task in tasks] + named))
+    urls: list[str] = [str(task["pr_url"]) for task in tasks]
+    for task in tasks:
+        for store in stores:
+            record: dict[str, Any] = store.read(task["id"]) or {}
+            urls += [str(url) for url in record.get("named_pending") or []]
+    return list(dict.fromkeys(urls))
 
 
 def pr_view(url, run=subprocess.run):
@@ -869,7 +858,7 @@ class Check:
     limit: int | None = None
     judging: Judging | None = None
 
-    def run(self, doc: dict) -> list[str]:
+    def run(self, doc: dict[str, Any]) -> list[str]:
         """Judge the watched tasks of ``doc``: every unchanged or draft pull, and at most ``limit`` changed ones in a
         turn that moves each minute, leaving the other changed ones to a later pass; with ``judging`` a changed pull
         is judged off the pass and settled by the first pass that finds its judgment finished."""
@@ -895,7 +884,9 @@ class Check:
                 actions += self._isolated(task, self._settle, task, record, moved, future, verdicts)
         return actions
 
-    def _started(self, doc: dict, task: dict, quick: bool, workers: ThreadPoolExecutor) -> Future | None:
+    def _started(
+        self, doc: dict[str, Any], task: dict[str, Any], quick: bool, workers: ThreadPoolExecutor
+    ) -> Future[Any] | None:
         """Return the judgment of ``task`` to settle this pass: on the pass's workers when it is quick or the check
         keeps no judging, else the finished one ``judging`` holds, None while it runs."""
         judge = partial(copy_context().run, self._judge, doc, task)
@@ -903,13 +894,13 @@ class Check:
             return workers.submit(judge)
         return self.judging.take((self.slug, task["id"]), self._key(doc, task), judge)
 
-    def _key(self, doc: dict, task: dict) -> tuple[str, str | None, str | None]:
+    def _key(self, doc: dict[str, Any], task: dict[str, Any]) -> tuple[str, str | None, str | None]:
         """Return what a judgment of ``task`` was made against: its inputs and its pull's head and text."""
         url = task["pr_url"]
         head = self.head(url) if self.head else None
         return _fingerprint(doc, task), head, self.text(url) if self.text else None
 
-    def _queue(self, doc: dict, task: dict, verdicts: Verdicts, tasks: list) -> list[str]:
+    def _queue(self, doc: dict[str, Any], task: dict[str, Any], verdicts: Verdicts, tasks: list[Any]) -> list[str]:
         """Queue ``task`` for judgment unless its verdict stands, or it changed and the pass already queued ``limit``
         changed tasks."""
         _bind_pulls(verdicts, task, task["pr_url"], doc)
@@ -939,7 +930,7 @@ class Check:
         tasks.append((task, record, moved, quick, counted))
         return []
 
-    def _quick(self, doc: dict, task: dict) -> bool:
+    def _quick(self, doc: dict[str, Any], task: dict[str, Any]) -> bool:
         """Return whether ``task`` is judged without a pull request view: its coached verdict stands or its pull is a
         draft."""
         drafted = self.draft is not None and self.draft(task["pr_url"])
@@ -983,7 +974,7 @@ class Check:
         timing.keep()
         return actions
 
-    def _judge(self, doc: dict, task: dict) -> _Judgment | None:
+    def _judge(self, doc: dict[str, Any], task: dict[str, Any]) -> _Judgment | None:
         """Return the judgment of ``task``: its standing coached verdict, a draft, or the answer to its state."""
         inputs = _fingerprint(doc, task)
         previous = self._unmoved(task, inputs)
@@ -1032,7 +1023,7 @@ class Check:
             "named_pending": failed + opened,
         }
 
-    def _named_moved(self, record: dict) -> bool:
+    def _named_moved(self, record: dict[str, Any]) -> bool:
         """Return whether a pull request ``record`` named as pending has merged since."""
         pending = record.get("named_pending") or []
         return bool(self.named) and any(self._merged(url) for url in pending)

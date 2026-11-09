@@ -76,7 +76,6 @@ def test_the_tick_hands_the_intent_check_batched_pull_request_readers_and_a_limi
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     [(args, kwargs)] = built
     assert isinstance(args[2], int)
-    assert kwargs["text"] is not intent.pr_text
     assert kwargs["limit"] == intent.JUDGED_PER_PASS
     assert kwargs["head"]("https://github.com/o/r/pull/1") is None
 
