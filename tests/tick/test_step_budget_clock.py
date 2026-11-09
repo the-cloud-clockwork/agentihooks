@@ -200,3 +200,14 @@ def test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_g
         )
     assert record == engine.StepRecord("verify", 0.0, 5.0, abandoned=True, skipped=True)
     assert ran == []
+
+
+@pytest.mark.feature("tick-step-budget-from-start")
+def test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group() -> None:
+    ran: list[str] = []
+    waiting = step("launch checks", 0.01, 5.0, ran)
+    with recording(), pool.running(workers=1, critical_s=0.0) as found:
+        start = engine._Start(time.monotonic)
+        record = engine._after(frozenset(), waiting, Context(View(), Deadline.after(60.0)), found, start)
+    assert record == engine.StepRecord("launch checks", 0.0, 5.0, abandoned=True, skipped=True)
+    assert ran == []

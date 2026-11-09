@@ -2700,7 +2700,7 @@
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
-      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success. A step that needs a handed off step of an earlier group that never ends inside the lane is skipped and never runs.",
+      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success. A step that needs a handed off step of an earlier group that never ends inside the lane is skipped and never runs. A step with no earlier group to wait on, or whose earlier group already ended, is still skipped and never runs when its own lane already expired or the start gate is closed.",
       "seam": "engine.run_step, engine._after and engine._eager lane expiry, timing.within outcome",
       "tests": [
         "tests/tick/test_step_budget_clock.py::test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_and_never_starts",
@@ -2708,7 +2708,8 @@
         "tests/tick/test_step_budget_clock.py::test_a_step_whose_own_run_overruns_its_budget_is_abandoned_and_never_reports_success",
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
         "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs",
-        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends"
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group"
       ]
     },
     {
