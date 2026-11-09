@@ -197,6 +197,7 @@ def grade(
         if (
             head.get(path, 0) > recorded.get(path, 0)
             or recorded.get(path, 0) > max(base.get(path, 0), head.get(path, 0))
+            or (touched is None and recorded.get(path, 0) != head.get(path, 0))
         )
         and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
     ]

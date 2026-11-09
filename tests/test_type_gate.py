@@ -164,7 +164,9 @@ def test_grade_reports_growth_and_drift_per_file() -> None:
     assert type_gate.grade({"a.py": 2}, {"a.py": 2, "b.py": 1}, {"a.py": 2, "b.py": 1}) == [
         "b.py has 1 type errors, more than the 0 the base allows"
     ]
-    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}) == []
+    assert type_gate.grade({"a.py": 2}, {"a.py": 1}, {"a.py": 2}) == [
+        f"{type_gate.BASELINE} records 2 type errors in a.py, the head has 1; run python -m scripts.type_gate --write"
+    ]
     assert type_gate.grade({"a.py": 2}, {"a.py": 3}, None) == [
         "a.py has 3 type errors, more than the 2 the base allows",
         f"{type_gate.BASELINE} records 0 type errors in a.py, the head has 3; run python -m scripts.type_gate --write",
