@@ -15,5 +15,5 @@ rules:
               def hive_controller(...):
                   ...
       - pattern-either:
-          - pattern: capacity.accounts(..., refresh=True, ...)
+          - pattern: capacity.accounts
           - pattern: balancer.cached_observations(...)
