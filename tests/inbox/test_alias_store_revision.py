@@ -92,7 +92,26 @@ def test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile(
     assert marks.mark("sw-eng-1", "sw:7:note") is True
     assert calls == ["sw-eng-1", "sw-eng-1", "engineer@abcdef-0002", "engineer@abcdef-0002"]
     assert marks.seen("engineer@abcdef-0002", "sw:7:note")
-    assert not store.redis.sismember(seen.SeenMarks.key("sw-eng-1"), "sw:7:note")
+
+
+@pytest.mark.feature("inbox-alias-store-revision")
+def test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write(
+    store: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marks = seen.SeenMarks(store.redis)
+    real = seen.SeenMarks.key
+    calls = []
+
+    def key(name: str) -> str:
+        if not calls:
+            _point(store, "sw-eng-1", "engineer@abcdef-0002")
+        calls.append(name)
+        return real(name)
+
+    monkeypatch.setattr(seen.SeenMarks, "key", staticmethod(key))
+    assert marks.mark("sw-eng-1", "sw:7:note") is True
+    assert calls == ["sw-eng-1", "sw-eng-1", "engineer@abcdef-0002", "engineer@abcdef-0002"]
+    assert marks.seen("engineer@abcdef-0002", "sw:7:note")
 
 
 @pytest.mark.feature("inbox-alias-store-revision")

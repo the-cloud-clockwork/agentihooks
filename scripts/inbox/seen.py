@@ -40,15 +40,14 @@ class SeenMarks:
                     pipe.watch(*names.watched("alias", name))
                     resolved = NameRegistry(pipe).resolve(name)
                     pipe.watch(owner_key(resolved))
-                    owned = pipe.get(owner_key(resolved)) is not None
+                    added = 0
+                    if pipe.get(owner_key(resolved)) is None:
+                        pipe.multi()
+                        pipe.sadd(self.key(resolved), ref)
+                        pipe.expire(self.key(resolved), TTL_S)
+                        added, _ = pipe.execute()
                     if names.revisions(("alias", name)) != before:
                         continue
-                    if owned:
-                        return False
-                    pipe.multi()
-                    pipe.sadd(self.key(resolved), ref)
-                    pipe.expire(self.key(resolved), TTL_S)
-                    added, _ = pipe.execute()
                     return added == 1
                 except WatchError:
                     continue
