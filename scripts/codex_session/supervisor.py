@@ -12,7 +12,7 @@ import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
@@ -544,7 +544,7 @@ def end_join_report(store: RedisStore, agent: AgentRecord, now_ms: int) -> None:
     from scripts.hive import join_report
 
     redis = cast("Redis", store.redis)
-    report: dict[str, str] = join_report.read(redis, agent)
+    report: dict[str, Any] = join_report.read(redis, agent)
     if report:
         join_report.end(
             redis, join_report.host(agent), agent.execution_id, report["session_id"], TRANSPORT_EXITED, "ended", now_ms
