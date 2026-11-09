@@ -7,6 +7,7 @@ import socket
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
 MASTER_NAME = "swarm-master"
+DERIVED_MASTER = re.compile(rf"{re.escape(MASTER_NAME)}-[0-9]+")
 AUTO = "auto"
 INDEX = hive_state.LEGACY_INDEX
 
@@ -194,9 +196,26 @@ def _amend(client, hive_id: str, change):
 
 
 def _settle(hive_id: str, record: dict) -> dict:
-    """The hive hosting the operator's interface runs the masters and is always named MASTER_NAME."""
+    """The hive hosting the operator's interface runs the masters and is named MASTER_NAME or a name derived from it."""
     settled = {**_default(hive_id, record.get("ui", "no")), **record}
-    return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
+    if settled["ui"] != "yes" or DERIVED_MASTER.fullmatch(str(settled["name"])):
+        return settled
+    return {**settled, "name": MASTER_NAME}
+
+
+def _held(client: object, hive_id: str) -> set[str]:
+    """The names every other registered hive reads as, or none where this caller cannot read the index."""
+    try:
+        return {record["name"] for record in hives(client) if record["id"] != hive_id}
+    except state.unavailable():
+        return set()
+
+
+def unique(name: str, held: set[str]) -> str:
+    """The name itself while no other hive holds it, else the name with the first free numeric suffix from 2."""
+    if name not in held:
+        return name
+    return next(candidate for n in count(2) if (candidate := f"{name}-{n}") not in held)
 
 
 @dataclass(frozen=True)
@@ -249,6 +268,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
+    held = _held(client, hive_id)
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
@@ -259,6 +279,9 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
         }
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
+        settled = _settle(hive_id, merged)["name"]
+        if (derived := unique(settled, held)) != settled:
+            merged["name"] = derived
         if merged.get("max_agents") is None:
             merged.pop("max_agents", None)
         return _drained(merged, stored, drain)
