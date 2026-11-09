@@ -1,5 +1,5 @@
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from scripts.hive import registry
 
@@ -219,9 +219,9 @@ def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     for report in end_gone(redis, hive, reports, at):
         if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
-        checks = {
-            name: report["checks"].get(name) is True or passed for name, passed in cheap_checks(redis, report).items()
-        }
+        fresh = cast("dict[str, bool]", cheap_checks(redis, report))
+        stored = cast("dict[str, object]", report["checks"])
+        checks = {name: stored.get(name) is True or passed for name, passed in fresh.items()}
         with redis.pipeline() as pipe:
             try:
                 pipe.watch(key(hive))

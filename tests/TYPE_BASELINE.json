@@ -376,7 +376,7 @@
   "scripts/hive/invite.py": 11,
   "scripts/hive/join.py": 20,
   "scripts/hive/join_checks.py": 76,
-  "scripts/hive/join_report.py": 130,
+  "scripts/hive/join_report.py": 129,
   "scripts/hive/lanes.py": 65,
   "scripts/hive/launch.py": 398,
   "scripts/hive/launch_logs.py": 10,
