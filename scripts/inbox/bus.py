@@ -53,12 +53,12 @@ class SentElsewhere(ValueError):
 
 
 class SeatInbox:
-    def __init__(self, bus: Bus, swarm: str):
+    def __init__(self, bus: Bus, swarm: str) -> None:
         if not swarm:
             raise ValueError("a seat inbox needs a swarm")
-        self.bus = bus
+        self.bus = bus.for_swarm(swarm)
         self.swarm = swarm
-        self.state = bus.state("inbox")
+        self.state = self.bus.state("inbox")
 
     def send(self, address: str, message: Message) -> Envelope:
         if not address or not message.text.strip():
