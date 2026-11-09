@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, reboot, tick_heartbeat
-from scripts.tick import engine, pool
+from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
 from scripts.tick.steps import host, report
@@ -79,9 +79,9 @@ def test_closing_steps_run_after_the_critical_lane_expired_while_critical_steps_
     assert records[1].abandoned
 
 
-def test_the_three_closing_steps_sit_in_the_closing_group_and_lane() -> None:
-    named = {step.name: step for step in report.STEPS if step.group == "closing"}
-    assert sorted(named) == ["heartbeat", "last tick", "status publish"]
+def test_the_closing_steps_sit_in_the_closing_group_and_lane() -> None:
+    named = {step.name: step for step in registry.steps() if step.group == report.CLOSING_GROUP}
+    assert sorted(named) == ["heartbeat", "last tick", "status publish", "step starvation"]
     assert {step.lane for step in named.values()} == {pool.CLOSING_LANE}
 
 

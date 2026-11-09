@@ -25,6 +25,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | heartbeat | closing | closing | 2 | 60 | none | none | none |
 | last tick | closing | closing | 2 | 60 | none | none | none |
 | status publish | closing | closing | 2 | 60 | health findings | none | none |
+| step starvation | closing | closing | 2 | 60 | none | inbox | tick-step-starvation |
 | dispatch seat | dispatch seat | tick | 2 | 60 | drained resume, sleeping | none | none |
 | drained resume | drained resume | tick | 2 | 60 | master move fail over, master start watch, master wake, recover master, sleeping, spawn due, stopped branch | none | none |
 | sleeping | drained resume | tick | 2 | 60 | spawn due | none | none |
