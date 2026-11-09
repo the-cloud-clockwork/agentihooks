@@ -40,10 +40,7 @@ def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_recovery(
     assert history["target"] == "branch"
     assert history["enforcement"] == "active"
     assert history["conditions"] == queue["conditions"]
-    assert history["bypass_actors"] in (
-        [],
-        [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}],
-    )
+    assert history["bypass_actors"] == [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]
     gate = next(rule for rule in queue["rules"] if rule["type"] == "required_status_checks")
     assert history["rules"] == [
         {"type": "deletion"},
