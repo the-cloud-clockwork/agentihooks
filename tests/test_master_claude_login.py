@@ -1549,6 +1549,7 @@ def test_the_master_token_route_takes_a_seat_past_full_lane_agents(ah, rendered,
     assert executed[0]["CLAUDE_CODE_OAUTH_TOKEN"] == "routed"
 
 
+@pytest.mark.feature("master-token-slot-route-report")
 @pytest.mark.parametrize("reason", ["No account slot available", "Account slot admission failed"])
 def test_a_refused_master_token_hive_slot_reports_only_the_refusal(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
@@ -1588,6 +1589,7 @@ def test_a_refused_master_token_hive_slot_reports_only_the_refusal(
     executed.assert_not_called()
 
 
+@pytest.mark.feature("master-token-slot-route-report")
 def test_the_master_token_route_reports_routed_only_inside_the_admitted_callback(
     ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

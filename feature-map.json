@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "master-token-slot-route-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
+      "behaviour": "Master token launch reports routed only after hive account admission; refused slots report the refusal without a routed report.",
+      "seam": "launch_token account slot callback and route report",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
+        "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
       "id": "hive-drain-launch-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
