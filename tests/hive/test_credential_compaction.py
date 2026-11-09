@@ -28,6 +28,12 @@ def _digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def test_scoped_credential_keys_preserve_existing_record_addresses() -> None:
+    assert hive_state.agent_key("m1", "alpha", "engineer@1") == (
+        "agent.m1.d540e79213ffc4316c706b9576c85f31dad274814e278a86a4d8392eeb0362f5"
+    )
+
+
 def test_compaction_preserves_legacy_tokens_and_removes_member_maps(client: Any) -> None:
     from scripts.hive import agent_credentials
 
