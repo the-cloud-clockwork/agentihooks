@@ -544,11 +544,12 @@ def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
     from scripts.hive import headroom, orders
 
     stop, waits, published = threading.Event(), [], []
+    failure = {"OSError": OSError}.get(error) or getattr(exceptions, error)
 
     def wait(seconds: float, state: object, timeout: float) -> None:
         waits.append(seconds)
         if len(waits) == 1:
-            raise getattr(exceptions, error, OSError)("gone")
+            raise failure("gone")
         if len(waits) == 3:
             stop.set()
 
