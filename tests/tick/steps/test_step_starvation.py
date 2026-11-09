@@ -1,6 +1,7 @@
 """The step starvation tick step records each step's last completed run and alarms once a step misses three windows."""
 
 import json
+import time
 from importlib import import_module
 from typing import Any
 
@@ -208,3 +209,22 @@ def test_inside_one_reap_the_ledger_probe_alert_is_read_once_per_swarm(
     assert ledger_probe.holding(store, SLUG) is False
     assert ledger_probe.holding(store, SLUG) is False
     assert len(reads) == 4
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_finding_times_read_in_utc_whatever_the_host_zone(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host in another time zone still names the last completion and first miss in UTC."""
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        journal(store, START - MINUTE, WAITS, engine.OK)
+        step_starvation.step(store, SLUG, START - MINUTE - 1, WINDOWS)
+        replay(store, 4)
+        [found] = step_starvation.findings(store, SLUG, START + 4 * MINUTE + 1_000)
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+    assert found.evidence[:2] == (
+        "Last completed run: 06 November 21:19 UTC",
+        "4 passes since ran it without a completed run, the first at 06 November 21:21 UTC",
+    )
