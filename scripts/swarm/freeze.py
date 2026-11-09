@@ -54,7 +54,7 @@ def frozen(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str]
 def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
     nodes, selectors = _targets(records)[verb]
     levels = [level for level, node in enumerate(chain) if node in nodes]
-    if any(covers(target, task, chain) for target in selectors):
+    if any(SELECTORS[selector](task) == value for selector, value in selectors):  # pyright: ignore[reportUnknownArgumentType]
         levels.append(len(chain))
     return min(levels, default=sys.maxsize)
 
@@ -62,15 +62,16 @@ def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], cha
 _TARGETS: list[Any] = []
 
 
-def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], tuple[str, ...]]]:
-    """Each verb's node targets and lane or kind selector targets, indexed once per freeze list."""
+def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]]:
+    """Each verb's node targets and lane or kind selector pairs, indexed once per freeze list."""
     if _TARGETS and _TARGETS[0] is records and _TARGETS[1] == len(records):
         return _TARGETS[2]
-    found: dict[str, tuple[frozenset[str], tuple[str, ...]]] = {}
+    found: dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]] = {}
     for verb in ("freeze", "focus"):
         targets = [r["target"] for r in records if r["verb"] == verb]
-        selectors = tuple(t for t in targets if _selects(t))
-        found[verb] = (frozenset(targets) - frozenset(selectors), selectors)
+        selected = [t for t in targets if _selects(t)]
+        pairs = tuple((selector, value) for selector, _, value in (t.partition(":") for t in selected))
+        found[verb] = (frozenset(targets) - frozenset(selected), pairs)
     _TARGETS[:] = [records, len(records), found]
     return found
 
