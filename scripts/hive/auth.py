@@ -6,7 +6,9 @@ import json
 import os
 import secrets
 import time
+from functools import partial
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from scripts.auth import switch
@@ -81,6 +83,31 @@ class StoreRefused(HiveError):
 
 def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
+
+
+AGENT_TOKENS_KEPT = 8
+
+
+def _agent_key(member_id: str, slug: str, name: str) -> str:
+    """The credential store key of the one record holding an agent's newest token digests."""
+    return f"agent.{member_id}.{_digest(json.dumps([slug, name]))}"
+
+
+def _tokens(record: Any) -> list[str]:
+    """The token digests an agent record holds."""
+    return list(record["tokens"]) if record else []
+
+
+def _with_token(current: Any, digest: object, slug: str, name: str, held: str) -> dict[str, Any]:
+    """The agent record with held appended, keeping the newest AGENT_TOKENS_KEPT digests of the same ledger."""
+    kept = _tokens(current) if current and current["ledger"] == digest else []
+    return {"ledger": digest, "scope": [slug, name], "tokens": [*kept, held][-AGENT_TOKENS_KEPT:]}
+
+
+def _without_token(current: dict[str, Any] | None, held: str) -> dict[str, Any] | None:
+    """The agent record without held, or None once it holds no token."""
+    remaining = [token for token in _tokens(current) if token != held]
+    return {**current, "tokens": remaining} if current and remaining else None
 
 
 def _store(client):
@@ -255,10 +282,11 @@ def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     if not _mapped(redis, store, digest, member_id):
         raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
-    key = f"agent.{member_id}.{_digest(token)}"
-    hive_state.amend(store, key, lambda _: {"ledger": digest, "scope": [slug, name]})
-    if agent_member(redis, token, slug, name) != member_id:
-        hive_state.amend(store, key, lambda _: None)
+    held = _digest(token)
+    key = _agent_key(member_id, slug, name)
+    hive_state.amend(store, key, partial(_with_token, digest=digest, slug=slug, name=name, held=held))
+    if not _mapped(redis, store, digest, member_id):
+        hive_state.amend(store, key, partial(_without_token, held=held))
         raise HiveError("Hive membership was revoked")
     return token
 
@@ -266,7 +294,10 @@ def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
 def agent_member(redis: object, token: str, slug: str, name: str) -> str | None:
     member_id = token.removeprefix("hive.").partition(".")[0]
     store = _store(redis)
-    scoped = hive_state.read(store, f"agent.{member_id}.{_digest(token)}")
+    held = _digest(token)
+    scoped = hive_state.read(store, _agent_key(member_id, slug, name))
+    if held not in _tokens(scoped):
+        scoped = hive_state.read(store, f"agent.{member_id}.{held}")
     if scoped is not None:
         if scoped["scope"] != [slug, name]:
             return None
