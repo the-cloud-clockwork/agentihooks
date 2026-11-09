@@ -2419,6 +2419,17 @@
       ]
     },
     {
+      "id": "hive-rollout-lease-failed-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
+      "behaviour": "A hive whose sync fails after it takes the hive rollout lease frees it through the SyncFail abandon hook, even over an unserving replacement, and a lease whose renew time plus its duration has passed is taken over by a hive still inside its acquire wait, so one stuck hive never holds every other hive on the old release.",
+      "seam": "scripts.hive.rollout acquire and abandon",
+      "tests": [
+        "tests/hive/test_rollout.py::test_a_failed_sync_frees_the_lease_for_the_next_hive",
+        "tests/hive/test_rollout.py::test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive"
+      ]
+    },
+    {
       "id": "controller-fresh-quota-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-fallback-guard",

@@ -1,7 +1,15 @@
+import importlib.util
 import subprocess
 from pathlib import Path
 
 import yaml
+
+SPEC = importlib.util.spec_from_file_location(
+    "rollout", Path(__file__).resolve().parents[1] / "scripts/hive/rollout.py"
+)
+assert SPEC is not None and SPEC.loader is not None
+ROLLOUT = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ROLLOUT)
 
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
@@ -31,12 +39,19 @@ def render(*settings):
     return [item for item in yaml.safe_load_all(result.stdout) if item]
 
 
-def test_every_roll_acquires_before_sync_and_releases_after_serving():
+def test_every_roll_acquires_before_sync_and_releases_after_serving() -> None:
     objects = render()
     jobs = [item for item in objects if item["kind"] == "Job"]
-    assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {"PreSync", "PostSync"}
+    assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {
+        "PreSync",
+        "PostSync",
+        "SyncFail",
+    }
+    abandon = next(item for item in jobs if item["metadata"]["annotations"]["argocd.argoproj.io/hook"] == "SyncFail")
+    assert "abandon" in abandon["spec"]["template"]["spec"]["containers"][0]["command"]
     for job in jobs:
         assert job["spec"]["ttlSecondsAfterFinished"] == 3600
+        assert job["spec"]["activeDeadlineSeconds"] > ROLLOUT.ACQUIRE_SECONDS > ROLLOUT.LEASE_SECONDS
         pod = job["spec"]["template"]["spec"]
         assert pod["automountServiceAccountToken"] is True
         command = pod["containers"][0]["command"]
@@ -97,7 +112,8 @@ def test_storage_preparation_is_not_suppressed_by_native_rollout_hooks():
     assert annotations["argocd.argoproj.io/hook-delete-policy"] == "BeforeHookCreation,HookSucceeded"
 
 
-def test_a_drain_that_consumes_the_rollout_budget_is_refused():
+def test_a_drain_that_consumes_the_rollout_budget_is_refused() -> None:
+    assert ROLLOUT.LEASE_SECONDS > 1500 + 600
     try:
         render("workers.rollout.drainSeconds=1800")
     except subprocess.CalledProcessError as error:
