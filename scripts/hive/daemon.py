@@ -227,8 +227,7 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
         try:
             scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
         except (RedisError, OSError) as exc:
-            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
-            stop.wait(HEADROOM_SECONDS)
+            _headroom_wait_failed(exc, stop)
             continue
         if stop.is_set():
             return
@@ -240,6 +239,12 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
+    """Logs a failed headroom wait and holds one headroom interval, so only the stop event ends the thread."""
+    print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+    stop.wait(HEADROOM_SECONDS)
 
 
 def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
