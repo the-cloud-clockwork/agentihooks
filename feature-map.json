@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "hive-master-account-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
+      "behaviour": "A front door master token launch on a hive admits one master seat when lane agents fill the Claude account cap, without increasing lane capacity.",
+      "seam": "hive account slot execute and master token launch",
+      "tests": [
+        "tests/test_master_claude_login.py::test_the_master_token_route_takes_a_seat_past_full_lane_agents",
+        "tests/hive/test_master_account_seat.py::test_one_master_seat_is_independent_of_lane_capacity",
+        "tests/hive/test_master_account_seat.py::test_master_admission_respects_quota_and_failed_launch_returns_its_seat",
+        "tests/hive/test_master_account_seat.py::test_master_seat_renews_and_expires_with_execution_ownership"
+      ]
+    },
+    {
       "id": "hive-drain-launch-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
