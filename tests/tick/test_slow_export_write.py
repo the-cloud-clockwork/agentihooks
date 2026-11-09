@@ -163,6 +163,7 @@ def test_a_write_the_slow_server_does_not_answer_is_queued_locally(
     with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient(service=True))  # pyright: ignore[reportPrivateUsage]
         answer = LedgerClient(service=True)._call("sw", [OP])  # pyright: ignore[reportPrivateUsage]
+    assert ledger_client.SLOW.get() is False
     assert sent == [("sw", [OP], True)]
     assert ledger.queued == [("sw", [OP], True)]
     assert answer["queued"] == "c1"
