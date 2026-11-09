@@ -276,7 +276,7 @@ def test_main_backfills_holder_records_before_it_serves(hive: Any, capsys: pytes
         service.main(["serve"])
 
     assert order == ["backfill", "serve"]
-    assert capsys.readouterr().out == f"wrote the holder record of {grant['id']}\n"
+    assert capsys.readouterr().err == f"wrote the holder record of {grant['id']}\n"
     assert auth.hive_state.read(auth._store(store.redis), f"holder.{grant['id']}") == auth._digest(
         grant["ledger_credential"]
     )

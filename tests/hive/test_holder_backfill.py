@@ -1,5 +1,6 @@
 """Members minted before the auth service get a holder record by backfill, and agent token issue reads only holder records."""
 
+import argparse
 from typing import Any
 from unittest.mock import patch
 
@@ -126,3 +127,11 @@ def test_the_hive_holders_command_prints_the_backfill(client: Any, capsys: pytes
         assert cli.main(["holders"]) == 0
 
     assert capsys.readouterr().out == f"wrote the holder record of {first}, {second}\n"
+
+
+@pytest.mark.feature("hive-agent-token-holder-only")
+def test_the_hive_help_names_the_holders_command() -> None:
+    commands = next(action for action in cli._parser()._actions if isinstance(action, argparse._SubParsersAction))
+    helps = {choice.dest: choice.help for choice in commands._choices_actions}
+
+    assert helps["holders"] == "Write the holder record of every member minted before holder records"

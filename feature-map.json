@@ -2550,6 +2550,7 @@
         "tests/hive/test_holder_backfill.py::test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map",
         "tests/hive/test_holder_backfill.py::test_the_backfill_leaves_held_and_unmapped_members_alone",
         "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
+        "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
         "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
       ]
     }

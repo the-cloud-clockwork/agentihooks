@@ -264,11 +264,15 @@ def _mapped(redis: object, store: object, digest: str | None, member_id: str) ->
 
 def _backfill(redis: object, store: StateStore, member_id: str) -> str | None:
     """Write a member's holder record from its member record when its ledger credential still maps to it."""
-    found = member(redis, member_id)
-    digest = found["ledger"] if found else None
+    found: dict[str, Any] | None = member(redis, member_id)
+    digest: str | None = found["ledger"] if found else None
     if not _mapped(redis, store, digest, member_id):
         return None
-    hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
+
+    def held(_: object) -> str | None:
+        return digest
+
+    hive_state.amend(store, f"holder.{member_id}", held)
     return digest
 
 
@@ -276,7 +280,8 @@ def backfill_holders(redis: object) -> str:
     """Write the holder record of every indexed member that has none and whose ledger credential still maps to it."""
     store = _store(redis)
     written: list[str] = []
-    for member_id in hive_state.index(redis):
+    indexed: list[str] = hive_state.index(redis)
+    for member_id in indexed:
         if hive_state.read(store, f"holder.{member_id}") is None and _backfill(redis, store, member_id):
             written.append(member_id)
     return f"wrote the holder record of {', '.join(written)}" if written else "wrote no holder record"
