@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -238,15 +239,18 @@ class Pulls:
     def __init__(self, read: Callable[[list[str]], dict], urls: list[str]) -> None:
         """Read ``urls`` in one batch through ``read``."""
         self.read = read
+        self.reading = threading.Lock()
         self.asked = set(urls)
         self.found = dict(read(list(urls))) if urls else {}
 
     def _get(self, url: str) -> dict | None:
-        """Return what the reads found for ``url``, reading it alone the first time it is asked outside the batch."""
-        if url not in self.asked:
-            self.asked.add(url)
-            self.found.update(self.read([url]))
-        return self.found.get(url)
+        """Return what the reads found for ``url``, reading it alone the first time it is asked outside the batch,
+        one judging worker at a time."""
+        with self.reading:
+            if url not in self.asked:
+                self.found.update(self.read([url]))
+                self.asked.add(url)
+            return self.found.get(url)
 
     def head(self, url: str) -> str | None:
         """Return the head commit of ``url``, None when no read found it."""
@@ -267,6 +271,18 @@ class Pulls:
         """Return whether ``url`` is a draft."""
         pull = self._get(url)
         return bool(pull) and pull["draft"]
+
+
+def watched_urls(slug: str, doc: dict, mode: str, home: object = None) -> list[str]:
+    """Return the pull requests a pass of the intent check reads: each watched task's own and each pull its stored
+    verdicts name as pending."""
+    states = ("pr", "claimed") if mode == "coach" else ("pr",)
+    tasks = [task for task in doc["tasks"] if task.get("state") in states and task.get("pr_url")]
+    stores = [Verdicts(slug, NAME, home), Verdicts(slug, "intent-coach", home)]
+    named = [
+        url for task in tasks for store in stores for url in (store.read(task["id"]) or {}).get("named_pending") or []
+    ]
+    return list(dict.fromkeys([task["pr_url"] for task in tasks] + named))
 
 
 def pr_view(url, run=subprocess.run):

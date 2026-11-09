@@ -26,7 +26,7 @@ def _doc() -> dict:
     return {**DOC, "tasks": tasks}
 
 
-def _pulls(doc: dict, draft: bool = False) -> tuple[intent.Pulls, list[list[str]]]:
+def _pulls(doc: dict, draft: bool = False, home: object = None) -> tuple[intent.Pulls, list[list[str]]]:
     reads: list[list[str]] = []
     found = {
         task["pr_url"]: {"head": f"h{task['id']}", "title": TITLE, "body": BODY, "state": "OPEN", "draft": draft}
@@ -37,7 +37,7 @@ def _pulls(doc: dict, draft: bool = False) -> tuple[intent.Pulls, list[list[str]
         reads.append(list(urls))
         return {url: found[url] for url in urls if url in found}
 
-    return intent.Pulls(read, [task["pr_url"] for task in doc["tasks"]]), reads
+    return intent.Pulls(read, intent.watched_urls(SLUG, doc, "coach", home)), reads
 
 
 def _check(mode: str, pulls: intent.Pulls, calls: list[str], tmp_path, now: int = NOW) -> intent.Check:
@@ -86,16 +86,16 @@ def test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment(tm
             phase="p8",
             inputs=intent._fingerprint(doc, task),
             text=intent.text_key(TITLE, BODY),
-            named_pending=["https://github.com/o/other/pull/1"],
+            named_pending=[f"https://github.com/o/other/pull/{task['id']}"],
             url=task["pr_url"],
         )
-    pulls, reads = _pulls(doc)
+    pulls, reads = _pulls(doc, home=tmp_path)
     calls: list[str] = []
     actions = _check("coach", pulls, calls, tmp_path).run(doc)
     assert actions == []
     assert calls == []
-    assert len(reads) == 2
-    assert len(reads[0]) == COUNT and reads[1] == ["https://github.com/o/other/pull/1"]
+    assert len(reads) == 1
+    assert len(reads[0]) == 2 * COUNT
 
 
 @pytest.mark.feature("swarm-intent-check-budget")

@@ -398,8 +398,7 @@ def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, conf
     view = building.submit(copy_context().run, timing.call, ledger_events.tick_view, inbox, store, slug, doc)
     building.shutdown(wait=False)
     mode = intent.mode_of(config)
-    states = ("pr", "claimed") if mode == "coach" else ("pr",)
-    urls = [task["pr_url"] for task in doc["tasks"] if task.get("state") in states and task.get("pr_url")]
+    urls = intent.watched_urls(slug, doc, mode)
     pulls = intent.Pulls(lambda batch: timing.call(ledger_events.pull_texts, batch), urls)
     check = intent.Check(
         slug,

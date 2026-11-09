@@ -12,6 +12,7 @@ rules:
         - intent-check-per-task-read.py
     pattern-either:
       - pattern: intent.Check(..., text=intent.pr_text, ...)
+      - pattern: 'intent.Check(..., head=lambda $URL: getattr($VIEW($URL), "head", None), ...)'
       - patterns:
           - pattern: intent.Check(...)
           - pattern-not: intent.Check(..., limit=$LIMIT, ...)
