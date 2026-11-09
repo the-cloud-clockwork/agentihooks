@@ -1,11 +1,14 @@
+import importlib.util
 import subprocess
 from pathlib import Path
 
 import yaml
 
-ROLLOUT = (Path(__file__).resolve().parents[1] / "scripts/hive/rollout.py").read_text()
-ACQUIRE_SECONDS = 5400
-assert "LEASE_SECONDS = 3600\nACQUIRE_SECONDS = LEASE_SECONDS + 1800\n" in ROLLOUT
+SPEC = importlib.util.spec_from_file_location(
+    "rollout", Path(__file__).resolve().parents[1] / "scripts/hive/rollout.py"
+)
+ROLLOUT = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(ROLLOUT)
 
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
@@ -47,7 +50,7 @@ def test_every_roll_acquires_before_sync_and_releases_after_serving():
     assert "abandon" in abandon["spec"]["template"]["spec"]["containers"][0]["command"]
     for job in jobs:
         assert job["spec"]["ttlSecondsAfterFinished"] == 3600
-        assert job["spec"]["activeDeadlineSeconds"] > ACQUIRE_SECONDS
+        assert job["spec"]["activeDeadlineSeconds"] > ROLLOUT.ACQUIRE_SECONDS > ROLLOUT.LEASE_SECONDS
         pod = job["spec"]["template"]["spec"]
         assert pod["automountServiceAccountToken"] is True
         command = pod["containers"][0]["command"]
@@ -109,6 +112,7 @@ def test_storage_preparation_is_not_suppressed_by_native_rollout_hooks():
 
 
 def test_a_drain_that_consumes_the_rollout_budget_is_refused():
+    assert ROLLOUT.LEASE_SECONDS > 1500 + 600
     try:
         render("workers.rollout.drainSeconds=1800")
     except subprocess.CalledProcessError as error:

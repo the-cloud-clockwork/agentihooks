@@ -95,14 +95,15 @@ def wall_clock(monkeypatch: pytest.MonkeyPatch, module: ModuleType, step: Callab
 def test_a_failed_sync_frees_the_lease_for_the_next_hive(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
+    cluster.healthy = False
     failed = []
 
     def sync_fails(now: float) -> None:
         if not failed:
             failed.append(now)
-            module.abandon(cluster, "default", "shared", "second", "hive", "own")
+            module.abandon(cluster, "default", "shared", "second")
             assert cluster.lease["spec"]["holderIdentity"] == "first"
-            module.abandon(cluster, "default", "shared", "first", "hive", "own")
+            module.abandon(cluster, "default", "shared", "first")
 
     clock = wall_clock(monkeypatch, module, sync_fails)
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -115,11 +116,9 @@ def test_a_failed_sync_frees_the_lease_for_the_next_hive(monkeypatch: pytest.Mon
 def test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
-    cluster.healthy = False
     seen = []
 
     def sync_died(now: float) -> None:
-        module.abandon(cluster, "default", "shared", "first", "hive", "own")
         seen.append(cluster.lease["spec"]["holderIdentity"])
 
     clock = wall_clock(monkeypatch, module, sync_died)
@@ -145,7 +144,7 @@ def test_a_lease_without_a_renew_time_or_duration_never_expires() -> None:
 def test_abandon_without_a_lease_changes_nothing() -> None:
     module = rollout()
     cluster = Cluster()
-    module.abandon(cluster, "default", "shared", "first", "hive", "own")
+    module.abandon(cluster, "default", "shared", "first")
     assert cluster.lease is None
     assert [call[0] for call in cluster.calls] == ["GET"]
 
@@ -375,7 +374,7 @@ def test_unobserved_and_zero_capacity_deployments_never_count_as_serving():
 
 
 @pytest.mark.parametrize("timeout", [None, 0])
-def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch, timeout):
+def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch: pytest.MonkeyPatch, timeout: int | None) -> None:
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -412,7 +411,7 @@ def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action)
     monkeypatch.setattr(sys, "argv", ["rollout", action])
     module.main()
     defaults = (api, "default", "agentihooks-hive-rollout", "")
-    assert calls == [defaults if action == "acquire" else (*defaults, "", "")]
+    assert calls == [defaults if action != "release" else (*defaults, "", "")]
     calls.clear()
     monkeypatch.setattr(
         sys,
@@ -434,7 +433,7 @@ def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action)
     )
     module.main()
     override = (api, "rolls", "shared", "hive/app")
-    assert calls == [override if action == "acquire" else (*override, "workers", "one,two")]
+    assert calls == [override if action != "release" else (*override, "workers", "one,two")]
 
 
 def test_unknown_hook_actions_never_contact_kubernetes(monkeypatch):

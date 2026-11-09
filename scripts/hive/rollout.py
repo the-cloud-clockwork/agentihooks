@@ -84,24 +84,11 @@ def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int
         time.sleep(5)
 
 
-def hive_serving(api: Kubernetes, hive_namespace: str, deployment: str) -> bool:
-    """Tell whether every named worker deployment serves its current generation."""
-    for worker in deployment.split(","):
-        workload = api.request(
-            "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(worker, safe='')}"
-        )
-        if workload is None or not serving(workload):
-            return False
-    return True
-
-
-def abandon(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespace: str, deployment: str) -> None:
-    """Free the rollout lease after a failed sync when owner holds it and its hive still serves."""
+def abandon(api: Kubernetes, namespace: str, name: str, owner: str) -> None:
+    """Free the rollout lease after a failed sync when owner still holds it."""
     path = lease_path(namespace, name)
     lease = api.request("GET", path)
     if lease is None or lease["spec"].get("holderIdentity") != owner:
-        return
-    if not hive_serving(api, hive_namespace, deployment):
         return
     lease["spec"]["holderIdentity"] = ""
     api.request("PUT", path, lease)
@@ -112,8 +99,12 @@ def release(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespa
     lease = api.request("GET", path)
     if lease is None or lease["spec"].get("holderIdentity") != owner:
         raise RuntimeError("only the rollout owner can release the lease")
-    if not hive_serving(api, hive_namespace, deployment):
-        raise RuntimeError("replacement hive is not serving; rollout ownership retained")
+    for worker in deployment.split(","):
+        workload = api.request(
+            "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(worker, safe='')}"
+        )
+        if workload is None or not serving(workload):
+            raise RuntimeError("replacement hive is not serving; rollout ownership retained")
     lease["spec"]["holderIdentity"] = ""
     api.request("PUT", path, lease)
 
@@ -137,7 +128,7 @@ def main() -> None:
     if args.action == "acquire":
         acquire(api, args.namespace, args.name, args.owner)
     elif args.action == "abandon":
-        abandon(api, args.namespace, args.name, args.owner, args.hive_namespace, args.deployment)
+        abandon(api, args.namespace, args.name, args.owner)
     else:
         release(api, args.namespace, args.name, args.owner, args.hive_namespace, args.deployment)
 
