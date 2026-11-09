@@ -63,7 +63,7 @@ class _Placing:
 ROOM_DETAILS = {"reason": "", "detail": ""}
 
 
-def loaded_hives(store: RedisStore) -> list[dict]:
+def loaded_hives(store: RedisStore) -> list[dict[str, Any]]:
     """Every registered hive with the worker agents it runs or is launching.
 
     A hive counts a running agent in its slot's processes even when it lists no execution for it, and never fewer
@@ -113,11 +113,19 @@ def loaded_hives(store: RedisStore) -> list[dict]:
         found = admission.capped(admission.room(reading, pending=held), used, hive["max_agents"])
         hive["room"] = found.room
         hive["refusal"] = admission.refusal(found)
+        hive["limit"] = f"{found.reason}: {found.detail}"
         if hive["prefer"]:
             ranked = admission.capped(admission.room(reading, pending=held, first=True), used, hive["max_agents"])
             hive[placement.FIRST_ROOM] = ranked.room
             hive[placement.FIRST_REFUSAL] = admission.refusal(ranked)
     return hives
+
+
+def live_hives(store: RedisStore) -> list[dict[str, Any]]:
+    """The loaded hives whose heartbeat is live."""
+    loaded = loaded_hives(store)
+    now = lease.now_ms(store)
+    return [hive for hive in loaded if registry.live(hive, now)]
 
 
 def hosted_profiles(redis: Any, hives: list[dict[str, Any]]) -> dict[str, frozenset[str]]:

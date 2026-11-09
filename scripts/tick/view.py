@@ -8,6 +8,7 @@ window no longer covers the gap.
 import hashlib
 import os
 import sys
+import time
 import urllib.error
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
 
 __all__ = [
     "CURRENT",
+    "FRESH_VIEW_S",
     "PARTS",
     "READ_ONLY",
     "FrozenDict",
@@ -33,13 +35,16 @@ __all__ = [
     "current",
     "document",
     "freeze",
+    "fresh",
     "frozen_views",
     "hold_stored",
     "holding",
     "queued",
     "refreshed",
+    "slow",
     "start",
     "stored",
+    "timed_out",
     "view_file",
     "wrote",
 ]
@@ -92,6 +97,7 @@ def frozen_views() -> bool:
 
 
 PARTS = LEDGER_PARTS
+FRESH_VIEW_S = 300.0
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -129,6 +135,7 @@ class Held:
     renew: Callable[[], LedgerView]
     stale: bool = False
     offline: bool = False
+    slow: bool = False
 
 
 HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
@@ -144,6 +151,12 @@ def offline() -> bool:
     """Whether the held view's server stopped answering in any step of this pass."""
     held = HELD.get()
     return held is not None and held.offline
+
+
+def slow() -> bool:
+    """Whether the held view's server last failed a read by answering too slowly rather than refusing it."""
+    held = HELD.get()
+    return held is not None and held.slow
 
 
 def current() -> LedgerView | None:
@@ -217,12 +230,17 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
             return refresh()
         except urllib.error.HTTPError:
             raise
-        except OSError:
+        except OSError as exc:
             held: Held = HELD.get()  # pyright: ignore[reportAssignmentType]
-            held.offline = True
+            held.offline, held.slow = True, timed_out(exc)
             return held.view
 
     return renew
+
+
+def timed_out(exc: OSError) -> bool:
+    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
+    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
 
 
 def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:
@@ -241,6 +259,21 @@ def stored(slug: str) -> LedgerView | None:
     base: str = ledger.base(slug)
     found = read_export_file(view_file(base, slug, scheduler.runtime_dir()))
     return None if found is None else LedgerView(found[0], found[1])
+
+
+def fresh(slug: str) -> bool:
+    """True when this host stored a view of this swarm's ledger within ``FRESH_VIEW_S``, recent enough for the
+    server to still answer a delta read after it."""
+    from scripts.scheduler import service as scheduler
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
+    try:
+        written = view_file(base, slug, scheduler.runtime_dir()).stat().st_mtime
+    except OSError:
+        return False
+    return time.time() - written < FRESH_VIEW_S
 
 
 def hold_stored(slug: str) -> LedgerView | None:

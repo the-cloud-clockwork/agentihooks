@@ -187,7 +187,7 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, machine, remove
+    from scripts.hive import invite, machine, member_swarms, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
@@ -207,6 +207,7 @@ def _remove(args: argparse.Namespace) -> list[str]:
         wait_s=args.wait,
         signer=_signer(),
         dry_run=args.dry_run,
+        signer_path=member_swarms.signer_path(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
 
@@ -293,7 +294,10 @@ def _parser() -> argparse.ArgumentParser:
     invited.add_argument("--url", help="this hive's endpoint as the new hive reaches it, for hive refresh")
     invited.add_argument("--redis-url", help="Redis URL the new hive connects to")
     invited.add_argument("--swarm-url", help="ledger address the new hive reaches")
-    invited.add_argument("--bus-url", help="NATS address the new hive reaches; copied from --like when omitted")
+    invited.add_argument(
+        "--bus-url",
+        help="NATS address the new hive reaches; copied from --like, else the hub signer record, when omitted",
+    )
     invited.add_argument(
         "--swarm", action="append", default=[], help="swarm the member's bus credential reaches; every swarm if omitted"
     )
@@ -369,6 +373,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workers(reported: dict[str, list[dict[str, Any]]], local: dict[str, list[str]], record: dict[str, Any]) -> int:
+    """How many of a hive's listed agents count against its agent limit: every one but its masters."""
+    from scripts.swarm import local_slots
+
+    hive = str(record["id"])
+    names = [str(report["agent"]) for report in reported[hive]] + local.get(hive, [])
+    return sum(not local_slots.is_master(name) for name in names)
+
+
 def _ceiling_columns(record: Any, reading: Any) -> tuple[str, str]:
     """The hive list's max agents column, the ceiling and how it is set, and its headroom column."""
     from scripts.hive import ceiling, headroom
@@ -385,14 +398,21 @@ def _list() -> None:
     now = now_ms()
     redis = redis_client()
     hives = registry.hives(redis)
-    reported = {record["id"]: join_report.live(redis, record["id"]) for record in hives}
+    reported: dict[str, list[dict[str, Any]]] = {
+        record["id"]: join_report.live(redis, record["id"]) for record in hives
+    }
     local = _local_agents(redis, {(report["slug"], report["agent"]) for rows in reported.values() for report in rows})
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
-        print(f"{record['id']}{label}\t{state}\tui={record['ui']}\tmax-agents={top}\texcluded={excluded}\t{room}")
+        workers = _workers(reported, local, record)
+        print(
+            f"{record['id']}{label}\t{state}\tui={record['ui']}"
+            f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
+            f"\trelease={record['version'] or 'unknown'}"
+        )
         for member, entry in sorted(record.get("members", {}).items()):
             taking = "draining" if entry["draining"] == "yes" else "taking agents"
             print(f"  member {member}\t{taking}\theartbeat {now - entry['heartbeat_at']} ms ago")

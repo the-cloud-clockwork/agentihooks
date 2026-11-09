@@ -5,6 +5,9 @@
   ],
   "workflow runner": [
    "running"
+  ],
+  "reap": [
+   "hive-roll"
   ]
  },
  "unmapped": [
@@ -76,7 +79,6 @@
   "quiet pass",
   "quota notice",
   "rank pass",
-  "reap",
   "reboot pass",
   "recover master",
   "recover outages",

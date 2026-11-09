@@ -114,6 +114,38 @@
       ]
     },
     {
+      "id": "swarm-tick-slow-export",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
+      "behaviour": "A tick pass whose short ledger read times out on a large export reads it again under the export budget when this host stores no view or only a stale one, stores the fresh view for the next pass, and runs offline on a fresh stored view without the long read.",
+      "seam": "scripts.swarm.cli._hold_view against a real HTTP ledger server that pauses mid body longer than the short read budget",
+      "tests": [
+        "tests/tick/test_slow_export_view.py::test_a_first_full_read_slower_than_the_short_budget_is_read_again_and_stored",
+        "tests/tick/test_slow_export_view.py::test_a_stale_stored_view_is_read_again_under_the_export_budget",
+        "tests/tick/test_slow_export_view.py::test_a_fresh_stored_view_runs_the_pass_offline_without_a_long_read",
+        "tests/tick/test_slow_export_view.py::test_a_long_read_that_also_times_out_runs_the_pass_offline_on_the_stale_view",
+        "tests/tick/test_slow_export_view.py::test_the_long_read_runs_as_the_pass_service_and_a_refusal_ends_the_pass",
+        "tests/tick/test_slow_export_view.py::test_a_stored_view_is_fresh_only_until_its_age_reaches_the_limit"
+      ]
+    },
+    {
+      "id": "swarm-tick-slow-export-write",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ledger-write-timeout",
+      "behaviour": "A tick pass whose start or mid pass view read only timed out runs from its last good view yet still sends each ledger write to the server under the request budget, so a write lands while another client reads a full export; it queues a write locally only when the server stops answering or refused the connection.",
+      "seam": "scripts.swarm.ledger_client.LedgerClient._call after scripts.swarm.cli._hold_view against a real HTTP ledger server serving a slow full export to another client",
+      "tests": [
+        "tests/tick/test_slow_export_write.py::test_a_write_lands_within_its_budget_while_another_client_reads_a_full_export",
+        "tests/tick/test_slow_export_write.py::test_a_write_the_slow_server_does_not_answer_is_queued_locally",
+        "tests/tick/test_slow_export_write.py::test_a_write_the_slow_server_refuses_raises_its_refusal",
+        "tests/tick/test_slow_export_write.py::test_a_pass_whose_server_refused_the_connection_queues_writes_without_sending",
+        "tests/tick/test_slow_export_write.py::test_a_write_after_a_mid_pass_view_read_timed_out_is_still_sent",
+        "tests/tick/test_slow_export_write.py::test_a_mid_pass_read_the_server_refused_queues_writes_without_sending",
+        "tests/tick/test_slow_export_write.py::test_a_full_outbox_leaves_an_offline_write_unreachable",
+        "tests/tick/test_slow_export_write.py::test_only_a_timeout_marks_a_failed_read_slow"
+      ]
+    },
+    {
       "id": "swarm-spawn-claim-before-launch",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-claim-write",
@@ -2289,6 +2321,17 @@
       ]
     },
     {
+      "id": "hive-release-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2097",
+      "behaviour": "Each hive heartbeat records the agentihooks release the hive runs, and hive list prints it per hive, unknown when the record carries none.",
+      "seam": "daemon.beat and the hive list command",
+      "tests": [
+        "tests/hive/test_daemon.py::test_each_beat_reports_the_release_the_hive_runs",
+        "tests/hive/test_join_display.py::test_hive_list_prints_the_release_each_hive_runs"
+      ]
+    },
+    {
       "id": "controller-quota-after-restart",
       "origin": "regression",
       "ordered_at": "2026-11-08",
@@ -2304,7 +2347,8 @@
         "tests/hive/test_controller_launch.py::test_a_placement_wait_names_an_account_with_no_fresh_quota_reading",
         "tests/hive/test_controller_launch.py::test_placement_before_the_pass_reads_quota_uses_the_runtime_reader",
         "tests/hive/test_controller_launch.py::test_placement_without_a_runtime_reader_reads_the_hive_reports",
-        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set"
+        "tests/swarm/test_controller_quota_after_restart.py::test_the_hive_controller_keeps_a_quota_reader_the_deployment_set",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_fresh_controller_with_an_empty_quota_cache_places_an_agent"
       ]
     },
     {
@@ -2323,6 +2367,95 @@
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
         "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
+      ]
+    },
+    {
+      "id": "hive-pods-not-rolled-by-release-image-digest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-roll-every-release",
+      "behaviour": "The chart release workflow no longer stamps the hive worker image digest into the Helm chart, so the worker hive pod template carries no per release digest annotation and a release never rolls the worker hives on its own; an explicit workers.rollout.release value still rolls them on request.",
+      "seam": "worker-hive.yaml pod template metadata.annotations and the chart release build",
+      "tests": [
+        "tests/test_swarm_chart_hive_rollout_release.py::test_the_release_annotation_only_follows_an_explicit_rollout_release"
+      ]
+    },
+    {
+      "id": "hive-retire-absence",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
+      "behaviour": "Remote retirement settles without acknowledgement once bounded hive heartbeat loss or a newer member report proves the agent gone, freeing its seat; live hives still acknowledge normally.",
+      "seam": "HerdrRuntime.retire",
+      "tests": [
+        "tests/hive/test_reports.py::test_unacknowledged_retire_settles_after_bounded_hive_absence_and_frees_the_seat",
+        "tests/hive/test_reports.py::test_live_hive_acknowledgement_settles_retirement_and_frees_the_seat"
+      ]
+    },
+    {
+      "id": "swarm-tick-dead-remote-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
+      "behaviour": "Dead remote seats retire without loading the execution archive, leaving reap within budget and allowing a launch within two passes after a hive roll.",
+      "seam": "remote retirement and the reap/spawn tick passes",
+      "tests": [
+        "tests/tick/steps/test_drop_remote.py::test_ten_dead_remote_seats_drop_without_loading_the_execution_archive",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_a_hive_roll_drops_ten_seats_and_launches_within_two_budgeted_passes",
+        "tests/tick/steps/test_drop_remote.py::test_retiring_an_archived_projection_preserves_its_history_metadata"
+      ]
+    },
+    {
+      "id": "swarm-tick-step-budget-gate",
+      "origin": "regression",
+      "ordered_at": "2026-11-08",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-regression-ci",
+      "behaviour": "Every tick scenario replayed on the real step clock finishes each step inside its declared floor with no step abandoned, so a step budget overrun or an abandoned pass fails before merge.",
+      "seam": "the tick:records rows each scenario pass writes, held against scripts.tick.steps.budgets.FLOORS",
+      "tests": [
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_every_scenario_step_finishes_inside_its_floor",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_an_overrun_or_abandoned_step_is_named",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_step_inside_its_floor_passes",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_head_floor_increase_cannot_weaken_the_base_budget"
+      ]
+    },
+    {
+      "id": "gate-admin-recovery-payload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
+      "behaviour": "The frozen dev history ruleset accepts an exact payload allowing repository admins to recover CI through a pull request while preserving its branch protections.",
+      "seam": "Frozen ruleset payload registry",
+      "tests": [
+        "tests/test_gate_recovery_payload.py::test_the_frozen_registry_accepts_the_admin_pull_request_recovery_payload"
+      ]
+    },
+    {
+      "id": "gate-declarations-never-expire",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
+      "behaviour": "Gate wiring declarations require reason and owner without expiry; missing, past, future and malformed dates never interrupt wiring or protected base grading.",
+      "seam": "ci_wiring.check and gate_protected.grade",
+      "tests": [
+        "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
+      ]
+    },
+    {
+      "id": "controller-fresh-quota-placement",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-fallback-guard",
+      "behaviour": "A fresh controller pass with no quota rows and an empty pod quota cache places agents using the deployment runtime quota reader or hive quota reports in Redis.",
+      "seam": "HiveLaunch.select with a fresh HerdrRuntime before pass quota rows exist",
+      "tests": [
+        "tests/hive/test_controller_launch.py::test_a_fresh_runtime_places_without_pass_rows_or_pod_quota"
+      ]
+    },
+    {
+      "id": "hive-placement-slot-before-room",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2427",
+      "behaviour": "Placement keeps only the hives that advertise the launch slot before it checks room, so a launch whose slot holders are full waits on their room refusal instead of naming the slot as missing beside a slotless hive with room. A preferred hive without the slot spills on the slot refusal.",
+      "seam": "scripts.hive.placement.choose",
+      "tests": [
+        "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
+        "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
+        "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
     }
   ],

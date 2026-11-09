@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁretire:a8f89b7b1be35e36de0a422e4d8ad8546971405100995903d2e4d3a109ea5355": {
+    "reader": "standards_reader",
+    "reason": "Replacing the type argument dict[str, object] with None in typing.cast changes only static typing. typing.cast returns self.refusals unchanged and performs no runtime type check; pop(agent.name, None) therefore runs on the identical dictionary with identical arguments and produces identical runtime output."
+  }
+}

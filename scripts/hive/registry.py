@@ -90,8 +90,12 @@ def _count(setting: str, value: str) -> int:
 
 
 def _cap(setting: str, value: str) -> int | None:
-    """A positive cap, or None for auto, which leaves the ceiling to the hive's own resources."""
-    return None if value == AUTO else _count(setting, value)
+    """A whole number cap, zero scaling the hive fully down, or None for auto, which leaves the ceiling to the hive."""
+    if value == AUTO:
+        return None
+    if not (value.isascii() and value.isdigit()):
+        raise HiveError(f"{setting} must be a whole number, not {value!r}")
+    return int(value)
 
 
 def _names(setting: str, value: str, noun: str) -> list[str]:
