@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.761 · 2026-11-09
+
+### 2026-11-09 · 9d2473b750dc · #10214 · @agenticore-app
+
+**Show hive admission room and the binding limit in swarm status and autoscale**
+
+This change makes `swarm status` and `swarm autoscale` report, per live hive, its admission room alongside quota seats and host room, and explicitly names whichever of the three is currently binding and blocking spawns; when every hive is full it instead names hive admission plus each hive's specific refusing limit. This closes the gap where autoscale and status showed quota seats and host room as free while hive cpu room or the shared six-slot workstation cap silently refused every spawn, so operators can now see at a glance why urgent tasks are stuck waiting instead of assuming capacity is available.
+
 ## v2.17.757 · 2026-11-08
 
 ### 2026-11-08 · b046f80e8d0d · #10239 · @nestorcolt
