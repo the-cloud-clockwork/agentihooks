@@ -93,6 +93,8 @@ def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     wheel = worker_stage("wheel")
     assert wheel.startswith("FROM source-${AGENTIHOOKS_SOURCE} AS wheel\n")
     assert "COPY" not in wheel
+    assert "ARG AGENTIHOOKS_VERSION=0.0.0\n" in wheel
+    assert 'SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel' in wheel
     assert "ADD" not in wheel
 
 
@@ -535,6 +537,7 @@ def test_an_unpublished_hive_release_builds_proves_and_pushes_release_before_its
     assert build.startswith("docker build -f deploy/worker/Dockerfile ")
     assert "--build-arg WORKER_IMAGE=ghcr.io/the-cloud-clockwork/agentihooks-worker:2.1.7" in build
     assert "--build-arg AGENTIHOOKS_REF=abc123" in build
+    assert "--build-arg AGENTIHOOKS_VERSION=2.1.7" in build
     assert build.endswith("--tag registry/hive:abc123 .")
     assert proof.startswith("docker run --rm ") and "agentihooks init --profile engineer" in proof
     release = ["docker buildx imagetools create --tag registry/hive:release registry/hive:abc123"]
