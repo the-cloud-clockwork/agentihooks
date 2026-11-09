@@ -236,8 +236,9 @@ def run_group(
     A failed or late step never stops the next. Outside a parallel pass steps run one at a time in group order. In a
     parallel pass each step starts as soon as every step it needs has ended, records keep group order, writes are
     applied on the scheduling thread as each step ends, and a lane past its deadline drops its unfinished steps and
-    every step that needs them. Slow lane steps, and the steps that need them, start once the group's other steps
-    end and run on after the group returns: the pass joins them when it ends and hands their records to ``finished``.
+    every step that needs them. Slow lane steps, and the steps that need them, run in their own schedule started
+    with the group, each once the steps it needs have ended, and run on after the group returns: the pass joins them
+    when it ends and hands their records to ``finished``.
     A step that needs a step an earlier group of the pass handed off starts once that step ended or was held, handed
     off too while that step still runs; it is dropped when that step was dropped or left running past its budget or
     its lane.
@@ -274,14 +275,14 @@ def _scheduled(
         return _in_turn(ordered, ctx, apply or {}, rest, gate)
     later = _slow_lane(ordered, found.pending())
     names = {step.name for step in later}
-    records = _eager(tuple(step for step in ordered if step.name not in names), ctx, found, apply or {}, rest, gate)
+    first = tuple(step for step in ordered if step.name not in names)
     if later:
+        awaited = frozenset[str]().union(*(step.needs for step in later)) & {step.name for step in first}
         found.hand(names)
-        gone = _gone(later, frozenset(record.name for record in records if record.lost))
-        for each in gone:
-            found.end(each, True)
-        found.detach(partial(_run_later, later, gone, ctx, found, apply or {}, finished, partial(_opened, rest, gate)))
-    return records
+        found.track(awaited)
+        opened = partial(_opened, rest, gate)
+        found.detach(partial(_run_later, later, awaited, ctx, found, apply or {}, finished, opened))
+    return _eager(first, ctx, found, apply or {}, rest, gate)
 
 
 def _in_turn(
@@ -305,23 +306,26 @@ class SiteGate:
 
     A site's hook runs once, when the site's first step is ready, and shuts the whole site when it answers false;
     ``shut`` shuts single steps and is asked before and after the hook. ``seen`` holds the records of the steps that
-    ended before the latest step became ready.
+    ended before the latest step became ready. The handed lane and the rest of the graph ask it from their own
+    threads, one at a time, so a site's hook runs once.
     """
 
     hooks: Mapping[str, Callable[[], bool]]
     shut: Callable[[Step], bool]
     seen: dict[str, StepRecord] = field(default_factory=dict[str, StepRecord])
     opened: dict[str, bool] = field(default_factory=dict[str, bool])
+    guard: Lock = field(default_factory=Lock, compare=False)
 
     def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
         """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step."""
-        self.seen.update(records)
-        if self.shut(step):
-            return False
-        if step.group not in self.opened:
-            hook = self.hooks.get(step.group)
-            self.opened[step.group] = hook is None or hook()
-        return self.opened[step.group] and not self.shut(step)
+        with self.guard:
+            self.seen.update(records)
+            if self.shut(step):
+                return False
+            if step.group not in self.opened:
+                hook = self.hooks.get(step.group)
+                self.opened[step.group] = hook is None or hook()
+            return self.opened[step.group] and not self.shut(step)
 
 
 def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step, ...]:
@@ -334,29 +338,19 @@ def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step,
     return tuple(step for step in ordered if step.name in names)
 
 
-def _gone(later: tuple[Step, ...], dropped: frozenset[str]) -> frozenset[str]:
-    """Return ``dropped`` with every step of ``later`` that needs one of them, directly or through another."""
-    gone = set(dropped)
-    for step in later:
-        if step.needs & gone:
-            gone.add(step.name)
-    return frozenset(gone)
-
-
 def _run_later(
     later: tuple[Step, ...],
-    gone: frozenset[str],
+    awaited: frozenset[str],
     ctx: Context,
     found: pool.Pass,
     apply: Appliers,
     finished: Callable[[tuple[StepRecord, ...]], object] | None,
     gate: Gate,
 ) -> None:
-    """Run the handed off steps on the pass workers, dropping each in ``gone`` and resting each ``gate`` shuts, then
+    """Run the handed off steps on the pass workers alongside the rest of their graph, each once the steps it needs
+    ended, those in ``awaited`` included, dropping each whose need was dropped and resting each ``gate`` shuts, then
     hand their records in group order to ``finished``."""
-    kept = tuple(s for s in later if s.name not in gone)
-    ran = {record.name: record for record in _eager(kept, ctx, found, apply, frozenset(), gate)}
-    records = tuple(ran.get(step.name) or _skipped(step, _offset()) for step in later)
+    records = _eager(later, ctx, found, apply, frozenset(), gate, awaited)
     if finished is not None:
         finished(records)
 
@@ -397,11 +391,6 @@ def resting(ordered: Iterable[Step], cadence: float) -> frozenset[str]:
     now = time.time() if current is None else current["start_ms"] / 1000
     ends = timing.step_ends(store, slug)
     return frozenset(name for name, every in wide.items() if name in ends and now - ends[name] <= every - CRON_S)
-
-
-def _skipped(step: Step, offset: float | None) -> StepRecord:
-    """Return and journal the record of ``step`` dropped before it started."""
-    return _journal(step, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True), offset)
 
 
 def _offset() -> float | None:
@@ -536,12 +525,18 @@ def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, 
     return run_step(step, ctx)
 
 
-def _waiting(step: Step, names: set[str], found: pool.Pass) -> bool:
-    """Return whether ``step`` still waits, inside its lane, on a handed off step of an earlier group of the pass.
+def _earlier(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[str]) -> frozenset[str]:
+    """Return the steps outside ``names`` that ``step`` waits on: those an earlier group handed off and those of its
+    own graph in ``awaited``."""
+    return found.handed_of(step.needs - names) | (step.needs & awaited)
+
+
+def _waiting(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[str]) -> bool:
+    """Return whether ``step`` still waits, inside its lane, on a step outside ``names`` it waits on.
 
     Such a step is submitted only once that step ended, so it never holds a pass worker while it waits.
     """
-    earlier = found.handed_of(step.needs - names)
+    earlier = _earlier(step, names, found, awaited)
     return bool(earlier) and not found.lane(step.lane).expired and not found.settled(earlier)
 
 
@@ -601,8 +596,10 @@ def _eager(
     apply: Appliers,
     rest: frozenset[str] = frozenset(),
     gate: Gate | None = None,
+    awaited: frozenset[str] = frozenset(),
 ) -> tuple[StepRecord, ...]:
-    """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended.
+    """Run ``ordered`` on the pass workers, each step submitted the moment its needs have ended, those in ``awaited``
+    that another schedule of the pass runs included.
 
     Each finished step's writes are applied through ``apply`` on this scheduling thread before its dependents start.
     A step in ``rest`` starts no thread and ends at once for its dependents. A kept step starts even after its lane
@@ -622,7 +619,9 @@ def _eager(
     try:
         while pending or running:
             ready = [
-                step for step in pending if step.needs & names <= records.keys() and not _waiting(step, names, found)
+                step
+                for step in pending
+                if step.needs & names <= records.keys() and not _waiting(step, names, found, awaited)
             ]
             for step in ready:
                 pending.remove(step)
@@ -636,20 +635,20 @@ def _eager(
                         found, StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
                     )
                 elif _kept(step):
-                    earlier = found.handed_of(step.needs - names)
+                    earlier = _earlier(step, names, found, awaited)
                     start = _Start(clock)
                     future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found, start)
                     submitted.append(future)
                     running[future] = (step, start, ctx.deadline)
                 else:
-                    earlier = found.handed_of(step.needs - names)
+                    earlier = _earlier(step, names, found, awaited)
                     lane_ctx = _lane_context(lane, ctx)
                     start = _Start(clock)
                     future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found, start)
                     submitted.append(future)
                     running[future] = (step, start, lane)
             ended = [0.0] if any(step.name in records for step in ready) else []
-            held = any(_waiting(step, names, found) for step in pending)
+            held = any(_waiting(step, names, found, awaited) for step in pending)
             if not running:
                 if not ready and not held:
                     raise ValueError(f"steps {sorted(step.name for step in pending)} wait on needs that never end")

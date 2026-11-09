@@ -74,21 +74,32 @@ class Pass:
     handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
     gone: set[str] = field(default_factory=set[str], compare=False)
     guard: Lock = field(default_factory=Lock, compare=False)
+    tracked: set[str] = field(default_factory=set[str], compare=False)
 
     def hand(self, names: Iterable[str]) -> None:
         """Mark each step in ``names`` handed off to run on after its group, pending until ``end`` marks it."""
         with self.guard:
             self.handed.update((name, Event()) for name in names)
 
+    def track(self, names: Iterable[str]) -> None:
+        """Mark each step in ``names``, run by its own group, awaited by that group's handed off steps until ``end``
+        marks it; a tracked step is neither handed off nor pending."""
+        with self.guard:
+            fresh = [name for name in names if name not in self.handed]
+            self.handed.update((name, Event()) for name in fresh)
+            self.tracked.update(fresh)
+
     def pending(self) -> frozenset[str]:
         """Return the handed off steps not yet marked ended."""
         with self.guard:
-            return frozenset(name for name, event in self.handed.items() if not event.is_set())
+            return frozenset(
+                name for name, event in self.handed.items() if not event.is_set() and name not in self.tracked
+            )
 
     def handed_of(self, names: Iterable[str]) -> frozenset[str]:
         """Return the steps in ``names`` that a group of this pass handed off."""
         with self.guard:
-            return frozenset(name for name in names if name in self.handed)
+            return frozenset(name for name in names if name in self.handed and name not in self.tracked)
 
     def settled(self, names: Iterable[str]) -> bool:
         """Return whether every handed off step in ``names`` was marked ended, dropped or not."""
