@@ -1,11 +1,13 @@
-"""Ledger port adapter: the tick's ledger tools over the ledger server's export and mutate routes, each call
-bounded by its deadline and every write stamped with the controller epoch of its ledger."""
+"""Ledger port adapter: the tick's ledger tools over the export and mutate routes, run in process over the shared
+database when its URL is set and over the ledger server otherwise, each call bounded by its deadline and every write
+stamped with the controller epoch of its ledger."""
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from scripts.swarm import lease
+from scripts.swarm_ledger.api import in_process
 from scripts.swarm_ledger.api.client import ResourceClient
 from scripts.tick.deadline import Deadline
 
@@ -24,7 +26,7 @@ def resource_client(slug: str, service: bool = False) -> Clients:
         base: str = ledger.base(slug)
         credentials: dict[str, str] = ledger.credentials(slug, service)
         timeout: float = ledger.REQUEST_TIMEOUT
-        return ResourceClient(base, credentials, min(timeout, remaining))
+        return in_process.connect(base, credentials, min(timeout, remaining))
 
     return build
 

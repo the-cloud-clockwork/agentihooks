@@ -217,9 +217,9 @@ def launch_token(slug, name):
 
 
 def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
-    from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.swarm_ledger.api.in_process import connect
 
-    client = ResourceClient(base(slug), credentials(slug, service), timeout)
+    client = connect(base(slug), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
@@ -232,20 +232,20 @@ def resource(
     timeout: float = REQUEST_TIMEOUT,
     attempts: int = REMOTE_READ_ATTEMPTS,
 ) -> dict | list:
-    from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.swarm_ledger.api.in_process import connect
 
     def read():
-        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, timeout)
+        client = connect(base(slug), credentials(slug, service) if headers is None else headers, timeout)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
     return retried(read, attempts) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
-    from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.swarm_ledger.api.in_process import connect
 
     def read():
-        return ResourceClient(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
+        return connect(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
             "data"
         ]
 

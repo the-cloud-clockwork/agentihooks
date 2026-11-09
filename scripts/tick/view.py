@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any, NoReturn, cast
 
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
+from scripts.swarm_ledger.api import in_process
+from scripts.swarm_ledger.api.client import patched, read_export_file, write_export_file
 
 __all__ = [
     "CURRENT",
@@ -179,7 +180,7 @@ def start(slug: str, service: bool) -> LedgerView | None:
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    client = in_process.connect(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:

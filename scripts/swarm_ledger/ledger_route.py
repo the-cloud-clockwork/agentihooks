@@ -81,6 +81,9 @@ def service(function: Callable) -> Callable:
         pending = store.redis.hget(store.key(slug, "config"), "pending_api_url")
         if (url(slug) or pending) and not tick_headers(slug):
             return ["the host tick will apply the settings"]
-        return function(store, slug, *args, **kwargs)
+        from scripts.swarm_ledger.api import in_process
+
+        with in_process.scoped():
+            return function(store, slug, *args, **kwargs)
 
     return trusted
