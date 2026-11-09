@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 store = test_tick.store
 FakeLedger, FakeRuntime = test_tick.FakeLedger, test_tick.FakeRuntime
 REPLAY = Path(__file__).with_name("spawn_pass_replay.json.gz")
-BUDGET_SHARE = 33
+BUDGET_SHARE = 10
 
 
 def replay() -> dict[str, Any]:
