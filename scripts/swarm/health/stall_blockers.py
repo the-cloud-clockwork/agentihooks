@@ -49,7 +49,7 @@ def _focused(doc: dict[str, Any], tasks: list[dict[str, Any]]) -> list[dict[str,
     from scripts.swarm import freeze
     from scripts.swarm_ledger.repository import hierarchy
 
-    admitted = freeze.admitted(doc, hierarchy.project(doc)[0])
+    admitted = freeze.admitted(doc, hierarchy.project(doc)[0])  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
     return [task for task in tasks if task.get("state") == "pr" and (admitted is None or task["id"] in admitted)]
 
 
@@ -103,7 +103,8 @@ def _apply(
             return []
         logged[category] = found.since
         reason = f"{category}: {found.detail}"
-        gate_log.append(slug, gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=reason, now_ms=now_ms))
+        row = gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=reason, now_ms=now_ms)  # pyright: ignore[reportUnknownMemberType]
+        gate_log.append(slug, row)  # pyright: ignore[reportUnknownMemberType]
         return [f"stall blockers: logged {reason}"]
     current = blockers.active(store, slug, now_ms).get(category)
     if current is not None and (found is None or current.first_seen < found.since):
@@ -130,7 +131,7 @@ def observe(
     raw = store.redis.get(key)
     if raw is None and not any(task.get("state") == "pr" for task in rows):
         return []
-    mode = str(modes.configured(GATE, store.config(slug).gates))
+    mode = str(modes.configured(GATE, store.config(slug).gates))  # pyright: ignore[reportUnknownMemberType]
     if mode == "off":
         return []
     state = json.loads(raw or "{}")

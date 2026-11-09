@@ -628,14 +628,13 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
+    held = functools.partial(_merged_held, mail, now_ms=now_ms)
     return (
         _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
         + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
-        + stall_blockers.observe(
-            store, slug, doc, tasks.values(), github, now_ms, lambda t: _merged_held(mail, t, now_ms)
-        )
+        + stall_blockers.observe(store, slug, doc, tasks.values(), github, now_ms, held)  # pyright: ignore[reportUnknownArgumentType]
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
         + _priorities(mail, doc, raised)
