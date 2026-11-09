@@ -106,7 +106,7 @@ def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it
     assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
     assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
     overlay = worker_stage("overlay")
-    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt" in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl \\\n" in overlay
     assert "lib/python3.12/site-packages/pip " in overlay
     assert (
         "useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker"
