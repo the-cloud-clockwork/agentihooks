@@ -207,19 +207,23 @@ def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_prefer
 
 @pytest.mark.feature("hive-master-closed-account")
 @pytest.mark.parametrize(
-    ("fields", "front"),
+    ("fields", "front", "kind"),
     [
-        ({"master_login": {"claude": "closed_key"}}, True),
-        ({"interactive": {"claude": "closed_key"}}, False),
-        ({"slots": [{"harness": "claude", "account": "closed_key", "kind": "subscription"}]}, False),
+        ({"master_login": {"claude": "closed_key"}}, True, "master-login"),
+        ({"interactive": {"claude": "closed_key"}, "slots": []}, False, "interactive"),
+        ({"slots": [{"harness": "claude", "account": "closed_key", "kind": "subscription"}]}, False, "subscription"),
     ],
 )
-def test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat(fields: dict, front: bool) -> None:
+def test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat(
+    fields: dict[str, object], front: bool, kind: str
+) -> None:
     hives = [hive("closed", prefer={"master": 0}, **fields), hive("open", prefer={"master": 1})]
     assert placement.place_master("claude", "", REPO, hives, NOW, front, frozenset({"closed-key"})) == (
         placement.MasterPlacement("open", "token", "subscription", False)
     )
-    assert placement.place_master("claude", "", REPO, hives, NOW, front).hive == "closed"
+    assert placement.place_master("claude", "", REPO, hives, NOW, front) == (
+        placement.MasterPlacement("closed", "closed_key", kind, False)
+    )
 
 
 @pytest.mark.feature("hive-master-closed-account")
