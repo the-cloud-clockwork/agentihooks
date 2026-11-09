@@ -2688,7 +2688,8 @@
         "tests/inbox/test_codex_pump.py::test_a_refreshed_thread_never_records_a_refusal",
         "tests/test_codex_usage.py::test_a_deactivated_workspace_reads_as_expired",
         "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
-        "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing"
+        "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
+        "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
       ]
     }
   ],

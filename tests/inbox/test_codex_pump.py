@@ -783,6 +783,15 @@ def test_a_refreshed_thread_never_records_a_refusal():
     assert state.refused == ""
 
 
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_turn_events_without_a_turn_id_leave_the_turn_ids_empty():
+    state = codex.ThreadState(active_turn="turn-1")
+    state.observe({"method": codex.TURN_COMPLETED, "params": {"turn": {"status": "failed", "error": DEACTIVATED}}})
+    assert (state.ended, state.active_turn, state.refused) == ("", "turn-1", DEACTIVATED["message"])
+    state.observe({"method": codex.TURN_STARTED, "params": {}})
+    assert state.active_turn == ""
+
+
 def test_run_closes_its_subscription(rig):
     rig.run(1)
     closed = rig.pump.subscription
