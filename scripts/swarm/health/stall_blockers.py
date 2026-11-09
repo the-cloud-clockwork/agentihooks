@@ -105,7 +105,7 @@ def _apply(
         reason = f"{category}: {found.detail}"
         row = gate_log.Row.of(GATE.name, "observe", Who(name=SENDER), reason=reason, now_ms=now_ms)  # pyright: ignore[reportUnknownMemberType]
         gate_log.append(slug, row)  # pyright: ignore[reportUnknownMemberType]
-        return [f"stall blockers: logged {reason}"]
+        return []
     current = blockers.active(store, slug, now_ms).get(category)
     if current is not None and (found is None or current.first_seen < found.since):
         blockers.clear(store, slug, category)

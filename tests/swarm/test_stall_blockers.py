@@ -255,20 +255,20 @@ def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store: RedisStore
 def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store: RedisStore) -> None:
     now = _now(store)
     _merged(store, now - HOUR)
-    lines = _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now)
+    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now) == []
     reason = f"{stall_blockers.MERGE_STALL}: 1 focused pull requests open and no merge into dev on owner/repo"
-    assert lines == [f"stall blockers: logged {reason}"]
     assert blockers.active(store, SLUG, now) == {}
-    rows = [json.loads(line) for line in gate_log.gate_log_path(SLUG).read_text().splitlines()]
-    assert [(row["gate"], row["kind"], row["agent"], row["reason"], row["at"]) for row in rows] == [
-        ("stall-blockers", "observe", "swarm", reason, now)
-    ]
-    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + MINUTE) == []
-    assert len(gate_log.gate_log_path(SLUG).read_text().splitlines()) == 1
-    assert _observe(store, [_task("a", "pr-a")], _pulls(), now) == []
-    assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + 2 * MINUTE) == [
-        f"stall blockers: logged {reason}"
-    ]
+
+    def logged() -> list[tuple[str, str, str, str, int]]:
+        rows = [json.loads(line) for line in gate_log.gate_log_path(SLUG).read_text().splitlines()]
+        return [(row["gate"], row["kind"], row["agent"], row["reason"], row["at"]) for row in rows]
+
+    assert logged() == [("stall-blockers", "observe", "swarm", reason, now)]
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + MINUTE)
+    assert len(logged()) == 1
+    _observe(store, [_task("a", "pr-a")], _pulls(), now)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + 2 * MINUTE)
+    assert logged()[1:] == [("stall-blockers", "observe", "swarm", reason, now + 2 * MINUTE)]
 
 
 def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(store: RedisStore) -> None:
