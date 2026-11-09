@@ -38,7 +38,8 @@ class Client(cases.Herdr):
 def setup(tmp_path: Path, beat: int | None) -> tuple[Service, Client, RedisStore]:
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     if beat is not None:
-        registry.update(store.redis, "hive-three", [f"name={LABEL}", f"heartbeat_at={beat}"])
+        registry.update(store.redis, "hive-three", [f"name={LABEL}"])
+        registry.beat(store.redis, "hive-three", {"heartbeat_at": beat})
     client = Client()
     terminal = cases.client_terminal(tmp_path, client, "test-workers")
     known = tmp_path / ".ssh" / "known_hosts"
@@ -54,7 +55,7 @@ def setup(tmp_path: Path, beat: int | None) -> tuple[Service, Client, RedisStore
     return Service(Upkeep(terminal), connect, clock), client, store
 
 
-@pytest.mark.parametrize("beat", [None, NOW - LIMIT - 1])
+@pytest.mark.parametrize("beat", [None, NOW - LIMIT, NOW - LIMIT - 1])
 def test_removed_and_unplugged_hives_leave_herdr_with_their_host_key(
     tmp_path: Path, beat: int | None, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -95,7 +96,7 @@ def test_lifecycle_cleanup_runs_even_when_worker_attempts_do_not_change(tmp_path
 def test_a_recovered_hive_keeps_its_machine_past_the_first_outage_deadline(tmp_path: Path) -> None:
     service, client, store = setup(tmp_path, NOW - LIMIT + 1)
     service.run_pass()
-    registry.update(store.redis, "hive-three", [f"heartbeat_at={NOW + LIMIT}"])
+    registry.beat(store.redis, "hive-three", {"heartbeat_at": NOW + LIMIT})
 
     def clock() -> float:
         return (NOW + LIMIT + 1) / 1000
@@ -142,3 +143,34 @@ def test_readding_a_removed_name_clears_its_removal_record(tmp_path: Path, monke
     machine.save(store.redis, "operator", TARGET, LABEL, run)
 
     assert LABEL not in machine.removed(store.redis)
+
+
+@pytest.mark.parametrize("label", ["devbox", "swarm-hive-tools", "my-swarm-hive-003"])
+def test_unrelated_manual_machine_names_are_never_removed(tmp_path: Path, label: str) -> None:
+    service, client, _ = setup(tmp_path, None)
+    client.machines[0]["label"] = label
+
+    service.run_pass()
+
+    assert len(client.machines) == 2
+    assert not client.mutating()
+
+
+def test_a_hive_that_has_not_started_reporting_is_retained(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+
+
+def test_an_unreadable_catalog_reports_failure_without_removing_machines(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, None)
+    client.listing = "unreadable"
+
+    report = service.run_pass()
+
+    assert report is not None
+    assert "hives" in report.refused
+    assert len(client.machines) == 2
+    assert not client.mutating()
