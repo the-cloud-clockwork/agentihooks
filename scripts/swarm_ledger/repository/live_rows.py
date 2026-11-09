@@ -44,6 +44,12 @@ def covers(target: str, task: dict[str, Any], chain: list[str]) -> bool:
     return target in chain
 
 
+def reshapes(path: list[Any]) -> bool:
+    if not path or path[0] not in SCOPE_PATHS:
+        return False
+    return path[0] != "phases" or len(path) < 3 or path[2] == "plan"
+
+
 def _targets(records: list[dict[str, Any]], verb: str) -> tuple[set[str], list[str]]:
     named = [record["target"] for record in records if record.get("verb") == verb]
     selectors = [target for target in named if target.partition(":")[0] in SELECTORS and target.partition(":")[2]]

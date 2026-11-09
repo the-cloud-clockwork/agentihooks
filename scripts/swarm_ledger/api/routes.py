@@ -296,7 +296,7 @@ def export_changes(
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
     units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
     if answer is not None:
-        if any(unit[:1] in SCOPE_UNITS for unit in units):
+        if any(live_rows.reshapes(json.loads(path)) for path in paths):
             return None
         view["tasks"] = answer.rows
     named = {encode(part) for part in parts}
@@ -322,9 +322,6 @@ def export_changes(
     if answer is not None and (not named or encode("tasks") in named):
         changes["set"].append([[live_rows.FROZEN_IDS], answer.frozen_ids])
     return json.dumps({"changes": changes})
-
-
-SCOPE_UNITS = {(encode(part),) for part in live_rows.SCOPE_PATHS}
 
 
 def handle(handler: object, services: Services) -> None:

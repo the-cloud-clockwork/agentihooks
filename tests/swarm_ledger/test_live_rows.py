@@ -127,12 +127,23 @@ def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
-@pytest.mark.parametrize("part", ["freezes", "phases"])
-def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str) -> None:
+@pytest.mark.parametrize(
+    ("part", "field"), [("freezes", "target"), ("phases", "plan"), ("phases", None), ("slices", "phase")]
+)
+def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str, field: str | None) -> None:
+    doc = {**_doc(), "slices": [{"id": "s1", "phase": "phases/p1"}]}
+    answer = live_rows.answer(doc, live_rows.Scope())
+    item = ["id", doc[part][0]["id"], 0]
+    paths = {_path(part, item) if field is None else _path(part, item, field)}
+    assert routes.export_changes(doc, paths, ("tasks",), answer) is None
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_a_phase_change_outside_its_plan_link_stays_a_delta() -> None:
     doc = _doc()
     answer = live_rows.answer(doc, live_rows.Scope())
-    paths = {_path(part, ["id", doc[part][0]["id"], 0], "target")}
-    assert routes.export_changes(doc, paths, ("tasks",), answer) is None
+    reply = json.loads(routes.export_changes(doc, {_path("phases", ["id", "p1", 0], "review")}, ("tasks",), answer))
+    assert reply["changes"]["set"] == [[["frozen_ids"], ["c"]]]
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
