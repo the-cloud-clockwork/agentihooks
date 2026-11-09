@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.765 · 2026-11-09
+
+### 2026-11-09 · 74dba094031e · #10245 · @agenticore-app
+
+**Hold every tick scenario step to its floor and place from a fresh controller**
+
+This change strengthens the tick CI gate so regressions caught in production incidents cannot silently slip back in: every scenario step is now checked against its protected base floor and flagged if a pass abandons it, and a fresh-controller-with-empty-quota-cache scenario verifies placement still works from a clean cache. The existing ten-dead-seat hive-roll scenario is replayed and must complete within two passes. Wall-time records are uploaded per scenario for visibility, and workflow tests enforce check ordering, protected-grading, and separate artifact directories. Proven with matching red/green CI runs per the task's planted-fault requirement.
+
 ## v2.17.764 · 2026-11-09
 
 ### 2026-11-09 · 628324ad6ec6 · #10262 · @nestorcolt
