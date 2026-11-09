@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hooks.context.profile_chain import BUNDLE_PROFILES
+from scripts.swarm import brain_binding
 from scripts.swarm_v2 import filesystem
 
 TARGETS = ("claude", "codex")
@@ -222,6 +223,7 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": str(interpreter),
         "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
+        **{key: os.environ[key] for key in (brain_binding.VARIABLE,) if os.environ.get(key)},
     }
 
 
@@ -295,7 +297,7 @@ def materialize(attempt: Path, target: str) -> None:
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
     workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
-    adapter.register_mcp(browser.configure(workable, names))
+    adapter.register_mcp(brain_binding.apply(browser.configure(workable, names), os.environ))
 
 
 def _strings(value: object) -> list[str]:
