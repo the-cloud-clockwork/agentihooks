@@ -434,7 +434,7 @@ WAITS_END = "waits end"
 def _holding_wait(store: Any, slug: str, name: str, now_ms: int) -> Any:
     """The agent's declared wait as the idle count reads it: a checked wait only while the waits end step, which ends
     a checked wait once its target resolves, has run within the idle retirement window."""
-    found: Any = tick.idle_state.wait(store.redis, slug, name)
+    found: Any = tick.timing.timed(tick.idle_state.wait, store.redis, slug, name)
     if not isinstance(found, dict):
         return found
     held = cast(dict[str, Any], found)
