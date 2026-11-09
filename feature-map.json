@@ -2502,7 +2502,8 @@
       "tests": [
         "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
-        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation"
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
+        "tests/hive/test_admission.py::test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it"
       ]
     }
   ],
