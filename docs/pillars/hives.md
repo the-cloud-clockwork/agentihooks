@@ -1177,13 +1177,10 @@ fails. GitHub and provider account credentials remain separate Secret references
 `workers.credentialSecret` is required; it carries the member invite and, with `workers.ssh.enabled`, also the
 sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` to reach it. Credentials come from
 ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
-the chart refuses `workers.replicas` above 1; see [Scaling worker hives](#scaling-worker-hives). Scale with `workers.hives`: each entry, `name` plus its own
+the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own
 `credentialSecret`, renders one more hive pod, `<release>-worker-hive-<name>` with component `worker-hive-<name>` and
-its own worktrees ConfigMap. Every other key the entry sets replaces that `workers` key whole, so an entry that sets
-`homeVolume` gives the complete source. The chart refuses an entry without a credential of its own, an entry
-that sets `replicas`, an entry whose hostPath or claim home is the same path or claim as another hive's, a
-repeated name, or a name that is not a lowercase DNS label of at most 20 characters. Add a pod with no installed
-credential with `agentihooks hive add` from the UI hive; the pod name is used only then.
+its own worktrees ConfigMap; [Scaling worker hives](#scaling-worker-hives) gives an example and every refusal. Add a
+pod with no installed credential with `agentihooks hive add` from the UI hive; the pod name is used only then.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
@@ -1219,9 +1216,10 @@ CI work as Pods while its master, planners and dispatcher stay on the workstatio
 ### Scaling worker hives
 
 One hive credential is one hive. The hive id inside a member credential is fixed when the member is minted, and the
-member's Redis user writes only below that hive's keys, so every pod that mounts the same credential registers as the
-same hive with the same `max-agents`. Placement would then see one hive and one agent limit however many pods run.
-The chart therefore renders each hive as exactly one pod and refuses any setting that would share a credential.
+member's Redis user writes only that hive's own keys and the shared worker keys, so every pod that mounts the same
+credential registers as the same hive with the same `max-agents`. Placement would then see one hive and one agent
+limit however many pods run. The chart therefore renders each hive as exactly one pod and refuses two hives in one
+release that share a credential Secret.
 
 To run more hives, mint one member per hive and give each its own Secret:
 
@@ -1253,14 +1251,15 @@ workers:
         key: credential
 ```
 
-This release renders three Deployments, each with one replica: `<fullname>-worker-hive` (hive a, 8 agents),
+The example renders three Deployments, each with one replica: `<fullname>-worker-hive` (hive a, 8 agents),
 `<fullname>-worker-hive-b` (8 agents, inherited) and `<fullname>-worker-hive-c` (4 agents), where `<fullname>` is
-`<release>-agentihooks-swarm`, or the release name alone when it already contains `agentihooks-swarm`. Each pod sets its own
-`max-agents` at start and its memory request and limit follow its own `maxAgents`. `agentihooks hive list` shows
-three hives, and placement fills each up to its own limit. An entry inherits every other `workers` key; a key it sets,
-such as `credentialSecret` or `homeVolume`, replaces the whole value, so write the complete map. Entries with a
-`workers.node` inherit it and get their own host folder, `<release>_<name>`. Installing one release per credential,
-each with `workers.replicas: 1`, gives the same result as entries in one release.
+`<release>-agentihooks-swarm`, or the release name alone when it already contains `agentihooks-swarm`. Each pod sets
+its own `max-agents` at start and its memory request and limit follow its own `maxAgents`. `agentihooks hive list`
+shows three hives, each with its own max agents, and placement holds each to its own limit. An entry inherits every
+other `workers` key; a key it sets, such as `credentialSecret` or `homeVolume`, replaces the whole value, so write the
+complete map. Entries with a `workers.node` inherit it and get their own host folder, `<release>_<name>`. Installing
+one release per credential, each with `workers.replicas: 1`, also gives one pod per credential; Deployment names and
+host folders then derive from each release name, and no duplicate check runs across releases.
 
 Check a values file before installing it; a refusal stops the render with the message below:
 
@@ -1268,10 +1267,10 @@ Check a values file before installing it; a refusal stops the render with the me
 helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml | grep -E '^  name: .*-worker-hive'
 ```
 
-`deploy/worker/chart-proof.sh` renders one replica and asserts that a missing credential and `workers.replicas=2`
-with one credential are both refused.
+`deploy/worker/chart-proof.sh` renders one replica and asserts that a missing credential and `workers.replicas=2` with
+one credential are both refused.
 
-#### Scaling refusals
+### Scaling refusals
 
 | Render fails with | Cause | Fix |
 |---|---|---|
@@ -1280,7 +1279,7 @@ with one credential are both refused.
 | `workers.hives <name> sets replicas: each entry is one pod; remove the entry to stop it` | The entry sets `replicas`, even `1` or `0`. | Drop the key; remove the entry to stop that hive. |
 | `workers.hives name "<name>" must be a lowercase DNS label of at most 20 characters` | The name has upper case, dots or underscores, starts or ends with a dash, or is longer than 20 characters. | Use lowercase letters, digits and inner dashes. |
 | `workers.hives name <name> appears twice` | Two entries share a name. | Rename one. |
-| `workers.hives <name> shares its home volume with another hive; give it its own homeVolume` | The entry's hostPath or claim home is the same path or claim as another hive's. | Give the entry its own `homeVolume`, or set `workers.node` so each hive gets its own host folder. |
+| `workers.hives <name> shares its home volume with another hive; give it its own homeVolume` | The entry's hostPath or claim home is the same path or claim as another hive's. | Give the entry its own `homeVolume`; `workers.node` alone does not clear this check, which runs on the inherited `homeVolume`. |
 
 If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
 chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
