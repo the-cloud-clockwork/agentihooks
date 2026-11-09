@@ -414,6 +414,7 @@ def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, conf
         merged=pulls.merged,
         draft=pulls.draft,
         limit=intent.JUDGED_PER_PASS,
+        judging=intent.TICK_JUDGING,
     )
     return view, skip_refused(check.run, doc)
 

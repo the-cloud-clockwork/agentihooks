@@ -1,5 +1,9 @@
 """The intent check stays inside its tick step budget with thirty tasks in pr."""
 
+import threading
+from concurrent import futures
+from dataclasses import replace
+
 import pytest
 
 from scripts.gates import intent
@@ -112,6 +116,30 @@ def test_thirty_changed_pulls_judge_at_most_the_pass_limit_and_the_rest_later(tm
     assert second.count("ask") == intent.JUDGED_PER_PASS
     assert len([c for c in first if c.startswith("view")]) == intent.JUDGED_PER_PASS
     assert len(judged) == 2 * intent.JUDGED_PER_PASS
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_changed_pull_is_judged_off_the_pass_and_settled_by_a_later_pass(tmp_path):
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    released, asked = threading.Event(), []
+
+    def ask(state: dict) -> tuple[str, str]:
+        asked.append(state)
+        released.wait(5)
+        return "pass", "the phase can use it"
+
+    judging = intent.Judging()
+    check = replace(_check("coach", pulls, [], tmp_path), ask=ask, judging=judging)
+    first = check.run(doc)
+    in_pass = [task["id"] for task in doc["tasks"] if Verdicts(SLUG, "intent", tmp_path).read(task["id"])]
+    released.set()
+    futures.wait([future for _, future in judging.running.values()], timeout=5)
+    second = check.run(doc)
+    settled = [task["id"] for task in doc["tasks"] if Verdicts(SLUG, "intent", tmp_path).read(task["id"])]
+    assert first == [] and in_pass == []
+    assert len(settled) == intent.JUDGED_PER_PASS
+    assert second == [f"task {task} intent check pass" for task in settled]
 
 
 @pytest.mark.feature("swarm-intent-check-budget")
