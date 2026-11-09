@@ -11,7 +11,7 @@ from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 if TYPE_CHECKING:
     from redis import Redis
 
-_PASS_SCAN: list[tuple[object, dict[str, dict]]] = []
+_PASS_SCAN: list[tuple[object, dict[str, dict[str, Any]]]] = []
 _PASS_LOCK = threading.Lock()
 
 
@@ -25,7 +25,7 @@ def name(slot: str) -> str:
     return f"{harness}:{account_key(account)}"
 
 
-def _scan(redis: "Redis", now: float) -> dict[str, dict]:
+def _scan(redis: "Redis", now: float) -> dict[str, dict[str, Any]]:
     from scripts.routing.reservation import LaunchSlots
 
     rows: dict[str, dict[str, Any]] = {}
@@ -60,7 +60,7 @@ def _scan(redis: "Redis", now: float) -> dict[str, dict]:
     return rows
 
 
-def read(redis: "Redis", now: float) -> dict[str, dict]:
+def read(redis: "Redis", now: float) -> dict[str, dict[str, Any]]:
     """Every account's row from the live hive reports, scanned once per tick pass and reused by every later read in
     that pass, whichever client asks, since a pass reads the one swarm Redis; outside a pass each call scans."""
     from scripts.tick import pool

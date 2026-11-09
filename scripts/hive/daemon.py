@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -426,7 +426,7 @@ def claude_signed_in() -> bool:
     return result.returncode == 0 and status.get("loggedIn") is True and status.get("authMethod") == "claude.ai"
 
 
-def _subscriptions(environ: dict, counts: dict, now: float) -> tuple[list, dict]:
+def _subscriptions(environ: Mapping[str, str], counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
     claude = {credential.account for credential in balancer.discover_credentials(environ)}

@@ -1,6 +1,7 @@
 """The controller reads hive quota once per tick pass and closes an account a hive reading marks refused."""
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts.hive import daemon
 from scripts.routing import aggregate
 from scripts.swarm import capacity
+from scripts.swarm.store import RedisStore
 from scripts.tick import pool
 
 ENVIRON = {"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}
@@ -58,7 +60,7 @@ def scans(monkeypatch: pytest.MonkeyPatch) -> Mock:
 
 @pytest.mark.feature("controller-quota-read-once")
 def test_one_pass_makes_one_hive_quota_read_for_every_account(scans: Mock) -> None:
-    read = capacity.hive_accounts(_Store())
+    read = capacity.hive_accounts(cast(RedisStore, _Store()))
     with pool.running():
         first = read(ENVIRON, 100, refresh=False)
         assert read(ENVIRON, 101, refresh=False) == first
@@ -72,7 +74,7 @@ def test_one_pass_makes_one_hive_quota_read_for_every_account(scans: Mock) -> No
 
 @pytest.mark.feature("controller-quota-read-once")
 def test_reads_outside_a_pass_stay_fresh(scans: Mock) -> None:
-    read = capacity.hive_accounts(_Store())
+    read = capacity.hive_accounts(cast(RedisStore, _Store()))
     read(ENVIRON, 100, refresh=False)
     read(ENVIRON, 101, refresh=False)
     assert scans.call_count == 4
