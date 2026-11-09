@@ -76,7 +76,7 @@ def check(
     folder = ledger_workspace.folder(slug, task)
     folder.mkdir(parents=True, exist_ok=True)
     fresh, holder = _cached(folder / CACHE, name, now)
-    if not fresh:
+    if not fresh or holder == name:
         holder = _holder(env, redis, slug, task)
         (folder / CACHE).write_text(json.dumps({"name": name, "at": now, "holder": holder}))
     if holder is None or not claim_lost.lost(name, {"claimed_by": holder}):

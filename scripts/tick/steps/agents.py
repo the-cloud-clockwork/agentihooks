@@ -177,9 +177,14 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     store.release(slug, agent.task, agent.name)
     store.drop_agent(slug, agent.name)
     row = rows.get(agent.task, {})
-    goes_on = bool(store.handoff(slug, agent.task)) and row.get("state") in tick.ACTIVE and not tick.awaiting_merge(row)
+    goes_on = (
+        tick._current_owner(agent, row)
+        and bool(store.handoff(slug, agent.task))
+        and row.get("state") in tick.ACTIVE
+        and not tick.awaiting_merge(row)
+    )
     if goes_on:
-        tick._reopen(slug, ledger, rows, agent.task)
+        goes_on = tick._reopen(slug, ledger, rows, agent.task, expected={"claimed_by": agent.name})
     tick.exits.settle(tick.InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
     return [f"retired {agent.name}"]
 

@@ -69,3 +69,47 @@ def test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state() 
         if_state=("open",),
         if_match={"claimed_by": agent.name, "claim_generation": 0, "awaiting": ""},
     )
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
+@pytest.mark.parametrize("owner", ["", "successor", "engineer"])
+@pytest.mark.parametrize("reopened", [False, True])
+def test_retirement_preserves_other_claims_and_fences_its_own_reopen(
+    monkeypatch: pytest.MonkeyPatch, owner: str, reopened: bool
+) -> None:
+    agent = AgentRecord(name="engineer", lane="eng", task="task", seat="eng-1@swarm")
+    row = {"state": "claimed", "claimed_by": owner}
+    rows = {"task": row}
+    store, ledger, runtime = Mock(), Mock(), Mock()
+    store.redis.hexists.return_value = False
+    store.handoff.return_value = "retained handoff"
+    ledger.update_task.return_value = (
+        {"state": "open", "claimed_by": ""} if reopened else {"state": "claimed", "claimed_by": "successor"}
+    )
+    monkeypatch.setattr(tick.master_retire, "forget", Mock())
+    monkeypatch.setattr(tick.reports, "Reports", Mock(return_value=Mock(removed=Mock(return_value=False))))
+    monkeypatch.setattr(tick.retire_watch, "reported_gone", Mock(return_value=False))
+    monkeypatch.setattr(tick, "_refund_parked", Mock())
+    monkeypatch.setattr(tick.reaper, "scratch_homes", Mock(return_value=[]))
+    settle = Mock()
+    monkeypatch.setattr(tick.exits, "settle", settle)
+    monkeypatch.setattr(tick, "InboxStore", Mock(return_value="inbox"))
+
+    assert agents._retire_ended("swarm", store, ledger, runtime, rows, agent, 1000) == ["retired engineer"]
+    runtime.retire.assert_called_once_with(agent, homes=[])
+    store.release.assert_called_once_with("swarm", "task", agent.name)
+    store.drop_agent.assert_called_once_with("swarm", agent.name)
+    if owner == agent.name:
+        ledger.update_task.assert_called_once_with(
+            "swarm",
+            "task",
+            {"state": "open", "claimed_by": ""},
+            if_state=tick.ACTIVE,
+            if_match={"claimed_by": agent.name},
+        )
+    else:
+        ledger.update_task.assert_not_called()
+        assert row["claimed_by"] == owner
+    settle.assert_called_once_with(
+        "inbox", agent.name, agent.seat if owner == agent.name and reopened else "", "exited"
+    )

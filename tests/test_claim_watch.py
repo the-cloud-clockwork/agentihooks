@@ -163,17 +163,13 @@ def test_the_ci_lane_is_checked() -> None:
     assert stop is not None
 
 
-def test_a_pushed_answer_is_kept_thirty_seconds_then_read_again() -> None:
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner() -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
-    assert claim_watch.CACHE_S >= 30
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
     redis.holder = OTHER
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S - 1, spawn) is None
-    assert redis.reads == [KEY]
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner=OTHER
-    )
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
     assert redis.reads == [KEY, KEY]
     assert len(spawn.calls) == 1
 
@@ -253,19 +249,15 @@ def test_the_client_reads_the_swarm_redis_with_a_fifty_millisecond_bound_and_no_
     ]
 
 
-def test_a_released_claim_keeps_the_session_until_the_next_claimant_takes_the_key() -> None:
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner() -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
     redis.holder = None
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner=""
-    )
-    redis.holder = OTHER
-    assert claim_watch.check(ENV, redis, 1000.0 + 2 * claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner=OTHER
-    )
-    assert len(spawn.calls) == 2
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner="")
+    assert redis.reads == [KEY, KEY]
+    assert spawn.calls[0][0] == ["agentihooks", "swarm", "sw", "--as", NAME, "exit"]
 
 
 @pytest.mark.parametrize("saved", ["[]", "null", '"x"', '{"name": "' + NAME + '", "at": "soon", "holder": null}'])
