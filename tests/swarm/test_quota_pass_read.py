@@ -108,7 +108,7 @@ def test_a_hive_publishes_a_provider_refusal_with_its_claude_reading(
     monkeypatch.setattr(balancer, "cached_observations", Mock(return_value=[(120, refused), (120, allowed)]))
     monkeypatch.setattr(daemon.codex_router, "accounts", Mock(return_value=[]))
     monkeypatch.setattr(daemon.codex_router, "quotas", Mock(return_value={}))
-    environ = {"AH_CC_TOKEN_one": "sentinel", "AH_CC_TOKEN_two": "sentinel"}
+    environ = {"AH_CC_TOKEN_one": "first", "AH_CC_TOKEN_two": "second"}
     _, quota = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 122)
     assert quota["claude:one"]["refused"] is True
     assert "refused" not in quota["claude:two"]
