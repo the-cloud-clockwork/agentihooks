@@ -1,6 +1,7 @@
 """A step abandoned with write domains beyond its own actions journals one swarm_tick_step_abandoned line."""
 
 import json
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import Event
@@ -117,20 +118,20 @@ def test_a_write_step_left_at_its_budget_journals_its_returned_write_domains(
 
 
 @pytest.mark.feature("swarm-tick-cost-report")
-def test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains(
+def test_a_write_step_running_past_an_expired_lane_journals_its_write_domains_only_at_its_own_budget(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    store, release = Store(), Event()
-    step = WriteStep("grouping release", "planted", waiting(release), writes=frozenset({Domain("tasks")}))
-    step.floor_s = 30.0
-    try:
-        with recording(store), pool.running(critical_s=0.3):
-            engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
-    finally:
-        release.set()
-        joined("grouping release")
+    store = Store()
+    step = WriteStep(
+        "grouping release", "planted", lambda tick, get: time.sleep(1.5) or [], writes=frozenset({Domain("tasks")})
+    )
+    step.floor_s = 1.0
+    with recording(store), pool.running(critical_s=0.3):
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [step])
+        assert journal(capsys.readouterr().err) == []
+    joined("grouping release")
     assert [(row["step"], row["budget_s"], row["writes"]) for row in journal(capsys.readouterr().err)] == [
-        ("grouping release", 30.0, ["tasks"])
+        ("grouping release", 1.0, ["tasks"])
     ]
 
 
