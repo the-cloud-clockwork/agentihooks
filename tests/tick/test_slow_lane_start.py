@@ -16,6 +16,7 @@ pytestmark = pytest.mark.unit
 CRITICAL_S = 2.0
 SLOW_S = 1.8
 OVERRUN_S = 4.0
+BUSY_S = 2.5
 
 
 class View:
@@ -58,7 +59,7 @@ def _pass_graph() -> dict[str, frozenset[str]]:
 def test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     steps = (
-        Step("overrun", "a", _overrun),
+        Step("overrun beside the lane", "a", _overrun),
         Step("fast", "a"),
         Step("slow free", "a", lane=engine.SLOW),
         Step("slow after fast", "b", needs=frozenset({"fast"}), lane=engine.SLOW),
@@ -76,8 +77,8 @@ def test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lan
 def test_a_handed_step_needing_a_lost_critical_step_is_still_dropped() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     steps = (
-        Step("overrun", "a", _overrun),
-        Step("slow after overrun", "b", needs=frozenset({"overrun"}), lane=engine.SLOW),
+        Step("overrun before a drop", "a", _overrun),
+        Step("slow after overrun", "b", needs=frozenset({"overrun before a drop"}), lane=engine.SLOW),
         Step("through the dropped", "c", needs=frozenset({"slow after overrun"}), lane=engine.SLOW),
     )
     ctx = Context(View(), Deadline.after(10.0))
@@ -87,6 +88,23 @@ def test_a_handed_step_needing_a_lost_critical_step_is_still_dropped() -> None:
         ("slow after overrun", True),
         ("through the dropped", True),
     ]
+
+
+def _busy(ctx: Context) -> Result:
+    sleep(BUSY_S)
+    return Result()
+
+
+@pytest.mark.feature("swarm-tick-slow-lane-start")
+def test_a_busy_handed_lane_leaves_the_critical_steps_their_workers() -> None:
+    later: list[tuple[engine.StepRecord, ...]] = []
+    busy = tuple(Step(f"busy {index}", "a", _busy, lane=engine.SLOW) for index in range(2))
+    steps = (*busy, Step("critical beside busy", "a"))
+    ctx = Context(View(), Deadline.after(10.0))
+    with pool.running(workers=2, critical_s=CRITICAL_S, slow_s=2 * BUSY_S + 1.0):
+        records = engine.run_graph(steps, ctx, finished=later.append)
+    assert [(record.name, record.outcome) for record in records] == [("critical beside busy", engine.OK)]
+    assert {record.outcome for record in later[0]} == {engine.OK}
 
 
 @pytest.mark.feature("swarm-tick-slow-lane-start")

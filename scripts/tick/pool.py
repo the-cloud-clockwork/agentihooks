@@ -51,6 +51,12 @@ RESERVES: Mapping[str, float] = MappingProxyType({"spawn": SPAWN_RESERVE_S})
 
 _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
 
+
+def _handoff(workers: int) -> ThreadPoolExecutor:
+    """Return the workers of a pass's handed off steps: half the pass's step workers, at least one."""
+    return ThreadPoolExecutor(max_workers=max(1, workers // 2), thread_name_prefix="tick-handed")
+
+
 Item = TypeVar("Item")
 Found = TypeVar("Found")
 
@@ -75,6 +81,12 @@ class Pass:
     gone: set[str] = field(default_factory=set[str], compare=False)
     guard: Lock = field(default_factory=Lock, compare=False)
     tracked: set[str] = field(default_factory=set[str], compare=False)
+    handoff: ThreadPoolExecutor = field(default_factory=lambda: _handoff(WORKERS), compare=False)
+
+    def executor(self, name: str) -> ThreadPoolExecutor:
+        """Return the workers step ``name`` runs on: the handed off steps' own, else the pass's step workers, so the
+        handed lane never takes a worker from the rest of the pass."""
+        return self.handoff if self.handed_of((name,)) else self.steps
 
     def hand(self, names: Iterable[str]) -> None:
         """Mark each step in ``names`` handed off to run on after its group, pending until ``end`` marks it."""
@@ -213,6 +225,7 @@ def running(
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
         closing_s,
         reserved(critical_s) if reserves is None else reserves,
+        handoff=_handoff(workers),
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
@@ -223,6 +236,7 @@ def running(
         for thread in current.later:
             thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
         current.steps.shutdown(wait=False, cancel_futures=True)
+        current.handoff.shutdown(wait=False, cancel_futures=True)
         current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:

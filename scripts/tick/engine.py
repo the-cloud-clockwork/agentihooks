@@ -10,7 +10,7 @@ from contextvars import Context as ContextCopy
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from functools import partial
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 from uuid import uuid4
 
@@ -306,8 +306,8 @@ class SiteGate:
 
     A site's hook runs once, when the site's first step is ready, and shuts the whole site when it answers false;
     ``shut`` shuts single steps and is asked before and after the hook. ``seen`` holds the records of the steps that
-    ended before the latest step became ready. The handed lane and the rest of the graph ask it from their own
-    threads, one at a time, so a site's hook runs once.
+    ended, on either thread, before the latest step became ready. The handed lane and the rest of the graph ask it
+    from their own threads; a site's hook runs once, outside the guard.
     """
 
     hooks: Mapping[str, Callable[[], bool]]
@@ -315,17 +315,30 @@ class SiteGate:
     seen: dict[str, StepRecord] = field(default_factory=dict[str, StepRecord])
     opened: dict[str, bool] = field(default_factory=dict[str, bool])
     guard: Lock = field(default_factory=Lock, compare=False)
+    opening: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
 
     def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
-        """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step."""
+        """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step; a
+        step of a site whose hook runs on another thread waits for it, and steps of other sites never do."""
         with self.guard:
             self.seen.update(records)
             if self.shut(step):
                 return False
-            if step.group not in self.opened:
-                hook = self.hooks.get(step.group)
-                self.opened[step.group] = hook is None or hook()
-            return self.opened[step.group] and not self.shut(step)
+            first = step.group not in self.opening
+            opening = self.opening.setdefault(step.group, Event())
+        if first:
+            self._open(step.group, opening)
+        opening.wait()
+        with self.guard:
+            return self.opened.get(step.group, False) and not self.shut(step)
+
+    def _open(self, group: str, opening: Event) -> None:
+        """Run the hook of site ``group`` and keep its answer, then release the steps waiting on it."""
+        try:
+            hook = self.hooks.get(group)
+            self.opened[group] = hook is None or hook()
+        finally:
+            opening.set()
 
 
 def _slow_lane(ordered: tuple[Step, ...], handed: frozenset[str]) -> tuple[Step, ...]:
@@ -637,14 +650,18 @@ def _eager(
                 elif _kept(step):
                     earlier = _earlier(step, names, found, awaited)
                     start = _Start(clock)
-                    future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found, start)
+                    future = found.executor(step.name).submit(
+                        copy_context().run, _kept_after, earlier, step, ctx, found, start
+                    )
                     submitted.append(future)
                     running[future] = (step, start, ctx.deadline)
                 else:
                     earlier = _earlier(step, names, found, awaited)
                     lane_ctx = _lane_context(lane, ctx)
                     start = _Start(clock)
-                    future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found, start)
+                    future = found.executor(step.name).submit(
+                        copy_context().run, _after, earlier, step, lane_ctx, found, start
+                    )
                     submitted.append(future)
                     running[future] = (step, start, lane)
             ended = [0.0] if any(step.name in records for step in ready) else []
