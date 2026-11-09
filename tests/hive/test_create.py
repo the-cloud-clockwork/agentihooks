@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -986,7 +987,7 @@ def test_two_concurrent_creates_reserve_different_names(world):
     assert names == ["swarm-hive-001", "swarm-hive-002"]
     for state in started.values():
         assert _reserved(world, state["name"]) == state["reservation"]
-        assert state["reservation"].startswith("root:")
+        assert re.fullmatch(r"root:[0-9a-f]{16}", state["reservation"])
         assert 0 < world.tools.redis.ttl(f"{create.RESERVED}:{state['name']}") <= create.RESERVE_S
 
 
