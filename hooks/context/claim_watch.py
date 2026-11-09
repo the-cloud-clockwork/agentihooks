@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks.context import worker_mode
+from scripts.swarm import claim_lost
 from scripts.swarm.keyspace import ROOT
 
 WORKERS = frozenset({"eng", "ci"})
@@ -53,7 +54,7 @@ def _holder(environ: Mapping[str, str], redis: Any, slug: str, task: str) -> str
 
     try:
         client = _client(environ) if redis is None else redis
-        return None if client is None else client.get(key(slug, task))
+        return None if client is None else (client.get(key(slug, task)) or "")
     except (redis_lib.RedisError, OSError):
         return None
 
@@ -64,7 +65,7 @@ def check(
     now: float | None = None,
     spawn: Callable[..., Any] | None = None,
 ) -> str | None:
-    """The stop message for a worker whose pushed task claim names another agent, else None."""
+    """The stop message when a reachable task claim no longer names the worker, else None."""
     from scripts.swarm_ledger import ledger_workspace
 
     env = os.environ if environ is None else environ
@@ -78,7 +79,7 @@ def check(
     if not fresh:
         holder = _holder(env, redis, slug, task)
         (folder / CACHE).write_text(json.dumps({"name": name, "at": now, "holder": holder}))
-    if not holder or holder == name:
+    if holder is None or not claim_lost.lost(name, {"claimed_by": holder}):
         return None
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
     with (folder / "progress.md").open("a") as progress:

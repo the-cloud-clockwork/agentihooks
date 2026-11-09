@@ -9,6 +9,8 @@ from dataclasses import replace
 from importlib import import_module
 from typing import Any
 
+from scripts.swarm import claim_lost
+
 
 def skip_refused(function: Callable[..., Any], *args: Any) -> Any:
     from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -107,12 +109,13 @@ def _ended(agent: Any, rows: dict[str, Any]) -> bool:
         task.get("done")
         or task.get("state") in {"done", "blocked", "handoff"}
         or (task.get("awaiting") == "verify" and not task.get("claimed_by"))
+        or not _current_owner(agent, task)
     )
     return agent.state == "finished" or bool(ended)
 
 
 def _current_owner(agent: Any, row: dict[str, Any]) -> bool:
-    return row.get("claimed_by", "") in ("", agent.name)
+    return not claim_lost.lost(agent.name, row)
 
 
 def _reopen(slug: str, ledger: Any, rows: dict[str, Any], task_id: str, expected: dict[str, Any] | None = None) -> bool:

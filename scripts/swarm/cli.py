@@ -1176,12 +1176,10 @@ def cmd_exit(store, args):
     HerdrRuntime().reap_name(name)
 
 
-def _claimless(store, slug, agent):
-    from scripts.hive import scope
-
+def _claimless(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
     if store.claimant(slug, agent.task) != agent.name:
         return True
-    return claim_lost.lost(agent.name, LedgerClient().task(slug, agent.task), bool(scope.member()))
+    return claim_lost.lost(agent.name, LedgerClient().task(slug, agent.task))
 
 
 def gate_mode(key, value):

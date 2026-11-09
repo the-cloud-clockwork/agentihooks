@@ -1,9 +1,9 @@
-"""A worker has lost its task when the ledger names another claimant, or names none while the worker runs as a hive
-member: the tick restores an emptied claim only for a live workstation agent."""
+"""Shared task ownership checks for worker exits, tool calls and tick retirement."""
+
+from collections.abc import Mapping
 
 
-def lost(name: str, row: dict | None, hive: bool) -> bool:
+def lost(name: str, row: Mapping[str, object] | None) -> bool:
     if not row:
         return False
-    owner = row.get("claimed_by") or ""
-    return owner != name and (bool(owner) or hive)
+    return row.get("claimed_by") != name

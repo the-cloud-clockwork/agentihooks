@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -5,6 +7,15 @@ import pytest
 from scripts.swarm import tick
 from scripts.swarm.store import AgentRecord
 from scripts.tick.steps import agents, common
+
+
+def _timed(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    return function(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tick.timing, "timed", _timed)
 
 
 @pytest.mark.feature("swarm-reopened-claim-loss")

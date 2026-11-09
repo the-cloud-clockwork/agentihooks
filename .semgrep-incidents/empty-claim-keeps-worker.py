@@ -17,11 +17,11 @@ def permissive_hook(owner: str | None, name: str) -> str | None:
 
 def checked_owner(row: dict[str, Any], name: str) -> bool:
     # ok: empty-claim-keeps-worker
-    return not claim_lost.lost(name, row, True)
+    return not claim_lost.lost(name, row)
 
 
 def checked_hook(owner: str | None, name: str) -> str | None:
     # ok: empty-claim-keeps-worker
-    if owner is None or not claim_lost.lost(name, {"claimed_by": owner}, True):
+    if owner is None or not claim_lost.lost(name, {"claimed_by": owner}):
         return None
     return "exit"
