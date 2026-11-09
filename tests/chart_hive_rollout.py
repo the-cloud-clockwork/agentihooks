@@ -1,4 +1,6 @@
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -6,12 +8,12 @@ import yaml
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
 
-def render(*settings):
+def render(*settings: str, chart: Path = CHART) -> list[dict]:
     command = [
         "helm",
         "template",
         "proof",
-        str(CHART),
+        str(chart),
         "--namespace",
         "hive",
         "--set",
@@ -126,6 +128,37 @@ def test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest():
         assert "agentihooks.io/release" not in worker["spec"]["template"]["metadata"]["annotations"]
 
 
+def render_released(app_version: str, *settings: str) -> list[dict]:
+    """Render a copy of the chart whose appVersion is the one the chart release package stamps."""
+    with tempfile.TemporaryDirectory() as scratch:
+        copy = Path(scratch) / CHART.name
+        shutil.copytree(CHART, copy)
+        meta = yaml.safe_load((copy / "Chart.yaml").read_text())
+        meta["appVersion"] = app_version
+        (copy / "Chart.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
+        return render(*settings, chart=copy)
+
+
+def hook_images(objects: list[dict]) -> set[str]:
+    """Name the image every rollout hook Job runs."""
+    return {
+        item["spec"]["template"]["spec"]["containers"][0]["image"]
+        for item in objects
+        if item["kind"] == "Job" and item["metadata"]["name"].endswith(("-acquire", "-release"))
+    }
+
+
+def test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version():
+    repository = "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
+    for tag in ("release", "dev", "2.17.400"):
+        objects = render_released("2.17.467", f"workers.image.tag={tag}")
+        assert hook_images(objects) == {f"{repository}:2.17.467"}
+        worker = next(item for item in objects if item["kind"] == "Deployment")
+        assert worker["spec"]["template"]["spec"]["containers"][0]["image"] == f"{repository}:{tag}"
+    assert hook_images(render_released("dev", "workers.image.tag=release")) == {f"{repository}:release"}
+    assert hook_images(render("workers.image.tag=release")) == {f"{repository}:release"}
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -134,4 +167,5 @@ if __name__ == "__main__":
     test_storage_preparation_is_not_suppressed_by_native_rollout_hooks()
     test_the_release_stamp_annotates_only_leased_hive_pods()
     test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
+    test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")
