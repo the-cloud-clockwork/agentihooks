@@ -495,12 +495,15 @@ def test_a_ledger_subject_the_antoncore_user_lacks_names_the_grader_as_its_sourc
     }
 
 
-def test_the_ledger_grant_covers_the_inbox_bucket_the_seat_inbox_writes_and_purges():
+def test_the_ledger_grant_covers_the_inbox_bucket_the_seat_inbox_writes_and_purges() -> None:
     from scripts.inbox.bus import SeatInbox
 
     opened = []
 
     class Bus:
+        def for_swarm(self, swarm: str) -> "Bus":
+            return self
+
         def state(self, bucket):
             opened.append(bucket)
 

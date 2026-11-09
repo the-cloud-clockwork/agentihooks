@@ -1,6 +1,6 @@
+from typing import cast
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.events import memory
@@ -19,6 +19,8 @@ from tests.hive.test_nats_grant import signer as signer
 def test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], fails: bool
 ) -> None:
+    import fakeredis
+
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setenv("AGENTIHOOKS_BUS_SCOPED", "1")
     monkeypatch.setenv("AGENTIHOOKS_BUS_SWARMS", "swarm")
@@ -26,7 +28,7 @@ def test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_fa
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://member")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "remote")
     monkeypatch.setattr(bus, "OPEN_WAIT_S", 30.0)
-    shared = memory.open_bus(BusConfig(scoped=True))
+    shared = cast(Bus, memory.open_bus(BusConfig(scoped=True)))
     publisher = bus.SeatPublisher(lambda: shared)
     monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     own = shared.for_swarm("swarm")
@@ -57,6 +59,8 @@ def test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_fa
 def test_scoped_nats_member_sends_without_root_state_or_redis_fallback(
     hub: Bus, signer: Signer, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import fakeredis
+
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setenv("AGENTIHOOKS_BUS_SCOPED", "1")
     monkeypatch.setenv("AGENTIHOOKS_BUS_SWARMS", "rig")
@@ -66,7 +70,7 @@ def test_scoped_nats_member_sends_without_root_state_or_redis_fallback(
     monkeypatch.setattr(bus, "OPEN_WAIT_S", 30.0)
     address = "eng-1@rig"
     consumer = bus.SeatInbox(hub, "rig").consumer(address, "session")
-    client = member(signer)
+    client = cast(Bus, member(signer))
     publisher = bus.SeatPublisher(lambda: client)
     monkeypatch.setattr(bus, "_publisher", lambda config: publisher)
     store = InboxStore(fakeredis.FakeRedis(decode_responses=True))
