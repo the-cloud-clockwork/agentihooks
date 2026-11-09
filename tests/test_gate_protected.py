@@ -111,7 +111,7 @@ def test_a_head_declaring_its_own_non_gate_entry_is_red():
     assert "test.yml/planted runs on pull requests but is not a need of Gate — Required." in problems
 
 
-def test_a_head_extending_a_base_declaration_keeps_the_base_expiry():
+def test_a_head_and_base_declaration_date_never_blocks_grading() -> None:
     base = _workflow()
     base["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
     head = copy.deepcopy(base)
@@ -122,7 +122,7 @@ def test_a_head_extending_a_base_declaration_keeps_the_base_expiry():
         base_config={"not_gates": {"test.yml/slow": old}},
         head_config={"not_gates": {"test.yml/slow": {**old, "expires": "2027-01-01"}}},
     )
-    assert "test.yml/slow expired on 2026-10-01." in problems
+    assert problems == []
 
 
 def test_a_head_retiring_a_declared_job_with_its_entry_is_green():
@@ -1503,7 +1503,7 @@ def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_m
 
 
 @pytest.mark.parametrize("stage", ["mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"])
-def test_a_merged_mutation_stage_keeps_the_base_expiry(stage: str) -> None:
+def test_a_merged_mutation_stage_ignores_the_base_declaration_date(stage: str) -> None:
     base, head = _aggregators()
     head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["mutation"] = {"needs": [stage], "runs-on": "ubuntu-latest"}
@@ -1512,7 +1512,7 @@ def test_a_merged_mutation_stage_keeps_the_base_expiry(stage: str) -> None:
     base_config = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
     head_config = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
     problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _TODAY, _POLICY)
-    assert f"{key} expired on 2026-10-01." in problems
+    assert problems == []
 
 
 def _separate_summary(head, steps):
@@ -1624,7 +1624,7 @@ def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_b
     assert "The test summary must use the reviewed reporting job." in problems
 
 
-def test_the_separate_summary_keeps_the_protected_declaration_expiry():
+def test_the_separate_summary_ignores_the_protected_declaration_date() -> None:
     from scripts import ci_reuse
 
     base, head = _aggregators()
@@ -1642,7 +1642,7 @@ def test_the_separate_summary_keeps_the_protected_declaration_expiry():
         base_config={"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}},
         head_config={"not_gates": {key: _entry()}},
     )
-    assert "test.yml/test-summary expired on 2026-10-01." in problems
+    assert problems == []
 
 
 @pytest.mark.parametrize("promotion", [False, True])

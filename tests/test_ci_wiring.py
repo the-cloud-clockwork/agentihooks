@@ -56,13 +56,13 @@ def test_the_root_defaults_to_the_working_directory(tmp_path, monkeypatch, capsy
     assert "test.yml/planted runs on pull requests" in capsys.readouterr().out
 
 
-def test_main_grades_expiry_against_the_current_utc_date(tmp_path, capsys):
-    config = {"not_gates": {"test.yml/old": _entry(expires="2000-01-01"), "test.yml/new": _entry(expires="2999-01-01")}}
+def test_main_ignores_declaration_dates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config = {
+        "not_gates": {"test.yml/old": _entry(expires="2000-01-01"), "test.yml/new": _entry(expires="invalid-date")}
+    }
     _write(tmp_path, {"test.yml": _gate_workflow(old={}, new={})}, config)
-    assert ci_wiring.main(["--root", str(tmp_path)]) == 1
-    out = capsys.readouterr().out
-    assert "1 workflows, 5 jobs, 1 wiring problems" in out
-    assert "::error::test.yml/old expired on 2000-01-01." in out
+    assert ci_wiring.main(["--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "1 workflows, 5 jobs, 0 wiring problems\n"
 
 
 def test_main_reads_today_in_utc(tmp_path, monkeypatch, capsys):
@@ -179,9 +179,9 @@ def test_mismatched_event_quotes_keep_the_job_on_the_pull_request_path(condition
     assert ci_wiring.on_pull_requests({"if": condition}) is True
 
 
-@pytest.mark.parametrize("field", ["reason", "owner", "expires"])
+@pytest.mark.parametrize("field", ["reason", "owner"])
 @pytest.mark.parametrize("empty", ["", None])
-def test_an_exemption_missing_a_field_is_red(field, empty):
+def test_an_exemption_missing_a_field_is_red(field: str, empty: str | None) -> None:
     workflows = {"test.yml": _gate_workflow(record={}), "smoke.yml": {"on": "pull_request", "jobs": {"smoke": {}}}}
     entry = {**_entry(), field: empty}
     config = {"not_gates": {"test.yml/record": entry}, "outside_gate": {"smoke.yml/smoke": entry}}
@@ -191,12 +191,12 @@ def test_an_exemption_missing_a_field_is_red(field, empty):
     ]
 
 
-def test_an_exemption_expires_the_day_after_its_date():
+def test_declarations_remain_valid_after_their_former_expiry() -> None:
     workflows = {"test.yml": _gate_workflow(record={}, late={})}
     config = {
         "not_gates": {"test.yml/record": _entry(expires="2026-10-08"), "test.yml/late": _entry(expires="2026-10-07")}
     }
-    assert _check(workflows, config) == ["test.yml/late expired on 2026-10-07."]
+    assert _check(workflows, config) == []
 
 
 @pytest.mark.parametrize("count", [0, 2])
