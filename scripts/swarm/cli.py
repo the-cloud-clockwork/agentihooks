@@ -340,6 +340,7 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
     if not ledger_view.reads(ledger):
         return
     beating.callback(ledger_client.OFFLINE.set, False)
+    beating.callback(ledger_client.SLOW.set, False)
     try:
         ledger_view.start(slug, ledger.service, ledger_client.SNAPSHOT_TIMEOUT_S)
     except ledger_link.Cleartext as exc:
@@ -350,15 +351,10 @@ def _hold_view(beating: ExitStack, slug: str, ledger: LedgerClient) -> None:
         _read_long_or_hold_stored(slug, ledger, exc)
 
 
-def _timed_out(exc: OSError) -> bool:
-    """True when a ledger read failed because the server answered too slowly, not because it refused or is gone."""
-    return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
-
-
 def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> None:
     """Read the view of ledger ``slug`` again under the export budget when the short read timed out and this host
     stores no view fresh enough to run from, else hold the stored view."""
-    if _timed_out(exc) and not ledger_view.fresh(slug):
+    if ledger_view.timed_out(exc) and not ledger_view.fresh(slug):
         try:
             ledger_view.start(slug, ledger.service, ledger_client.EXPORT_TIMEOUT_S)
             return
@@ -371,12 +367,13 @@ def _read_long_or_hold_stored(slug: str, ledger: LedgerClient, exc: OSError) -> 
 
 def _hold_stored(slug: str, exc: OSError) -> None:
     """Hold the last good view of ledger ``slug`` for the pass and run it offline, or leave the pass to its ledger
-    health probe when this host stores none."""
+    health probe when this host stores none; a read that only timed out leaves its writes sent to the server first."""
     if ledger_view.hold_stored(slug) is None:
         print(f"ledger {slug} not answering ({exc}) and no view is stored to run from", file=sys.stderr)
         return
     print(f"ledger {slug} not answering ({exc}): the pass runs from its last good view", file=sys.stderr)
     ledger_client.OFFLINE.set(True)
+    ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
 def _stopped_tick(store, slug, ledger, runtime, held):
@@ -1506,7 +1503,24 @@ def probe_command(store, args):
         print(found.line())
 
 
-def cmd_status(store, args):
+def hive_admission(store: Any, slug: str) -> dict[str, Any]:
+    """Each live hive's admission room and limit, and the binding limit against quota seats and host room."""
+    from scripts.hive import admission
+    from scripts.hive.launch import live_hives
+    from scripts.swarm import capacity
+
+    hives = live_hives(store)
+    record: dict[str, Any] = capacity.read(store, slug)
+    host: dict[str, Any] = record.get("host") or {}
+    environ = dict(os.environ)
+    observed = capacity.accounts(environ, time.time(), refresh=False)
+    seats = capacity.quota_seats(observed, capacity.warned_accounts(observed, environ))
+    others: dict[str, int | None] = {"quota seats": seats, "host room": host.get("room")}
+    rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+    return {"hives": rows, "lines": admission.view_lines(hives, others)}
+
+
+def cmd_status(store: Any, args: Any) -> None:
     if args.json:
         store.config(args.slug)
         print(json.dumps(status_report(store, args.slug, LedgerClient().state(args.slug), HerdrRuntime())))
@@ -1539,6 +1553,7 @@ def cmd_status(store, args):
     from scripts.hive import admission, placement_waits
 
     held += admission.status_lines(placement_waits.read(store, args.slug))
+    held += hive_admission(store, config.slug)["lines"]
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))
@@ -1625,6 +1640,7 @@ def autoscale_lines(config, decision):
 
 
 def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
+    from scripts.hive import admission, launch
     from scripts.swarm import capacity, local_slots
 
     config = store.config(args.slug) if args.slug in store.slugs() else SwarmConfig(args.slug, "", max_eng=0, max_ci=0)
@@ -1635,15 +1651,30 @@ def cmd_autoscale(store: RedisStore, args: argparse.Namespace) -> None:
     _, decision = capacity.autoscaled(replace(config, scaling=AUTO_SCALING), inputs, capacity.tick_host(inputs))
     known = args.slug in store.slugs()
     slots = {"local_slots": local_slots.maximum(store, args.slug, config.local_max_agents)} if known else {}
+    host: dict[str, Any] = (decision or {})["host"]
+    hives: list[dict[str, Any]] = [] if args.fixture else launch.live_hives(store)
+    admitted: list[str] = []
+    if hives:
+        seats = capacity.inputs_seats(inputs)
+        admitted = admission.view_lines(hives, {"quota seats": seats, "host room": host["room"]})
     if args.json:
+        rows = [{"hive": hive["id"], "room": hive["room"], "limit": hive["limit"]} for hive in hives]
+        shown: dict[str, Any] = {"hive_admission": rows, "binding": admitted[-1]} if hives else {}
         print(
             json.dumps(
-                {"scaling": config.scaling, "applied": config.scaling == AUTO_SCALING, **decision, **slots}, indent=2
+                {
+                    "scaling": config.scaling,
+                    "applied": config.scaling == AUTO_SCALING,
+                    **(decision or {}),
+                    **slots,
+                    **shown,
+                },
+                indent=2,
             )
         )
         return
     local = [f"local slots {slots['local_slots']}, host room guard applies"] if known else []
-    print("\n".join([*autoscale_lines(config, decision), *local]))
+    print("\n".join([*autoscale_lines(config, decision), *local, *admitted]))
 
 
 def cmd_names(store, args):

@@ -2,40 +2,33 @@
   "not_gates": {
     "test.yml/test-summary": {
       "reason": "Reports current run test counts after the test producers settle without grading required results.",
-      "owner": "ci-1@rig-grade-swarm-doctor",
-      "expires": "2027-04-20"
+      "owner": "ci-1@rig-grade-swarm-doctor"
     },
     "test.yml/mutation-refine": {
       "reason": "Writes the measured mutation plan the shards run; its result reaches Gate Required through the mutation job, which fails when refinement or any shard does not succeed.",
-      "owner": "ci-5@rig-grade-swarm",
-      "expires": "2027-05-01"
+      "owner": "ci-5@rig-grade-swarm"
     },
     "test.yml/mutation-probe": {
       "reason": "Runs each split mutant's head tests once so the shards skip them; its results reach Gate Required through the mutation job, which fails when the early stage, the replan or any shard does not succeed.",
-      "owner": "ci-3@rig-grade-swarm",
-      "expires": "2027-05-01"
+      "owner": "ci-3@rig-grade-swarm"
     },
     "test.yml/mutation-replan": {
       "reason": "Sizes the shards from the mutants the early stage left; its result reaches Gate Required through the mutation job, which fails when the replan or any shard does not succeed.",
-      "owner": "ci-3@rig-grade-swarm",
-      "expires": "2027-05-01"
+      "owner": "ci-3@rig-grade-swarm"
     },
     "test.yml/mutation-shard": {
       "reason": "Grades one share of the changed line mutants; the mutation job merges every shard report, grades split units and fails when any shard does not succeed.",
-      "owner": "ci-5@rig-grade-swarm",
-      "expires": "2027-05-01"
+      "owner": "ci-5@rig-grade-swarm"
     }
   },
   "outside_gate": {
     "equivalence.yml/ledger-equivalence": {
       "reason": "Replays ledger storage and pages on every pull request that touches the ledger package, its tests or this workflow; the equivalence gate task wires it into the gate.",
-      "owner": "ci-1@rig-grade-swarm",
-      "expires": "2026-11-22"
+      "owner": "ci-1@rig-grade-swarm"
     },
     "gate-protected.yml/grade": {
       "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
-      "owner": "ci-2@rig-grade-swarm",
-      "expires": "2027-04-09"
+      "owner": "ci-2@rig-grade-swarm"
     }
   }
 }

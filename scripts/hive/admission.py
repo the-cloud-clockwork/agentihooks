@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 CPU, RAM, QUOTA, PLACEMENT, NODE_CAP, MISSING = "cpu", "ram", "quota", "placement", "node cap", "missing telemetry"
 MAX_AGENTS, DISK = "max agents", "disk"
+HIVE_ADMISSION = "hive admission"
 REASONS = (CPU, RAM, DISK, QUOTA, PLACEMENT, NODE_CAP, MAX_AGENTS, MISSING)
 HOST_PERCENT = 80
 SWARM_PERCENT = 40
@@ -251,3 +252,25 @@ def counts(waits: dict) -> dict:
 def status_lines(waits: dict) -> list[str]:
     shown = "  ".join(f"{reason} {count}" for reason, count in counts(waits).items())
     return [f"admission refusals  {shown}"] if shown else []
+
+
+def hive_lines(hives: list[dict[str, Any]]) -> list[str]:
+    """One line per hive naming its admission room and the limit that binds it."""
+    return [f"hive {hive['id']}  admission room {hive['room']}  {hive['limit']}" for hive in hives]
+
+
+def binding(hives: list[dict[str, Any]], others: dict[str, int | None]) -> str:
+    """The limit that binds spawning: the smallest of the summed hive admission room and the other known rooms, hive
+    admission first on a tie; at zero hive room it names each hive's refusing limit."""
+    room = sum(hive["room"] for hive in hives)
+    limits = {HIVE_ADMISSION: room, **{name: count for name, count in others.items() if count is not None}}
+    name = min(limits, key=limits.__getitem__)
+    line = f"binding limit {name}, room {limits[name]}"
+    if name != HIVE_ADMISSION or room:
+        return line
+    return line + ": " + "; ".join(f"hive {hive['id']} {hive['refusal']}" for hive in hives)
+
+
+def view_lines(hives: list[dict[str, Any]], others: dict[str, int | None]) -> list[str]:
+    """The hive admission lines and the binding limit line, none when no hive is live."""
+    return [*hive_lines(hives), binding(hives, others)] if hives else []
