@@ -2673,6 +2673,16 @@
       ]
     },
     {
+      "id": "fleet-red-claim-view-cache-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2440",
+      "behaviour": "The claim view admits an open task with a pull request whenever the fleet red listing of its repository is not yet saved, instead of listing it live, so spawn due never blocks its budget on a GitHub round trip; a saved listing, saved or failed, still judges the task exactly as before.",
+      "seam": "the claim view's fleet red reader through scripts.swarm.fleet_red.saved_reader",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_claim_view_admits_a_task_on_a_cold_cache_without_listing_live"
+      ]
+    },
+    {
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
