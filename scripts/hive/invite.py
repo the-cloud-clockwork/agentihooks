@@ -33,6 +33,7 @@ class Request:
     signer_path: str | None = None
     swarms: tuple[str, ...] = ()
     sync: str | None = None
+    minted: Callable[[str], None] | None = None
 
 
 def default_path(label: str) -> str:
@@ -61,6 +62,8 @@ def invite(
     entries = {key: value for key, value in entries.items() if value}
     signer = _read(bao, request.signer_path) if request.signer_path else {}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
+    if request.minted is not None:
+        request.minted(f"{grant['id']}")
     member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
     bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL") or signer.get(SIGNER_URL)
     if bus_url:
