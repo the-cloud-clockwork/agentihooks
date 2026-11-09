@@ -888,20 +888,50 @@ def select_launch_credential(
     now: float | None = None,
 ) -> RouteDecision:
     """A swarm or hive slot launch keeps the session cap; an operator launch overflows like the master."""
-    pick = (
-        select_credential
-        if environ.get("AGENTIHOOKS_SWARM") or environ.get("AGENTIHOOKS_SLOT_HIVE")
-        else select_master_credential
-    )
-    return pick(
-        environ,
-        include_fable=include_fable,
-        claude_bin=claude_bin,
-        sessions=sessions,
-        exclude=exclude,
-        cache_file=cache_file,
-        now=now,
-    )
+    options: dict[str, Any] = {
+        "include_fable": include_fable,
+        "claude_bin": claude_bin,
+        "sessions": sessions,
+        "exclude": exclude,
+        "cache_file": cache_file,
+        "now": now,
+    }
+    if environ.get("AGENTIHOOKS_SWARM") or environ.get("AGENTIHOOKS_SLOT_HIVE"):
+        return select_credential(environ, **options)
+    try:
+        return select_master_credential(environ, **options)
+    except RoutingError as exc:
+        if not exc.results:
+            raise
+        timestamp = time.time() if now is None else now
+        reasons = "; ".join(
+            f"{result.account}: {_launch_refusal(result, timestamp, include_fable, set(exclude))}"
+            for result in exc.results
+        )
+        raise RoutingError(f"no Claude account is open: {reasons}", exc.results) from exc
+
+
+def _launch_refusal(result: ProbeResult, now: float, include_fable: bool, excluded: set[str]) -> str:
+    """Why an operator launch cannot take this account."""
+    if result.account in excluded:
+        return "excluded from this launch"
+    if refused(result):
+        return REVOKED_ERROR
+    weeks = [result.seven_day, *([result.fable] if include_fable else [])]
+    left = [session_bands.left(window.used, window.resets_at, now) for window in weeks]
+    if None in left:
+        return "no fresh quota reading"
+    week = min(value for value in left if value is not None)
+    from scripts.routing import reservation
+
+    if reservation.primary_reserved(result.account, week, os.environ):
+        return "the primary login keeps its week reserve"
+    if week < session_bands.WEEK_FLOOR:
+        return f"{week:.0f}% of its week left, under the {session_bands.WEEK_FLOOR:g}% floor"
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
+    if five is not None and five < session_bands.HANDOFF_FIVE:
+        return f"{five:.0f}% of its five hour window left, under the {session_bands.HANDOFF_FIVE:g}% floor"
+    return "open"
 
 
 def _api_side(

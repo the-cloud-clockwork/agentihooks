@@ -1379,3 +1379,37 @@ def test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_f
     assert capsys.readouterr().out == (
         "[agenti] account=BEST routing_left=80% 5h_left=90% 7d_left=80% source=master overflow\n"
     )
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_skips_an_account_under_five_percent_of_its_five_hour_window(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tired = balancer.parse_probe("TIRED", _stream(0.97, 0.05), 100)
+    mid = balancer.parse_probe("MID", _stream(0.30, 0.40), 100)
+    low = balancer.parse_probe("LOW", _stream(0.50, 0.70), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, mid, low], "cached"))
+    env = {"AH_CC_TOKEN_TIRED": "t", "AH_CC_TOKEN_MID": "m", "AH_CC_TOKEN_LOW": "l"}
+    full = {"TIRED": 0, "MID": 6, "LOW": 4}
+    decision = balancer.select_launch_credential(env, cache_file=tmp_path / "c.json", sessions=full, now=1000)
+    assert (decision.account, decision.source) == ("MID", "master overflow")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    tired = balancer.parse_probe("TIRED", _stream(0.97, 0.05), 100)
+    spent = balancer.parse_probe("SPENT", _stream(0.10, 0.99), 100)
+    skipped = balancer.parse_probe("SKIPPED", _stream(0.10, 0.10), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([tired, spent, skipped], "cached"))
+    env = {"AH_CC_TOKEN_TIRED": "t", "AH_CC_TOKEN_SPENT": "s", "AH_CC_TOKEN_SKIPPED": "k"}
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(
+            env, cache_file=tmp_path / "c.json", sessions={}, exclude=["SKIPPED"], now=1000
+        )
+    assert str(raised.value) == (
+        "no Claude account is open: TIRED: 3% of its five hour window left, under the 5% floor; "
+        "SPENT: 1% of its week left, under the 5% floor; SKIPPED: excluded from this launch"
+    )
+    assert [result.account for result in raised.value.results] == ["TIRED", "SPENT", "SKIPPED"]
