@@ -115,6 +115,25 @@ def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it
     assert 'test "$(getent passwd worker | cut -d: -f7)" = /bin/bash' in PROOF.read_text()
 
 
+def test_hive_build_tools_install_in_a_layer_cached_apart_from_the_source() -> None:
+    env = worker_stage("build-env")
+    assert env.startswith("FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS build-env\n")
+    assert re.findall(r"^COPY (.+) \S+$", env, re.M) == ["pyproject.toml"]
+    assert "['build-system']['requires']" in env
+    assert "r.startswith('ruff==')" in env
+    assert "python -m venv /opt/venv" in env
+    assert "/opt/venv/bin/pip install --no-cache-dir -r /build-env/tools.txt" in env
+    assert worker_stage("source-local").startswith("FROM build-env AS source-local\n")
+    assert worker_stage("source-git").startswith("FROM build-env AS source-git\n")
+    wheel = worker_stage("wheel")
+    assert "pip wheel --no-deps --no-build-isolation --wheel-dir /wheels ." in wheel
+    assert "tools.txt" not in wheel
+    overlay = worker_stage("overlay")
+    assert overlay.startswith("FROM build-env AS overlay\n")
+    assert "python -m venv" not in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl \\\n" in overlay
+
+
 def test_hive_image_can_install_agentihooks_from_the_local_build_context():
     local = worker_stage("source-local")
     assert "ADD" not in local
