@@ -114,7 +114,7 @@ def _remember_hive_check(key: tuple[str, str, str], member: str) -> None:
         _HIVE_CHECKS[key] = (member, time.monotonic())
         _HIVE_CHECKS.move_to_end(key)
         while len(_HIVE_CHECKS) > HIVE_CHECK_MAX:
-            _HIVE_CHECKS.popitem(False)
+            del _HIVE_CHECKS[next(iter(_HIVE_CHECKS))]
 
 
 def caller(headers: Mapping[str, str], admin: str, slug: str) -> str | None:
