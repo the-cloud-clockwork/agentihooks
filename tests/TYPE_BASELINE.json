@@ -245,7 +245,7 @@
   "scripts/codex_session/protocol.py": 75,
   "scripts/codex_session/serve.py": 25,
   "scripts/codex_session/stand_down.py": 49,
-  "scripts/codex_session/supervisor.py": 142,
+  "scripts/codex_session/supervisor.py": 102,
   "scripts/codex_sessions.py": 35,
   "scripts/codex_usage.py": 36,
   "scripts/dead_code.py": 30,
