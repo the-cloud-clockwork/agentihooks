@@ -139,7 +139,7 @@ class PassBox(dict[str, Any]):
 def note_left(box: object, records: Iterable[StepRecord]) -> None:
     """Add to a pass ``box`` the name of each recorded step left running past its budget, dropped or held."""
     if isinstance(box, PassBox):
-        box.left.extend(record.name for record in records if record.abandoned or record.held)
+        box.left.extend(record.name for record in records if record.lost or record.held)
 
 
 MODULES = (

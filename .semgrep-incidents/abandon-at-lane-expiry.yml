@@ -3,21 +3,20 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A tick step is journaled abandoned when its lane expires, so a step still queued behind a sibling, or one that
-      started late and ends inside its budget, reads abandoned and then also reports success. Only run_step journals
-      an abandon, when the step's own run passes its budget; at a lane end close the step's start instead.
+      A tick step is recorded or journaled abandoned when its lane expires, so a step still queued behind a sibling,
+      or one that started late and ends inside its budget, reads abandoned and then also reports success. Only
+      run_step abandons a step, when its own run passes its budget; at a lane end skip a step that never started and
+      record a running one cut.
     paths:
       include:
         - /scripts/tick/
         - abandon-at-lane-expiry.py
-    pattern-either:
-      - pattern: |
+    patterns:
+      - pattern-inside: |
           if $LANE.expired:
               ...
-              _abandoned($STEP)
-              ...
-      - pattern: |
-          if $LANE.expired:
-              ...
-              _left(...)
-              ...
+      - pattern-either:
+          - pattern: _abandoned(...)
+          - pattern: _left(...)
+          - pattern: StepRecord(..., abandoned=True, ...)
+      - pattern-not: StepRecord(..., skipped=True, ...)

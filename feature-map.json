@@ -2541,7 +2541,7 @@
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
-      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step cut at its lane end inside its budget journals no abandon event, and only a run past its own budget journals swarm_tick_step_abandoned and reports outcome abandoned, never success.",
+      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success.",
       "seam": "engine.run_step and engine._eager lane expiry, timing.within outcome",
       "tests": [
         "tests/tick/test_step_budget_clock.py::test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_and_never_starts",
