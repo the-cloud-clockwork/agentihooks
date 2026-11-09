@@ -2377,6 +2377,17 @@
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
       ]
+    },
+    {
+      "id": "hive-join-heartbeat-keeps-passed-grade",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
+      "behaviour": "A hive heartbeat never downgrades a join check that passed at launch, so an agent whose session closed before its report ended keeps its passed launch grade; the heartbeat still recovers a check that was missing at join.",
+      "seam": "join_report.heartbeat",
+      "tests": [
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
+      ]
     }
   ],
   "unmapped_rules": [
