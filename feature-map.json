@@ -2492,6 +2492,18 @@
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
+    },
+    {
+      "id": "hive-admission-pending-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
+      "behaviour": "A hive launch stops counting as a pending launch against admission room once the hive acknowledges it, live or failed, so admission pending for a hive matches the launches the hive has not yet answered.",
+      "seam": "HiveLaunch.complete and HiveLaunch.finished against admission.pending",
+      "tests": [
+        "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation"
+      ]
     }
   ],
   "unmapped_rules": [
