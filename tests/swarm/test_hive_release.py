@@ -88,3 +88,17 @@ def test_a_release_names_no_claim_it_does_not_hold(monkeypatch: pytest.MonkeyPat
     _on_hive(monkeypatch, "hive-a")
     row = {"state": "claimed", "workstation": True, "claimed_by": "engineer@a1b2c3-0009"}
     assert hive_release.fields(row, AGENT) == {}
+
+
+@pytest.mark.feature("hive-workstation-release")
+def test_a_release_writes_as_the_leaver_guarded_on_its_own_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple] = []
+
+    class Ledger:
+        def update_task(self, slug: str, task_id: str, fields: dict, by: str, if_match: dict) -> None:
+            calls.append((slug, task_id, fields, by, if_match))
+
+    _on_hive(monkeypatch, "hive-a")
+    row = {"id": "t1", "state": "pr", "workstation": True, "claimed_by": AGENT}
+    assert hive_release.release(Ledger(), "sw", row, AGENT) == {"claimed_by": ""}
+    assert calls == [("sw", "t1", {"claimed_by": ""}, AGENT, {"claimed_by": AGENT})]
