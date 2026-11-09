@@ -2644,6 +2644,21 @@
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
       ]
+    },
+    {
+      "id": "hive-admission-pending-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
+      "behaviour": "A hive launch stops counting as a pending launch against admission room once the controller collects the hive's answer to it, live, failed or ambiguous, including a live answer that fails its identity check, so admission pending for a hive matches the launches the hive has not yet answered.",
+      "seam": "HiveLaunch.complete and HiveLaunch.finished against admission.pending",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it",
+        "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
+      ]
     }
   ],
   "unmapped_rules": [
