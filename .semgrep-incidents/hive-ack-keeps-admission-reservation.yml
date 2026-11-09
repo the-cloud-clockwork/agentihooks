@@ -1,0 +1,21 @@
+rules:
+  - id: hive-ack-keeps-admission-reservation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive launch answered by its acknowledgement returns before releasing its admission reservation. On 9 November
+      swarm-hive-003 refused every launch on four pending launches while hive list showed none, because answered
+      launches stayed counted. Release the reservation with admission.release before returning on any acknowledgement.
+    patterns:
+      - pattern-inside: |
+          def $FN(...):
+              ...
+              $ACK = self.orders.ack(...)
+              ...
+      - pattern: return Outcome(..., detail=$DETAIL)
+      - metavariable-regex:
+          metavariable: $DETAIL
+          regex: .*hive launch failed.*
+      - pattern-not-inside: |
+          admission.release(...)
+          ...
