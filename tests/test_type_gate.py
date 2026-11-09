@@ -562,3 +562,33 @@ def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
     monkeypatch.chdir(tmp_path)
     args = type_gate.build_parser().parse_args(["--base", "b"])
     assert (args.base, args.head) == (Path("b"), Path.cwd())
+
+@pytest.mark.feature("independent-ci-records")
+def test_type_records_load_and_refresh_without_rewriting_the_shared_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {"hooks/a.py": WELL_TYPED}, {})
+    records = root / "tests/type-baseline"
+    (records / "hooks").mkdir(parents=True)
+    (records / "hooks/a.py.json").write_text("2\n")
+    (records / "hooks/untouched.py.json").write_text("1\n")
+    assert type_gate.load(root) == {"hooks/a.py": 2, "hooks/untouched.py": 1}
+    monkeypatch.setattr(type_gate, "measure", lambda _: {"hooks/a.py": 1, "hooks/untouched.py": 1})
+    type_gate.write(root)
+    assert (root / type_gate.BASELINE).read_text() == "{}"
+    assert (records / "hooks/a.py.json").read_text() == "1\n"
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/untouched.py": 1}
+
+
+def test_type_record_duplicate_and_invalid_counts_are_refused(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 1})
+    record = root / "tests/type-baseline/hooks/a.py.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("1")
+    with pytest.raises(ValueError, match="duplicate"):
+        type_gate.load(root)
+    (root / type_gate.BASELINE).write_text("{}")
+    for invalid in ("-1", "true", "\"one\"", "{}"):
+        record.write_text(invalid)
+        with pytest.raises(ValueError, match="count"):
+            type_gate.load(root)

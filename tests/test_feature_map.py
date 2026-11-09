@@ -781,3 +781,26 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
             'python -m scripts.feature_map --root "$GITHUB_WORKSPACE" --base "$RUNNER_TEMP/base"'
         )
     )
+
+@pytest.mark.feature("independent-ci-records")
+def test_feature_fragments_preserve_validation_and_retirement(
+    mapped_repo: tuple[Path, Path, dict], tmp_path: Path
+) -> None:
+    import hashlib
+
+    root, path, entry = mapped_repo
+    directory = root / "feature-map.d"
+    directory.mkdir()
+    fragment = directory / (hashlib.sha256(entry["id"].encode()).hexdigest() + ".json")
+    fragment.write_text(json.dumps(entry))
+    path.write_text(json.dumps({"features": [], "fragments": True}))
+    assert feature_map.validate(root, path) == 1
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "feature-map.json").write_text(path.read_text())
+    (base / "feature-map.d").mkdir()
+    (base / "feature-map.d" / fragment.name).write_text(fragment.read_text())
+    path.write_text(json.dumps({"features": [], "fragments": True, "retired": [RETIRED]}))
+    fragment.unlink()
+    with pytest.raises(ValueError, match="features must be a nonempty list|removed feature"):
+        feature_map.validate(root, path, base / "feature-map.json")
