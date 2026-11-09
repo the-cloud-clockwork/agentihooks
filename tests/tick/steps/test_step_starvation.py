@@ -114,7 +114,10 @@ def test_a_completed_run_clears_the_starvation_and_rested_rows_never_start_it(st
         journal(store, at + index * MINUTE, "spawn", "skipped", rested=True)
     assert step_starvation.step(store, SLUG, at + 10 * MINUTE, WINDOWS) == []
     assert step_starvation.findings(store, SLUG, at + 10 * MINUTE) == []
-    assert step_starvation.read(store, SLUG)["steps"] == {WAITS: {"done": at}, "spawn": {"done": START + 5 * MINUTE + 1}}
+    assert step_starvation.read(store, SLUG)["steps"] == {
+        WAITS: {"done": at},
+        "spawn": {"done": START + 5 * MINUTE + 1},
+    }
 
 
 @pytest.mark.feature("tick-step-starvation")
