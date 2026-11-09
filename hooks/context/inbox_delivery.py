@@ -1,13 +1,30 @@
 import os
+from collections.abc import Mapping
 
 from hooks.context import worker_mode
 from hooks.targets import is_codex_memory_thread
 from scripts.inbox.cli import identity
 from scripts.inbox.seen import claim
-from scripts.inbox.store import InboxError, connect, now_ms
+from scripts.inbox.store import InboxError, InboxStore, Unreachable, now_ms
 from scripts.inbox.wake import window_ms
 
 CLOSE_HINT = "done|handoff <address>|blocked <what>|cancel [why]"
+
+
+def connect(environ: Mapping[str, str]) -> InboxStore:
+    """The inbox store over the hook process's one shared Redis client."""
+    import redis
+
+    from hooks.context.swarm_heartbeat import client
+    from scripts.inbox import outbox
+    from scripts.inbox.seen import receiving_session
+
+    try:
+        store = InboxStore(client(environ), session_id=receiving_session(environ))
+    except redis.RedisError as exc:
+        raise Unreachable(f"Redis is unreachable ({exc}); the inbox refuses to run without it") from exc
+    outbox.flush(store)
+    return store
 
 
 def pending_context(session_id, environ=None, cwd=""):
