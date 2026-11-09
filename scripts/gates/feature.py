@@ -64,7 +64,7 @@ def read_map(
     except (OSError, subprocess.SubprocessError):
         return None
     if done.returncode != 0:
-        return None
+        return {} if path != MAP and "HTTP 404" in done.stderr else None
     try:
         found = json.loads(done.stdout)
     except ValueError:
@@ -79,6 +79,8 @@ def read_feature(ref: str, feature: str) -> dict[str, Any] | None:
         return data
     path = feature_map.entry_path(Path(MAP), feature).as_posix()
     entry = read_map(ref, path=path)
+    if entry == {}:
+        return data
     if entry is None or entry.get("id") != feature:
         return None
     return {"features": [entry]}

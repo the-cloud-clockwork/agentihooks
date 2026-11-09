@@ -268,3 +268,26 @@ def test_completion_preserves_inline_features_in_a_mixed_map(monkeypatch: pytest
     monkeypatch.setattr(feature, "read_map", read)
     assert feature.read_feature("dev", "chosen") == data
     assert calls == ["dev"]
+
+
+def test_a_missing_fragment_reads_as_unmapped_and_a_failed_fragment_read_as_unread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = json.dumps({"features": [], "fragments": True})
+    original = feature.read_map
+
+    def gh(stderr: str) -> object:
+        def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if f"contents/{feature.MAP}?" in argv[-1]:
+                return subprocess.CompletedProcess(argv, 0, root, "")
+            return subprocess.CompletedProcess(argv, 1, "", stderr)
+
+        def read(ref: str, path: str = feature.MAP) -> dict | None:
+            return original(ref, run, path)
+
+        return read
+
+    monkeypatch.setattr(feature, "read_map", gh("gh: Not Found (HTTP 404)"))
+    assert feature.refusal({"kind": "ops"}, "nope", lambda: [feature.read_feature("dev", "nope")]) == UNKNOWN
+    monkeypatch.setattr(feature, "read_map", gh("gh: Bad Gateway (HTTP 502)"))
+    assert feature.refusal({"kind": "ops"}, "nope", lambda: [feature.read_feature("dev", "nope")]) == UNREAD
