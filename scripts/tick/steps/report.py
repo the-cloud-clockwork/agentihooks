@@ -253,8 +253,8 @@ STEPS = (
     CallStep(
         "progress checks", "wrapper events", held(viewed("progress checks", _progress_checks)), VIEWED, VIEW, lane=SLOW
     ),
-    CallStep("waits end", "wrapper events", held(viewed("waits end", _waits_end)), VIEWED, VIEW, lane=SLOW),
-    CallStep("merge pass", "wrapper events", held(viewed("merge pass", _merge_pass)), VIEWED, VIEW, lane=SLOW),
+    CallStep("waits end", "wrapper events", held(viewed("waits end", _waits_end)), VIEWED, VIEW, kept=True),
+    CallStep("merge pass", "wrapper events", held(viewed("merge pass", _merge_pass)), VIEWED, VIEW, kept=True),
     CallStep(
         "stall watch",
         "wrapper events",

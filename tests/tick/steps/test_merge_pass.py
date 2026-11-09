@@ -25,9 +25,7 @@ NOW = 5_000
 
 @pytest.mark.feature("tick-merged-task-settlement-after-overrun")
 @pytest.mark.parametrize("kind", ["code", "ci"])
-def test_merged_task_closes_and_releases_its_seat_after_an_abandoned_barrier(
-    env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytest.MonkeyPatch, kind: str
-) -> None:
+def test_merge_pass(env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     store, ledger, runtime = env
     cli.main(["sw", "create", "--repo", "/repo"])
     ledger.rows["t1"].update(state="pr", kind=kind, pr_url=URL, claimed_by=AGENT)

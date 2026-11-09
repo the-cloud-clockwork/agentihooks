@@ -2534,7 +2534,9 @@
       "behaviour": "A merged code or ci task closes and its engineer leaves the seat within two passes when an intent or spawn barrier overruns its budget.",
       "seam": "tick view, waits end and merge pass scheduling after an abandoned dependency, then ended agent reaping",
       "tests": [
-        "tests/tick/steps/test_merge_settlement.py::test_merged_task_closes_and_releases_its_seat_after_an_abandoned_barrier"
+        "tests/tick/steps/test_merge_pass.py::test_merge_pass",
+        "tests/tick/steps/test_tick_view.py::test_tick_view",
+        "tests/tick/steps/test_waits_end.py::test_waits_end"
       ]
     }
   ],
