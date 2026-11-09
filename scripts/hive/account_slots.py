@@ -47,7 +47,7 @@ def _live(value, now):
         value[field] = {name: row for name, row in value.get(field, {}).items() if row["expires_ms"] > now}
 
 
-def _used(value: dict) -> int:
+def _used(value: dict[str, Any]) -> int:
     holders = value["holders"]
     manual = sum(max(row["sessions"] - len(row["observed"]), 0) for row in value["hives"].values())
     return sum(not row.get("master", False) for row in holders.values()) + manual
@@ -107,7 +107,7 @@ class Slots:
             if slot["harness"] != harness or (preferred and slot["account"] != preferred):
                 continue
 
-            def reserve(value: dict) -> bool:
+            def reserve(value: dict[str, Any]) -> bool:
                 now = self.clock()
                 _live(value, now)
                 holder = value["holders"].get(execution)
@@ -180,7 +180,12 @@ class Remote(Slots):
         self.ask({"op": "heartbeat", "hive": self.hive, "report": report, "executions": executions})
 
     def take(self, execution: str, harness: str, preferred: str = "", *, master: bool = False) -> str | None:
-        request = {"execution": execution, "harness": harness, "preferred": preferred, "report": self.read()}
+        request: dict[str, Any] = {
+            "execution": execution,
+            "harness": harness,
+            "preferred": preferred,
+            "report": self.read(),
+        }
         if master:
             request["master"] = True
         return self.ask({"op": "take", "hive": self.hive, **request})

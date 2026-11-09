@@ -3,7 +3,7 @@
 import json
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.events.bus import Bus
 from scripts.events.subjects import SLOTS
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 BUCKETS = ("account-slots", "hive-slot-accounts")
 QUEUE = "hub-slots"
-OPERATIONS = {
+OPERATIONS: dict[str, Callable[[account_slots.Slots, dict[str, Any]], Any]] = {
     "take": lambda slots, request: slots.take(
         request["execution"], request["harness"], request.get("preferred", ""), master=request.get("master", False)
     ),
