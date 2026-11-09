@@ -222,6 +222,8 @@ def _retire(args: argparse.Namespace) -> str:
         return "\n".join([*bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
+    if args.command == "holders":
+        return auth.backfill_holders(redis_client())
     return "\n".join(_remove(args))
 
 
@@ -541,10 +543,8 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command in ("revoke", "remove", "drain"):
+        elif args.command in ("revoke", "remove", "drain", "holders"):
             print(_retire(args))
-        elif args.command == "holders":
-            print(auth.backfill_holders(redis_client()))
         elif args.command in ("run", "install"):
             return _daemon(args.command)
         elif args.command == "compare":
