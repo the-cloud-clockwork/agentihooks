@@ -7,7 +7,6 @@ import socket
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from itertools import count
 from pathlib import Path
 from typing import Any
 
@@ -225,7 +224,7 @@ def _unique(name: str, held: set[str]) -> str:
     """The name itself while no other hive holds it, else the name with the first free numeric suffix from 2."""
     if name not in held:
         return name
-    return next(candidate for n in count(2) if (candidate := f"{name}-{n}") not in held)
+    return next(candidate for n in range(2, len(held) + 2) if (candidate := f"{name}-{n}") not in held)
 
 
 @dataclass(frozen=True)
