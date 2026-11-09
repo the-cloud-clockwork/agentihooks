@@ -98,9 +98,21 @@ def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
 
 
 def load(tree: Path) -> dict[str, int] | None:
-    """Return the baseline recorded in a tree, or None when it has none."""
+    """Read legacy counts and independently owned source records."""
     path = tree / BASELINE
-    return json.loads(path.read_text()) if path.is_file() else None
+    directory = tree / "tests/type-baseline"
+    if not path.is_file() and not directory.is_dir():
+        return None
+    counts: dict[str, int] = json.loads(path.read_text()) if path.is_file() else {}
+    for record in sorted(directory.rglob("*.json")):
+        source = record.relative_to(directory).as_posix().removesuffix(".json")
+        count = json.loads(record.read_text())
+        if source in counts:
+            raise ValueError(f"duplicate type baseline entry: {source}")
+        if not source.endswith(".py") or type(count) is not int or count < 0:
+            raise ValueError(f"invalid type count in {record}")
+        counts[source] = count
+    return counts
 
 
 def changed(base: Path, head: Path, paths: set[str]) -> set[str]:
@@ -168,8 +180,30 @@ def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
 
 
 def write(head: Path) -> None:
-    """Record the head's measurement as its baseline."""
-    (head / BASELINE).write_text(json.dumps(measure(head), indent=2) + "\n")
+    """Record measurements while preserving each source's existing owner."""
+    counts = measure(head)
+    directory = head / "tests/type-baseline"
+    if not directory.is_dir():
+        (head / BASELINE).write_text(json.dumps(counts, indent=2) + "\n")
+        return
+    path = head / BASELINE
+    legacy: dict[str, int] = json.loads(path.read_text()) if path.is_file() else {}
+    owned = set(legacy)
+    refreshed = {source: counts[source] for source in legacy if source in counts}
+    if refreshed != legacy:
+        path.write_text(json.dumps(refreshed, indent=2) + "\n")
+    for record in directory.rglob("*.json"):
+        source = record.relative_to(directory).as_posix().removesuffix(".json")
+        if source not in counts:
+            record.unlink()
+    for source, count in counts.items():
+        if source in owned:
+            continue
+        record = directory / f"{source}.json"
+        text = json.dumps(count) + "\n"
+        if not record.is_file() or record.read_text() != text:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(text)
 
 
 def grade(

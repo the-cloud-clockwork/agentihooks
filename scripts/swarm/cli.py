@@ -2218,7 +2218,7 @@ def _pull_reader(url, pull):
 
 
 def _feature_gate(
-    store: RedisStore, slug: str, agent: AgentRecord, task: dict, pull: ledger_events.PullRequest | None
+    store: RedisStore, slug: str, agent: AgentRecord, task: dict[str, Any], pull: ledger_events.PullRequest | None
 ) -> None:
     """Refuse swarm done when the feature gate enforces and the task names no mapped, tested feature."""
     if modes.configured(feature_gate.GATE, store.config(slug).gates) == "off":
@@ -2227,7 +2227,7 @@ def _feature_gate(
     refused = feature_gate.refusal(
         task,
         task["proof"].get("feature", ""),
-        lambda: [feature_gate.read_map(ref) for ref in feature_gate.refs(head)],
+        lambda: [feature_gate.read_feature(ref, task["proof"].get("feature", "")) for ref in feature_gate.refs(head)],
     )
     who = Who(name=agent.name, swarm=slug, task=agent.task)
     if refused and feature_gate.GATE.allows(store, who, "done", refused, now_ms()):

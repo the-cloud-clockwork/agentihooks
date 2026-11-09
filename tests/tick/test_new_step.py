@@ -103,6 +103,30 @@ def test_a_scaffolded_step_passes_the_catalogue_check_beside_every_registered_st
     assert import_module("scripts.tick.catalogue").check(tree) == [f"Step {STEP}: no scenario lists it"]
 
 
+def test_scaffold_writes_its_feature_fragment_without_touching_the_shared_map(tree: Path) -> None:
+    map_path = tree / "feature-map.json"
+    text = json.dumps({"features": [], "fragments": True})
+    map_path.write_text(text)
+    assert scaffold(tree, STEP) == 0
+    assert map_path.read_text() == text
+    entries = import_module("scripts.feature_map").load(map_path)["features"]
+    assert len(entries) == 1
+    assert entries[0]["tests"] == ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]
+    assert import_module("scripts.tick.new_step").check(tree, STEP)["feature entry"]
+
+
+def test_scaffold_preserves_inline_ownership_in_a_mixed_map(tree: Path) -> None:
+    map_path = tree / "feature-map.json"
+    entry = {"id": "tick-step-widgets", "origin": "inventory", "tests": ["previous"]}
+    map_path.write_text(json.dumps({"features": [entry], "fragments": True}))
+    assert scaffold(tree, STEP) == 0
+    entries = import_module("scripts.feature_map").load(map_path)["features"]
+    assert len(entries) == 1
+    assert entries[0]["tests"][0] == "previous"
+    assert len(entries[0]["tests"]) == 2
+    assert not import_module("scripts.feature_map").entry_path(map_path, "tick-step-widgets").exists()
+
+
 def plant(tree: Path, artefact: str) -> None:
     """Remove one artefact of the scaffolded step from ``tree``."""
     copied = {

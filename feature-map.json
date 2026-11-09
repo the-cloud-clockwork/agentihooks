@@ -2631,6 +2631,18 @@
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
       ]
+    },
+    {
+      "id": "independent-ci-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",
+      "behaviour": "Independent source changes retain independently owned type counts and feature entries when their branches merge in either order.",
+      "seam": "Type baseline loader and writer, feature map loaders and Git merge of disjoint source records",
+      "tests": [
+        "tests/test_type_gate.py::test_type_records_load_and_refresh_without_rewriting_the_shared_baseline",
+        "tests/test_type_gate.py::test_independent_source_branches_merge_their_records_in_either_order",
+        "tests/test_feature_map.py::test_feature_fragments_preserve_validation_and_retirement"
+      ]
     }
   ],
   "unmapped_rules": [
