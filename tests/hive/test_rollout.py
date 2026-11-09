@@ -65,7 +65,7 @@ def test_a_waiting_release_cannot_take_ownership_or_mutate_a_hive():
     )
 
 
-def test_a_failed_replacement_holds_the_lock_without_expiry():
+def test_a_failed_replacement_holds_the_lock_until_it_expires():
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -73,7 +73,45 @@ def test_a_failed_replacement_holds_the_lock_without_expiry():
     with pytest.raises(RuntimeError, match="^replacement hive is not serving; rollout ownership retained$"):
         module.release(cluster, "default", "shared", "first", "hive", "hive-worker-hive")
     assert cluster.lease["spec"]["holderIdentity"] == "first"
-    assert "leaseDurationSeconds" not in cluster.lease["spec"]
+    assert cluster.lease["spec"]["leaseDurationSeconds"] == module.LEASE_SECONDS
+
+
+@pytest.mark.feature("hive-rollout-lease-failed-sync")
+def test_a_failed_sync_frees_the_lease_for_the_next_hive():
+    module = rollout()
+    cluster = Cluster()
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    cluster.healthy = False
+    module.abandon(cluster, "default", "shared", "second")
+    assert cluster.lease["spec"]["holderIdentity"] == "first"
+    module.abandon(cluster, "default", "shared", "first")
+    module.acquire(cluster, "default", "shared", "second", timeout=0)
+    assert cluster.lease["spec"]["holderIdentity"] == "second"
+
+
+@pytest.mark.feature("hive-rollout-lease-failed-sync")
+def test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive(monkeypatch):
+    module = rollout()
+    cluster = Cluster()
+    clock = [1_000_000.0]
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    module.acquire(cluster, "default", "shared", "first", timeout=0)
+    clock[0] += module.LEASE_SECONDS
+    with pytest.raises(TimeoutError):
+        module.acquire(cluster, "default", "shared", "second", timeout=0)
+    assert cluster.lease["spec"]["holderIdentity"] == "first"
+    clock[0] += 1
+    module.acquire(cluster, "default", "shared", "second", timeout=0)
+    assert cluster.lease["spec"]["holderIdentity"] == "second"
+    assert cluster.lease["spec"]["renewTime"] == module.micro_time(clock[0])
+
+
+def test_abandon_without_a_lease_changes_nothing():
+    module = rollout()
+    cluster = Cluster()
+    module.abandon(cluster, "default", "shared", "first")
+    assert cluster.lease is None
+    assert [call[0] for call in cluster.calls] == ["GET"]
 
 
 def test_only_the_owner_can_release_after_the_current_generation_serves():
@@ -249,9 +287,10 @@ def test_hook_entrypoint_routes_to_the_exclusive_protocol(monkeypatch, tmp_path,
         assert cluster.lease["spec"]["holderIdentity"] == ("first" if action == "acquire" else "")
 
 
-def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection():
+def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection(monkeypatch):
     module = rollout()
     cluster = Cluster()
+    monkeypatch.setattr(module.time, "time", lambda: 1794215510.407518)
     module.acquire(cluster, "rolls", "capacity", "hive/app", timeout=0)
     assert cluster.calls == [
         ("GET", "/apis/coordination.k8s.io/v1/namespaces/rolls/leases/capacity", None),
@@ -262,7 +301,11 @@ def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection():
                 "apiVersion": "coordination.k8s.io/v1",
                 "kind": "Lease",
                 "metadata": {"name": "capacity", "namespace": "rolls"},
-                "spec": {"holderIdentity": "hive/app"},
+                "spec": {
+                    "holderIdentity": "hive/app",
+                    "leaseDurationSeconds": 1500,
+                    "renewTime": "2026-11-09T09:11:50.407518Z",
+                },
             },
         ),
     ]

@@ -34,7 +34,13 @@ def render(*settings):
 def test_every_roll_acquires_before_sync_and_releases_after_serving():
     objects = render()
     jobs = [item for item in objects if item["kind"] == "Job"]
-    assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {"PreSync", "PostSync"}
+    assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {
+        "PreSync",
+        "PostSync",
+        "SyncFail",
+    }
+    abandon = next(item for item in jobs if item["metadata"]["annotations"]["argocd.argoproj.io/hook"] == "SyncFail")
+    assert "abandon" in abandon["spec"]["template"]["spec"]["containers"][0]["command"]
     for job in jobs:
         assert job["spec"]["ttlSecondsAfterFinished"] == 3600
         pod = job["spec"]["template"]["spec"]
