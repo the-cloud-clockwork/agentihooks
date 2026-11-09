@@ -1,5 +1,6 @@
 """Open readiness checks Redis using a separate connection with bounded waits and no retries."""
 
+import threading
 from typing import Any
 
 
@@ -24,3 +25,25 @@ def available(client: Any) -> bool:
         return False
     finally:
         pool.disconnect()
+
+
+class Probe:
+    def __init__(self, client: Any) -> None:
+        self.client = client
+        self.running = threading.Lock()
+
+    def check(self) -> bool:
+        if not self.running.acquire(blocking=False):
+            return False
+        done = threading.Event()
+        outcome: list[bool] = []
+
+        def ping() -> None:
+            try:
+                outcome.append(available(self.client))
+            finally:
+                done.set()
+                self.running.release()
+
+        threading.Thread(target=ping, daemon=True).start()
+        return done.wait(4) and outcome[0]

@@ -338,12 +338,13 @@ class HealthAPI:
         deep: bool = True,
     ) -> None:
         self.health, self.grants, self.operator, self.deep = health, grants, operator, deep
+        self.readiness = readiness.Probe(health.store.redis)
 
     def route(self, method: str, path: str, authorization: str, body: object) -> tuple[int, dict]:
         if (method, path) == ("GET", LIVE_PATH):
             return 200, self.health.live()
         if (method, path) == ("GET", READY_PATH):
-            available = readiness.available(self.health.store.redis)
+            available = self.readiness.check()
             return (200 if available else 503), {"redis": OK if available else UNAVAILABLE}
         if (method, path) not in (("GET", DIAGNOSE_PATH), ("POST", QUALIFY_PATH)):
             return 404, GrantRefused("invalid_request", "no such health endpoint").detail()
