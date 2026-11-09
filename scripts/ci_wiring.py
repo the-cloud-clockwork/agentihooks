@@ -13,7 +13,7 @@ GATE_EVENTS = ("pull_request", "merge_group")
 FILTERED_EVENTS = ("pull_request", "push")
 FILTERS = ("paths", "paths-ignore", "types")
 CONFIG = ".github/gate-wiring.json"
-FIELDS = ("reason", "owner", "expires")
+FIELDS = ("reason", "owner")
 EVENT_TERM = re.compile(r"""github\.event_name\s*(==|!=)\s*(['"])(\w+)\2""")
 EXPRESSION = re.compile(r"\$\{\{(.*)\}\}", re.DOTALL)
 
@@ -105,13 +105,13 @@ def _outside_problems(
     ]
 
 
-def _declaration_problems(declared: dict[str, dict[str, Any]], today: date) -> list[str]:
-    problems: list[str] = []
-    for key, entry in declared.items():
-        problems += [f"{key} is declared without its {field}." for field in FIELDS if not entry.get(field)]
-        if entry.get("expires") and date.fromisoformat(entry["expires"]) < today:
-            problems.append(f"{key} expired on {entry['expires']}.")
-    return problems
+def _declaration_problems(declared: dict[str, dict[str, Any]]) -> list[str]:
+    return [
+        f"{key} is declared without its {field}."
+        for key, entry in declared.items()
+        for field in FIELDS
+        if not entry.get(field)
+    ]
 
 
 def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: date) -> list[str]:
@@ -125,7 +125,7 @@ def check(workflows: dict[str, dict[Any, Any]], config: dict[str, Any], today: d
         config.get("not_gates", cast(dict[str, Any], {})),
         config.get("outside_gate", cast(dict[str, Any], {})),
     )
-    problems = _declaration_problems({**not_gates, **outside}, today)
+    problems = _declaration_problems({**not_gates, **outside})
     gates = [
         (file, job_id)
         for file, workflow in workflows.items()

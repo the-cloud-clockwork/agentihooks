@@ -98,6 +98,18 @@ def test_a_kept_hive_does_not_stop_the_sweep_and_a_draining_hive_is_not_drained_
 
 
 @pytest.mark.feature("hive-quiet-sweep")
+def test_the_sweep_reads_only_the_state_index_and_skips_ids_without_a_record(store: RedisStore) -> None:
+    """With no state index the sweep finds nothing, and an indexed id with no record is passed over."""
+    assert sweep.indexed(store.redis) == []
+    assert sweep.sweep(store, NOW_MS) == []
+    hive_state.indexed(store.redis, "orphan", True)
+    _hive(store, "proof", "yes", QUIET_AT)
+    assert sweep.indexed(store.redis) == ["orphan", "proof"]
+    assert sweep.sweep(store, NOW_MS)[0] == "drained quiet ephemeral hive proof"
+    assert sweep.indexed(store.redis) == ["orphan"]
+
+
+@pytest.mark.feature("hive-quiet-sweep")
 def test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none(store: RedisStore) -> None:
     """Each non ephemeral hive past the window is one quiet hive finding naming its silence in minutes."""
     _hive(store, "lasting", "no", QUIET_AT)

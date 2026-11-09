@@ -305,7 +305,12 @@ def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_o
     from scripts.hive import registry
 
     for hive_id, ephemeral in (("proof", "yes"), ("lasting", "no")):
-        record = {**registry._default(hive_id), "ephemeral": ephemeral, "heartbeat_at": NOW_MS - registry.QUIET_MS - 1}
+        record = {
+            **registry._default(hive_id),
+            "ephemeral": ephemeral,
+            "max_agents": 4,
+            "heartbeat_at": NOW_MS - registry.QUIET_MS - 1,
+        }
         store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
         store.redis.sadd(registry.INDEX, hive_id)
     reply: Any = dispatch(request("GET"), store)
