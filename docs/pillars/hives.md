@@ -1179,8 +1179,9 @@ sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` 
 ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
 the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own
 `credentialSecret`, renders one more hive pod, `<release>-worker-hive-<name>` with component `worker-hive-<name>` and
-its own worktrees ConfigMap; [Scaling worker hives](#scaling-worker-hives) gives an example and the scaling refusals. Add a
-pod with no installed credential with `agentihooks hive add` from the UI hive; the pod name is used only then.
+its own worktrees ConfigMap; [Scaling worker hives](#scaling-worker-hives) gives an example and the scaling
+refusals. Add a pod with no installed credential with `agentihooks hive add` from the UI hive; the pod name is used
+only then.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
