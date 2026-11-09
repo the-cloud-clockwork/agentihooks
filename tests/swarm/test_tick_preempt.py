@@ -149,11 +149,11 @@ def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store,
     monkeypatch.setattr(profile_first, "placeable", lambda slug, config, store, runtime, lane, ready, cap: (ready, []))
     seen = []
 
-    def ready(slug, store, rows, doc, lane, dispatched, claims=None):
-        seen.append(lane)
-        return sorted([task for task in tasks if task["lane"] == lane], key=dispatched)
+    def ready(slug, store, rows, doc, lanes, dispatched, claims=None):
+        seen.extend(lanes)
+        return {lane: sorted([task for task in tasks if task["lane"] == lane], key=dispatched) for lane in lanes}
 
-    monkeypatch.setattr(tick_module, "ready_in_order", ready)
+    monkeypatch.setattr(tick_module, "ready_by_lane", ready)
     order, waits = tick_module._spawn_order(
         "sw", store.config("sw"), store, [], {task["id"]: task for task in tasks}, {"tasks": tasks}, FakeRuntime()
     )

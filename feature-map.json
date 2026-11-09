@@ -1,6 +1,23 @@
 {
   "features": [
     {
+      "id": "swarm-spawn-order-once-per-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
+      "behaviour": "A spawn pass builds one claim view and one launch order for every lane, and the readiness check indexes the ledger's freeze and focus targets once per freeze list instead of scanning every record per task, so a pass over the replayed rig-grade-swarm ledger of 997 open tasks and 1322 freeze records stays under a tenth of the spawn floor.",
+      "seam": "scripts.tick.steps.place._spawn_order over the pass rows and ledger document",
+      "tests": [
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_computes_its_claim_order_once_for_every_lane",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_orders_claims_once",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_spawn_floor",
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds",
+        "tests/swarm/test_spawn_order_budget.py::test_the_freeze_index_is_built_once_per_freeze_list",
+        "tests/swarm/test_spawn_order_budget.py::test_the_readiness_hold_keeps_the_fix_phase_and_open_dependencies",
+        "tests/swarm/test_spawn_order_budget.py::test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane",
+        "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ]
+    },
+    {
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
@@ -2700,14 +2717,16 @@
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
-      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success.",
-      "seam": "engine.run_step and engine._eager lane expiry, timing.within outcome",
+      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success. A step that needs a handed off step of an earlier group that never ends inside the lane is skipped and never runs. A step with no earlier group to wait on, or whose earlier group already ended, is still skipped and never runs when its own lane already expired or the start gate is closed.",
+      "seam": "engine.run_step, engine._after and engine._eager lane expiry, timing.within outcome",
       "tests": [
         "tests/tick/test_step_budget_clock.py::test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_and_never_starts",
         "tests/tick/test_step_budget_clock.py::test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_abandoned",
         "tests/tick/test_step_budget_clock.py::test_a_step_whose_own_run_overruns_its_budget_is_abandoned_and_never_reports_success",
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
-        "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs"
+        "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group"
       ]
     },
     {
@@ -2726,6 +2745,34 @@
         "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
         "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
         "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
+      "id": "swarm-intent-check-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
+      "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
+      "tests": [
+        "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
+        "tests/gates/test_intent_budget.py::test_thirty_changed_pulls_judge_at_most_the_pass_limit_and_the_rest_later",
+        "tests/gates/test_intent_budget.py::test_a_changed_pull_is_judged_off_the_pass_and_settled_by_a_later_pass",
+        "tests/gates/test_intent_budget.py::test_only_a_process_that_keeps_running_passes_judges_off_the_pass",
+        "tests/gates/test_intent_budget.py::test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
+        "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
+        "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
+        "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
+        "tests/gates/test_intent_budget.py::test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another",
+        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled",
+        "tests/gates/test_intent_budget.py::test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name",
+        "tests/gates/test_intent_budget.py::test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches",
+        "tests/gates/test_intent_budget.py::test_each_minute_judges_the_changed_pulls_from_its_own_turn",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_builds_its_view_timed_inside_the_callers_context",
+        "tests/gates/test_intent_budget.py::test_a_kept_judging_settles_draft_pulls_inside_the_pass"
       ]
     },
     {
