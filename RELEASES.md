@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.770 · 2026-11-09
+
+### 2026-11-09 · 6b19680cbc60 · #10281 · @nestorcolt
+
+**Fill a hive invite's bus address from the hub signer record**
+
+When a hive invite is minted with the hub's NATS signer but no explicit `--bus-url` or `--like` address, it now looks up the signer record before minting and uses its published `url` to fill `AGENTIHOOKS_BUS_URL`. An explicit `--bus-url` flag or a `--like` reference still takes priority. This closes the gap where such invites carried no bus address at all, forcing a manual rejoin using internal service names; now a rejoined hive connects straight to the published NATS address with no hand setup, matching the stated project goal.
+
 ## v2.17.768 · 2026-11-09
 
 ### 2026-11-09 · 79a5cbd3c5a0 · #10256 · @agenticore-app
