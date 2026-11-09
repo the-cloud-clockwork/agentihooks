@@ -105,5 +105,6 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args(argv)
+    print(ports.hive().auth.backfill_holders(ports.swarm().store.redis_client()), flush=True)
     server((args.host, args.port)).serve_forever()
     return 0

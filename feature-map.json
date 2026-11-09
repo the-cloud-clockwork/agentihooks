@@ -2497,13 +2497,16 @@
       "id": "hive-agent-token-holder-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2263",
-      "behaviour": "Hive agent token issue reads only the member's holder record, never the member map, even with legacy credentials on; the hive holders backfill writes the holder record of every member minted before it whose ledger credential still maps to it.",
+      "behaviour": "Once AGENTIHOOKS_HIVE_HOLDERS=enforce, hive agent token issue reads only the member's holder record and never the member map, even with legacy credentials on. Until then a member with no holder record gets one written from its member record, with a logged line, before it is issued or refused. The auth service and the hive holders command backfill the holder record of every member minted before it whose ledger credential still maps to it.",
       "seam": "scripts.hive.auth.issue_agent",
       "tests": [
         "tests/hive/test_holder_backfill.py::test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_on",
+        "tests/hive/test_holder_backfill.py::test_until_enforced_issue_backfills_and_logs_a_legacy_member_once",
+        "tests/hive/test_holder_backfill.py::test_until_enforced_an_unmapped_member_is_logged_and_refused",
         "tests/hive/test_holder_backfill.py::test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map",
         "tests/hive/test_holder_backfill.py::test_the_backfill_leaves_held_and_unmapped_members_alone",
-        "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill"
+        "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
+        "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
       ]
     }
   ],

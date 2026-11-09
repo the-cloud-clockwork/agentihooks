@@ -38,6 +38,7 @@ def test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_o
 ) -> None:
     grant = _legacy(client, "laptop")
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_HOLDERS", "enforce")
 
     with (
         patch.object(auth, "member", side_effect=AssertionError("read the member map")),
@@ -45,6 +46,47 @@ def test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_o
         pytest.raises(auth.HiveError, match="^Hive membership was revoked$"),
     ):
         auth.issue_agent(client, grant["id"], SLUG, WORKER)
+    assert _holder(client, grant["id"]) is None
+
+
+@pytest.mark.feature("hive-agent-token-holder-only")
+def test_until_enforced_issue_backfills_and_logs_a_legacy_member_once(
+    client: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    grant = _legacy(client, "laptop")
+    monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_HOLDERS", raising=False)
+
+    first = auth.issue_agent(client, grant["id"], SLUG, WORKER)
+
+    assert _holder(client, grant["id"]) == auth._digest(grant["ledger_credential"])
+    assert capsys.readouterr().err == (
+        f"hive agent token: member {grant['id']} had no holder record, wrote it from its member record; "
+        "AGENTIHOOKS_HIVE_HOLDERS=enforce refuses it\n"
+    )
+    with patch.object(auth, "member", side_effect=AssertionError("read the member map")):
+        second = auth.issue_agent(client, grant["id"], SLUG, WORKER)
+    assert capsys.readouterr().err == ""
+    assert {auth.agent_member(client, token, SLUG, WORKER) for token in (first, second)} == {grant["id"]}
+
+
+@pytest.mark.feature("hive-agent-token-holder-only")
+def test_until_enforced_an_unmapped_member_is_logged_and_refused(
+    client: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    grant = _legacy(client, "laptop")
+    auth.hive_state.amend(auth._store(client), f"ledger.{auth._digest(grant['ledger_credential'])}", lambda _: None)
+    monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_HOLDERS", raising=False)
+
+    with pytest.raises(auth.HiveError, match="^Hive membership was revoked$"):
+        auth.issue_agent(client, grant["id"], SLUG, WORKER)
+
+    assert _holder(client, grant["id"]) is None
+    assert capsys.readouterr().err == (
+        f"hive agent token: member {grant['id']} had no holder record, and none could be written; "
+        "AGENTIHOOKS_HIVE_HOLDERS=enforce refuses it\n"
+    )
 
 
 @pytest.mark.feature("hive-agent-token-holder-only")

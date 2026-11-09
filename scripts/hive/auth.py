@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import secrets
+import sys
 import time
 from functools import partial
 from pathlib import Path
@@ -13,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from scripts.auth import switch
 from scripts.events import state
+from scripts.events.bus import StateStore
 from scripts.hive import hive_state, redis_acl
 from scripts.swarm.keyspace import ROOT
 
@@ -260,23 +262,47 @@ def _mapped(redis: object, store: object, digest: str | None, member_id: str) ->
     )
 
 
+def _backfill(redis: object, store: StateStore, member_id: str) -> str | None:
+    """Write a member's holder record from its member record when its ledger credential still maps to it."""
+    found = member(redis, member_id)
+    digest = found["ledger"] if found else None
+    if not _mapped(redis, store, digest, member_id):
+        return None
+    hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
+    return digest
+
+
 def backfill_holders(redis: object) -> str:
     """Write the holder record of every indexed member that has none and whose ledger credential still maps to it."""
     store = _store(redis)
-    written: list[str] = []
-    for member_id in hive_state.index(redis):
-        found = member(redis, member_id) if hive_state.read(store, f"holder.{member_id}") is None else None
-        digest = found["ledger"] if found else None
-        if _mapped(redis, store, digest, member_id):
-            hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
-            written.append(member_id)
+    written = [
+        member_id
+        for member_id in hive_state.index(redis)
+        if hive_state.read(store, f"holder.{member_id}") is None and _backfill(redis, store, member_id)
+    ]
     return f"wrote the holder record of {', '.join(written)}" if written else "wrote no holder record"
 
 
+def _unheld(redis: object, store: StateStore, member_id: str) -> str | None:
+    """The ledger digest for a member with no holder record: backfilled and logged until refusal is enforced."""
+    if switch.holders_enforced(os.environ) or not switch.legacy(os.environ):
+        return None
+    digest = _backfill(redis, store, member_id)
+    print(
+        f"hive agent token: member {member_id} had no holder record, "
+        f"{'wrote it from its member record' if digest else 'and none could be written'}; "
+        f"{switch.HOLDERS_ENV}={switch.ENFORCE} refuses it",
+        file=sys.stderr,
+    )
+    return digest
+
+
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
-    """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
+    """A hive agent token scoped to one ledger and agent, recorded on its own from the member's holder record."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}")
+    if digest is None:
+        digest = _unheld(redis, store, member_id)
     if not _mapped(redis, store, digest, member_id):
         raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"

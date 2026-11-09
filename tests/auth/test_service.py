@@ -3,6 +3,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -246,14 +247,36 @@ def test_the_health_route_answers(served):
     assert missing.value.code == 404
 
 
-def test_main_serves_on_the_given_address():
+def test_main_serves_on_the_given_address(hive):
     with patch.object(service, "server") as built:
         assert service.main(["serve", "--host", "0.0.0.0", "--port", "9000"]) == 0
     built.assert_called_once_with(("0.0.0.0", 9000))
     built.return_value.serve_forever.assert_called_once_with()
 
 
-def test_main_defaults_to_loopback_on_the_auth_port():
+def test_main_defaults_to_loopback_on_the_auth_port(hive):
     with patch.object(service, "server") as built:
         service.main(["serve"])
     built.assert_called_once_with(("127.0.0.1", 8768))
+
+
+@pytest.mark.feature("hive-agent-token-holder-only")
+def test_main_backfills_holder_records_before_it_serves(hive: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    store, grant = hive
+    auth.hive_state.amend(auth._store(store.redis), f"holder.{grant['id']}", lambda _: None)
+    order: list[str] = []
+    backfill = auth.backfill_holders
+
+    def recorded(redis: object) -> str:
+        order.append("backfill")
+        return backfill(redis)
+
+    with patch.object(auth, "backfill_holders", side_effect=recorded), patch.object(service, "server") as built:
+        built.return_value.serve_forever.side_effect = lambda: order.append("serve")
+        service.main(["serve"])
+
+    assert order == ["backfill", "serve"]
+    assert capsys.readouterr().out == f"wrote the holder record of {grant['id']}\n"
+    assert auth.hive_state.read(auth._store(store.redis), f"holder.{grant['id']}") == auth._digest(
+        grant["ledger_credential"]
+    )

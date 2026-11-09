@@ -34,6 +34,15 @@ def test_a_minted_member_records_its_credential_digest_on_its_own(client):
     assert held == auth._digest(grant["ledger_credential"])
 
 
+def test_a_member_minted_before_the_holder_record_still_issues_tokens(client):
+    grant = auth.mint(client, "laptop", "redis://hive.example:6380/2")
+    auth.hive_state.amend(auth._store(client), f"holder.{grant['id']}", lambda _: None)
+
+    token = auth.issue_agent(client, grant["id"], SLUG, WORKER)
+
+    assert auth.agent_member(client, token, SLUG, WORKER) == grant["id"]
+
+
 def test_a_member_without_a_holder_record_is_refused_without_a_map_read_once_legacy_is_off(client, monkeypatch):
     grant = auth.mint(client, "laptop", "redis://hive.example:6380/2")
     auth.hive_state.amend(auth._store(client), f"holder.{grant['id']}", lambda _: None)
