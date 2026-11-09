@@ -2158,7 +2158,7 @@ def test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see
     member = InboxStore(store.redis)
     assert member.world == "m1" and [a.name for a in store.agents("sw")] == [ME]
     assert (held := idle.wait(store.redis, "sw", ME)) is not None and held["on"] == {"kind": "reply", "target": item.id}
-    with pytest.raises(InboxError):
+    with pytest.raises(InboxError, match=f"^no message {item.id}$"):
         member.locate(item.id)
 
     assert waits.end_pass(store, "sw", {}, member, {}.get, 5_000, {}.get) == []
