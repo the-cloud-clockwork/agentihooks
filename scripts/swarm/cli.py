@@ -2425,7 +2425,9 @@ def cmd_handoff(store, args):
     )
 
 
-def _hand_off(store, slug, agent, text, reason, ledger):
+def _hand_off(
+    store: RedisStore, slug: str, agent: AgentRecord, text: str, reason: str, ledger: LedgerClient
+) -> tuple[dict, dict]:
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
