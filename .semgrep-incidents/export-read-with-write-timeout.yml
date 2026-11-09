@@ -50,8 +50,11 @@ rules:
         - export-read-with-write-timeout.py
     patterns:
       - pattern-inside: |
-          def _call(...):
+          def $CALL(...):
               ...
+      - metavariable-regex:
+          metavariable: $CALL
+          regex: ^_call
       - pattern-either:
           - pattern: $LEDGER.queue(...)
           - pattern: _offline_write(...)
