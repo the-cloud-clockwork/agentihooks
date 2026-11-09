@@ -49,6 +49,8 @@ FAILED = "failed"
 HELD = "held"
 SKIPPED = "skipped"
 CUT = "cut"
+CUT_EVENT = "swarm_tick_step_cut"
+END_GRACE_S = 1.0
 SETTLE_S = 0.05
 
 _RUNNING: dict[tuple[str | None, str], Thread] = {}
@@ -127,7 +129,10 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     worker.join(step.budget_s)
     if run.give_up():
         return _left(step, outcome, clock() - started)
-    worker.join()
+    worker.join(END_GRACE_S)
+    if not outcome:
+        _lost_writes(step, CUT_EVENT)
+        return StepRecord(step.name, clock() - started, step.budget_s, cut=True)
     return _finished(step, outcome, clock() - started)
 
 
@@ -184,9 +189,14 @@ def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> S
 
 def _abandoned(step: Step) -> None:
     """Journal one ``swarm_tick_step_abandoned`` line for ``step`` when it declares writes beyond its own actions."""
+    _lost_writes(step, "swarm_tick_step_abandoned")
+
+
+def _lost_writes(step: Step, event: str) -> None:
+    """Journal one ``event`` line naming the write domains of ``step`` beyond its own actions, when it has any."""
     writes = sorted(step.writes - {Domain(f"actions:{step.name}")})
     if writes:
-        line = {"event": "swarm_tick_step_abandoned", "slug": timing.SWARM.get(), "step": step.name}
+        line = {"event": event, "slug": timing.SWARM.get(), "step": step.name}
         print(json.dumps({**line, "budget_s": step.budget_s, "writes": writes}), file=sys.stderr, flush=True)
 
 
@@ -206,7 +216,7 @@ def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: St
     error it raised; the run reads abandoned when ``run`` was given up at its budget before it ended."""
     try:
         outcome.append(
-            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, left=run.end)
+            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, on_end=run.end)
         )
     except BaseException as exc:
         outcome.append(exc)
@@ -579,6 +589,7 @@ def _expire(
             if began is None:
                 left = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
             else:
+                _lost_writes(step, CUT_EVENT)
                 left = StepRecord(step.name, clock() - began, step.budget_s, cut=True)
             records[step.name] = _ended(found, left)
 

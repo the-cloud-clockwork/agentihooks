@@ -240,11 +240,11 @@ def within(
     *args: Any,
     lane: str | None = None,
     name: str | None = None,
-    left: Callable[[], bool] | None = None,
+    on_end: Callable[[], bool] | None = None,
 ) -> Any:
     """Run ``function`` as a timed step recorded as ``name``, else as the function's own name, whose record carries
-    ``budget_s``, its ``lane`` when given, and reads late when it overruns; it reads outcome abandoned when ``left``,
-    asked as the run ends, says the run was given up at its budget."""
+    ``budget_s``, its ``lane`` when given, and reads late when it overruns; ``on_end`` is called once as the run
+    ends and returns whether the run was already given up at its budget, which makes the record read abandoned."""
     keep()
     with step(name or named(function)) as record:
         if record is not None:
@@ -255,7 +255,7 @@ def within(
         try:
             result = function(*args)
         finally:
-            if left is not None and left() and record is not None:
+            if on_end is not None and on_end() and record is not None:
                 record["outcome"] = ABANDONED
         if record is not None:
             record["late"] = time.monotonic() - started > budget_s

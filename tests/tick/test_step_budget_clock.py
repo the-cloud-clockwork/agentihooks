@@ -141,6 +141,7 @@ def test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_ab
     assert records["late reap"].wall_s < 0.9
     assert records["late reap"].cut and not records["late reap"].abandoned
     assert records["late reap"].outcome == engine.CUT
+    assert [row["step"] for row in rows(err) if row.get("event") == engine.CUT_EVENT] == ["late reap"]
     assert abandoned(err) == []
     assert outcomes(err, "late reap") == ["success"]
 
