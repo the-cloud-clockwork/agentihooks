@@ -1,6 +1,49 @@
 {
   "features": [
     {
+      "id": "swarm-spawn-order-once-per-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
+      "behaviour": "A spawn pass builds one claim view and one launch order for every lane, and the readiness check indexes the ledger's freeze and focus targets once per freeze list instead of scanning every record per task, so a pass over the replayed rig-grade-swarm ledger of 997 open tasks and 1322 freeze records stays under a tenth of the spawn floor.",
+      "seam": "scripts.tick.steps.place._spawn_order over the pass rows and ledger document",
+      "tests": [
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_computes_its_claim_order_once_for_every_lane",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_orders_claims_once",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_spawn_floor",
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds",
+        "tests/swarm/test_spawn_order_budget.py::test_the_freeze_index_is_built_once_per_freeze_list",
+        "tests/swarm/test_spawn_order_budget.py::test_the_readiness_hold_keeps_the_fix_phase_and_open_dependencies",
+        "tests/swarm/test_spawn_order_budget.py::test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane",
+        "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ]
+    },
+    {
+      "id": "swarm-tick-idle-claim-retire",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
+      "behaviour": "A checked wait holds a claim holder's idle count only while the waits end step, which ends checked waits whose target resolved, has run within the idle retirement window; when that step is starved, an agent idle at its prompt counts idle ticks, raises the idle with claim finding and is retired with its task reopened within 25 ticks, workstation and hive agents alike.",
+      "seam": "scripts.tick.steps.agents._watch_idle and _hive_lost, through _holding_wait",
+      "tests": [
+        "tests/tick/steps/test_idle_claim_retire.py::test_workstation_engineers_idle_under_an_unended_checked_wait_are_retired_within_25_ticks",
+        "tests/tick/steps/test_idle_claim_retire.py::test_eight_codex_hive_owners_with_no_turn_are_retired_within_25_ticks",
+        "tests/tick/steps/test_idle_claim_retire.py::test_the_idle_with_claim_finding_fires_on_the_counted_idle_ticks",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_checked_wait_still_holds_the_idle_count_while_waits_end_runs",
+        "tests/tick/steps/test_idle_claim_retire.py::test_a_silent_hive_owner_under_an_unended_checked_wait_is_lost"
+      ]
+    },
+    {
+      "id": "tick-merged-task-settlement-after-overrun",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2432",
+      "behaviour": "A merged code or ci task closes and its engineer leaves the seat within two passes when an intent or spawn barrier overruns its budget.",
+      "seam": "tick view, waits end and merge pass scheduling after an abandoned dependency, then ended agent reaping",
+      "tests": [
+        "tests/tick/steps/test_merge_pass.py::test_merge_pass",
+        "tests/tick/steps/test_tick_view.py::test_tick_view",
+        "tests/tick/steps/test_waits_end.py::test_waits_end"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
@@ -800,7 +843,7 @@
         "tests/swarm/test_tick_report.py::test_report_aggregates_step_costs_and_pass_gaps",
         "tests/swarm/test_tick_report.py::test_report_gives_each_lane_its_share_of_all_step_cpu",
         "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_its_budget_journals_its_returned_write_domains",
-        "tests/tick/test_abandoned_writes.py::test_a_write_step_left_at_an_expired_lane_journals_its_returned_write_domains",
+        "tests/tick/test_abandoned_writes.py::test_a_write_step_running_past_an_expired_lane_journals_its_write_domains_only_at_its_own_budget",
         "tests/tick/test_abandoned_writes.py::test_a_step_left_with_only_its_actions_domain_journals_nothing",
         "tests/tick/test_engine_records.py::test_abandoned_write_step_reads_abandoned_with_its_writes_dropped",
         "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
@@ -2670,6 +2713,50 @@
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
+      ]
+    },
+    {
+      "id": "fleet-red-claim-view-cache-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2440",
+      "behaviour": "The claim view admits an open task with a pull request whenever the fleet red listing of its repository is not yet saved, instead of listing it live, so spawn due never blocks its budget on a GitHub round trip; a saved listing, saved or failed, still judges the task exactly as before.",
+      "seam": "the claim view's fleet red reader through scripts.swarm.fleet_red.saved_reader",
+      "tests": [
+        "tests/swarm/test_fleet_red.py::test_the_claim_view_admits_a_task_on_a_cold_cache_without_listing_live"
+      ]
+    },
+    {
+      "id": "tick-step-budget-from-start",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
+      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success. A step that needs a handed off step of an earlier group that never ends inside the lane is skipped and never runs. A step with no earlier group to wait on, or whose earlier group already ended, is still skipped and never runs when its own lane already expired or the start gate is closed.",
+      "seam": "engine.run_step, engine._after and engine._eager lane expiry, timing.within outcome",
+      "tests": [
+        "tests/tick/test_step_budget_clock.py::test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_and_never_starts",
+        "tests/tick/test_step_budget_clock.py::test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_abandoned",
+        "tests/tick/test_step_budget_clock.py::test_a_step_whose_own_run_overruns_its_budget_is_abandoned_and_never_reports_success",
+        "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
+        "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group"
+      ]
+    },
+    {
+      "id": "codex-pump-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
+      "behaviour": "A Codex turn that the provider fails live with an account refusal (HTTP 401, 402 or 403, or unauthorized) ends the push pump with AccountRefused and exit status 4; codex session serve then stops the app server, so the seat is relaunched, and records the routed account as expired, so codex_router.account_cap gives it no seats at once. An old refused turn in a resumed thread leaves a fresh pump delivering. A usage read answered 402 deactivated_workspace is also an expired reading.",
+      "seam": "scripts.inbox.codex Pump.step, ThreadState.observe and main exit status; scripts.codex_session.serve close_refused with codex_router.account_cap; scripts.codex_usage.read",
+      "tests": [
+        "tests/inbox/test_codex_pump.py::test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded",
+        "tests/inbox/test_codex_pump.py::test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delivering",
+        "tests/inbox/test_codex_pump.py::test_only_a_failed_turn_with_an_account_status_reads_as_an_account_refusal",
+        "tests/inbox/test_codex_pump.py::test_a_live_completion_records_the_refusal_and_a_later_clean_completion_keeps_it",
+        "tests/inbox/test_codex_pump.py::test_a_refreshed_thread_never_records_a_refusal",
+        "tests/test_codex_usage.py::test_a_deactivated_workspace_reads_as_expired",
+        "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
+        "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
+        "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
       ]
     }
   ],
