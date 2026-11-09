@@ -23,7 +23,9 @@ COPY profiles /build/profiles
 FROM source-${AGENTIHOOKS_SOURCE} AS wheel
 ARG AGENTIHOOKS_VERSION=0.0.0
 WORKDIR /build
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --no-build-isolation --wheel-dir /wheels .
+RUN python -c "import tomllib; print(*tomllib.load(open('pyproject.toml', 'rb'))['build-system']['requires'], sep='\\n')" > /build-env/source-requires.txt \
+    && pip install --no-cache-dir -r /build-env/source-requires.txt \
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --no-build-isolation --wheel-dir /wheels .
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
 RUN apt-get update && apt-get install -y --no-install-recommends gh

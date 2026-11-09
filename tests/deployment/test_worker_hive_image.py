@@ -127,6 +127,8 @@ def test_hive_build_tools_install_in_a_layer_cached_apart_from_the_source() -> N
     assert worker_stage("source-git").startswith("FROM build-env AS source-git\n")
     wheel = worker_stage("wheel")
     assert "pip wheel --no-deps --no-build-isolation --wheel-dir /wheels ." in wheel
+    assert "open('pyproject.toml', 'rb'))['build-system']['requires']" in wheel
+    assert wheel.index("pip install --no-cache-dir -r /build-env/source-requires.txt") < wheel.index("pip wheel")
     assert "tools.txt" not in wheel
     overlay = worker_stage("overlay")
     assert overlay.startswith("FROM build-env AS overlay\n")
