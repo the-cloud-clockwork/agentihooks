@@ -2,9 +2,10 @@
 window through the blocker window.
 
 no merge into dev holds while focused pull requests are open, every task in pr when no focus holds, and starts at the
-later of the last dev merge and the first pass that saw it hold. merged task in pr holds while a task sits in pr twenty minutes after its pull request merged and starts
-at that mark. The stall-blockers gate picks the mode in the swarm config: observe logs each would-be record to the
-swarm gate log, enforce records it in the blocker queue, off skips.
+later of the last dev merge and the first pass that saw it hold. merged task in pr holds while a task sits in pr
+twenty minutes after its pull request merged and starts at that mark. The stall-blockers gate picks the mode in the
+swarm config: observe logs each would-be record once per start to the swarm gate log, enforce records it in the
+blocker queue, off skips.
 """
 
 import json
@@ -74,7 +75,8 @@ def merge_stall(
 def merged_in_pr(
     tasks: list[dict[str, Any]], github: Callable[[str], Any], held: Callable[[dict[str, Any]], bool], now_ms: int
 ) -> Held | None:
-    """Return the oldest task left in pr twenty minutes after its pull request merged, unless a declared wait holds it."""
+    """Return the oldest task left in pr twenty minutes after its pull request merged, unless a declared wait holds
+    it."""
     left: list[tuple[int, str]] = []
     for task in tasks:
         url = task.get("pr_url")
@@ -140,5 +142,5 @@ def observe(
     logged = state.setdefault("logged", {})
     lines = _apply(store, slug, MERGE_STALL, stall, mode, now_ms, logged)
     lines += _apply(store, slug, MERGED_IN_PR, left, mode, now_ms, logged)
-    store.redis.set(key, json.dumps(state))
+    store.redis.set(key, json.dumps(state), px=blockers.TTL_MS)
     return lines
