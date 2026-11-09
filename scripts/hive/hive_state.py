@@ -5,6 +5,7 @@ On Redis each hive's record gets its own store, so a member's ACL user is grante
 
 import json
 from collections.abc import Callable
+from typing import Any
 
 from scripts.events import state
 from scripts.events.bus import StateConflict, StateStore
@@ -31,7 +32,7 @@ def _bus(bucket: str) -> StateStore:
     return _OPENED[bucket]
 
 
-def records(client, hive_id: str) -> StateStore:
+def records(client: Any, hive_id: str) -> StateStore:
     return RedisStateStore(client, f"hive-{hive_id}") if on_redis() else _bus(RECORDS)
 
 
@@ -39,7 +40,7 @@ def credentials(client, prefix: str) -> StateStore:
     return RedisStateStore(client, "credentials", prefix) if on_redis() else _bus(CREDENTIALS)
 
 
-def read(store: StateStore, key: str, legacy: Callable[[], object] = lambda: None):
+def read(store: StateStore, key: str, legacy: Callable[[], object] = lambda: None) -> Any:
     entry = store.get(key)
     if entry is None:
         return legacy()
@@ -79,7 +80,7 @@ def index(client) -> list[str]:
     return read(records(client, INDEX), INDEX, _legacy_index(client)) or []
 
 
-def indexed(client, hive_id: str, present: bool) -> None:
+def indexed(client: Any, hive_id: str, present: bool) -> None:
     def change(current):
         ids = set(current or ())
         wanted = ids | {hive_id} if present else ids - {hive_id}
