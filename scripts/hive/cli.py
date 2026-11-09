@@ -393,10 +393,9 @@ def _list() -> None:
         excluded = ",".join(record["excluded"]) or "none"
         top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
-        release = record.get("version") or "unknown"
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={top}\texcluded={excluded}\t{room}\trelease={release}"
+            f"\tmax-agents={top}\texcluded={excluded}\t{room}\trelease={record['version'] or 'unknown'}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

@@ -395,8 +395,9 @@ def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3 (cap 3)\texcluded=qa\theadroom=missing\n"
-        "pod\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng\theadroom=missing\n"
+        "box\tname=swarm-master\tlive\tui=yes\tmax-agents=3 (cap 3)\texcluded=qa\theadroom=missing"
+        "\trelease=unknown\n"
+        "pod\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng\theadroom=missing\trelease=unknown\n"
     )
 
 
@@ -444,7 +445,8 @@ def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
     assert (
-        capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng,ci\theadroom=missing\n"
+        capsys.readouterr().out
+        == "box\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=eng,ci\theadroom=missing\trelease=unknown\n"
     )
 
 
