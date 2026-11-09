@@ -47,10 +47,10 @@ def _live(value, now):
         value[field] = {name: row for name, row in value.get(field, {}).items() if row["expires_ms"] > now}
 
 
-def _used(value):
+def _used(value: dict) -> int:
     holders = value["holders"]
     manual = sum(max(row["sessions"] - len(row["observed"]), 0) for row in value["hives"].values())
-    return len(holders) + manual
+    return sum(not row.get("master", False) for row in holders.values()) + manual
 
 
 class Slots:
@@ -100,23 +100,28 @@ class Slots:
 
             _change(self.bus.state("account-slots"), key(harness, account), renew)
 
-    def take(self, execution: str, harness: str, preferred: str = "") -> str | None:
+    def take(self, execution: str, harness: str, preferred: str = "", *, master: bool = False) -> str | None:
         report = self.read()
         self.heartbeat(report, {})
         for slot in report["slots"]:
             if slot["harness"] != harness or (preferred and slot["account"] != preferred):
                 continue
 
-            def reserve(value):
+            def reserve(value: dict) -> bool:
                 now = self.clock()
                 _live(value, now)
                 holder = value["holders"].get(execution)
                 if holder:
                     return holder["hive"] == self.hive
                 cap = min(row["cap"] for row in value["hives"].values())
-                if _used(value) >= cap:
+                if master:
+                    if cap <= 0 or any(row.get("master") for row in value["holders"].values()):
+                        return False
+                elif _used(value) >= cap:
                     return False
                 value["holders"][execution] = {"hive": self.hive, "expires_ms": now + TTL_MS}
+                if master:
+                    value["holders"][execution]["master"] = True
                 return True
 
             if _change(self.bus.state("account-slots"), key(harness, slot["account"]), reserve):
@@ -131,9 +136,11 @@ class Slots:
 
         _change(self.bus.state("account-slots"), key(harness, account), remove)
 
-    def launch(self, execution: str, harness: str, preferred: str, invoke: Callable[[str], Any]) -> Any:
+    def launch(
+        self, execution: str, harness: str, preferred: str, invoke: Callable[[str], Any], *, master: bool = False
+    ) -> Any:
         try:
-            account = self.take(execution, harness, preferred)
+            account = self.take(execution, harness, preferred, master=master)
         except Exception as exc:
             raise Unavailable("Account slot admission failed") from exc
         if account is None:
@@ -172,8 +179,10 @@ class Remote(Slots):
     def heartbeat(self, report: dict, executions: dict) -> None:
         self.ask({"op": "heartbeat", "hive": self.hive, "report": report, "executions": executions})
 
-    def take(self, execution: str, harness: str, preferred: str = "") -> str | None:
+    def take(self, execution: str, harness: str, preferred: str = "", *, master: bool = False) -> str | None:
         request = {"execution": execution, "harness": harness, "preferred": preferred, "report": self.read()}
+        if master:
+            request["master"] = True
         return self.ask({"op": "take", "hive": self.hive, **request})
 
     def release(self, execution: str, harness: str, account: str) -> None:
@@ -201,7 +210,14 @@ def _reading(hive: str) -> dict:
     return report
 
 
-def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Callable[[dict[str, str]], Any]) -> Any:
+def execute(
+    harness: str,
+    account: str,
+    environ: Mapping[str, str],
+    invoke: Callable[[dict[str, str]], Any],
+    *,
+    master: bool = False,
+) -> Any:
     from scripts.events.config import BusConfig
     from scripts.events.factory import open_bus
 
@@ -213,7 +229,7 @@ def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Call
     bus = open_bus(config)
     try:
         slots = _slots(bus, config.backend, hive, lambda: _reading(hive), environ)
-        return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child))
+        return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child), master=master)
     finally:
         bus.close()
 

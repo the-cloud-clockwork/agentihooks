@@ -15,7 +15,9 @@ if TYPE_CHECKING:
 BUCKETS = ("account-slots", "hive-slot-accounts")
 QUEUE = "hub-slots"
 OPERATIONS = {
-    "take": lambda slots, request: slots.take(request["execution"], request["harness"], request.get("preferred", "")),
+    "take": lambda slots, request: slots.take(
+        request["execution"], request["harness"], request.get("preferred", ""), master=request.get("master", False)
+    ),
     "heartbeat": lambda slots, request: slots.heartbeat(request["report"], request["executions"]),
     "release": lambda slots, request: slots.release(request["execution"], request["harness"], request["account"]),
 }

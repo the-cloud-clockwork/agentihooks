@@ -1245,7 +1245,8 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
 
-    def admit(harness, account, environ, launch):
+    def admit(harness: str, account: str, environ: Any, launch: Any, *, master: bool) -> Any:
+        assert master is True
         assert (harness, account) == ("claude", "workeratexample_com")
         return launch(environ)
 
