@@ -457,6 +457,31 @@ def test_cancel_runs_spares_the_integration_head_of_a_merged_fix(monkeypatch: py
 
 
 @pytest.mark.feature("panic-merged-fix-integration-head")
+def test_cancel_runs_spares_the_integration_head_of_each_merged_fix_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    bases = {FIX: ("dev", 1), f"{FIX}0": ("hotfix", 10)}
+
+    def change(url: str, refused: str) -> ChangeState:
+        base, number = bases[url]
+        return ChangeState(ChangeRef("o/a", number), "closed", "a" * 40, base, True, url, f"fix-{number}")
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs(
+        {
+            "o/a": [
+                RepositoryRun(1, "hotfix", "push", "in_progress", head_sha="h" * 40),
+                RepositoryRun(2, "dev", "push", "in_progress", head_sha="n" * 40),
+                RepositoryRun(3, "hotfix", "push", "in_progress", head_sha="g" * 40),
+                RepositoryRun(4, "dev", "push", "in_progress", head_sha="o" * 40),
+            ],
+        },
+    )
+    assert panic.cancel_runs([FIX, f"{FIX}0"], ["o/a"], runs) == ["o/a run 3 on hotfix", "o/a run 4 on dev"]
+
+
+@pytest.mark.feature("panic-merged-fix-integration-head")
 def test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.swarm import stack
     from scripts.tick.ports.source_control import ChangeRef, ChangeState
