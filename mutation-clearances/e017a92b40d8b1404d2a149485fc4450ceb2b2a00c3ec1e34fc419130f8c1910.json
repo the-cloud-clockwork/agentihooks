@@ -1,0 +1,6 @@
+{
+  "scripts/codex_session/supervisor.py:scripts.codex_session.supervisor.x_end_join_report:9bd76fc9125da2e009d6cd83e63db2a91f12cfdc2c95102e4f5ebcd7dda09414": {
+    "reader": "standards_reader",
+    "reason": "In x_end_join_report, the mutation alters only the static type argument of the typing.cast(...) call (type argument mutated to the string XXRedisXX); typing.cast returns its value argument unchanged at runtime regardless of the type argument given, so this changes no runtime output."
+  }
+}
