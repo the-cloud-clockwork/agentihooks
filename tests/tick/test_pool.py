@@ -239,7 +239,8 @@ def test_queued_steps_of_an_expired_lane_never_start() -> None:
     try:
         with pool.running(workers=1, critical_s=0.02):
             rows = engine.run_group("load", context(), (Step("stuck", stuck), Step("later", later)))
-        assert [row.outcome for row in rows] == [engine.LATE, engine.LATE]
+        assert [row.lost for row in rows] == [True, True]
+        assert rows[1].outcome == engine.LATE and rows[1].skipped
     finally:
         release.set()
     assert not queued.wait(0.2)
@@ -290,7 +291,7 @@ def test_an_abandoned_step_keeps_running_after_its_group_returns() -> None:
         with pool.running(critical_s=0.02):
             rows = engine.run_group("load", context(), (Step("stuck", stuck),))
             assert not finished.is_set()
-        assert [row.outcome for row in rows] == [engine.LATE]
+        assert [row.lost for row in rows] == [True]
     finally:
         release.set()
 
@@ -600,7 +601,7 @@ def test_the_pass_waits_for_a_hung_slow_step_only_until_the_slow_deadline() -> N
                 engine.run_group("load", context(), (Step("hung", hung, lane=Lane("slow")),), finished=later.append)
                 == ()
             )
-        assert [[row.outcome for row in records] for records in later] == [[engine.LATE]]
+        assert [[row.lost for row in records] for records in later] == [[True]]
     finally:
         release.set()
 
