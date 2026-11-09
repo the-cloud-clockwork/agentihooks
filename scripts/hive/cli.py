@@ -225,7 +225,7 @@ def _unlist(member: str) -> list[str]:
     path = member_swarms.signer_path(os.environ)
     if path is None:
         return []
-    bao = openbao_kv.from_env(os.environ)
+    bao = openbao_kv.from_env(os.environ)  # pyright: ignore[reportUnknownMemberType]
     plan = remove.Plan(member, "", "", signer_path=path, sync=member_swarms.sync_target(os.environ))
     return remove.unlist(None, bao, plan, remove.Host())
 

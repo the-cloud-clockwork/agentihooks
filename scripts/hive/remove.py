@@ -108,7 +108,7 @@ def ledger_client() -> TaskLedger:
 
 @dataclass(frozen=True)
 class Host:
-    run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], float] = time.time
