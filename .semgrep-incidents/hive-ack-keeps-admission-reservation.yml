@@ -10,12 +10,14 @@ rules:
       - pattern-inside: |
           def $FN(...):
               ...
-              $ACK = self.orders.ack(...)
-              ...
       - pattern: return Outcome(..., detail=$DETAIL)
       - metavariable-regex:
           metavariable: $DETAIL
           regex: .*hive launch failed.*
       - pattern-not-inside: |
           admission.release(...)
+          ...
+      - pattern-not-inside: |
+          if $AGENT is not None:
+              admission.release(...)
           ...

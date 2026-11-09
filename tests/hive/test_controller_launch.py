@@ -1125,7 +1125,7 @@ def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task
 
 
 @pytest.mark.feature("hive-admission-pending-launches")
-def test_a_finished_receipt_releases_its_admission_reservation(setup):
+def test_a_finished_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     request, order, _ = live_order(setup)
@@ -1138,7 +1138,9 @@ def test_a_finished_receipt_releases_its_admission_reservation(setup):
 
 
 @pytest.mark.feature("hive-admission-pending-launches")
-def test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation(setup):
+def test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
     from scripts.hive import admission
     from scripts.hive.orders import Ack
 
@@ -1287,7 +1289,7 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
 
 
 @pytest.mark.feature("hive-admission-pending-launches")
-def test_a_live_acknowledgement_releases_its_admission_reservation(setup):
+def test_a_live_acknowledgement_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     _, order, ack = live_order(setup)
@@ -1519,6 +1521,33 @@ def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_a
     assert slots.release("released")
     assert not slots.acknowledge("released", "claude:account")
     assert slots.counts() == {"claude:account": 1}
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_an_ambiguous_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    _, order, _ = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert not setup.launcher.complete(order, Ack("failed", {}, "ambiguous")).ok
+    assert admission.pending(setup.store.redis, order.hive) == 0
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    with pytest.raises(SwarmError):
+        setup.launcher.complete(replace(order, generation=order.generation + 1), ack)
+    assert admission.pending(setup.store.redis, order.hive) == 0
 
 
 def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):

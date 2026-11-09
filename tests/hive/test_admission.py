@@ -1,9 +1,13 @@
 import threading
+from typing import TYPE_CHECKING
 
 import pytest
 
 from scripts.hive import admission
 from tests.swarm.test_cli import env as env
+
+if TYPE_CHECKING:
+    import fakeredis
 
 pytestmark = pytest.mark.unit
 
@@ -467,8 +471,9 @@ def test_a_max_agents_refusal_falls_in_its_own_reason():
     assert admission.MAX_AGENTS in admission.REASONS
 
 
-@pytest.mark.feature("hive-admission-pending-launches")
-def test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it(redis):
+def test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it(
+    redis: "fakeredis.FakeRedis",
+) -> None:
     measured = reading(cpus=8, load5=3.65)
     admission.reserve(redis, "hive-two", "s/answered", 2)
     admission.reserve(redis, "hive-two", "s/unanswered", 2)
@@ -481,9 +486,10 @@ def test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_hol
         "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
         "fits 4 more under the 80 percent line",
     )
+    assert admission.HOST_PERCENT == 80
 
 
-def test_a_new_launch_of_a_released_name_reserves_again(redis):
+def test_a_new_launch_of_a_released_name_reserves_again(redis: "fakeredis.FakeRedis") -> None:
     admission.reserve(redis, "anton", "s/one", 1)
     admission.release(redis, "anton", "s/one")
     assert admission.reserve(redis, "anton", "s/one", 1) == (True, 0)

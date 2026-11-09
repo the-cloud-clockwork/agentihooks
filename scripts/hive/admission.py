@@ -1,6 +1,6 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes until the hive acknowledges its launch, live or failed, and the readings carry the agent's own load
-from the next heartbeat on."""
+for fifteen minutes until the controller collects the hive's answer to its launch, live, failed or ambiguous; the CPU
+used and pod load readings carry a launched agent's own load from the next heartbeat on."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
