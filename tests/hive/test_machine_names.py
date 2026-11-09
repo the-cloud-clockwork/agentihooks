@@ -85,15 +85,6 @@ def test_a_target_saved_under_another_label_is_not_added_to_herdr_again(admin):
     assert run.calls == []
 
 
-def test_a_name_only_looked_up_writes_nothing(admin):
-    assert machine.name(admin, "worker-001", assign=False) == "swarm-hive-001"
-    assert admin.hgetall(machine.MACHINES) == {}
-
-    machine.name(admin, "worker-001")
-    assert machine.name(admin, "worker-002", assign=False) == "swarm-hive-002"
-    assert machine.name(admin, "worker-001", assign=False) == "swarm-hive-001"
-
-
 @pytest.mark.parametrize(
     ("target", "host"),
     [
@@ -213,16 +204,15 @@ def test_remove_deletes_the_files_of_a_hive_that_hive_create_named() -> None:
     ]
 
 
-def test_a_new_machine_skips_every_name_a_live_hive_already_holds(admin):
-    admin.hset(machine.MACHINES, "worker-001", "swarm-hive-001")
+def test_a_saved_label_outside_the_hive_pattern_holds_no_ordinal(admin):
+    admin.hset(machine.MACHINES, "worker-001", "anton-9")
 
-    assert machine.name(admin, "worker-002", taken=lambda: {"swarm-hive-002", "anton-9"}) == "swarm-hive-003"
-    assert admin.hgetall(machine.MACHINES) == {"worker-001": "swarm-hive-001", "worker-002": "swarm-hive-003"}
+    assert machine.name(admin, "worker-002") == "swarm-hive-001"
+    assert admin.hgetall(machine.MACHINES) == {"worker-001": "anton-9", "worker-002": "swarm-hive-001"}
 
 
-def test_a_known_machine_keeps_its_name_even_when_it_is_taken(admin):
-    admin.hset(machine.MACHINES, "worker-002", "swarm-hive-002")
+def test_a_known_machine_answers_its_saved_name_and_writes_nothing(admin):
+    admin.hset(machine.MACHINES, "worker-002", "swarm-hive-005")
 
-    assert machine.name(admin, "worker-002", taken=lambda: pytest.fail("a known machine reads no taken names")) == (
-        "swarm-hive-002"
-    )
+    assert machine.name(admin, "worker-002") == "swarm-hive-005"
+    assert admin.hgetall(machine.MACHINES) == {"worker-002": "swarm-hive-005"}
