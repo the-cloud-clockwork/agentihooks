@@ -347,7 +347,7 @@ def supervised(monkeypatch, wait, returncode=0):
         execution_id="exe-1", thread_id="thread-1", endpoint_ref="unix:///run/cx/s", state="connected"
     )
     started = SimpleNamespace(record=record, process=process)
-    spec = SimpleNamespace(slug="sw", cwd="/workspace", environ=dict(SWARM_ENV))
+    spec = SimpleNamespace(slug="sw", cwd="/workspace", environ=dict(SWARM_ENV), agent=SimpleNamespace(account="alpha"))
     seen = {
         "finished": [],
         "stopped": [],
@@ -424,6 +424,23 @@ def test_an_exited_pump_names_its_status_before_the_server_stops(tmp_path, monke
     assert serve.main(argv, dict(SWARM_ENV)) == 1
     assert capsys.readouterr().err == serve.PUMP_EXITED.format(1) + "\n"
     assert seen["stopped"] == [seen["pump"], started.process]
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(("pump_code", "cap"), [(4, 0), (1, None)], ids=["refused", "degraded"])
+def test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing(tmp_path, monkeypatch, pump_code, cap):
+    from scripts import codex_usage
+    from scripts.codex_quota import CodexQuota
+
+    started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
+    seen["pump"].poll = lambda: pump_code
+    seen["pump"].returncode = pump_code
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == pump_code
+    assert seen["stopped"] == [seen["pump"], started.process]
+    reading = codex_usage.cached().get("alpha")
+    assert reading == (CodexQuota(1.5, "?", expired=True) if cap == 0 else None)
+    assert codex_router.account_cap(reading, 1.5) == cap
 
 
 def test_a_failed_pump_spawn_retires_the_server_and_finishes_the_execution(tmp_path, monkeypatch):
