@@ -1,0 +1,10 @@
+rules:
+  - id: gate-wiring-expiry
+    languages: [generic]
+    severity: ERROR
+    message: Gate wiring declarations require reason and owner only. Expiry dates must never interrupt CI continuity.
+    paths:
+      include:
+        - '**/gate-wiring.json'
+        - '**/gate-wiring-expiry.test.yaml'
+    pattern-regex: '"expires"\s*:'
