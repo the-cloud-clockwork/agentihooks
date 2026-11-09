@@ -202,9 +202,15 @@ def _amend(client, hive_id: str, change):
 def _settle(hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
     """The hive hosting the operator's interface runs the masters and is named MASTER_NAME or a name derived from it."""
     settled: dict[str, Any] = {**_default(hive_id, record.get("ui", "no")), **record}
-    if settled["ui"] != "yes" or DERIVED_MASTER.fullmatch(str(settled["name"])):
-        return settled
-    return {**settled, "name": MASTER_NAME}
+    return {**settled, "name": _read_name(settled)}
+
+
+def _read_name(record: dict[str, Any]) -> str:
+    """The name a record reads as: an interface hive keeps a derived MASTER_NAME, else reads as MASTER_NAME."""
+    name = str(record["name"])
+    if record.get("ui") != "yes" or DERIVED_MASTER.fullmatch(name):
+        return name
+    return MASTER_NAME
 
 
 def _held(client: object, hive_id: str) -> set[str]:
@@ -281,7 +287,7 @@ def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, d
         }
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
-        settled = str(_settle(hive_id, merged)["name"])
+        settled = _read_name(merged)
         if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
             merged["name"] = derived
         if merged.get("max_agents") is None:

@@ -133,7 +133,7 @@ def test_two_headed_hives_joining_take_unique_names(redis):
 
 def test_a_restarted_headed_hive_keeps_its_derived_name(redis):
     registry.update(redis, "root", ["ui=yes"])
-    registry.update(redis, "vm", ["ui=yes"])
+    assert registry.update(redis, "vm", ["ui=yes"])["name"] == "swarm-master-2"
     assert registry.update(redis, "vm", ["ui=yes", "name=vm"], keep=True)["name"] == "swarm-master-2"
     assert registry.update(redis, "vm", ["name=Desk"])["name"] == "swarm-master-2"
 
