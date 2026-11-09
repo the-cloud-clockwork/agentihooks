@@ -2363,6 +2363,16 @@
       "tests": [
         "tests/test_gate_recovery_payload.py::test_the_frozen_registry_accepts_the_admin_pull_request_recovery_payload"
       ]
+    },
+    {
+      "id": "gate-declarations-never-expire",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
+      "behaviour": "Gate wiring declarations require reason and owner without expiry; missing, past, future and malformed dates never interrupt wiring or protected base grading.",
+      "seam": "ci_wiring.check and gate_protected.grade",
+      "tests": [
+        "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -111,7 +111,7 @@ def test_a_head_declaring_its_own_non_gate_entry_is_red():
     assert "test.yml/planted runs on pull requests but is not a need of Gate — Required." in problems
 
 
-def test_a_head_extending_a_base_declaration_keeps_the_base_expiry():
+def test_a_head_and_base_declaration_date_never_blocks_grading() -> None:
     base = _workflow()
     base["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
     head = copy.deepcopy(base)
@@ -122,7 +122,7 @@ def test_a_head_extending_a_base_declaration_keeps_the_base_expiry():
         base_config={"not_gates": {"test.yml/slow": old}},
         head_config={"not_gates": {"test.yml/slow": {**old, "expires": "2027-01-01"}}},
     )
-    assert "test.yml/slow expired on 2026-10-01." in problems
+    assert problems == []
 
 
 def test_a_head_retiring_a_declared_job_with_its_entry_is_green():
@@ -197,21 +197,21 @@ def test_main_passes_a_clean_head(repo, capsys):
     assert "0 protected gate problems" in capsys.readouterr().out
 
 
-def test_main_reads_declarations_from_the_protected_tip(repo, capsys):
+def test_main_reads_declarations_from_the_protected_tip(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     workflow = _workflow()
     workflow["jobs"]["slow"] = {"runs-on": "ubuntu-latest"}
-    expired = {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2000-01-01"}}}
-    _commit(repo, {"test.yml": workflow}, expired, "base")
+    incomplete = {"not_gates": {"test.yml/slow": {"reason": "why", "owner": ""}}}
+    _commit(repo, {"test.yml": workflow}, incomplete, "base")
     _git(repo, "checkout", "-q", "-b", "pr")
     head = copy.deepcopy(workflow)
     head["jobs"]["audit"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate"]["needs"].append("audit")
-    behind = _commit(repo, {"test.yml": head}, expired, "add audit")
+    behind = _commit(repo, {"test.yml": head}, incomplete, "add audit")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 1
-    assert "test.yml/slow expired on 2000-01-01." in capsys.readouterr().out
+    assert "test.yml/slow is declared without its owner." in capsys.readouterr().out
     _commit(
-        repo, {"test.yml": workflow}, {"not_gates": {"test.yml/slow": {**_entry(), "expires": "2999-01-01"}}}, "renew"
+        repo, {"test.yml": workflow}, {"not_gates": {"test.yml/slow": {"reason": "why", "owner": "ci"}}}, "record owner"
     )
     assert gate_protected.main(["--root", str(repo), "--head", behind]) == 0
 
@@ -1503,7 +1503,7 @@ def test_a_mutation_stage_runs_outside_required_grading_only_when_the_required_m
 
 
 @pytest.mark.parametrize("stage", ["mutation-refine", "mutation-probe", "mutation-replan", "mutation-shard"])
-def test_a_merged_mutation_stage_keeps_the_base_expiry(stage: str) -> None:
+def test_a_merged_mutation_stage_ignores_the_base_declaration_date(stage: str) -> None:
     base, head = _aggregators()
     head["jobs"][stage] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["mutation"] = {"needs": [stage], "runs-on": "ubuntu-latest"}
@@ -1512,7 +1512,7 @@ def test_a_merged_mutation_stage_keeps_the_base_expiry(stage: str) -> None:
     base_config = {"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}}
     head_config = {"not_gates": {key: {**_entry(), "expires": "2027-01-01"}}}
     problems = gate_protected.grade({"test.yml": base}, base_config, {"test.yml": head}, head_config, _TODAY, _POLICY)
-    assert f"{key} expired on 2026-10-01." in problems
+    assert problems == []
 
 
 def _separate_summary(head, steps):
@@ -1624,7 +1624,7 @@ def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_b
     assert "The test summary must use the reviewed reporting job." in problems
 
 
-def test_the_separate_summary_keeps_the_protected_declaration_expiry():
+def test_the_separate_summary_ignores_the_protected_declaration_date() -> None:
     from scripts import ci_reuse
 
     base, head = _aggregators()
@@ -1642,7 +1642,7 @@ def test_the_separate_summary_keeps_the_protected_declaration_expiry():
         base_config={"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}},
         head_config={"not_gates": {key: _entry()}},
     )
-    assert "test.yml/test-summary expired on 2026-10-01." in problems
+    assert problems == []
 
 
 @pytest.mark.parametrize("promotion", [False, True])
