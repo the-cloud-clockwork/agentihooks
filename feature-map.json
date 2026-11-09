@@ -34,6 +34,16 @@
       ]
     },
     {
+      "id": "hive-stop-recovery-handoff",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2252",
+      "behaviour": "An agent still running when its hive stops for a release gets a recovery handoff; once the hive stops reporting the tick retires the agent, reopens its task and launches the next engineer primed with that recovery handoff.",
+      "seam": "tick over a hive settled by remove.settle",
+      "tests": [
+        "tests/swarm/test_tick_hive_stop_recovery.py::test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
