@@ -2394,6 +2394,20 @@
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
       ]
+    },
+    {
+      "id": "hive-workstation-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
+      "behaviour": "A hive seat that hands off, parks or readies a workstation task clears its claimant, so a workstation seat can take the task; a workstation seat, or a task without the workstation pin, keeps its claim.",
+      "seam": "swarm handoff, park and ready through the shared hand off step",
+      "tests": [
+        "tests/swarm/test_hive_release.py::test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task",
+        "tests/swarm/test_hive_release.py::test_a_hive_ready_on_a_workstation_task_leaves_its_pull_request_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
+        "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold"
+      ]
     }
   ],
   "unmapped_rules": [
