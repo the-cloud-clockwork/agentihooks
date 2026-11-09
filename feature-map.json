@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-spawn-order-once-per-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
+      "behaviour": "A spawn pass builds one claim view and one launch order for every lane, and the readiness check indexes the ledger's freeze and focus targets once per freeze list instead of scanning every record per task, so a pass over the replayed rig-grade-swarm ledger of 997 open tasks and 1322 freeze records stays under a thirty third of the spawn floor.",
+      "seam": "scripts.tick.steps.place._spawn_order over the pass rows and ledger document",
+      "tests": [
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_computes_its_claim_order_once_for_every_lane",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
