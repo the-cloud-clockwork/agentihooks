@@ -1403,3 +1403,12 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 - [Swarm](swarm.md): the master, seats, the minute tick and the swarm commands.
 - [Claude account load balancing](load-balancing.md): subscription and api slots.
 - [Hosted ledger auth](../reference/hosted-ledger-auth.md): hive tokens and edge mode.
+
+## Compacting member credentials
+
+`agentihooks hive compact-credentials --member ID --readers-compatible` removes the obsolete member agents map
+only for explicitly selected members. Repeat `--member` for each verified member. Before confirming, verify every
+reader in service for those members, including stable hive releases, accepts independent agent token records.
+Keep members with unknown readers out of the command. The migration preserves legacy token authentication and
+replaces retained member history with compact documents. Output maps member identifiers to document byte counts;
+it never prints credentials. The command requires the Redis state backend.

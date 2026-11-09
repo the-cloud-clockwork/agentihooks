@@ -313,6 +313,13 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
     joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
+    compacted = sub.add_parser("compact-credentials", help="Compact member documents after verifying deployed readers")
+    compacted.add_argument(
+        "--member", action="append", required=True, help="member whose deployed readers were verified"
+    )
+    compacted.add_argument(
+        "--readers-compatible", action="store_true", help="confirm independent token readers are deployed"
+    )
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     removed = sub.add_parser(
@@ -540,6 +547,10 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
+        elif args.command == "compact-credentials":
+            from scripts.hive import agent_credentials
+
+            print(json.dumps(agent_credentials.compact(redis_client(), args.member, args.readers_compatible)))
         elif args.command in ("revoke", "remove", "drain"):
             print(_retire(args))
         elif args.command in ("run", "install"):

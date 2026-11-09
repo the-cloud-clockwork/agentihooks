@@ -32,10 +32,10 @@ def test_compaction_preserves_legacy_tokens_and_removes_member_maps(client: Any)
     hive_state.amend(
         store, "member.m1", lambda _: {"name": "hive", "ledger": "d", "agents": {held: ["alpha", "engineer@1"]}}
     )
-    agent_credentials.compact(client, readers_compatible=True)
+    agent_credentials.compact(client, ["m1"], readers_compatible=True)
 
     assert auth.member(client, "m1") == {"name": "hive", "ledger": "d"}
     assert auth.agent_member(client, token, "alpha", "engineer@1") == "m1"
     assert auth.agent_member(client, token, "other", "engineer@1") is None
     assert hive_state.read(store, f"agent.m1.{held}") == {"ledger": "d", "scope": ["alpha", "engineer@1"]}
-    assert agent_credentials.compact(client, readers_compatible=True) == {"m1": 31}
+    assert agent_credentials.compact(client, ["m1"], readers_compatible=True) == {"m1": 31}
