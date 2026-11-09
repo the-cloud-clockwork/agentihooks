@@ -4,7 +4,7 @@
       "id": "swarm-reopened-claim-loss",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
-      "behaviour": "A reopened or reassigned task ends its former worker through hook exit and tick retirement; a live workstation worker whose claim still names it remains restorable.",
+      "behaviour": "A reassigned task ends its former worker anywhere, and an emptied or reopened claim ends a hive worker through hook exit and tick retirement; a live workstation worker keeps its emptied claim restorable.",
       "seam": "hooks.context.claim_watch.check and scripts.tick.steps.common._current_owner, _ended with scripts.tick.steps.agents._reap_agent",
       "tests": [
         "tests/tick/steps/test_claim_loss.py::test_reopened_or_reassigned_claims_end_the_previous_worker",
@@ -12,7 +12,9 @@
         "tests/tick/steps/test_claim_loss.py::test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state",
         "tests/tick/steps/test_claim_loss.py::test_retirement_preserves_other_claims_and_fences_its_own_reopen",
         "tests/test_claim_watch.py::test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner",
-        "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner"
+        "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner",
+        "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
+        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session"
       ]
     },
     {

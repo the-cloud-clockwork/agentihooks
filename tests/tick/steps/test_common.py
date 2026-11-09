@@ -84,11 +84,37 @@ def test_still_held_needs_active_state_owner_and_generation() -> None:
 
 @pytest.mark.feature("swarm-tick-common-helpers")
 def test_current_owner_accepts_an_unclaimed_row_or_its_own_claim() -> None:
-    agent = SimpleNamespace(name="a")
+    agent = SimpleNamespace(name="a", runtime_backend="local", runtime_target={}, hive="")
     assert common._current_owner(agent, {}) is True
-    assert common._current_owner(agent, {"claimed_by": ""}) is False
+    assert common._current_owner(agent, {"claimed_by": ""}) is True
     assert common._current_owner(agent, {"claimed_by": "a"}) is True
     assert common._current_owner(agent, {"claimed_by": "b"}) is False
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
+@pytest.mark.parametrize(
+    "placed",
+    [
+        {"runtime_backend": "kubernetes", "runtime_target": {}, "hive": ""},
+        {"runtime_backend": "local", "runtime_target": {"host_id": "swarm-hive-003"}, "hive": ""},
+        {"runtime_backend": "local", "runtime_target": {}, "hive": "swarm-hive-003"},
+    ],
+)
+def test_a_hive_agent_loses_an_emptied_claim(monkeypatch: pytest.MonkeyPatch, placed: dict[str, object]) -> None:
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    agent = SimpleNamespace(name="a", **placed)
+    assert common._current_owner(agent, {"state": "open", "claimed_by": ""}) is False
+    assert common._current_owner(agent, {"state": "open"}) is False
+    assert common._current_owner(agent, {"claimed_by": "a"}) is True
+    assert common._current_owner(agent, {}) is True
+
+
+def test_an_agent_of_this_hive_keeps_an_emptied_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
+    agent = SimpleNamespace(
+        name="a", runtime_backend="local", runtime_target={"host_id": "workstation"}, hive="workstation"
+    )
+    assert common._current_owner(agent, {"state": "open", "claimed_by": ""}) is True
 
 
 @pytest.mark.feature("swarm-tick-common-helpers")
@@ -112,7 +138,9 @@ def test_current_owner_accepts_an_unclaimed_row_or_its_own_claim() -> None:
 def test_ended_reads_the_task_row_except_for_masters(
     lane: str, state: str, row: dict[str, object], ended: bool
 ) -> None:
-    agent = SimpleNamespace(lane=lane, state=state, task="t1")
+    agent = SimpleNamespace(
+        name="a", lane=lane, state=state, task="t1", runtime_backend="local", runtime_target={}, hive=""
+    )
     assert common._ended(agent, {"t1": row}) is ended
 
 

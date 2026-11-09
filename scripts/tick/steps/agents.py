@@ -184,7 +184,7 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
         and not tick.awaiting_merge(row)
     )
     if goes_on:
-        goes_on = tick._reopen(slug, ledger, rows, agent.task, expected={"claimed_by": agent.name})
+        goes_on = tick._reopen(slug, ledger, rows, agent.task)
     tick.exits.settle(tick.InboxStore(store.redis), agent.name, agent.seat if goes_on else "", "exited")
     return [f"retired {agent.name}"]
 

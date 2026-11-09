@@ -1,6 +1,5 @@
 import copy
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -106,10 +105,7 @@ def test_exit_retires_a_worker_whose_ledger_claim_moved_while_its_store_claim_ho
     assert runtime.reaped == [name]
 
 
-def test_exit_retires_a_workstation_worker_whose_ledger_claim_is_empty(
-    env: tuple[Any, Any, Any],  # noqa: F811
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_exit_keeps_a_workstation_worker_whose_emptied_claim_the_tick_restores(env, monkeypatch):  # noqa: F811
     from scripts.hive import scope
 
     store, ledger, runtime = env
@@ -123,11 +119,10 @@ def test_exit_retires_a_workstation_worker_whose_ledger_claim_is_empty(
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
 
-    assert run("sw", "exit") == 0
-    assert store.agents("sw")[0].state == "finished"
-    assert store.claimant("sw", "t1") is None
-    assert runtime.reaped == [name]
-    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert run("sw", "exit") == 1
+    assert store.agents("sw") == [agent]
+    assert store.claimant("sw", "t1") == name
+    assert runtime.reaped == []
 
 
 @pytest.mark.parametrize("hive", [True, False])

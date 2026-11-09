@@ -131,11 +131,21 @@ def test_the_claimant_itself_keeps_working() -> None:
     assert not (ledger_workspace.folder("sw", "t1") / "progress.md").exists()
 
 
-def test_an_absent_pushed_claim_keeps_the_session() -> None:
+def test_an_absent_pushed_claim_keeps_a_workstation_session() -> None:
     stop, _, spawn = _check(None)
 
+    assert stop is None
+    assert spawn.calls == []
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_an_absent_pushed_claim_ends_a_hive_session(hive: list) -> None:
+    redis, spawn = Pushed(None), Spawn()
+    stop = claim_watch.check(ENV, redis, 1000.0, spawn)
+
     assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="")
-    assert spawn.calls[0][0] == ["agentihooks", "swarm", "sw", "--as", NAME, "exit"]
+    assert len(spawn.calls) == 1
+    assert hive == [ENV]
 
 
 @pytest.mark.parametrize(
@@ -250,7 +260,7 @@ def test_the_client_reads_the_swarm_redis_with_a_fifty_millisecond_bound_and_no_
 
 
 @pytest.mark.feature("swarm-reopened-claim-loss")
-def test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner() -> None:
+def test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner(hive: list) -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None

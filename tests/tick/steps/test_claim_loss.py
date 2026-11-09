@@ -21,7 +21,7 @@ def timing(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.feature("swarm-reopened-claim-loss")
 @pytest.mark.parametrize("owner", ["", None, "another-worker"])
 def test_reopened_or_reassigned_claims_end_the_previous_worker(owner: str | None) -> None:
-    agent = AgentRecord(name="engineer", lane="eng", task="task")
+    agent = AgentRecord(name="engineer", lane="eng", task="task", hive="swarm-hive-003")
     row = {"state": "open", "claimed_by": owner}
     assert common._current_owner(agent, row) is False
     assert common._ended(agent, {"task": row}) is True
@@ -33,7 +33,7 @@ def test_reopened_or_reassigned_claims_end_the_previous_worker(owner: str | None
 def test_tick_retires_a_lost_claim_before_restore_or_watch(
     monkeypatch: pytest.MonkeyPatch, backend: str, owner: str
 ) -> None:
-    agent = AgentRecord(name="engineer", lane="eng", task="task", runtime_backend=backend)
+    agent = AgentRecord(name="engineer", lane="eng", task="task", runtime_backend=backend, hive="swarm-hive-003")
     row = {"state": "open", "claimed_by": owner}
     retired, restored, watched = Mock(return_value=["retired"]), Mock(), Mock()
     monkeypatch.setattr(tick, "_acknowledging", Mock(return_value=False))
@@ -77,7 +77,7 @@ def test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state() 
 def test_retirement_preserves_other_claims_and_fences_its_own_reopen(
     monkeypatch: pytest.MonkeyPatch, owner: str, reopened: bool
 ) -> None:
-    agent = AgentRecord(name="engineer", lane="eng", task="task", seat="eng-1@swarm")
+    agent = AgentRecord(name="engineer", lane="eng", task="task", seat="eng-1@swarm", hive="swarm-hive-003")
     row = {"state": "claimed", "claimed_by": owner}
     rows = {"task": row}
     store, ledger, runtime = Mock(), Mock(), Mock()
@@ -105,7 +105,6 @@ def test_retirement_preserves_other_claims_and_fences_its_own_reopen(
             "task",
             {"state": "open", "claimed_by": ""},
             if_state=tick.ACTIVE,
-            if_match={"claimed_by": agent.name},
         )
     else:
         ledger.update_task.assert_not_called()

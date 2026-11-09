@@ -115,7 +115,19 @@ def _ended(agent: Any, rows: dict[str, Any]) -> bool:
 
 
 def _current_owner(agent: Any, row: dict[str, Any]) -> bool:
-    return not claim_lost.lost(agent.name, row)
+    hive = bool(row) and not row.get("claimed_by") and _on_hive(agent)
+    return not claim_lost.lost(agent.name, row, hive)
+
+
+def _on_hive(agent: Any) -> bool:
+    """True for an agent another hive runs, whose emptied claim the tick never restores."""
+    from scripts.swarm.commands import hive_id
+
+    return (
+        agent.runtime_backend != "local"
+        or bool(tick.reports.host(agent))
+        or (bool(agent.hive) and agent.hive != hive_id())
+    )
 
 
 def _reopen(slug: str, ledger: Any, rows: dict[str, Any], task_id: str, expected: dict[str, Any] | None = None) -> bool:
