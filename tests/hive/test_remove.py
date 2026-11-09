@@ -898,25 +898,39 @@ def test_an_agent_still_running_at_the_deadline_has_its_unpushed_worktrees_pushe
 
     def rescue(path: Path) -> str:
         pushed.append(path.name)
+        if path.name == "engineer-1-2":
+            raise subprocess.TimeoutExpired(["git", "push"], 600)
         return f"wip/agentihooks/{path.name}"
 
     host = replace(_host(Clock(store, member, 99), Run(), tmp_path), rescue=rescue)
+    store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
+    (tmp_path / "worktrees" / "agentihooks" / "engineer-2").mkdir(parents=True)
+    states["engineer-2"] = ((), True)
 
     remove.settle(store, member, 30, host)
 
-    assert pushed == ["engineer-1", "engineer-1-2"]
-    assert inspected == [(name, 1793.5) for name in ("engineer-1", "engineer-1-2", "engineer-1-3", "engineer-1-4")]
-    refs = "wip/agentihooks/engineer-1, wip/agentihooks/engineer-1-2"
+    assert pushed == ["engineer-1", "engineer-1-2", "engineer-2"]
+    assert inspected == [
+        *((name, 1793.5) for name in ("engineer-1", "engineer-1-2", "engineer-1-3", "engineer-1-4")),
+        ("engineer-2", 1793.5),
+    ]
+    left = tmp_path / "worktrees" / "agentihooks" / "engineer-1-2"
+    refs = (
+        "pushed to wip/agentihooks/engineer-1, "
+        f"left in worktree {left} because its push failed (Command '['git', 'push']' timed out after 600 seconds)"
+    )
     text = remove.RECOVERY.format(
         name="engineer@1",
         task="t1",
         hive=member,
         wait=30,
         folder=folder(SLUG, "t1"),
-        pushed=f"\nIts unpushed work was pushed to {refs}; continue from there.",
+        pushed=f"\nIts unpushed work: {refs}; continue from there.",
     )
     assert store.handoffs[(SLUG, "t1")] == (text, SEAT)
-    assert f"still running.\nIts unpushed work was pushed to {refs}; continue from there.\n\n##" in text
+    assert f"still running.\nIts unpushed work: {refs}; continue from there.\n\n##" in text
+    second = store.handoffs[(SLUG, "t2")][0]
+    assert "\nIts unpushed work: pushed to wip/agentihooks/engineer-2; continue from there.\n" in second
 
 
 def test_the_drain_pushes_through_the_lifecycle_wip_snapshot_from_the_worktree_root(
@@ -929,6 +943,22 @@ def test_the_drain_pushes_through_the_lifecycle_wip_snapshot_from_the_worktree_r
     assert remove.wip_push(tmp_path / "tree") == "wip/tree"
     assert remove.Host().rescue is remove.wip_push
     assert remove.Host().worktrees == Path.home() / "dev" / "worktrees"
+
+
+@pytest.mark.parametrize("failure", ["action", "os"])
+def test_a_failed_wip_push_names_the_worktree_left_behind(tmp_path: Path, failure: str) -> None:
+    from hooks.lifecycle.act import ActionError
+
+    error = ActionError("git push: rejected") if failure == "action" else OSError("disk gone")
+
+    def rescue(path: Path) -> str:
+        raise error
+
+    host = remove.Host(rescue=rescue)
+
+    assert remove._rescued(tmp_path / "tree", host) == (
+        f"left in worktree {tmp_path / 'tree'} because its push failed ({error})"
+    )
 
 
 def test_an_agent_with_a_recorded_handoff_no_longer_holds_the_drain_and_keeps_its_document(store, tmp_path):

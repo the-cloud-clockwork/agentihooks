@@ -308,13 +308,23 @@ def _pushed(agent: "AgentRecord", host: Host) -> str:
 
     own = re.compile(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?")
     refs = [
-        host.rescue(path)
+        _rescued(path, host)
         for path in sorted(host.worktrees.glob("*/*"))
         if own.fullmatch(path.name)
         and (state := gitstate.inspect(path, host.wall())) is not None
         and (state.dirty or state.unpushed)
     ]
-    return f"\nIts unpushed work was pushed to {', '.join(refs)}; continue from there." if refs else ""
+    return f"\nIts unpushed work: {', '.join(refs)}; continue from there." if refs else ""
+
+
+def _rescued(path: Path, host: Host) -> str:
+    """The wip branch now holding the worktree's work, or why its push failed, so one failure spares the rest."""
+    from hooks.lifecycle.act import ActionError
+
+    try:
+        return f"pushed to {host.rescue(path)}"
+    except (ActionError, OSError, subprocess.TimeoutExpired) as error:
+        return f"left in worktree {path} because its push failed ({error})"
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:

@@ -211,8 +211,8 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
 @pytest.mark.feature("swarm-reboot-recovery")
 def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
     ledger, runtime = rebooted
-    eng = next(a for a in _local(store).values() if a.lane == "eng")
-    store.put_agent("sw", replace(eng, account="spent"))
+    eng = replace(next(a for a in _local(store).values() if a.lane == "eng"), account="spent", conversation_id="")
+    store.put_agent("sw", eng)
     other = {"name": "engineer@ffffff-0001", "outcome": "resumed"}
     store.put_restored("sw", [other, {"name": eng.name, "outcome": "stale"}])
 
@@ -249,8 +249,10 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
 
 @pytest.mark.feature("hive-drain-push-resume")
 def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision(
-    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime]
+    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    fresh = {"remote_branch": "none", "remote_head": "none", "continue_from": "fresh", "fresh_reason": "none"}
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda repo, lives, recorded, heads=None: fresh)
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")
     store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
@@ -266,9 +268,11 @@ def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_success
     assert not [r for r in store.restored("sw") if r["outcome"] == resume.AWAITING]
     assert store.handoff("sw", eng.task) == "carry on from the parser"
 
-    tick_module.tick("sw", store, ledger, runtime, 901)
+    ticked = tick_module.tick("sw", store, ledger, runtime, 901)
 
-    (successor,) = [a for a in store.agents("sw") if a.task == eng.task]
+    successors = [a for a in store.agents("sw") if a.task == eng.task]
+    assert len(successors) == 1, ticked
+    (successor,) = successors
     assert successor.name != eng.name
     assert (successor.seat, successor.state) == (eng.seat, "working")
     assert runtime.spawned[-1] == ("eng", successor.name, eng.task)
