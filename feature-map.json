@@ -2440,7 +2440,10 @@
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_a_free_seat_the_normal_way",
         "tests/test_claude_quota_balancer.py::test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_fill_every_seat",
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_skips_an_account_under_five_percent_of_its_five_hour_window",
-        "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed"
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed",
+        "tests/test_claude_quota_balancer.py::test_the_launch_selector_forwards_every_option_to_the_selector_it_picks",
+        "tests/test_claude_quota_balancer.py::test_the_launch_refusal_names_the_rule_that_closes_the_account",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_keeps_a_refusal_that_read_no_account"
       ]
     }
   ],

@@ -1396,9 +1396,11 @@ def test_an_operator_launch_skips_an_account_under_five_percent_of_its_five_hour
 
 
 @pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize("now", [1000, None])
 def test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, now: float | None
 ) -> None:
+    monkeypatch.setattr(balancer.time, "time", lambda: 1000.0)
     tired = balancer.parse_probe("TIRED", _stream(0.97, 0.05), 100)
     spent = balancer.parse_probe("SPENT", _stream(0.10, 0.99), 100)
     skipped = balancer.parse_probe("SKIPPED", _stream(0.10, 0.10), 100)
@@ -1406,10 +1408,124 @@ def test_an_operator_launch_names_each_account_s_real_refusal_when_every_account
     env = {"AH_CC_TOKEN_TIRED": "t", "AH_CC_TOKEN_SPENT": "s", "AH_CC_TOKEN_SKIPPED": "k"}
     with pytest.raises(balancer.RoutingError) as raised:
         balancer.select_launch_credential(
-            env, cache_file=tmp_path / "c.json", sessions={}, exclude=["SKIPPED"], now=1000
+            env, cache_file=tmp_path / "c.json", sessions={}, exclude=["SKIPPED"], now=now
         )
     assert str(raised.value) == (
         "no Claude account is open: TIRED: 3% of its five hour window left, under the 5% floor; "
         "SPENT: 1% of its week left, under the 5% floor; SKIPPED: excluded from this launch"
     )
     assert [result.account for result in raised.value.results] == ["TIRED", "SPENT", "SKIPPED"]
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize(
+    ("marker", "selector"),
+    [
+        ("", "select_master_credential"),
+        ("AGENTIHOOKS_SWARM", "select_credential"),
+        ("AGENTIHOOKS_SLOT_HIVE", "select_credential"),
+    ],
+)
+def test_the_launch_selector_forwards_every_option_to_the_selector_it_picks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, marker: str, selector: str
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    for name in ("select_master_credential", "select_credential"):
+        monkeypatch.setattr(balancer, name, lambda environ, _name=name, **kwargs: calls.append((_name, kwargs)))
+    env = {marker: "x"} if marker else {}
+    balancer.select_launch_credential(env)
+    balancer.select_launch_credential(
+        env,
+        include_fable=True,
+        claude_bin="/opt/claude",
+        sessions={"A": 1},
+        exclude=["B"],
+        cache_file=tmp_path / "c.json",
+        now=5.0,
+    )
+    defaults = {
+        "include_fable": False,
+        "claude_bin": "claude",
+        "sessions": None,
+        "exclude": (),
+        "cache_file": None,
+        "now": None,
+    }
+    given = {
+        "include_fable": True,
+        "claude_bin": "/opt/claude",
+        "sessions": {"A": 1},
+        "exclude": ["B"],
+        "cache_file": tmp_path / "c.json",
+        "now": 5.0,
+    }
+    assert calls == [(selector, defaults), (selector, given)]
+
+
+def _window_result(
+    account: str,
+    five: float | None,
+    week: float | None,
+    *,
+    status: str = "allowed",
+    fable: float | None = None,
+    week_resets: int = 91000,
+) -> balancer.ProbeResult:
+    return balancer.ProbeResult(
+        account,
+        status,
+        "NORMAL",
+        None,
+        balancer.QuotaWindow(five, 4600),
+        balancer.QuotaWindow(week, week_resets),
+        balancer.QuotaWindow(fable, 91000),
+    )
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+@pytest.mark.parametrize(
+    ("result", "include_fable", "reason"),
+    [
+        (_window_result("SKIPPED", 10, 10), False, "excluded from this launch"),
+        (_window_result("A", 10, 10, status="rejected"), False, "the provider revoked or rejects this token"),
+        (_window_result("A", 10, 10, status="revoked"), False, "the provider revoked or rejects this token"),
+        (_window_result("A", 10, None), False, "no fresh quota reading"),
+        (_window_result("A", 10, 10), True, "no fresh quota reading"),
+        (_window_result("A", 10, 10, fable=97), True, "3% of its week left, under the 5% floor"),
+        (_window_result("A", 10, 96), False, "4% of its week left, under the 5% floor"),
+        (_window_result("A", 10, 95), False, "open"),
+        (_window_result("A", 10, 99, week_resets=500), False, "open"),
+        (_window_result("A", 96, 10), False, "4% of its five hour window left, under the 5% floor"),
+        (_window_result("A", 95, 10), False, "open"),
+        (_window_result("A", None, 10), False, "open"),
+        (_window_result("PRIMARY", 10, 85), False, "the primary login keeps its week reserve"),
+    ],
+)
+def test_the_launch_refusal_names_the_rule_that_closes_the_account(
+    monkeypatch: pytest.MonkeyPatch, result: balancer.ProbeResult, include_fable: bool, reason: str
+) -> None:
+    from scripts.routing import reservation
+
+    seen: list[tuple[str, float, bool]] = []
+
+    def primary_reserved(slug: str, week: float, environ: object) -> bool:
+        seen.append((slug, week, environ is balancer.os.environ))
+        return slug == "PRIMARY"
+
+    monkeypatch.setattr(reservation, "primary_reserved", primary_reserved)
+    assert balancer._launch_refusal(result, 1000, include_fable, {"SKIPPED"}) == reason
+    if result.account == "PRIMARY":
+        assert seen == [("PRIMARY", 15.0, True)]
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_keeps_a_refusal_that_read_no_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    refusal = balancer.RoutingError("no non-empty AH_CC_TOKEN_* variables found")
+
+    def refuse(environ: object, **kwargs: object) -> None:
+        raise refusal
+
+    monkeypatch.setattr(balancer, "select_master_credential", refuse)
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential({})
+    assert raised.value is refusal
