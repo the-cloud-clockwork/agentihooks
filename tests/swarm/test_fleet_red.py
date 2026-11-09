@@ -388,12 +388,14 @@ def test_the_notice_pass_reads_claims_and_clears_hold_marks_in_one_call_each_how
     assert [key for key in store.redis.scan_iter(store.key("sw", "fleet-red:*"))] == []
 
 
-def test_the_claim_view_lists_open_pull_requests_in_the_task_pull_request_repo(store, monkeypatch):
+@pytest.mark.feature("fleet-red-claim-view-cache-only")
+def test_the_claim_view_admits_a_task_on_a_cold_cache_without_listing_live(store, monkeypatch):
     reads = []
     monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or [])
     rows = {"red": task("red", pr_url=MINE, awaiting="fix")}
-    _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng")
-    assert reads == ["o/r"]
+
+    assert _claimable("sw", store, rows, {"phases": [], "tasks": list(rows.values())}, "eng") == [rows["red"]]
+    assert reads == []
 
 
 def test_the_claim_view_judges_a_saved_listing_without_listing_again(
