@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, create_render, machine, member_swarms, nats_grant, registry
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    join_report,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from scripts.hive.purge import FINISHED, forget, hosted, on_hive
 from scripts.hive.purge import keys as _keys
 from scripts.hive.purge import recorded as _recorded
@@ -223,7 +233,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     )
     inbox, ordered = InboxStore(store.redis), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive):
+    while remaining := _unhanded(store, hive, int(host.wall() * 1000)):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -242,8 +252,22 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not _handed(store, slug, agent)]
+def _unhanded(store: "RedisStore", hive: str, now_ms: int) -> list[tuple[str, "AgentRecord"]]:
+    return [
+        (slug, agent)
+        for slug, agent in hosted(store, hive)
+        if agent.task and _running(store, agent, now_ms) and not _handed(store, slug, agent)
+    ]
+
+
+def _running(store: "RedisStore", agent: "AgentRecord", now_ms: int) -> bool:
+    """Whether ``agent`` still runs on its hive: its join report for this generation has not ended, it launched under
+    one heartbeat ago and has not reported yet, or it has no execution id and so never reports joins."""
+    if not agent.execution_id:
+        return True
+    if report := join_report.read(store.redis, agent):
+        return "ended_at" not in report
+    return now_ms - max(agent.launched_at, agent.started_at) < join_report.HEARTBEAT_MS
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
