@@ -1,7 +1,9 @@
 """Tick scenarios replayed on the real step clock: every step inside its floor, none abandoned, a fresh controller places."""
 
 import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
@@ -33,10 +35,12 @@ def records() -> list[dict[str, Any]]:
 
 def overruns(rows: list[dict[str, Any]]) -> list[str]:
     """Return one line per row whose step was abandoned or whose wall exceeds its declared floor."""
+    floors = {name: budget.floor_s for name, budget in budgets.FLOORS.items()}
+    if source := os.environ.get("TICK_BUDGET_FLOORS"):
+        floors.update(json.loads(Path(source).read_text()))
     found: list[str] = []
     for row in rows:
-        timing_row = budgets.FLOORS.get(row["step"])
-        floor = timing_row.floor_s if timing_row is not None else row["budget_s"]
+        floor = floors.get(row["step"], row["budget_s"])
         if row["abandoned"]:
             found.append(f"{row['step']} abandoned after {row['wall_s']:.2f}s")
         elif row["wall_s"] > floor:
@@ -51,6 +55,9 @@ def test_every_scenario_step_finishes_inside_its_floor(
 ) -> None:
     characterisation.replay(scenario, "run_tick", monkeypatch, tmp_path)
     rows = records()
+    output = Path(os.environ.get("TICK_BUDGET_OUTPUT", str(tmp_path)))
+    output.mkdir(parents=True, exist_ok=True)
+    (output / f"{scenario}.json").write_text(json.dumps(rows, indent=2) + "\n")
     assert rows, f"{scenario} recorded no tick steps"
     assert not overruns(rows), f"{scenario}: " + "; ".join(overruns(rows))
 
@@ -77,6 +84,17 @@ def test_an_overrun_or_abandoned_step_is_named(row: dict[str, Any], line: str) -
 @pytest.mark.feature("swarm-tick-step-budget-gate")
 def test_a_step_inside_its_floor_passes() -> None:
     assert overruns([{"step": "reap", "wall_s": 21.9, "budget_s": 22.0, "abandoned": False}]) == []
+
+
+@pytest.mark.feature("swarm-tick-step-budget-gate")
+def test_a_head_floor_increase_cannot_weaken_the_base_budget(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source = tmp_path / "floors.json"
+    source.write_text(json.dumps({"reap": 22.0}))
+    monkeypatch.setenv("TICK_BUDGET_FLOORS", str(source))
+    monkeypatch.setattr(budgets, "FLOORS", {"reap": SimpleNamespace(floor_s=44.0)})
+    assert overruns([{"step": "reap", "wall_s": 30.0, "budget_s": 44.0, "abandoned": False}]) == [
+        "reap took 30.00s over its 22.0s floor"
+    ]
 
 
 def report_hive(store: RedisStore) -> None:

@@ -118,6 +118,11 @@ def test_tick_equivalence_holds_every_scenario_step_to_its_floor_unconditionally
     assert "continue-on-error" not in step
     [replay] = [item for item in steps if "bash head/tests/swarm/tick_equivalence.sh" in item.get("run", "")]
     assert steps.index(step) < steps.index(replay)
+    assert 'cp "../base/$gate" "$gate"' in step["run"]
+    assert "cd ../base" in step["run"]
+    assert "from scripts.tick.steps.budgets import FLOORS" in step["run"]
+    assert step["env"]["TICK_BUDGET_FLOORS"] == "${{ runner.temp }}/tick-step-floors.json"
+    assert step["env"]["TICK_BUDGET_OUTPUT"] == "${{ github.workspace }}/tick-evidence/step-budgets"
 
 
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:

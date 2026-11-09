@@ -93,7 +93,16 @@ jobs:
           python -m scripts.tick_pattern --base "$GITHUB_WORKSPACE/head" --head "$copy"
       - name: Hold every tick scenario step to its floor and fail an abandoned step
         working-directory: head
-        run: python -m pytest tests/swarm/tick_scenarios/test_step_budgets.py -n 0 --tb=short
+        env:
+          TICK_BUDGET_FLOORS: ${{ runner.temp }}/tick-step-floors.json
+          TICK_BUDGET_OUTPUT: ${{ github.workspace }}/tick-evidence/step-budgets
+        run: |
+          gate=tests/swarm/tick_scenarios/test_step_budgets.py
+          if [[ -f "../base/$gate" ]]; then
+            cp "../base/$gate" "$gate"
+          fi
+          (cd ../base && python -c 'import json; from scripts.tick.steps.budgets import FLOORS; print(json.dumps({name: budget.floor_s for name, budget in FLOORS.items()}))') > "$TICK_BUDGET_FLOORS"
+          python -m pytest tests/swarm/tick_scenarios/test_step_budgets.py -n 0 --tb=short
       - name: Replay tick scenarios on base and head concurrently and check the dropped action
         env:
           TICK_EQUIVALENCE_PLANT: ${{ inputs.tick_plant && '1' || '0' }}
