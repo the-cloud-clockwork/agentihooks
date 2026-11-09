@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.772 · 2026-11-09
+
+### 2026-11-09 · 8210750ced17 · #10188 · @agenticore-app
+
+**Avoid duplicate worker base downloads and daemon unpacking in kind proof**
+
+This change fixes the kind proof so the worker base image is no longer downloaded twice and unpacked redundantly by the Docker daemon. It switches to a container buildx builder that publishes directly through the local registry, only warming Redis separately, while preserving base freshness, the fallback build path, pod proofs, and final image publication. The registry now stays alive until publication completes and is torn down in an always-run cleanup step, closing a premature-cleanup regression caught by new tests; remaining work is confirming green full-runtime results across a few more integrated runs before closing the issue.
+
 ## v2.17.770 · 2026-11-09
 
 ### 2026-11-09 · 6b19680cbc60 · #10281 · @nestorcolt
