@@ -36,6 +36,8 @@ FAIL_COMMENT = "The intent check failed. The engineer has the verdict and the fi
 SHORTFALL_COMMENT = "Intent remains unmet after two fix rounds. The master must review this shortfall in the gate log."
 MERGED_COMMENT = "Intent remains unmet on a merged pull request. The master must review this shortfall in the gate log."
 DRAFT = "draft pull request, judged once ready for review"
+JUDGED_PER_PASS = 2
+TURN_MS = 60_000
 START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 RELEASES = (["done"], ["ready"])
@@ -227,6 +229,44 @@ def pr_text(url: str, run=subprocess.run) -> str | None:
         return text_key(raw["title"], raw["body"]) if raw else None
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return None
+
+
+class Pulls:
+    """The heads, text keys, merged and draft flags of pull requests, read in one batch for the urls a pass knows up
+    front and once more for each other url asked."""
+
+    def __init__(self, read: Callable[[list[str]], dict], urls: list[str]) -> None:
+        """Read ``urls`` in one batch through ``read``."""
+        self.read = read
+        self.asked = set(urls)
+        self.found = dict(read(list(urls))) if urls else {}
+
+    def _get(self, url: str) -> dict | None:
+        """Return what the reads found for ``url``, reading it alone the first time it is asked outside the batch."""
+        if url not in self.asked:
+            self.asked.add(url)
+            self.found.update(self.read([url]))
+        return self.found.get(url)
+
+    def head(self, url: str) -> str | None:
+        """Return the head commit of ``url``, None when no read found it."""
+        pull = self._get(url)
+        return pull["head"] if pull else None
+
+    def text(self, url: str) -> str | None:
+        """Return the text key of the title and body of ``url``, None when no read found it."""
+        pull = self._get(url)
+        return text_key(pull["title"], pull["body"]) if pull else None
+
+    def merged(self, url: str) -> bool:
+        """Return whether ``url`` is merged."""
+        pull = self._get(url)
+        return bool(pull) and pull["state"] == "MERGED"
+
+    def draft(self, url: str) -> bool:
+        """Return whether ``url`` is a draft."""
+        pull = self._get(url)
+        return bool(pull) and pull["draft"]
 
 
 def pr_view(url, run=subprocess.run):
@@ -758,26 +798,35 @@ class Check:
     head: Callable | None = None
     named: Callable | None = None
     text: Callable | None = None
+    merged: Callable | None = None
+    draft: Callable | None = None
+    limit: int | None = None
 
-    def run(self, doc):
+    def run(self, doc: dict) -> list[str]:
+        """Judge the watched tasks of ``doc``: every unchanged or draft pull, and at most ``limit`` changed ones in a
+        turn that moves each minute, leaving the other changed ones to a later pass."""
         if self.mode == "off":
             return []
         verdicts, actions, tasks = Verdicts(self.slug, NAME, self.home), [], []
-        for task in doc["tasks"]:
-            states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
-            if task.get("state") not in states or not task.get("pr_url"):
-                continue
+        states = ("pr", "claimed") if self.mode == "coach" else ("pr",)
+        watched = [task for task in doc["tasks"] if task.get("state") in states and task.get("pr_url")]
+        turn = (self.now_ms // TURN_MS) % len(watched) if watched else 0
+        for task in watched[turn:] + watched[:turn]:
             actions += self._isolated(task, self._queue, doc, task, verdicts, tasks)
+        order = {task["id"]: index for index, task in enumerate(watched)}
+        tasks.sort(key=lambda queued: order[queued[0]["id"]])
         with ThreadPoolExecutor(max_workers=2) as workers:
             pending = [
                 (task, record, moved, workers.submit(copy_context().run, self._judge, doc, task))
-                for task, record, moved in tasks
+                for task, record, moved, _ in tasks
             ]
             for task, record, moved, future in pending:
                 actions += self._isolated(task, self._settle, task, record, moved, future, verdicts)
         return actions
 
-    def _queue(self, doc, task, verdicts, tasks):
+    def _queue(self, doc: dict, task: dict, verdicts: Verdicts, tasks: list) -> list[str]:
+        """Queue ``task`` for judgment unless its verdict stands, or it changed and the pass already queued ``limit``
+        changed tasks."""
         _bind_pulls(verdicts, task, task["pr_url"], doc)
         record = verdicts.read(task["id"])
         judged = record and record["verdict"] != PENDING and not record.get("planned")
@@ -788,6 +837,9 @@ class Check:
         )
         if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
             return []
+        quick = self._quick(doc, task)
+        if not quick and self.limit is not None and sum(not queued for *_, queued in tasks) >= self.limit:
+            return []
         if _drafted(record):
             verdicts.write(
                 task["id"],
@@ -797,8 +849,14 @@ class Check:
                 phase=task.get("phase"),
                 **_split_fields(task, task["pr_url"]),
             )
-        tasks.append((task, record, moved))
+        tasks.append((task, record, moved, quick))
         return []
+
+    def _quick(self, doc: dict, task: dict) -> bool:
+        """Return whether ``task`` is judged without a pull request view: its coached verdict stands or its pull is a
+        draft."""
+        drafted = self.draft is not None and self.draft(task["pr_url"])
+        return drafted or self._unmoved(task, _fingerprint(doc, task)) is not None
 
     def _isolated(self, task, step, *args):
         from scripts.swarm.ledger_client import LedgerRefused
@@ -838,11 +896,14 @@ class Check:
         timing.keep()
         return actions
 
-    def _judge(self, doc, task):
+    def _judge(self, doc: dict, task: dict) -> _Judgment | None:
+        """Return the judgment of ``task``: its standing coached verdict, a draft, or the answer to its state."""
         inputs = _fingerprint(doc, task)
         previous = self._unmoved(task, inputs)
         if previous:
             return _Judgment(None, previous, None, None)
+        if self.draft is not None and self.draft(task["pr_url"]):
+            return _Judgment({"draft": True}, None, None, None)
         pr = self.view(task["pr_url"])
         if pr is None or (self.mode == "coach" and not pr.get("head")):
             return None
@@ -884,9 +945,17 @@ class Check:
             "named_pending": failed + opened,
         }
 
-    def _named_moved(self, record):
+    def _named_moved(self, record: dict) -> bool:
+        """Return whether a pull request ``record`` named as pending has merged since."""
         pending = record.get("named_pending") or []
-        return bool(self.named) and any((view := self.named(url)) and view["merged"] for url in pending)
+        return bool(self.named) and any(self._merged(url) for url in pending)
+
+    def _merged(self, url: str) -> bool:
+        """Return whether ``url`` is merged, from the merged reader when the check has one, else its named view."""
+        if self.merged is not None:
+            return self.merged(url)
+        view = self.named(url) if self.named else None
+        return bool(view) and view["merged"]
 
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr

@@ -1,0 +1,17 @@
+rules:
+  - id: intent-check-per-task-read
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The tick intent check made a GitHub read for every task in pr in every pass and judged every changed pull
+      request at once, so thirty tasks in pr took the step past eighty seconds against its eight second budget.
+      Build the check in the tick with readers from intent.Pulls, one batched read per pass, and with a limit.
+    paths:
+      include:
+        - /scripts/swarm/
+        - intent-check-per-task-read.py
+    pattern-either:
+      - pattern: intent.Check(..., text=intent.pr_text, ...)
+      - patterns:
+          - pattern: intent.Check(...)
+          - pattern-not: intent.Check(..., limit=$LIMIT, ...)

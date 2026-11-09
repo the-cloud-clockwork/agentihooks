@@ -56,7 +56,7 @@ def test_an_intent_failure_still_reaches_the_pass_when_the_tick_fails(env, monke
     assert judged.__context__ is ticked
 
 
-def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeypatch):  # noqa: F811
+def test_the_tick_hands_the_intent_check_batched_pull_request_readers_and_a_limit(env, monkeypatch):  # noqa: F811
     from scripts.swarm import ledger_events
 
     store, ledger, rt = env
@@ -72,10 +72,12 @@ def test_the_tick_hands_the_intent_check_the_pull_request_text_read(env, monkeyp
 
     monkeypatch.setattr(intent, "Check", Recorded)
     monkeypatch.setattr(ledger_events, "tick_view", lambda *args: lambda url: object())
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: {})
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     [(args, kwargs)] = built
     assert isinstance(args[2], int)
-    assert kwargs["text"] is intent.pr_text
+    assert kwargs["text"] is not intent.pr_text
+    assert kwargs["limit"] == intent.JUDGED_PER_PASS
     assert kwargs["head"]("https://github.com/o/r/pull/1") is None
 
 

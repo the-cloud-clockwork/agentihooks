@@ -2635,6 +2635,7 @@
     {
       "id": "swarm-intent-check-budget",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
       "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, and returns without waiting for the pass view, so thirty tasks in pr stay inside its eight second budget.",
       "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
       "tests": [

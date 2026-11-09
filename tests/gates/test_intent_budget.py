@@ -67,6 +67,7 @@ def _check(mode: str, pulls: intent.Pulls, calls: list[str], tmp_path, now: int 
         text=pulls.text,
         merged=pulls.merged,
         draft=pulls.draft,
+        limit=intent.JUDGED_PER_PASS,
     )
 
 
