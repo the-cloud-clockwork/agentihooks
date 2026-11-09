@@ -50,7 +50,7 @@ def _live(value, now):
 def _used(value: dict[str, Any]) -> int:
     holders = value["holders"]
     manual = sum(max(row["sessions"] - len(row["observed"]), 0) for row in value["hives"].values())
-    return sum(not row.get("master", False) for row in holders.values()) + manual
+    return sum(not row.get("master") for row in holders.values()) + manual
 
 
 class Slots:
