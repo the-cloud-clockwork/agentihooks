@@ -297,10 +297,10 @@ def test_cli_explains_the_reader_precondition(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit) as raised:
         cli.main(["--help"])
     assert raised.value.code == 0
-    assert "Compact member documents after verifying deployed readers" in capsys.readouterr().out
+    assert "Compact member documents after verifying deployed readers" in " ".join(capsys.readouterr().out.split())
     with pytest.raises(SystemExit) as raised:
         cli.main(["compact-credentials", "--help"])
     assert raised.value.code == 0
-    help_text = capsys.readouterr().out
+    help_text = " ".join(capsys.readouterr().out.split())
     assert "member whose deployed readers were verified" in help_text
     assert "confirm independent token readers are deployed" in help_text
