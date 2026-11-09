@@ -1,6 +1,30 @@
 {
   "features": [
     {
+      "id": "master-token-slot-route-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
+      "behaviour": "Master token launch reports routed only after hive account admission; refused slots report the refusal without a routed report.",
+      "seam": "launch_token account slot callback and route report",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
+        "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "hive-master-account-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
+      "behaviour": "A front door master token launch on a hive admits one master seat when lane agents fill the Claude account cap, without increasing lane capacity.",
+      "seam": "hive account slot execute and master token launch",
+      "tests": [
+        "tests/test_master_claude_login.py::test_the_master_token_route_takes_a_seat_past_full_lane_agents",
+        "tests/hive/test_master_account_seat.py::test_one_master_seat_is_independent_of_lane_capacity",
+        "tests/hive/test_master_account_seat.py::test_master_admission_respects_quota_and_failed_launch_returns_its_seat",
+        "tests/hive/test_master_account_seat.py::test_master_seat_renews_and_expires_with_execution_ownership"
+      ]
+    },
+    {
       "id": "hive-drain-launch-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
@@ -19,6 +43,18 @@
       "tests": [
         "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
+      "id": "hive-ready-through-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2172",
+      "behaviour": "The hive headroom thread logs a failed scheduler wait and keeps its cadence until stopped, so the rollout ready marker stays fresh while a slow agent launch holds the beat and the Redis wait times out once.",
+      "seam": "publish_headroom beside run while a beat blocks",
+      "tests": [
+        "tests/hive/test_daemon.py::test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval",
+        "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
+        "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
       ]
     },
     {
@@ -2215,6 +2251,25 @@
       ]
     },
     {
+      "id": "hive-quiet-sweep",
+      "origin": "inventory",
+      "behaviour": "The tick step hive sweep drains an ephemeral hive quiet past the registry window and removes its records once no agent runs on it; a quiet lasting hive raises one quiet hive finding; the hives page hides quiet ephemeral hives and counts no agents on a quiet row; the hive reproduce proof removes its invited member on exit.",
+      "seam": "scripts.hive.registry.quiet, scripts.hive.sweep.sweep through tick step hive sweep, scripts.swarm.health.quiet_hives.findings, scripts.swarm_ledger.api.hives.view, scripts/packaging/hive-reproduce.sh exit trap",
+      "tests": [
+        "tests/tick/steps/test_hive_sweep.py::test_hive_sweep",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_ephemeral_hive_is_drained_and_removed_after_the_window",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept",
+        "tests/tick/steps/test_hive_sweep.py::test_a_kept_hive_does_not_stop_the_sweep_and_a_draining_hive_is_not_drained_again",
+        "tests/tick/steps/test_hive_sweep.py::test_the_sweep_reads_only_the_state_index_and_skips_ids_without_a_record",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none",
+        "tests/tick/steps/test_hive_sweep.py::test_a_hive_is_quiet_only_once_a_beat_is_older_than_the_window",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_counts_only_agents_still_running_on_the_hive",
+        "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_that_stops_after_its_invite_removes_the_member",
+        "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_told_to_keep_its_hive_leaves_it"
+      ]
+    },
+    {
       "id": "hive-agent-ceiling",
       "origin": "operator",
       "operator_words": "a hive's max agents must not be a fixed number such as the default twenty or ten. With no cap set, the ceiling is computed each tick from the hive's own reported memory, swap and load, the same host room rule the workstation autoscale uses, and placement uses that number. A cap set by the operator through the hive command or the page bounds it from above.",
@@ -2350,6 +2405,16 @@
       ]
     },
     {
+      "id": "hive-roll-hooks-run-the-chart-release-worker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2169",
+      "behaviour": "A packaged release chart runs its hive roll PreSync and PostSync hook Jobs on the immutable semver hive worker tag of its own appVersion, so a sync never pulls a floating release worker image the release has not yet published; an unreleased chart with appVersion dev keeps workers.image for its hooks.",
+      "seam": "hive-rollout.yaml hook Job container image and the chart release package appVersion",
+      "tests": [
+        "tests/test_swarm_chart_hive_rollout_release.py::test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps"
+      ]
+    },
+    {
       "id": "hive-retire-absence",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1772",
@@ -2407,6 +2472,17 @@
       ]
     },
     {
+      "id": "hive-rollout-lease-failed-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2209",
+      "behaviour": "A hive whose sync fails after it takes the hive rollout lease frees it through the SyncFail abandon hook, even over an unserving replacement, and a lease whose renew time plus its duration has passed is taken over by a hive still inside its acquire wait, so one stuck hive never holds every other hive on the old release.",
+      "seam": "scripts.hive.rollout acquire and abandon",
+      "tests": [
+        "tests/hive/test_rollout.py::test_a_failed_sync_frees_the_lease_for_the_next_hive",
+        "tests/hive/test_rollout.py::test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive"
+      ]
+    },
+    {
       "id": "controller-fresh-quota-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-quota-fallback-guard",
@@ -2426,6 +2502,17 @@
         "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
+      ]
+    },
+    {
+      "id": "scoped-member-inbox-publish",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2151",
+      "behaviour": "A scoped hive member selects its swarm before opening inbox state and publishes immediately; only a real bus failure leaves delivery to the Redis recheck.",
+      "seam": "InboxStore.send through SeatPublisher and SeatInbox on a scoped member bus",
+      "tests": [
+        "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
+        "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
       ]
     },
     {
