@@ -88,16 +88,16 @@ def test_a_spawn_pass_over_the_replayed_ledger_orders_claims_once(
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
-@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="mutation trampolines slow every call")
 def test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_spawn_floor(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     offline(monkeypatch)
     doc = replay()
     rows = {task["id"]: task for task in doc["tasks"]}
+    share = 1 if "MUTANT_UNDER_TEST" in os.environ else BUDGET_SHARE
     started = time.process_time()
     tick_module._spawn_order("sw", store.config("sw"), store, [], rows, doc, FakeRuntime())
-    assert time.process_time() - started < budgets.FLOORS["spawn"].floor_s / BUDGET_SHARE
+    assert time.process_time() - started < budgets.FLOORS["spawn"].floor_s / share
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
