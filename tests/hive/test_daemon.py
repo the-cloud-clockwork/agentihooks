@@ -534,7 +534,7 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
 
 
-@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError", "NoPermissionError", "ResponseError", "OSError"])
 @pytest.mark.feature("hive-ready-through-launch")
 def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: str
@@ -548,7 +548,7 @@ def test_headroom_logs_a_failed_wait_and_keeps_its_cadence(
     def wait(seconds: float, state: object, timeout: float) -> None:
         waits.append(seconds)
         if len(waits) == 1:
-            raise getattr(exceptions, error)("gone")
+            raise getattr(exceptions, error, OSError)("gone")
         if len(waits) == 3:
             stop.set()
 
