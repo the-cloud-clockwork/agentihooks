@@ -20,6 +20,7 @@ from typing import Any, NoReturn, cast
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
+from scripts.swarm_ledger.repository import live_rows
 
 __all__ = [
     "CURRENT",
@@ -41,6 +42,7 @@ __all__ = [
     "holding",
     "queued",
     "refreshed",
+    "scoped",
     "slow",
     "start",
     "stored",
@@ -113,6 +115,7 @@ class LedgerView:
         self.tasks: list[dict[str, Any]] = state.get("tasks", [])
         self.meta: dict[str, Any] = state.get("_meta", {})
         self.phases: list[dict[str, Any]] = state.get("phases", [])
+        self.frozen_ids: frozenset[str] = frozenset(state.get(live_rows.FROZEN_IDS) or ())
         self.document = state
 
     def read(self, domain: str, key: str) -> object | None:
@@ -169,9 +172,11 @@ def current() -> LedgerView | None:
     return held.view
 
 
-def view_file(base: str, slug: str, directory: Path) -> Path:
-    """The file holding the view of ledger ``slug`` on the server at ``base``."""
-    return directory / "ledger-views" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
+def view_file(base: str, slug: str, directory: Path, scope: live_rows.Scope | None = None) -> Path:
+    """The file holding the view of ledger ``slug`` on the server at ``base`` read with ``scope``."""
+    scope = live_rows.Scope() if scope is None else scope
+    key = f"{base} {slug} live closed={scope.closed} frozen={scope.frozen}"
+    return directory / "ledger-views" / f"{hashlib.sha256(key.encode()).hexdigest()[:32]}.json"
 
 
 def refreshed(path: Path, reader: Reader) -> LedgerView:
@@ -312,6 +317,19 @@ def document(slug: str) -> dict[str, Any] | None:
     if kept is not None:
         kept.view, kept.stale = view, False
     return view.document
+
+
+def scoped(slug: str, scope: live_rows.Scope, service: bool = True) -> dict[str, Any]:
+    """The document of ledger ``slug`` read with ``scope`` from the view this host stores for that scope, patched
+    with one delta read, for a reader that needs closed or frozen tasks or reads outside a held pass."""
+    from scripts.scheduler import service as scheduler
+    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
+
+    ledger: Any = _ledger()
+    base: str = ledger.base(slug)
+    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
+    path = view_file(base, slug, scheduler.runtime_dir(), scope)
+    return refreshed(path, lambda since, parts: client.changes(slug, since, parts, scope)).document
 
 
 @contextmanager

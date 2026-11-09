@@ -11,7 +11,7 @@ from typing import Any
 
 from scripts.swarm_ledger import request_metrics
 
-from . import artifact_files, heap, hierarchy, media_files, outbox, refresh, writer_copy
+from . import artifact_files, heap, hierarchy, live_rows, media_files, outbox, refresh, writer_copy
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
@@ -592,7 +592,13 @@ class SQLiteLedgerRepository:
         return entry.views[view]
 
     def export_since(
-        self, slug: str, since: int, view: Callable[..., Any], changes: Callable[..., Any], parts: tuple[str, ...] = ()
+        self,
+        slug: str,
+        since: int,
+        view: Callable[..., Any],
+        changes: Callable[..., Any],
+        parts: tuple[str, ...] = (),
+        scope: live_rows.Scope | None = None,
     ) -> tuple[int, str | bytes]:
         """(generation, text) of the stored ledger: changes(state, paths, parts) when the database recorded every
         row change after generation since, else view(fragments, parts) of the stored ledger, built once per part
@@ -606,16 +612,25 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        text = None if paths is None else changes(entry.state, paths, parts)
+        scoped = () if scope is None else (self._answer(entry, scope),)
+        text = None if paths is None else changes(entry.state, paths, parts, *scoped)
         if text is not None:
             return entry.generation, text
-        key = (view, parts)
+        key = (view, parts, scope)
         if key not in entry.views:
             with VIEW_BUILD:
                 if key not in entry.views:
-                    entry.views[key] = view(entry.fragments, parts)
+                    entry.views[key] = view(entry.fragments, parts, *scoped)
                     heap.release()
         return entry.generation, entry.views[key]
+
+    def _answer(self, entry: Entry, scope: live_rows.Scope) -> live_rows.Answer:
+        key = (live_rows.answer, scope)
+        if key not in entry.views:
+            with VIEW_BUILD:
+                if key not in entry.views:
+                    entry.views[key] = live_rows.answer(entry.state, scope)
+        return entry.views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""

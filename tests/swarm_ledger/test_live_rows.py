@@ -89,14 +89,16 @@ def test_rows_answer_closed_and_frozen_tasks_only_on_request(closed: bool, froze
 @pytest.mark.feature(FEATURE)
 def test_the_default_scope_holds_neither_closed_nor_frozen_tasks() -> None:
     assert live_rows.Scope() == live_rows.Scope(closed=False, frozen=False)
+    assert live_rows.answer(_doc(), live_rows.Scope()).frozen_ids == ["c"]
+    assert live_rows.answer(_doc(), live_rows.Scope(frozen=True)).frozen_ids == []
 
 
 @pytest.mark.feature(FEATURE)
 def test_the_scoped_full_export_carries_only_the_scoped_task_rows() -> None:
     doc = _doc()
-    rows = live_rows.rows(doc, live_rows.Scope())
-    text = routes.export_text(fragments.document(doc), ("tasks", "phases"), rows)
-    assert json.loads(text) == {"data": {"tasks": rows, "phases": doc["phases"]}}
+    answer = live_rows.answer(doc, live_rows.Scope())
+    text = routes.export_text(fragments.document(doc), ("phases", "tasks"), answer)
+    assert json.loads(text) == {"data": {"tasks": answer.rows, "phases": doc["phases"], "frozen_ids": ["c"]}}
 
 
 @pytest.mark.feature(FEATURE)
@@ -117,21 +119,22 @@ def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
     after = copy.deepcopy(before)
     after["tasks"][0]["state"] = "done"
     after["tasks"][3]["state"] = "pr"
-    rows = live_rows.rows(after, live_rows.Scope())
+    answer = live_rows.answer(after, live_rows.Scope())
     paths = {_path("tasks", ["id", "a", 0], "state"), _path("tasks", ["id", "d", 0], "state")}
-    reply = json.loads(routes.export_changes(after, paths, ("tasks",), rows) or "null")
+    reply = json.loads(routes.export_changes(after, paths, ("tasks",), answer) or "null")
     assert reply is not None
-    assert _ids(patched(held, reply["changes"])["tasks"]) == ["d", "e", "f"]
-    assert patched(held, reply["changes"])["tasks"] == rows
+    result = patched(held, reply["changes"])
+    assert _ids(result["tasks"]) == ["d", "e", "f"]
+    assert result == {"tasks": answer.rows, "frozen_ids": ["c"]}
 
 
 @pytest.mark.feature(FEATURE)
 @pytest.mark.parametrize("part", ["freezes", "phases"])
 def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str) -> None:
     doc = _doc()
-    rows = live_rows.rows(doc, live_rows.Scope())
+    answer = live_rows.answer(doc, live_rows.Scope())
     paths = {_path(part, ["id", doc[part][0]["id"], 0], "target")}
-    assert routes.export_changes(doc, paths, ("tasks",), rows) is None
+    assert routes.export_changes(doc, paths, ("tasks",), answer) is None
 
 
 @pytest.mark.feature(FEATURE)
