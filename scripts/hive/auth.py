@@ -268,9 +268,9 @@ def backfill_holders(redis: object) -> str:
         found = member(redis, member_id) if hive_state.read(store, f"holder.{member_id}") is None else None
         digest = found["ledger"] if found else None
         if _mapped(redis, store, digest, member_id):
-            hive_state.amend(store, f"holder.{member_id}", lambda _, held=digest: held)
+            hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
             written.append(member_id)
-    return f"wrote the holder record of {', '.join(written)}" if written else "no member lacked a holder record"
+    return f"wrote the holder record of {', '.join(written)}" if written else "wrote no holder record"
 
 
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:

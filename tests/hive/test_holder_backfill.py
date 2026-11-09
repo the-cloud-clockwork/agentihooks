@@ -68,11 +68,12 @@ def test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map(
 @pytest.mark.feature(FEATURE)
 def test_the_backfill_leaves_held_and_unmapped_members_alone(client: Any) -> None:
     held = auth.mint(client, "held", PUBLIC)
+    auth.hive_state.amend(auth._store(client), f"holder.{held['id']}", lambda _: "stale")
     unmapped = _legacy(client, "unmapped")
     auth.hive_state.amend(auth._store(client), f"ledger.{auth._digest(unmapped['ledger_credential'])}", lambda _: None)
 
-    assert auth.backfill_holders(client) == "no member lacked a holder record"
-    assert _holder(client, held["id"]) == auth._digest(held["ledger_credential"])
+    assert auth.backfill_holders(client) == "wrote no holder record"
+    assert _holder(client, held["id"]) == "stale"
     assert _holder(client, unmapped["id"]) is None
 
 
