@@ -1,5 +1,6 @@
 """The controller reads hive quota once per tick pass and closes an account a hive reading marks refused."""
 
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -39,32 +40,42 @@ class _Store:
     redis = object()
 
 
-@pytest.mark.feature("controller-quota-read-once")
-def test_one_pass_makes_one_hive_quota_read_for_every_account(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads = Mock(side_effect=lambda redis, now: _records())
-    monkeypatch.setattr(aggregate, "read", reads)
+@pytest.fixture
+def scans(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """Count hive report scans, with a declared Claude master so the reservation reads the hive rows too."""
+    from hooks import _redis
+    from scripts.routing import reservation
+
+    counted = Mock(side_effect=lambda redis, now: _records())
+    monkeypatch.setattr(aggregate, "_scan", counted)
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(_redis, "get_redis", lambda: object())
+    monkeypatch.setattr(reservation.master_account, "load", lambda environ: {"claude": SimpleNamespace(slug="one")})
+    monkeypatch.setattr(reservation, "master_agents", lambda store, harness, slug: 0)
+    monkeypatch.setattr(reservation, "_store", lambda environ: None)
+    return counted
+
+
+@pytest.mark.feature("controller-quota-read-once")
+def test_one_pass_makes_one_hive_quota_read_for_every_account(scans: Mock) -> None:
     read = capacity.hive_accounts(_Store())
     with pool.running():
         first = read(ENVIRON, 100, refresh=False)
         assert read(ENVIRON, 101, refresh=False) == first
-        assert capacity.accounts(ENVIRON, 102, refresh=False, redis=_Store.redis) == first
-    assert reads.call_count == 1
+        assert capacity.accounts(ENVIRON, 102, refresh=False) == first
+    assert scans.call_count == 1
     assert {row.name for row in first} == {"one", "two"}
     with pool.running():
         read(ENVIRON, 103, refresh=False)
-    assert reads.call_count == 2
+    assert scans.call_count == 2
 
 
 @pytest.mark.feature("controller-quota-read-once")
-def test_reads_outside_a_pass_stay_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads = Mock(side_effect=lambda redis, now: _records())
-    monkeypatch.setattr(aggregate, "read", reads)
-    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+def test_reads_outside_a_pass_stay_fresh(scans: Mock) -> None:
     read = capacity.hive_accounts(_Store())
     read(ENVIRON, 100, refresh=False)
     read(ENVIRON, 101, refresh=False)
-    assert reads.call_count == 2
+    assert scans.call_count == 4
 
 
 @pytest.mark.feature("controller-hive-refusal")

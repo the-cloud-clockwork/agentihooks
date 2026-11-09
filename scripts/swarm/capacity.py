@@ -1,6 +1,5 @@
 import json
 import sys
-import threading
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
 
 LANES = ("eng", "ci", "plan")
 LABELS = {"claude": "Claude", "codex": "Codex"}
-_PASS_ROWS: list[tuple[object, list["Account"]]] = []
-_PASS_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -226,19 +223,6 @@ def _refused(environ: dict) -> set[tuple[str, str]]:
     return {(balancer.HARNESS, account_key(account)) for account, result in latest.items() if balancer.refused(result)}
 
 
-def _pass_global(environ: dict, now: float, redis: Any = None) -> list[Account]:
-    """The hive quota rows of the running tick pass, read once per pass and reused; outside a pass each call reads."""
-    from scripts.tick import pool
-
-    current = pool.active()
-    if current is None:
-        return _global(environ, now, redis)
-    with _PASS_LOCK:
-        if not _PASS_ROWS or _PASS_ROWS[0][0] is not current:
-            _PASS_ROWS[:] = [(current, _global(environ, now, redis))]
-        return list(_PASS_ROWS[0][1])
-
-
 def probe(environ: dict[str, str], now: float) -> list[Account]:
     """Probe stale Claude credentials and Codex readings, writing the caches a pass reads without ``refresh``."""
     return _claude(environ, now, True) + _codex(environ, now, True)
@@ -252,7 +236,7 @@ def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None)
     from scripts.routing import aggregate, reservation
 
     rows = (
-        _pass_global(environ, now, redis)
+        _global(environ, now, redis)
         if redis is not None or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
