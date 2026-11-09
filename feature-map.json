@@ -2631,6 +2631,18 @@
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
       ]
+    },
+    {
+      "id": "swarm-intent-check-budget",
+      "origin": "regression",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, and returns without waiting for the pass view, so thirty tasks in pr stay inside its eight second budget.",
+      "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
+      "tests": [
+        "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
+        "tests/gates/test_intent_budget.py::test_thirty_changed_pulls_judge_at_most_the_pass_limit_and_the_rest_later",
+        "tests/gates/test_intent_budget.py::test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built"
+      ]
     }
   ],
   "unmapped_rules": [

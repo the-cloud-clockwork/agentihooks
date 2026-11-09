@@ -1,5 +1,7 @@
 import threading
 
+import pytest
+
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import cli
@@ -86,3 +88,29 @@ def test_a_merge_wait_observes_a_merge_during_a_slow_runtime_launch(env, monkeyp
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert any(f"ended the wait of {agent.name}: pull request {url}, now merged" == action for action in actions)
     assert idle.wait(store.redis, "sw", agent.name) is None
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_the_intent_pass_returns_before_the_pass_view_is_built(env, monkeypatch):  # noqa: F811
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    built, release = threading.Event(), threading.Event()
+    lookup = object()
+
+    def slow_view(*args):
+        release.wait(5)
+        built.set()
+        return lookup
+
+    monkeypatch.setattr(ledger_events, "tick_view", slow_view)
+    monkeypatch.setattr(ledger_events, "pull_texts", lambda urls, source=None: {})
+    doc = {"tasks": [], "phases": []}
+    view, actions = cli._intent_pass(InboxStore(store.redis), store, "sw", doc, ledger, store.config("sw"))
+    returned_before = not built.is_set()
+    release.set()
+    assert returned_before
+    assert actions == []
+    assert view.result(timeout=5) is lookup
