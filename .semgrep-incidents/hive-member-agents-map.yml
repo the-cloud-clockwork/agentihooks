@@ -1,0 +1,10 @@
+rules:
+  - id: hive-member-agents-map
+    languages: [python]
+    severity: ERROR
+    message: Mint member documents without an agents map; agent tokens belong in independent records.
+    patterns:
+      - pattern-inside: |
+          def mint(...):
+              ...
+      - pattern: '{..., "agents": $MAP, ...}'

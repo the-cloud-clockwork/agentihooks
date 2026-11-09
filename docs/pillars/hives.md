@@ -1412,3 +1412,7 @@ reader in service for those members, including stable hive releases, accepts ind
 Keep members with unknown readers out of the command. The migration preserves legacy token authentication and
 replaces retained member history with compact documents. Output maps member identifiers to document byte counts;
 it never prints credentials. The command requires the Redis state backend.
+
+New member documents omit the agents map. Retirement and authoritative execution ending remove the agent's
+scoped credential record. Compaction indexes older independent token records by agent so ending that agent
+also removes its migrated credentials without scanning every member document. Active peers keep their tokens.

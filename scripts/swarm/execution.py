@@ -267,6 +267,10 @@ class ExecutionRegistry:
             return written, current
 
         written, current = self._fenced(slug, change)
+        if written.state == "ended":
+            from scripts.hive import agent_credentials
+
+            agent_credentials.retire(self.store.redis, written.hive, slug, written.name)
         if written != current:
             self._project(slug, (written.name,), written, current)
 
@@ -320,6 +324,9 @@ class ExecutionRegistry:
         if not self._fenced(slug, end):
             return False
         if agent.name not in self.store.listed(slug):
+            from scripts.hive import agent_credentials
+
+            agent_credentials.retire(self.store.redis, agent.hive, slug, agent.name)
             return True
         self._fenced(slug, undo)
         return False

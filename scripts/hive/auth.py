@@ -150,14 +150,14 @@ def members(client) -> dict[str, dict]:
     return {member_id: found for member_id in hive_state.index(client) if (found := member(client, member_id))}
 
 
-def mint(redis, name: str, redis_url: str) -> dict:
+def mint(redis: Any, name: str, redis_url: str) -> dict[str, Any]:
     member_id = secrets.token_hex(8)
     password = secrets.token_urlsafe()
     ledger = secrets.token_urlsafe()
     digest = _digest(ledger)
     store = _store(redis)
     try:
-        hive_state.amend(store, f"member.{member_id}", lambda _: {"name": name, "ledger": digest, "agents": {}})
+        hive_state.amend(store, f"member.{member_id}", lambda _: {"name": name, "ledger": digest})
         hive_state.amend(store, f"ledger.{digest}", lambda _: member_id)
         hive_state.amend(store, f"holder.{member_id}", lambda _: digest)
         hive_state.indexed(redis, member_id, True)
