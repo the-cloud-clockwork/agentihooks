@@ -117,6 +117,7 @@ def round_robin(hives: list[dict[str, Any]], nodes: int, repo: str, now: int) ->
 
 
 FIRST_ROOM, FIRST_REFUSAL = "first_room", "first_refusal"
+ROOM_CHECK = 1
 
 
 def first(role: str, hive: dict) -> bool:
@@ -145,13 +146,13 @@ def _checks(
 ) -> list[tuple[Callable[[dict[str, Any]], bool], str]]:
     key = account_key(slot)
     return [
-        (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
             lambda hive: any(
                 item["harness"] == harness and account_key(item["account"]) == key for item in hive["slots"]
             ),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
         ),
+        (lambda hive: role == MASTER or _room(hive, role) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (lambda hive: bool(repository(hive, repo)), f"no {kind} for {role} lists the repo {repo}"),
         (
             lambda hive: route_kind != INTERACTIVE or _holds(hive["interactive"], harness, key),
@@ -182,9 +183,9 @@ def _pick(
     for index, (check, reason) in enumerate(_checks(role, harness, slot, route_kind, repo, kind)):
         kept = [hive for hive in candidates if check(hive)]
         if not kept:
-            return Wait(_refused(reason, candidates, role) if index == 0 else reason)
+            return Wait(_refused(reason, candidates, role) if index == ROOM_CHECK else reason)
         if preferred is not None and spill is None and not check(preferred):
-            spill = Spill(preferred["id"], (refusal(preferred, role) or reason) if index == 0 else reason)
+            spill = Spill(preferred["id"], (refusal(preferred, role) or reason) if index == ROOM_CHECK else reason)
         candidates = kept
     return Choice(min(candidates, key=_order(role))["id"], spill=spill)
 

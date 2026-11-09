@@ -1,0 +1,19 @@
+rules:
+  - id: controller-local-quota-fallback
+    languages: [python]
+    severity: ERROR
+    message: Placement without pass quota rows must use the runtime quota reader or hive reports, because a restarted controller has an empty pod quota cache.
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              class HiveLaunch:
+                  ...
+          - pattern-inside: |
+              def _rotation(...):
+                  ...
+          - pattern-inside: |
+              def hive_controller(...):
+                  ...
+      - pattern-either:
+          - pattern: capacity.accounts
+          - pattern: balancer.cached_observations(...)

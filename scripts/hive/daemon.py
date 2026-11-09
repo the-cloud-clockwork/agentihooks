@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, github_app_cli, master_claude_login, session_bands
+from scripts import codex_router, github_app_cli, master_claude_login, session_bands, updater
 from scripts.hive import bundle_refresh, dispatch, quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -64,6 +64,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     fields = {name: report[name] for name in ("slots", "interactive", "repos")}
     fields["master_login"] = {"claude": master_claude_login.signed_in()}
     fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
+    fields["version"] = updater.installed_version()
     beat_ms = int(time.time() * 1000)
     fields["heartbeat_at"] = beat_ms
     registry.beat(redis, local_id, fields)
@@ -219,16 +220,16 @@ def timer_state(waiter: "Redis") -> "StateStore":
 
 
 def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
-    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+    from redis.exceptions import RedisError
 
     from scripts.hive import headroom, orders
 
     while not stop.is_set():
         try:
             scheduled_wait(HEADROOM_SECONDS, state=timer_state(waiter), timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
-        except (ConnectionError, TimeoutError) as exc:
-            print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
-            return
+        except (RedisError, OSError) as exc:
+            _headroom_wait_failed(exc, stop)
+            continue
         if stop.is_set():
             return
         try:
@@ -239,6 +240,12 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:
+    """Logs a failed headroom wait and holds one headroom interval, so only the stop event ends the thread."""
+    print(f"hive headroom wait failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+    stop.wait(HEADROOM_SECONDS)
 
 
 def publish_herdr_stats(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
