@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.775 · 2026-11-09
+
+### 2026-11-09 · 3c0e3c23216f · #10285 · @nestorcolt
+
+**Keep a passed hive join grade through the heartbeat**
+
+This fixes a bug where join_report.heartbeat re-ran its cheap checks every 180 seconds, sometimes overwriting a check that had already passed at join with a false "missing" result if the agent's pane or home vanished after its session ended but before end_gone finalized the report. Live data showed 193 ended reports incorrectly marked failed despite passing their launch checks. The heartbeat now only re-probes checks still missing at join, preserving any check that already passed, so finished agents no longer get wrongly downgraded.
+
 ## v2.17.772 · 2026-11-09
 
 ### 2026-11-09 · 8210750ced17 · #10188 · @agenticore-app
