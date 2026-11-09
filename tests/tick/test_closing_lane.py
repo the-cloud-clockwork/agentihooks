@@ -95,6 +95,7 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
     release = Event()
     real_group, real_running = engine.run_group, pool.running
     closing: list[engine.StepRecord] = []
+    published = Event()
 
     def planted(*args: Any) -> list[str]:
         release.wait(300.0)
@@ -103,7 +104,11 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
     def group(
         name: str, ctx: Context, steps: Any = None, apply: Any = None, finished: Any = None
     ) -> tuple[engine.StepRecord, ...]:
-        records = real_group(name, ctx, steps, apply, finished)
+        def completed(records: tuple[engine.StepRecord, ...]) -> None:
+            closing.extend(records)
+            published.set()
+
+        records = real_group(name, ctx, steps, apply, completed if name == "closing" else finished)
         if name == "closing":
             closing.extend(records)
         return records
@@ -118,6 +123,8 @@ def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_a
         assert not any(action.startswith("pass ended early") for action in actions)
         assert swarm.redis.get(swarm.key("sw", "last-tick")) is not None
         assert tick_heartbeat.read(swarm, "sw") is not None
+        if not any(record.name == "status publish" for record in closing):
+            assert published.wait(5.0)
         assert sorted(record.name for record in closing) == ["heartbeat", "last tick", "status publish"]
         stamps = [record for record in closing if record.name != "status publish"]
         assert not any(record.abandoned or record.outcome == engine.FAILED for record in stamps)
