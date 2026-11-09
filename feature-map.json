@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "hive-release-drain-live-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
+      "behaviour": "A hive release drain orders and waits only for agents still running on the hive; an agent whose join report ended gets no hand off order.",
+      "seam": "hive release roll drain settle",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_orders_no_seat_whose_agent_already_ended_on_the_hive",
+        "tests/hive/test_remove.py::test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_heartbeat_ago"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",

@@ -728,6 +728,56 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
     assert _orders(store, SEAT) == []
 
 
+def _remote(store: Any, member: str, name: str, seat: str, report: dict | None, launched_at: int = 0) -> None:
+    store.put_agent(
+        SLUG,
+        AgentRecord(
+            name,
+            "ci",
+            f"task-{name}",
+            seat=seat,
+            hive=member,
+            state="working",
+            execution_id=f"exec-{name}",
+            generation=3,
+            launched_at=launched_at,
+        ),
+    )
+    if report is not None:
+        row = {"agent": name, "slug": SLUG, "execution_id": f"exec-{name}", "generation": 3, **report}
+        store.redis.hset(f"{registry.key(member)}:join-reports", f"exec-{name}", json.dumps(row))
+
+
+@pytest.mark.feature("hive-release-drain-live-agents")
+def test_a_release_roll_orders_no_seat_whose_agent_already_ended_on_the_hive(store: Any, tmp_path: Path) -> None:
+    member = _member(store)
+    _remote(store, member, "ci@2", f"ci-2@{SLUG}", {"status": "ended", "heartbeat_at": 1, "ended_at": 2})
+    _remote(store, member, "ci@3", f"ci-3@{SLUG}", None, launched_at=1)
+    clock = Clock(store, member, 99)
+
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: every agent handed off, 0 ordered to hand off"
+    assert clock.slept == 0
+    assert _orders(store, f"ci-2@{SLUG}") == []
+    assert _orders(store, f"ci-3@{SLUG}") == []
+
+
+@pytest.mark.feature("hive-release-drain-live-agents")
+def test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_heartbeat_ago(
+    store: Any, tmp_path: Path
+) -> None:
+    member = _member(store)
+    _remote(store, member, "ci@2", f"ci-2@{SLUG}", {"status": "running", "heartbeat_at": 1})
+    _remote(store, member, "ci@3", f"ci-3@{SLUG}", None, launched_at=1_793_000)
+
+    settled = remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: every agent handed off, 2 ordered to hand off"
+    assert [item.text for item in _orders(store, f"ci-2@{SLUG}")] == [remove.ROLL.format(hive=member, slug=SLUG)]
+    assert [item.text for item in _orders(store, f"ci-3@{SLUG}")] == [remove.ROLL.format(hive=member, slug=SLUG)]
+
+
 class Successor:
     def __init__(self, store):
         self.store, self.now, self.slept = store, 0.0, 0
