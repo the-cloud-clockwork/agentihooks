@@ -67,6 +67,13 @@ def _never(task: dict[str, Any]) -> bool:
     return False
 
 
+def _hold(
+    store: RedisStore, tasks: list[dict[str, Any]], github: Callable[[str], PullRequest | None], start: int, end: int
+) -> None:
+    for at in [*range(start, end, stall_blockers.STALE_MS), end]:
+        _observe(store, tasks, github, at)
+
+
 def _observe(
     store: RedisStore,
     tasks: list[dict[str, Any]],
@@ -85,7 +92,7 @@ def test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_mast
     now = _now(store)
     _merged(store, now - 2 * HOUR)
     github = _pulls(**{"pr-a": _open()})
-    assert _observe(store, [_task("a", "pr-a")], github, now - HOUR) == []
+    _hold(store, [_task("a", "pr-a")], github, now - HOUR, now - stall_blockers.STALE_MS)
     assert _observe(store, [_task("a", "pr-a")], github, now) == []
     found = blockers.sustained(store, SLUG, now)
     assert list(found) == [stall_blockers.MERGE_STALL]
@@ -222,7 +229,7 @@ def test_a_new_dev_merge_restarts_the_stall_and_a_resolved_condition_clears_it(s
     now = _now(store)
     _merged(store, now - 2 * HOUR)
     github = _pulls(**{"pr-a": _open()})
-    _observe(store, [_task("a", "pr-a")], github, now - HOUR)
+    _hold(store, [_task("a", "pr-a")], github, now - HOUR, now - stall_blockers.STALE_MS)
     _merged(store, now - 10 * MINUTE)
     _observe(store, [_task("a", "pr-a")], github, now)
     assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - 10 * MINUTE
@@ -269,8 +276,7 @@ def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(stor
     now = _now(store)
     _merged(store, now - 3 * HOUR)
     github = _pulls(**{"pr-a": _open()})
-    _observe(store, [_task("a", "pr-a")], github, now - HOUR + 1)
-    _observe(store, [_task("a", "pr-a")], github, now)
+    _hold(store, [_task("a", "pr-a")], github, now - HOUR + 1, now)
     assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - HOUR + 1
     assert blockers.sustained(store, SLUG, now) == {}
     _observe(store, [_task("a", "pr-a")], _pulls(), now)
