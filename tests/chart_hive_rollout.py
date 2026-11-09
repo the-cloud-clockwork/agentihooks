@@ -159,6 +159,15 @@ def test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version()
     assert hook_images(render("workers.image.tag=release")) == {f"{repository}:release"}
 
 
+def test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused() -> None:
+    try:
+        render_released("v2.17.467")
+    except subprocess.CalledProcessError as error:
+        assert "appVersion must be a release version" in error.stderr
+    else:
+        raise AssertionError("a malformed appVersion must not fall back to the floating worker tag")
+
+
 if __name__ == "__main__":
     test_every_roll_acquires_before_sync_and_releases_after_serving()
     test_hives_in_one_release_have_distinct_sync_waves()
@@ -168,4 +177,5 @@ if __name__ == "__main__":
     test_the_release_stamp_annotates_only_leased_hive_pods()
     test_a_release_tag_worker_is_not_rolled_by_a_release_image_digest()
     test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version()
+    test_a_chart_whose_app_version_is_neither_a_release_nor_dev_is_refused()
     print("Shared rollout hooks, sequential hive waves, readiness and bounded drain: passed")

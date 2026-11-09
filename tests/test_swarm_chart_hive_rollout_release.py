@@ -28,6 +28,10 @@ def test_the_rollout_hooks_run_the_hive_worker_tag_the_chart_release_stamps() ->
     publish = (ROOT / "deploy" / "worker" / "release-hive.sh").read_text()
 
     assert '--app-version "$version"' in workflow
+    assert "workflows: [Swarm worker image]" in workflow
+    assert "github.event.workflow_run.conclusion == 'success'" in workflow
+    assert "release-hive.sh" in (ROOT / ".github" / "workflows" / "swarm-node-image.yml").read_text()
+    assert 'ne (toString .Chart.AppVersion) "dev"' in template
     assert '"$image:$version"' in publish
     assert 'merge (dict "tag" (toString .Chart.AppVersion)) $workers.image' in template
     assert '(dict "image" $hookImage)' in template

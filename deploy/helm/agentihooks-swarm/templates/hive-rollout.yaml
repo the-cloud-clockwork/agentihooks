@@ -6,6 +6,8 @@
 {{- $hookImage := $workers.image }}
 {{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" (toString .Chart.AppVersion) }}
 {{- $hookImage = merge (dict "tag" (toString .Chart.AppVersion)) $workers.image }}
+{{- else if ne (toString .Chart.AppVersion) "dev" }}
+{{- fail "appVersion must be a release version such as 2.17.467, or dev for an unreleased chart" }}
 {{- end }}
 {{- $deployments := list }}
 {{- if gt (int $workers.replicas) 0 }}
