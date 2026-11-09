@@ -2340,7 +2340,8 @@
       "seam": "scripts.hive.create.create",
       "tests": [
         "tests/hive/test_create.py::test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name",
-        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume"
+        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume",
+        "tests/hive/test_create.py::test_cli_create_hands_hive_create_the_nats_signer"
       ]
     },
     {

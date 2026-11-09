@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, create_github, create_render, invite, machine, member_swarms, nats_grant, registry, setup
@@ -68,7 +68,7 @@ class Tools:
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     out: Callable[[str], None] = report
-    state: dict = field(default_factory=dict)
+    state: dict[str, Any] = field(default_factory=dict)
     signer: Callable[[], "nats_grant.Signer | None"] = _no_signer
 
 
@@ -171,7 +171,7 @@ def _revoke_unfinished(tools: Tools) -> None:
     """Revoke every member the saved create state holds that the hive record does not name."""
     from scripts.hive import remove
 
-    saved = {tools.state.get(key) for key in SAVED_MEMBERS} - {None}
+    saved = {str(tools.state[key]) for key in SAVED_MEMBERS if tools.state.get(key)}
     if not saved:
         return
     current = _member(tools).get(invite.HIVE_ID)

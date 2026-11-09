@@ -53,7 +53,7 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
     entries = {key: value for key, value in entries.items() if value}
     grant = auth.mint(redis, request.label, request.redis_url or sample.get(REDIS_URL) or local_redis_url)
     if request.minted is not None:
-        request.minted(grant["id"])
+        request.minted(f"{grant['id']}")
     member_settings = {"AGENTIHOOKS_SWARM_URL": entries.get(SWARM_URL)}
     bus_url = request.bus_url or sample.get("AGENTIHOOKS_BUS_URL")
     if bus_url:

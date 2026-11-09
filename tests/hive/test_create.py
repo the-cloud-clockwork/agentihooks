@@ -889,6 +889,32 @@ def test_cli_create_passes_its_name(monkeypatch, capsys):
     assert seen["options"] == create.Options(name="swarm-hive-009")
 
 
+@pytest.mark.feature("hive-create-resume-revoke")
+def test_cli_create_hands_hive_create_the_nats_signer(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, create.Tools] = {}
+
+    def created(tools: create.Tools, options: create.Options) -> str:
+        seen["tools"] = tools
+        return "created"
+
+    def root() -> str:
+        return "root"
+
+    def no_redis() -> None:
+        return None
+
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", no_redis)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", root)
+    monkeypatch.setattr(create, "create", created)
+    assert cli.main(["create"]) == 0
+    assert capsys.readouterr().out == "created\n"
+    assert seen["tools"].signer is cli._signer
+
+
 def test_cli_create_names_its_name_option():
     parser = cli._parser()
     (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
@@ -952,6 +978,8 @@ def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_n
     assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
     assert stray not in world.bao.records[SIGNER]["member_swarms"]
     assert bus == [(signer, stray)]
+    assert f"hive create {NAME}: resume: unlisted {stray} from the hub signer record {SIGNER}" in world.lines
+    assert _state(world)["member"] == kept
 
 
 @pytest.mark.feature("hive-create-resume-revoke")
