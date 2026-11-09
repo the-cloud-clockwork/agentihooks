@@ -1,16 +1,19 @@
 {
   "features": [
     {
-      "id": "managed-swarm-brain-rendering",
+      "id": "hive-workstation-release",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
-      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
-      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
+      "behaviour": "A hive seat that hands off, parks or readies a workstation task clears its claimant, so a workstation seat can take the task; a workstation seat, or a task without the workstation pin, keeps its claim.",
+      "seam": "swarm handoff, park and ready through the shared hand off step",
       "tests": [
-        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
-        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
-        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
-        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+        "tests/swarm/test_hive_release.py::test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task",
+        "tests/swarm/test_hive_release.py::test_a_hive_park_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_hive_ready_on_a_workstation_task_leaves_its_pull_request_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
+        "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
+        "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
       ]
     },
     {
@@ -68,6 +71,16 @@
         "tests/hive/test_daemon.py::test_a_failed_headroom_wait_logs_and_holds_one_headroom_interval",
         "tests/hive/test_daemon.py::test_headroom_logs_a_failed_wait_and_keeps_its_cadence",
         "tests/hive/test_daemon.py::test_the_ready_marker_stays_fresh_through_a_failed_headroom_wait_during_a_slow_launch"
+      ]
+    },
+    {
+      "id": "hive-stop-recovery-handoff",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2252",
+      "behaviour": "An agent still running when its hive stops for a release gets a recovery handoff; once the hive stops reporting the tick retires the agent, reopens its task and launches the next engineer primed with that recovery handoff.",
+      "seam": "tick over a hive settled by remove.settle",
+      "tests": [
+        "tests/swarm/test_tick_hive_stop_recovery.py::test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer"
       ]
     },
     {
@@ -1278,6 +1291,15 @@
       ]
     },
     {
+      "id": "swarm-handoff-hive-binding",
+      "origin": "inventory",
+      "behaviour": "A hive successor binds live only while its hive report lists its execution at its generation and its name among the hive's live names.",
+      "seam": "scripts.handoff.transfers.observe",
+      "tests": [
+        "tests/handoff/test_transfers.py::test_a_hive_successor_is_bound_by_its_hive_execution_report"
+      ]
+    },
+    {
       "id": "swarm-intent-wait",
       "origin": "inventory",
       "behaviour": "A wait on intent names the agent's own task pull request and is refused for any other.",
@@ -1329,6 +1351,19 @@
       ]
     },
     {
+      "id": "managed-swarm-brain-rendering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
+      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
+      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "tests": [
+        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
+        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
@@ -1354,6 +1389,25 @@
         "tests/inbox/test_confirmation.py::test_read_and_close_count_as_confirmation",
         "tests/inbox/test_confirmation.py::test_the_next_hook_event_confirms_an_item_shown_by_the_last_one",
         "tests/inbox/test_confirmation.py::test_another_session_cannot_directly_confirm_the_delivery"
+      ]
+    },
+    {
+      "id": "agenti-operator-launch-overflow",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-agenti-work-launch",
+      "behaviour": "An agentihooks claude launch outside a swarm and outside a hive slot takes the open account with the most room when swarm agents on other hives fill every account's session cap, instead of refusing while the accounts still have quota. It still skips an account under 5% of its five hour window or week, and when every account is closed it names each account's real refusal. Swarm and hive slot launches keep the cap.",
+      "seam": "scripts.claude_quota_balancer.select_launch_credential",
+      "tests": [
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_the_open_account_with_most_room_when_swarm_agents_fill_every_seat",
+        "tests/test_claude_quota_balancer.py::test_a_swarm_or_hive_launch_keeps_the_session_cap_when_every_seat_is_full",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_a_free_seat_the_normal_way",
+        "tests/test_claude_quota_balancer.py::test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_fill_every_seat",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_skips_an_account_under_five_percent_of_its_five_hour_window",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed",
+        "tests/test_claude_quota_balancer.py::test_the_launch_selector_forwards_every_option_to_the_selector_it_picks",
+        "tests/test_claude_quota_balancer.py::test_the_launch_refusal_names_the_rule_that_closes_the_account",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_keeps_a_refusal_that_read_no_account",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_the_fable_week_when_it_closes_the_only_account"
       ]
     },
     {
@@ -2099,6 +2153,19 @@
       ]
     },
     {
+      "id": "panic-merged-fix-integration-head",
+      "origin": "regression",
+      "ordered_at": "2026-11-09",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-merged-fix",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the runs on the commit a merge queue run of a registered fix pull request carries, before the pull request reads as merged, and the runs on its integration branch head once it is merged, and still cancels the other runs on that branch.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_each_merged_fix_base",
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
@@ -2348,6 +2415,36 @@
       ]
     },
     {
+      "id": "hive-roll-member-drain",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1868",
+      "behaviour": "During a worker hive roll the replacement pod joins the same hive as a live member and takes new agents while the old pod drains only its own agents; the hive drains whole only when no other live member takes agents, and admission counts every member's agents against one hive cap.",
+      "seam": "registry.join and registry.leave, remove.settle with a member, the daemon and lane spoke drain gate, loaded_hives",
+      "tests": [
+        "tests/hive/test_hive_roll_members.py::test_a_replacement_pod_joins_as_a_second_live_member_and_a_quiet_member_is_forgotten",
+        "tests/hive/test_hive_roll_members.py::test_the_old_pod_drain_leaves_the_hive_open_while_the_replacement_takes_agents",
+        "tests/hive/test_hive_roll_members.py::test_a_sole_or_stale_replacement_drains_the_whole_hive_as_before",
+        "tests/hive/test_hive_roll_members.py::test_a_draining_replacement_takes_no_agents_so_the_hive_drains",
+        "tests/hive/test_hive_roll_members.py::test_a_member_keeps_its_drain_across_beats_and_clears_it_only_when_it_starts_again",
+        "tests/hive/test_hive_roll_members.py::test_a_join_or_drain_check_of_an_unregistered_hive_writes_nothing",
+        "tests/hive/test_hive_roll_members.py::test_the_old_pod_drain_orders_only_its_own_agents_to_hand_off",
+        "tests/hive/test_hive_roll_members.py::test_a_drain_with_no_member_named_still_waits_on_every_agent_of_the_hive",
+        "tests/hive/test_hive_roll_members.py::test_a_member_drain_whose_pod_namespace_is_unreadable_drains_the_whole_hive",
+        "tests/hive/test_hive_roll_members.py::test_the_pod_prestop_drain_names_this_pod_as_the_leaving_member",
+        "tests/hive/test_hive_roll_members.py::test_the_member_name_is_this_host_name",
+        "tests/hive/test_hive_roll_members.py::test_a_draining_member_polls_no_lane_spoke_and_waits",
+        "tests/hive/test_hive_roll_members.py::test_a_member_leaving_a_hive_that_never_recorded_members_drains_the_whole_hive",
+        "tests/hive/test_hive_roll_members.py::test_a_sole_member_drain_waits_on_every_agent_of_the_hive",
+        "tests/hive/test_hive_roll_members.py::test_a_fenced_member_that_is_not_draining_still_polls_no_launch_order",
+        "tests/hive/test_hive_roll_members.py::test_a_draining_member_whose_beats_lapsed_keeps_its_drain_on_its_next_beat",
+        "tests/hive/test_hive_roll_members.py::test_a_replacement_last_heard_exactly_one_live_window_ago_still_keeps_the_hive_open",
+        "tests/hive/test_hive_roll_members.py::test_the_lane_drain_gate_reads_this_pods_member_and_a_store_without_redis_is_never_draining",
+        "tests/hive/test_hive_roll_members.py::test_the_daemon_first_beat_clears_its_drain_and_a_draining_member_polls_no_launch_order",
+        "tests/hive/test_hive_roll_members.py::test_hive_list_names_each_member_and_whether_it_takes_agents",
+        "tests/hive/test_hive_roll_members.py::test_admission_counts_the_agents_of_both_members_against_one_hive_cap"
+      ]
+    },
+    {
       "id": "hive-overrun-progress",
       "origin": "regression",
       "ordered_at": "2026-11-08",
@@ -2548,6 +2645,32 @@
       "seam": "supervisor.finish before remove_home",
       "tests": [
         "tests/codex_session/test_runtime_homes.py::test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed"
+      ]
+    },
+    {
+      "id": "hive-join-heartbeat-keeps-passed-grade",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
+      "behaviour": "A hive heartbeat never re-evaluates a join check that passed at launch, for a live or a closed session, so an agent whose session closed before its report ended keeps its passed launch grade; the heartbeat re-probes only checks still missing and can recover them.",
+      "seam": "join_report.heartbeat",
+      "tests": [
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
+      ]
+    },
+    {
+      "id": "hive-admission-pending-launches",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
+      "behaviour": "A hive launch stops counting as a pending launch against admission room once the controller collects the hive's answer to it, live, failed or ambiguous, including a live answer that fails its identity check, so admission pending for a hive matches the launches the hive has not yet answered.",
+      "seam": "HiveLaunch.complete and HiveLaunch.finished against admission.pending",
+      "tests": [
+        "tests/hive/test_admission.py::test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it",
+        "tests/hive/test_controller_launch.py::test_a_finished_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
+        "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
       ]
     }
   ],

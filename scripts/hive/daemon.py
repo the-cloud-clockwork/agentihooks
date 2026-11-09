@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 BEAT_SECONDS = 15
+JOINED: set[str] = set()
 TTL_SECONDS = BEAT_SECONDS * 3
 # A launch inside a beat can run for minutes, so headroom and the heartbeat publish on their own thread well
 # inside their stale windows.
@@ -68,6 +69,8 @@ def beat(redis: "Redis", local_id: str) -> None:
     beat_ms = int(time.time() * 1000)
     fields["heartbeat_at"] = beat_ms
     registry.beat(redis, local_id, fields)
+    registry.join(redis, local_id, registry.member_name(), beat_ms, started=local_id not in JOINED)
+    JOINED.add(local_id)
     with redis.pipeline() as pipe:
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
@@ -78,7 +81,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _refresh_launch_slots(redis, executions)
     adopt_capabilities(redis, local_id)
-    if not fenced:
+    if not fenced and not registry.member_draining(redis, local_id, registry.member_name()):
         dispatch.poll(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
