@@ -262,12 +262,14 @@ def _unhanded(store: "RedisStore", hive: str, now_ms: int) -> list[tuple[str, "A
 
 def _running(store: "RedisStore", agent: "AgentRecord", now_ms: int) -> bool:
     """Whether ``agent`` still runs on its hive: its join report for this generation has not ended, it launched under
-    one heartbeat ago and has not reported yet, or it has no execution id and so never reports joins."""
+    one heartbeat ago or at no recorded time and has not reported yet, or it has no execution id and so never reports
+    joins."""
     if not agent.execution_id:
         return True
     if report := join_report.read(store.redis, agent):
         return "ended_at" not in report
-    return now_ms - max(agent.launched_at, agent.started_at) < join_report.HEARTBEAT_MS
+    launched = max(agent.launched_at, agent.started_at)
+    return not launched or now_ms - launched < join_report.HEARTBEAT_MS
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
