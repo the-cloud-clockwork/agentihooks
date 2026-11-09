@@ -925,8 +925,16 @@ def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_n
     from scripts.hive import hive_state
 
     signer, bus = object(), []
-    world.tools.signer = lambda: signer
-    monkeypatch.setattr(nats_grant, "revoke", lambda redis, given, member: bus.append((given, member)) or "bus")
+
+    def named() -> object:
+        return signer
+
+    def revoked(redis: object, given: object, member: str) -> str:
+        bus.append((given, member))
+        return f"revoked the NATS credential of {member}"
+
+    world.tools.signer = named
+    monkeypatch.setattr(nats_grant, "revoke", revoked)
 
     kept = _keep_member(world)
     stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
