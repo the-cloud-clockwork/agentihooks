@@ -84,6 +84,19 @@
       ]
     },
     {
+      "id": "hive-drain-push-resume",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-drain-resume",
+      "behaviour": "A stopping hive orders each agent to commit and push its branch before it hands off, pushes the unpushed worktrees of an agent still running at the deadline to wip branches named in its recovery handoff, and after a restart an agent that left a handoff gives its task and seat to a successor primed with it instead of awaiting a restore decision.",
+      "seam": "remove.settle and the reboot boot pass",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off",
+        "tests/hive/test_remove.py::test_an_agent_still_running_at_the_deadline_has_its_unpushed_worktrees_pushed_and_named_in_its_recovery",
+        "tests/swarm/test_reboot.py::test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision",
+        "tests/swarm/test_reboot.py::test_a_master_with_a_submitted_handoff_keeps_its_seat_and_awaits_its_decision"
+      ]
+    },
+    {
       "id": "master-safety-nudge",
       "origin": "operator",
       "operator_words": "Wherever we have masters running we need some sort of OS cron set that nudges masters with either claude or codex depending on what the master is running. If a master is running it publishes a message to that herdr panel to nudge the master every 1 hour: Safety Nudge: In case the main tick or controller is down.",
