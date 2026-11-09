@@ -2354,7 +2354,8 @@
       "tests": [
         "tests/swarm/tick_scenarios/test_step_budgets.py::test_every_scenario_step_finishes_inside_its_floor",
         "tests/swarm/tick_scenarios/test_step_budgets.py::test_an_overrun_or_abandoned_step_is_named",
-        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_step_inside_its_floor_passes"
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_step_inside_its_floor_passes",
+        "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_head_floor_increase_cannot_weaken_the_base_budget"
       ]
     }
   ],
