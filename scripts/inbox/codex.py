@@ -8,7 +8,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from redis.client import Pipeline
 
 STOPPED = "stopped"
+REFUSED = "refused"
+REFUSED_EXIT = 4
 RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
@@ -36,6 +38,9 @@ HELD = "thread {} waits on {}; inbox delivery is held"
 DEGRADED_LOG = "codex pump for {} degraded: {}: {}"
 CONTENDED_LOG = "codex pump for {} retries inbox contention: {}"
 BUS_LOST = "codex pump for {} lost its bus inbox, Redis reconcile delivers meanwhile: {}"
+FAILED = "failed"
+UNAUTHORIZED = "unauthorized"
+ACCOUNT_STATUSES = frozenset({401, 402, 403})
 
 
 def steady() -> None:
@@ -54,6 +59,21 @@ class StaleExecution(DispatchError):
     pass
 
 
+class AccountRefused(DispatchError):
+    pass
+
+
+def account_refusal(turn: dict[str, Any]) -> str:
+    """The error message of a turn the provider failed on an account refusal, else empty."""
+    error: dict[str, Any] = turn.get("error") or {}
+    info: object = error.get("codexErrorInfo")
+    variants: list[object] = list(cast(dict[str, object], info).values()) if isinstance(info, dict) else []
+    statuses = {cast(dict[str, object], v).get("httpStatusCode") for v in variants if isinstance(v, dict)}
+    refused = info == UNAUTHORIZED or bool(statuses & ACCOUNT_STATUSES)
+    message = str(error.get("message") or "") or str(info)
+    return message if turn.get("status") == FAILED and refused else ""
+
+
 @dataclass
 class ThreadState:
     """The active turn and open server requests, folded from events and refreshed from thread/read."""
@@ -61,10 +81,12 @@ class ThreadState:
     active_turn: str = ""
     requests: dict = field(default_factory=dict)
     ended: str = ""
+    refused: str = ""
 
     def observe(self, message: dict) -> None:
         method, params = message.get("method", ""), message.get("params") or {}
-        turn = (params.get("turn") or {}).get("id", "")
+        body = cast(dict[str, Any], params.get("turn") or {})
+        turn = body.get("id", "")
         if "id" in message:
             self.requests[message["id"]] = method
         elif method == TURN_STARTED:
@@ -72,6 +94,7 @@ class ThreadState:
             self.requests.clear()
         elif method == TURN_COMPLETED:
             self.ended = turn
+            self.refused = account_refusal(body) or self.refused
             if turn == self.active_turn:
                 self.active_turn = ""
                 self.requests.clear()
@@ -237,6 +260,9 @@ class Pump:
                 except InboxContention as failure:
                     self.log(CONTENDED_LOG.format(self.binding.recipient, failure))
                     resume = self._resync if resume is steady else resume
+                except AccountRefused as failure:
+                    self._degrade(failure)
+                    return REFUSED
                 except DispatchError as failure:
                     self._degrade(failure)
                     return DEGRADED
@@ -325,6 +351,8 @@ class Pump:
     def step(self) -> None:
         self.binding.transport.require()
         self.binding.connection.poll(self.timing.poll_s)
+        if self.state.refused:
+            raise AccountRefused(self.state.refused)
         woken = self._hinted()
         if self.timing.clock() >= self.next_reconcile:
             self._reconcile()
@@ -486,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     store = inbox_connect()
     store.session_id = record.thread_id
     feed = feed_for(store, record.agent_name, record.thread_id)
-    return 0 if Pump(store, binding, feed=feed).run(stopped.is_set) == STOPPED else 1
+    return {STOPPED: 0, REFUSED: REFUSED_EXIT}.get(Pump(store, binding, feed=feed).run(stopped.is_set), 1)
 
 
 if __name__ == "__main__":

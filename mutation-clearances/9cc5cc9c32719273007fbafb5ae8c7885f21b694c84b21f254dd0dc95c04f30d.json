@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.x_account_refusal:40c3b89b2635f18cc78d78acc73d47e7d1bf3c065502f09b9e2e01ea1958d24b": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, v) is v, already narrowed by isinstance(v, dict), and .get(\"httpStatusCode\") returns the same value."
+  }
+}
