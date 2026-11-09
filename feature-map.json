@@ -2514,6 +2514,16 @@
         "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
         "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
       ]
+    },
+    {
+      "id": "hive-credential-compaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2297",
+      "behaviour": "Member compaction preserves independent agent token authentication and removes legacy member maps after reader verification.",
+      "seam": "Hive credential compaction and agent authentication",
+      "tests": [
+        "tests/hive/test_credential_compaction.py::test_compaction_preserves_legacy_tokens_and_removes_member_maps"
+      ]
     }
   ],
   "unmapped_rules": [
