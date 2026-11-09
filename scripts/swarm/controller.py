@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from time import monotonic, time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -266,20 +266,25 @@ class FencedRuntime:
         if refused and not workstation:
             raise SwarmError(refused)
         if workstation or self.deployment == LOCAL:
-            from scripts.hive import admission, placement_waits
+            from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
             admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
-            placement_waits.admitted(self.store, self.slug)
         runtime = self.runtime
+        hive = getattr(runtime, "hive_launch", None) is not None
         if workstation:
             runtime = runtime.herdr_runtime
-        elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
+        elif not _hive_lane(lane, task, self.kubernetes_proof) and hive:
             runtime = runtime.original_runtime
         else:
             task = self._hive_task(config, lane, task)
         with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
-            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+            placed = cast("Placed", runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch}))
+        if workstation or (self.deployment == LOCAL and not hive):
+            from scripts.hive import placement_waits
+
+            placement_waits.admitted(self.store, self.slug)
+        return placed
 
     def _hive_task(self, config: SwarmConfig, lane: str, task: dict[str, Any]) -> dict[str, Any]:
         """A workstation task placed on a workstation hive other than this machine launches there, pinned to it."""

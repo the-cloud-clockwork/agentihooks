@@ -517,7 +517,6 @@ class HiveLaunch:
             refused = refused or self.reserve_room(request, selected)
             if not refused:
                 self._journal_spill(request, selected)
-                placement_waits.admitted(self.store, self.slug)
                 return selected
             print(
                 json.dumps(
@@ -597,6 +596,8 @@ class HiveLaunch:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
             outcome = self._ordered(request, selected)
             if not _account_full(outcome):
+                if outcome.status in (Status.OK, Status.PENDING):
+                    placement_waits.admitted(self.store, self.slug)
                 return outcome
             self._release_room(request, selected)
             accounts = accounts | {f"{selected.account.harness}:{selected.account.name}"}
