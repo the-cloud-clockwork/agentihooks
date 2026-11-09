@@ -2086,6 +2086,18 @@
       ]
     },
     {
+      "id": "panic-merged-fix-integration-head",
+      "origin": "regression",
+      "ordered_at": "2026-11-09",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-panic-spares-merged-fix",
+      "behaviour": "While fleet panic is on, the CI cancel sweep leaves running the runs on the commit a merge queue run of a registered fix pull request carries, before the pull request reads as merged, and the runs on its integration branch head once it is merged, and still cancels the other runs on that branch.",
+      "seam": "The panic CI cancel sweep over the fleet repositories' latest runs",
+      "tests": [
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_integration_head_of_a_merged_fix",
+        "tests/swarm/test_panic.py::test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged"
+      ]
+    },
+    {
       "id": "tick-pass-fence-first-site",
       "origin": "regression",
       "ordered_at": "2026-11-06",
