@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "hive-workstation-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
+      "behaviour": "A hive seat that hands off, parks or readies a workstation task clears its claimant, so a workstation seat can take the task; a workstation seat, or a task without the workstation pin, keeps its claim.",
+      "seam": "swarm handoff, park and ready through the shared hand off step",
+      "tests": [
+        "tests/swarm/test_hive_release.py::test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task",
+        "tests/swarm/test_hive_release.py::test_a_hive_park_on_a_workstation_task_reopens_it_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_hive_ready_on_a_workstation_task_leaves_its_pull_request_unclaimed",
+        "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
+        "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
+        "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
@@ -2426,6 +2442,18 @@
       ]
     },
     {
+      "id": "hive-create-resume-revoke",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
+      "behaviour": "Hive create saves each member it mints before the hive record names it, and a resumed create revokes every saved member the record does not name, removing it from the hive index.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name",
+        "tests/hive/test_create.py::test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume",
+        "tests/hive/test_create.py::test_cli_create_hands_hive_create_the_nats_signer"
+      ]
+    },
+    {
       "id": "swarm-tick-dead-remote-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-drop-remote-slow",
@@ -2516,19 +2544,13 @@
       ]
     },
     {
-      "id": "hive-workstation-release",
+      "id": "codex-join-report-ends-before-home-removal",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
-      "behaviour": "A hive seat that hands off, parks or readies a workstation task clears its claimant, so a workstation seat can take the task; a workstation seat, or a task without the workstation pin, keeps its claim.",
-      "seam": "swarm handoff, park and ready through the shared hand off step",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2256",
+      "behaviour": "When a Codex app server transport exits, its hive join report ends with the transport exit reason before the execution's scoped Codex home is removed, so no later heartbeat grades a removed home as missing profile, settings, pane or transcript.",
+      "seam": "supervisor.finish before remove_home",
       "tests": [
-        "tests/swarm/test_hive_release.py::test_a_hive_handoff_on_a_workstation_task_reopens_it_unclaimed",
-        "tests/swarm/test_hive_release.py::test_a_handoff_keeps_the_claim_off_a_hive_or_off_a_workstation_task",
-        "tests/swarm/test_hive_release.py::test_a_hive_park_on_a_workstation_task_reopens_it_unclaimed",
-        "tests/swarm/test_hive_release.py::test_a_hive_ready_on_a_workstation_task_leaves_its_pull_request_unclaimed",
-        "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
-        "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
-        "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
+        "tests/codex_session/test_runtime_homes.py::test_finish_ends_the_hive_join_report_before_the_scoped_home_is_removed"
       ]
     }
   ],
