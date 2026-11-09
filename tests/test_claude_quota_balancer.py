@@ -1346,3 +1346,36 @@ def test_an_operator_launch_takes_a_free_seat_the_normal_way(monkeypatch: pytest
         env, cache_file=tmp_path / "c.json", sessions={"BEST": 6, "MID": 6}, now=1000
     )
     assert (decision.account, decision.source) == ("LOW", "cached")
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_fill_every_seat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import install
+    from scripts.routing import reservation
+
+    for name, value in _three(monkeypatch).items():
+        monkeypatch.setenv(name, value)
+    for name in ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SLOT_HIVE", "AGENTIHOOKS_SLOT_EXECUTION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/opt/claude")
+    monkeypatch.setattr(balancer, "route_requires_fable", lambda *args: False)
+    monkeypatch.setattr(reservation, "for_worker", lambda harness, environ: None)
+    monkeypatch.setattr("hooks.context.account_sessions.sessions_by_account", lambda: {"BEST": 6, "MID": 6, "LOW": 4})
+    launched: dict[str, str] = {}
+
+    def execvpe(binary: str, argv: list[str], env: dict[str, str]) -> None:
+        launched.update(binary=binary, token=env["CLAUDE_CODE_OAUTH_TOKEN"])
+        raise RuntimeError("exec reached")
+
+    monkeypatch.setattr(install.os, "execvpe", execvpe)
+    with pytest.raises(RuntimeError, match="^exec reached$"):
+        install.cmd_claude([])
+    assert launched == {"binary": "/opt/claude", "token": "b"}
+    assert capsys.readouterr().out == (
+        "[agenti] account=BEST routing_left=80% 5h_left=90% 7d_left=80% source=master overflow\n"
+    )

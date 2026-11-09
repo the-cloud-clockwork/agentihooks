@@ -2437,7 +2437,8 @@
       "tests": [
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_the_open_account_with_most_room_when_swarm_agents_fill_every_seat",
         "tests/test_claude_quota_balancer.py::test_a_swarm_or_hive_launch_keeps_the_session_cap_when_every_seat_is_full",
-        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_a_free_seat_the_normal_way"
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_takes_a_free_seat_the_normal_way",
+        "tests/test_claude_quota_balancer.py::test_agenti_outside_a_swarm_launches_on_the_open_account_when_swarm_agents_fill_every_seat"
       ]
     }
   ],
