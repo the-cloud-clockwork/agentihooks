@@ -370,6 +370,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _workers(reported: dict[str, list[dict[str, Any]]], local: dict[str, list[str]], record: dict[str, Any]) -> int:
+    """How many of a hive's listed agents count against its agent limit: every one but its masters."""
+    from scripts.swarm import local_slots
+
+    hive = str(record["id"])
+    names = [str(report["agent"]) for report in reported[hive]] + local.get(hive, [])
+    return sum(not local_slots.is_master(name) for name in names)
+
+
 def _ceiling_columns(record: Any, reading: Any) -> tuple[str, str]:
     """The hive list's max agents column, the ceiling and how it is set, and its headroom column."""
     from scripts.hive import ceiling, headroom
@@ -386,16 +395,20 @@ def _list() -> None:
     now = now_ms()
     redis = redis_client()
     hives = registry.hives(redis)
-    reported = {record["id"]: join_report.live(redis, record["id"]) for record in hives}
+    reported: dict[str, list[dict[str, Any]]] = {
+        record["id"]: join_report.live(redis, record["id"]) for record in hives
+    }
     local = _local_agents(redis, {(report["slug"], report["agent"]) for rows in reported.values() for report in rows})
     for record in hives:
         state = "live" if registry.live(record, now) else "stale"
         excluded = ",".join(record["excluded"]) or "none"
         top, room = _ceiling_columns(record, headroom.read(redis, record["id"], now))
         label = f"\tname={record['name']}" if record["name"] != record["id"] else ""
+        workers = _workers(reported, local, record)
         print(
             f"{record['id']}{label}\t{state}\tui={record['ui']}"
-            f"\tmax-agents={top}\texcluded={excluded}\t{room}\trelease={record['version'] or 'unknown'}"
+            f"\tworkers={workers} of {top}\texcluded={excluded}\t{room}"
+            f"\trelease={record['version'] or 'unknown'}"
         )
         for report in reported[record["id"]]:
             print("  " + join_report.summary(report))

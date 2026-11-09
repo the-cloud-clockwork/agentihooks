@@ -106,9 +106,8 @@ def test_hive_list_shows_max_agents_and_excluded(
     registry.update(redis, "root", ["ui=yes"])
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "anton\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
-        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=unknown (auto)\texcluded=none\theadroom=missing"
-        "\trelease=unknown\n"
+        "anton\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
+        "root\tname=swarm-master\tstale\tui=yes\tworkers=0 of unknown (auto)\texcluded=none\theadroom=missing\trelease=unknown\n"
     )
 
 
@@ -121,10 +120,8 @@ def test_hive_list_shows_a_readable_name_beside_its_id(
     registry.update(redis, "root", ["ui=yes"])
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "ff0f11b025271d0c\tname=anton-2\tstale\tui=no\tmax-agents=unknown (auto)\texcluded=master"
-        "\theadroom=missing\trelease=unknown\n"
-        "root\tname=swarm-master\tstale\tui=yes\tmax-agents=unknown (auto)\texcluded=none\theadroom=missing"
-        "\trelease=unknown\n"
+        "ff0f11b025271d0c\tname=anton-2\tstale\tui=no\tworkers=0 of unknown (auto)\texcluded=master\theadroom=missing\trelease=unknown\n"
+        "root\tname=swarm-master\tstale\tui=yes\tworkers=0 of unknown (auto)\texcluded=none\theadroom=missing\trelease=unknown\n"
     )
 
 
