@@ -27,6 +27,15 @@ def hold(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
     return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
 
 
+def holds(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
+    """Whether ``hold`` names a reason, without building the freeze reason text."""
+    return (
+        bool(verification(task) or phased(task, doc))
+        or freeze.claim_gate(task, doc, graph, fix)
+        or bool(waits(task, rows))
+    )
+
+
 def verification(task: dict) -> str:
     if task.get("awaiting") != "verify":
         return ""

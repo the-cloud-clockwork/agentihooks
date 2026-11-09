@@ -83,7 +83,7 @@ def ready(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> bool:
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and not claim_hold.hold(task, rows, doc, graph, fix)
+        and not claim_hold.holds(task, rows, doc, graph, fix)
     )
 
 
