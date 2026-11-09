@@ -47,6 +47,8 @@ class SeenMarks:
                         pipe.expire(self.key(resolved), TTL_S)
                         added, _ = pipe.execute()
                     if names.revisions(("alias", name)) != before:
+                        if added:
+                            self.redis.srem(self.key(resolved), ref)
                         continue
                     return added == 1
                 except WatchError:
