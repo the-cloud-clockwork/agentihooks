@@ -190,9 +190,14 @@ def test_feed_for_builds_a_nats_feed_for_the_receiving_session(monkeypatch):
     assert bus.feed_for(items, "bob")._session == "bob"
 
 
-def test_a_failed_publish_closes_its_bus_and_retries_after_the_cooldown(monkeypatch, capsys):
+def test_a_failed_publish_closes_its_bus_and_retries_after_the_cooldown(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     class Unwritable:
         closed = 0
+
+        def for_swarm(self, swarm: str) -> "Unwritable":
+            return self
 
         def state(self, bucket):
             raise OSError("bus refused")

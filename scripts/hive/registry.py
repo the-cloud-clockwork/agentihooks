@@ -20,6 +20,7 @@ from scripts.swarm_v2.keyspace import INSTALLATION_FILE
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 BEAT_WINDOW_MS = 300_000
+QUIET_MS = 3_600_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {
@@ -270,7 +271,9 @@ def show(client, hive_id: str) -> dict | None:
     return None if stored is None else _settle(hive_id, stored)
 
 
-def update(client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None) -> dict:
+def update(
+    client: object, hive_id: str, pairs: list[str], keep: bool = False, drain: Drain | None = None
+) -> dict[str, Any]:
     if not HIVE_ID.fullmatch(hive_id):
         raise HiveError(f"hive id {hive_id!r} must be letters, digits, dots, dashes or underscores")
     if not pairs:
@@ -304,7 +307,7 @@ def beat(client, hive_id: str, fields: dict) -> None:
     _amend(client, hive_id, lambda stored: {**_seeded(hive_id), **(stored or {}), **fields})
 
 
-def forget(client, hive_id: str) -> None:
+def forget(client: Any, hive_id: str) -> None:
     _amend(client, hive_id, lambda stored: None)
     hive_state.indexed(client, hive_id, False)
 
@@ -316,7 +319,7 @@ def _index(client, hive_id: str) -> None:
         pass
 
 
-def hives(client) -> list[dict]:
+def hives(client: Any) -> list[dict[str, Any]]:
     return [record for hive_id in hive_state.index(client) if (record := show(client, hive_id))]
 
 
@@ -328,6 +331,12 @@ def live(record: Any, now_ms: int) -> bool:
         and now_ms - record["heartbeat_at"] <= LIVE_MS
         and now_ms - finished_at <= BEAT_WINDOW_MS
     )
+
+
+def quiet(record: Mapping[str, Any], now_ms: int, window_ms: int = QUIET_MS) -> bool:
+    """A hive that has beaten at least once is quiet once its last heartbeat is older than ``window_ms``."""
+    beat: int = record.get("heartbeat_at", 0)
+    return beat > 0 and now_ms - beat > window_ms
 
 
 def touch(client: Any, hive_id: str, now_ms: int) -> None:
