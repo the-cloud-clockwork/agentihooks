@@ -150,7 +150,8 @@ def test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane(
     monkeypatch: pytest.MonkeyPatch, prebuilt: bool
 ) -> None:
     calls: list[tuple[str, tuple[Any, ...]]] = []
-    built, given = object(), object()
+    built: Any = object()
+    given: Any = object()
     tasks = {"eng": [{"id": "e1", "lane": "eng"}], "ci": [{"id": "c1", "lane": "ci"}]}
 
     def view(*args: Any) -> object:
@@ -168,7 +169,10 @@ def test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane(
     monkeypatch.setattr(tick_module, "claim_view", view)
     monkeypatch.setattr(tick_module, "_claimable", claimable)
     monkeypatch.setattr(tick_module, "_launch_order", launch)
-    store_, rows, doc, key = object(), {"r": {}}, {"d": 1}, len
+    store_: Any = object()
+    key: Any = len
+    rows: dict[str, dict[str, Any]] = {"r": {}}
+    doc: dict[str, Any] = {"d": 1}
     found = tick_module.ready_by_lane("sw", store_, rows, doc, ["eng", "ci"], key, given if prebuilt else None)
     claims = given if prebuilt else built
     expected = [] if prebuilt else [("view", ("sw", store_, rows, doc, key))]
