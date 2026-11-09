@@ -547,10 +547,6 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command == "compact-credentials":
-            from scripts.hive import agent_credentials
-
-            print(json.dumps(agent_credentials.compact(redis_client(), args.member, args.readers_compatible)))
         elif args.command in ("revoke", "remove", "drain"):
             print(_retire(args))
         elif args.command in ("run", "install"):
@@ -564,11 +560,21 @@ def _run(args: argparse.Namespace) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command in ("setup", "nats-trust"):
-            print((_setup if args.command == "setup" else _nats_trust)(args))
+        elif args.command in ("setup", "nats-trust", "compact-credentials"):
+            print(
+                {"setup": _setup, "nats-trust": _nats_trust, "compact-credentials": _compact_credentials}[args.command](
+                    args
+                )
+            )
         else:
             return _serve(args)
     except auth.HiveError as exc:
         print(f"hive {args.command} refused: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _compact_credentials(args: argparse.Namespace) -> str:
+    from scripts.hive import agent_credentials
+
+    return json.dumps(agent_credentials.compact(redis_client(), args.member, args.readers_compatible))
