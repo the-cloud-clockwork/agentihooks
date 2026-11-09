@@ -436,6 +436,7 @@ def test_cancel_runs_spares_the_integration_head_of_a_merged_fix(monkeypatch: py
         {
             "o/a": [
                 RepositoryRun(1, "dev", "workflow_dispatch", "in_progress", head_sha="d" * 40),
+                RepositoryRun(9, "dev", "push", "in_progress", head_sha=""),
                 RepositoryRun(2, "dev", "push", "in_progress", head_sha="n" * 40),
                 RepositoryRun(3, "dev", "push", "queued", head_sha="n" * 40),
                 RepositoryRun(4, "dev", "push", "in_progress", head_sha="m" * 40),
@@ -448,6 +449,7 @@ def test_cancel_runs_spares_the_integration_head_of_a_merged_fix(monkeypatch: py
     )
     assert panic.cancel_runs([FIX], ["o/a", "o/b"], runs) == [
         "o/a run 1 on dev",
+        "o/a run 9 on dev",
         "o/a run 5 on dev",
         "o/a run 6 on feature",
         "o/b run 8 on dev",

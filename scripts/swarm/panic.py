@@ -167,8 +167,8 @@ def fix_branch(url: str) -> str:
 
 
 def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
-    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a merged fix's commit
-    or a release tag."""
+    """Return whether a panic cancel leaves the run alone: finished, the merge queue, a fix, a fix's commit or a
+    release tag."""
     return (
         row.status not in ACTIVE
         or row.event in (MERGE_QUEUE, RELEASE_EVENT)
@@ -180,7 +180,7 @@ def _spared(row: RepositoryRun, branches: set[str], commits: set[str]) -> bool:
 
 def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], repo: str) -> set[str]:
     """Return the commits a fix in this repository carries onto its base: each merge queue run's head for the fix,
-    and the base branch head once the fix is merged."""
+    and the base branch head once the fix is merged, read from rows ordered newest first."""
     found = [change for change in changes if change.reference.repository == repo]
     queues = tuple(f"{QUEUE_BRANCH}{change.base}/pr-{change.reference.number}-" for change in found)
     bases = {change.base for change in found if change.merged}
@@ -190,7 +190,7 @@ def _fix_heads(rows: Iterable[RepositoryRun], changes: Iterable[ChangeState], re
         branch = str(row.branch)
         if row.event == MERGE_QUEUE and branch.startswith(queues):
             queued.add(row.head_sha)
-        if row.event == PUSH and branch in bases:
+        if row.event == PUSH and branch in bases and row.head_sha:
             heads.setdefault(branch, row.head_sha)
     return (queued | set(heads.values())) - {""}
 
