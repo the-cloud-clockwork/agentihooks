@@ -334,3 +334,23 @@ registry.register(
         feature="tick-doc-items-map",
     )
 )
+
+
+def _step_starvation(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the step starvation step, given the tick module and a reader of the pass state."""
+    return []
+
+
+registry.register(
+    CallStep(
+        "step starvation",
+        "closing",
+        _step_starvation,
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("tick"),
+        effects=frozenset({"inbox"}),
+        feature="tick-step-starvation",
+    )
+)

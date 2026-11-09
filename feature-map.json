@@ -2709,6 +2709,15 @@
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
         "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs"
       ]
+    },
+    {
+      "id": "tick-step-starvation",
+      "origin": "inventory",
+      "behaviour": "The tick step step starvation runs in group closing on the tick lane every 60 seconds.",
+      "seam": "scripts.tick.steps.report._step_starvation registered as tick step step starvation",
+      "tests": [
+        "tests/tick/steps/test_step_starvation.py::test_step_starvation"
+      ]
     }
   ],
   "unmapped_rules": [
