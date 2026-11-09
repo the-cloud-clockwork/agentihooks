@@ -33,6 +33,7 @@ JSON_FIELDS = {
     "repos": list,
     "capabilities": list,
     "drains": list,
+    "members": dict,
 }
 DRAINS_KEPT = 20
 INT_FIELDS = ("max_agents", "heartbeat_at", "beat_at")
@@ -190,7 +191,7 @@ def _stored(client, hive_id: str) -> dict | None:
     return hive_state.read(hive_state.records(client, hive_id), hive_id, _legacy(client, hive_id))
 
 
-def _seeded(hive_id: str) -> dict:
+def _seeded(hive_id: str) -> dict[str, Any]:
     return {field: value for field, value in _default(hive_id).items() if field not in KEPT}
 
 
@@ -243,7 +244,7 @@ def _drained(record: dict[str, Any], stored: dict[str, Any], drain: Drain | None
     return {**record, "drains": [*stored.get("drains", []), entry][-DRAINS_KEPT:]}
 
 
-def show(client, hive_id: str) -> dict | None:
+def show(client: Any, hive_id: str) -> dict[str, Any] | None:
     stored = _stored(client, hive_id)
     return None if stored is None else _settle(hive_id, stored)
 
@@ -331,6 +332,55 @@ def finished(client: Any, hive_id: str, now_ms: int) -> None:
         return {**stored, "beat_at": now_ms} if stored else hive_state.KEEP
 
     _amend(client, hive_id, stamp)
+
+
+def member_name() -> str:
+    """The pod or machine this process runs on, one member of the hive its credential names."""
+    return socket.gethostname()
+
+
+def join(client: Any, hive_id: str, member: str, now_ms: int, started: bool = False) -> None:
+    """Records member as live in hive_id, keeping its drain unless it just started, and forgets members gone quiet."""
+
+    def write(stored: dict[str, Any] | None) -> object:
+        if not stored:
+            return hive_state.KEEP
+        members = stored.get("members", {})
+        kept = {name: entry for name, entry in members.items() if now_ms - entry["heartbeat_at"] <= LIVE_MS}
+        draining = "no" if started else members.get(member, {}).get("draining", "no")
+        return {**stored, "members": {**kept, member: {"heartbeat_at": now_ms, "draining": draining}}}
+
+    _amend(client, hive_id, write)
+
+
+def _serving(members: dict[str, dict[str, Any]], now_ms: int) -> bool:
+    """True when a live member takes new agents."""
+    return any(entry["draining"] != "yes" and now_ms - entry["heartbeat_at"] <= LIVE_MS for entry in members.values())
+
+
+def leave(client: Any, hive_id: str, member: str, drain: Drain) -> bool:
+    """Stops member taking new agents; the whole hive drains only when no other live member takes them.
+
+    True when another member keeps the hive open."""
+    at = wall_ms()
+
+    def write(stored: dict[str, Any] | None) -> object:
+        stored = stored or {}
+        members = stored.get("members", {})
+        entry = {"heartbeat_at": at, **members.get(member, {}), "draining": "yes"}
+        record: dict[str, Any] = {**stored, "members": {**members, member: entry}}
+        if _serving(record["members"], at):
+            return record
+        return _drained({**record, "draining": "yes"}, stored, drain)
+
+    written: dict[str, Any] = _amend(client, hive_id, write)
+    return _serving(written["members"], at)
+
+
+def member_draining(client: Any, hive_id: str, member: str) -> bool:
+    """True when member of hive_id was told to take no new agents."""
+    record = show(client, hive_id) or {}
+    return record.get("members", {}).get(member, {}).get("draining") == "yes"
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:
