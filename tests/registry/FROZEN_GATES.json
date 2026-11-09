@@ -24,7 +24,8 @@
     "f2564e6d513888599bce9e52c407bd8936934e26"
   ],
   ".github/rulesets/dev-history.json": [
-    "028765d3118bc97ee1ea82a511cdee04caa074b0"
+    "028765d3118bc97ee1ea82a511cdee04caa074b0",
+    "840a47273b52d69b8eb4e3d5b281bc24fa044f82"
   ],
   ".github/rulesets/dev-no-delete.json": [
     "6d49785b507ab1495a3608804a6f071b5fd99645"
