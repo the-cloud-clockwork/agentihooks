@@ -61,7 +61,9 @@ def test_initial_content_preserves_workflow_task_fields(case: str | None) -> Non
         task["case"] = case
     content = {"title": "Workflow ledger", "phases": [{"title": "Proof"}], "tasks": [task]}
     assert new_ledger.check(content) == []
-    seeded = new_ledger.build_doc(content)["tasks"][0]
+    document = new_ledger.build_doc(content)
+    assert document["size"] == "small"
+    seeded = document["tasks"][0]
     assert seeded["kind"] == "workflow"
     assert seeded["workflow"] == "review"
     assert seeded.get("case") == case
