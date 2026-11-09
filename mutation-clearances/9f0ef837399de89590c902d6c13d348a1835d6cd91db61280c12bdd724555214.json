@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/codex.py:scripts.inbox.codex.x_account_refusal:0a8efdffda096547d2b24c76171c56fdd7a37164348872c19c6b38a53b37a9cc": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged at runtime, so cast(None, info) is info; the isinstance(info, dict) guard already holds, so .values() is the same call."
+  }
+}
