@@ -401,7 +401,7 @@ def test_resource_names_are_quoted_as_single_url_segments():
 
 
 @pytest.mark.parametrize("action", ["acquire", "release", "abandon"])
-def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action):
+def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch: pytest.MonkeyPatch, action: str) -> None:
     import sys
 
     module = rollout()
