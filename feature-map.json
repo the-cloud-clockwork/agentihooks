@@ -2711,6 +2711,24 @@
       ]
     },
     {
+      "id": "codex-pump-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
+      "behaviour": "A Codex turn that the provider fails live with an account refusal (HTTP 401, 402 or 403, or unauthorized) ends the push pump with AccountRefused and exit status 4; codex session serve then stops the app server, so the seat is relaunched, and records the routed account as expired, so codex_router.account_cap gives it no seats at once. An old refused turn in a resumed thread leaves a fresh pump delivering. A usage read answered 402 deactivated_workspace is also an expired reading.",
+      "seam": "scripts.inbox.codex Pump.step, ThreadState.observe and main exit status; scripts.codex_session.serve close_refused with codex_router.account_cap; scripts.codex_usage.read",
+      "tests": [
+        "tests/inbox/test_codex_pump.py::test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded",
+        "tests/inbox/test_codex_pump.py::test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delivering",
+        "tests/inbox/test_codex_pump.py::test_only_a_failed_turn_with_an_account_status_reads_as_an_account_refusal",
+        "tests/inbox/test_codex_pump.py::test_a_live_completion_records_the_refusal_and_a_later_clean_completion_keeps_it",
+        "tests/inbox/test_codex_pump.py::test_a_refreshed_thread_never_records_a_refusal",
+        "tests/test_codex_usage.py::test_a_deactivated_workspace_reads_as_expired",
+        "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
+        "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
+        "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
       "id": "tick-step-starvation",
       "origin": "inventory",
       "behaviour": "The closing step step starvation records each tick step's last completed run from the pass records; a step that ran without completing for three windows of its budgets.FLOORS interval sends the master seat one urgent inbox item and swarm status lists a step starvation finding naming the step, its last completion and the passes since.",
