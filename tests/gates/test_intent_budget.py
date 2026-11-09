@@ -297,3 +297,56 @@ def test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view(tmp_p
     assert all(
         record and record["verdict"] == intent.PENDING and record["reason"] == intent.DRAFT for record in records
     )
+
+
+def _watched_doc() -> dict[str, Any]:
+    """A pull in pr, a claimed pull, an open pull and a pr task without a pull."""
+    tasks = [
+        {"id": "a", "state": "pr", "pr_url": "https://github.com/o/r/pull/1"},
+        {"id": "b", "state": "claimed", "pr_url": "https://github.com/o/r/pull/2"},
+        {"id": "c", "state": "open", "pr_url": "https://github.com/o/r/pull/3"},
+        {"id": "d", "state": "pr"},
+    ]
+    return {**DOC, "tasks": tasks}
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("coach", ["pull/1", "pull/2", "pull/9", "pull/8"]),
+        ("enforce", ["pull/1", "pull/9"]),
+    ],
+)
+def test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name(
+    tmp_path: Any, mode: str, expected: list[str]
+) -> None:
+    base = "https://github.com/o/r/"
+    Verdicts(SLUG, "intent", tmp_path).write("a", intent.PENDING, "r", named_pending=[base + "pull/9"])
+    Verdicts(SLUG, "intent-coach", tmp_path).write("b", intent.PENDING, "r", named_pending=[base + "pull/8"])
+    Verdicts(SLUG, "intent-coach", tmp_path).write("a", intent.PENDING, "r", named_pending=[base + "pull/1"])
+    assert intent.watched_urls(SLUG, _watched_doc(), mode, tmp_path) == [base + path for path in expected]
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches(tmp_path: Any) -> None:
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    judging = intent.Judging()
+    gone: futures.Future[Any] = futures.Future()
+    judging.running[(SLUG, "gone")] = ("key", gone)
+    replace(_check("coach", pulls, [], tmp_path), judging=judging).run(doc)
+    assert (SLUG, "gone") not in judging.running
+    assert gone.cancelled()
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+@pytest.mark.parametrize("minute", [0, 7, 29])
+def test_each_minute_judges_the_changed_pulls_from_its_own_turn(tmp_path: Any, minute: int) -> None:
+    doc = _doc()
+    pulls, _ = _pulls(doc)
+    now = minute * intent.TURN_MS
+    _check("coach", pulls, [], tmp_path, now).run(doc)
+    ids = [task["id"] for task in doc["tasks"]]
+    judged = {task for task in ids if Verdicts(SLUG, "intent", tmp_path).read(task)}
+    assert judged == set((ids[minute:] + ids[:minute])[: intent.JUDGED_PER_PASS])

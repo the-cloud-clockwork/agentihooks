@@ -2747,7 +2747,11 @@
         "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
         "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
         "tests/gates/test_intent_budget.py::test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another",
-        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled"
+        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled",
+        "tests/gates/test_intent_budget.py::test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name",
+        "tests/gates/test_intent_budget.py::test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches",
+        "tests/gates/test_intent_budget.py::test_each_minute_judges_the_changed_pulls_from_its_own_turn",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building"
       ]
     }
   ],

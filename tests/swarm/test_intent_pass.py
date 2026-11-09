@@ -1,4 +1,5 @@
 import threading
+from typing import Any
 
 import pytest
 
@@ -58,6 +59,36 @@ def test_ready_intent_is_delivered_before_a_slow_runtime_launch(env, monkeypatch
     print(f"ready_to_verdict_ms={wait_ms}; runtime_launch_delay_ms=780000")
     assert at_launch and all(record and record["verdict"] == "pass" for record in at_launch)
     assert wait_ms == 0
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_the_intent_pass_returns_while_its_view_is_still_building(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm import ledger_events
+
+    release = threading.Event()
+
+    def slow_view(*args: object) -> str:
+        release.wait(10)
+        return "view"
+
+    monkeypatch.setattr(ledger_events, "tick_view", slow_view)
+    monkeypatch.setattr(ledger_events, "Mail", lambda *args: None)
+    config = SimpleNamespace(gates={"intent": "off"})
+    returned: list[tuple[Any, list[str]]] = []
+    caller = threading.Thread(
+        target=lambda: returned.append(cli._intent_pass(None, None, "sw", {"tasks": []}, None, config))
+    )
+    caller.start()
+    caller.join(5)
+    finished = not caller.is_alive()
+    release.set()
+    caller.join(5)
+    view, actions = returned[0]
+    assert finished
+    assert actions == []
+    assert view.result(5) == "view"
 
 
 def test_a_merge_wait_observes_a_merge_during_a_slow_runtime_launch(env, monkeypatch):  # noqa: F811
