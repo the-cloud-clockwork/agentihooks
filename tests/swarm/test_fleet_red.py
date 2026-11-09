@@ -344,15 +344,16 @@ def test_the_notice_pass_declares_nothing_when_the_read_fails(store, error):
     assert store.redis.get(key) == MINE
 
 
-def test_the_tick_holds_a_task_red_only_from_a_shared_check_and_releases_it_once_the_check_passes(store, monkeypatch):
+def test_the_tick_holds_a_task_red_only_from_a_shared_check_and_releases_it_once_the_check_passes(store):
     rows = {t["id"]: t for t in [task("red", pr_url=MINE, awaiting="fix"), task("plain")]}
     doc = {"phases": [], "tasks": list(rows.values())}
     at = datetime.now(UTC).isoformat()
     others = [[run("Tests", "FAILURE", at)]] * 3
-    monkeypatch.setattr(fleet_red, "read", lambda repo: fleet([run("Tests", "FAILURE", at)], *others))
+    listed(store, "sw", "o/r", lambda repo: fleet([run("Tests", "FAILURE", at)], *others))
     assert [t["id"] for t in _claimable("sw", store, rows, doc, "eng")] == ["plain"]
+    store.redis.delete(store.key("sw", "fleet-red-pulls:o/r"))
     passed = [[run("Tests", "SUCCESS", at)]] * 3
-    monkeypatch.setattr(fleet_red, "read", lambda repo: fleet([run("Tests", "FAILURE", at)], *passed))
+    listed(store, "sw", "o/r", lambda repo: fleet([run("Tests", "FAILURE", at)], *passed))
     assert sorted(t["id"] for t in _claimable("sw", store, rows, doc, "eng")) == ["plain", "red"]
 
 
