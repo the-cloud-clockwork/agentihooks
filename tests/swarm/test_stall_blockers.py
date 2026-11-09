@@ -167,6 +167,27 @@ def test_a_stale_merge_observation_records_no_stall(store: RedisStore) -> None:
     assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
 
 
+def test_state_left_unobserved_past_the_stale_window_starts_over(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    _merged(store, now - 3 * HOUR)
+    github = _pulls(**{"pr-a": _open()})
+    _observe(store, [_task("a", "pr-a")], github, now - 2 * HOUR)
+    _observe(store, [_task("a", "pr-a")], github, now - 2 * HOUR + stall_blockers.STALE_MS)
+    assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - 2 * HOUR
+    _observe(store, [_task("a", "pr-a")], github, now)
+    assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now
+
+
+def test_a_ledger_without_pull_requests_leaves_its_categories_to_lapse(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _done(now - 2 * HOUR)}), now)
+    assert list(blockers.sustained(store, SLUG, now)) == [stall_blockers.MERGED_IN_PR]
+    assert _observe(store, [{"id": "a", "state": "done"}], _pulls(), now + blockers.RECENT_MS + 1) == []
+    assert blockers.sustained(store, SLUG, now + blockers.RECENT_MS + 1) == {}
+
+
 def test_a_ledger_without_pull_requests_reads_no_swarm_config(store: RedisStore) -> None:
     assert stall_blockers.observe(store, "no-such-swarm", {}, [{"id": "a", "state": "open"}], _pulls(), 0, _never) == []
 
@@ -206,9 +227,11 @@ def test_a_new_dev_merge_restarts_the_stall_and_a_resolved_condition_clears_it(s
     _observe(store, [_task("a", "pr-a")], github, now)
     assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - 10 * MINUTE
     assert blockers.sustained(store, SLUG, now) == {}
-    assert _observe(store, [], github, now) == [f"stall blockers: cleared {stall_blockers.MERGE_STALL}"]
+    assert _observe(store, [_task("a", "pr-a")], _pulls(), now) == [
+        f"stall blockers: cleared {stall_blockers.MERGE_STALL}"
+    ]
     assert blockers.active(store, SLUG, now) == {}
-    assert _observe(store, [], github, now) == []
+    assert _observe(store, [_task("a", "pr-a")], _pulls(), now) == []
 
 
 def test_a_stall_older_than_the_queue_lifetime_stays_sustained(store: RedisStore) -> None:
@@ -235,7 +258,7 @@ def test_log_only_by_default_writes_the_gate_log_and_records_no_blocker(store: R
     ]
     assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + MINUTE) == []
     assert len(gate_log.gate_log_path(SLUG).read_text().splitlines()) == 1
-    assert _observe(store, [], _pulls(), now) == []
+    assert _observe(store, [_task("a", "pr-a")], _pulls(), now) == []
     assert _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _open()}), now + 2 * MINUTE) == [
         f"stall blockers: logged {reason}"
     ]
@@ -250,7 +273,7 @@ def test_a_pull_request_opened_long_after_the_last_merge_waits_its_own_hour(stor
     _observe(store, [_task("a", "pr-a")], github, now)
     assert blockers.active(store, SLUG, now)[stall_blockers.MERGE_STALL].first_seen == now - HOUR + 1
     assert blockers.sustained(store, SLUG, now) == {}
-    _observe(store, [], github, now)
+    _observe(store, [_task("a", "pr-a")], _pulls(), now)
     _observe(store, [_task("a", "pr-a")], github, now + MINUTE)
     assert blockers.active(store, SLUG, now + MINUTE)[stall_blockers.MERGE_STALL].first_seen == now + MINUTE
 

@@ -126,15 +126,20 @@ def observe(
     held: Callable[[dict[str, Any]], bool],
 ) -> list[str]:
     """Record, log once per start or skip both categories by the stall-blockers gate mode, clearing a category that
-    stopped holding; the stall starts at the later of the last dev merge and the first pass that saw it hold."""
-    rows, key = list(tasks), store.key(slug, KEY)
-    raw = store.redis.get(key)
-    if raw is None and not any(task.get("state") == "pr" for task in rows):
+    stopped holding; the stall starts at the later of the last dev merge and the first pass that saw it hold. A ledger
+    with no task in pr costs no read: its categories stop recurring and fall out of the sustained set, and state left
+    unobserved past STALE_MS starts over."""
+    rows = list(tasks)
+    if not any(task.get("state") == "pr" for task in rows):
         return []
     mode = str(modes.configured(GATE, store.config(slug).gates))  # pyright: ignore[reportUnknownMemberType]
     if mode == "off":
         return []
-    state = json.loads(raw or "{}")
+    key = store.key(slug, KEY)
+    state = json.loads(store.redis.get(key) or "{}")
+    if now_ms - state.get("at", now_ms) > STALE_MS:
+        state = {}
+    state["at"] = now_ms
     stall = merge_stall(store, slug, doc, rows, github, now_ms)
     state["open_since"] = (state.get("open_since") or now_ms) if stall else None
     if stall:
