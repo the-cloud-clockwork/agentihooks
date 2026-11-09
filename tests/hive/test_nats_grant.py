@@ -686,7 +686,7 @@ def _offline_signer() -> nats_grant.Signer:
     return nats_grant.Signer(operator, nkey.create(nkey.ACCOUNT), "creds", "nats://hub:4222", operator.public)
 
 
-def test_a_member_credential_carries_exactly_the_hive_member_claims():
+def test_a_member_credential_carries_exactly_the_hive_member_claims() -> None:
     signed = _offline_signer()
     jwt, user = nkey.parse_creds(nats_grant.mint(signed, "m1"))
     claims = _claims(jwt)
@@ -697,6 +697,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "hive-presence",
         "hive-executions",
         "execution-starts",
+        "inbox",
     )
     publish = [
         "swarm.*.execution.>",

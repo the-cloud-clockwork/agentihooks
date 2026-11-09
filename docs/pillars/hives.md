@@ -695,6 +695,7 @@ The hub creates the hive buckets; members are not allowed to create them:
 | `hive-presence` | Each hive's heartbeat. |
 | `hive-executions` | What each hive reports about its running executions. |
 | `execution-starts` | Every `execution.started`. The tick and the reconciler use it to tell hub launched agents from tick launched ones. |
+| `inbox` | Message send records and delivery claims for each swarm seat inbox. |
 | `account-slots` | Per harness and account, the executions holding one of its sessions and each hive's cap for it. A spoke reserves a slot here before launching, so hives sharing an account stay under its cap. |
 | `hive-slot-accounts` | Per hive, the harness and account pairs it has reported, so its beat renews every slot it holds. |
 
@@ -1230,14 +1231,14 @@ in place and moves the master to another hive.
 | excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | The hive's agent ceiling, editable, marked `cap` when the operator set a cap and `auto` when it is computed from the hive's own resources; empty with an `unknown` hint when there is no cap and no fresh reading. |
-| agents | Working agents against max agents, such as `1/3`. |
-| slots | One line per slot: harness, account and the sessions the hive reports on it. |
+| agents | Working agents against max agents, such as `1/3`: the worker sessions the hive reported at its latest heartbeat, named by the row's `agents_at`, without its interactive master sessions; a row that is not live counts none. |
+| slots | One line per slot: harness, account and the sessions the hive reports on it at its latest heartbeat. |
 | master | The live master running on the hive, from any swarm, or `—`. |
 | (no header) | The move master button, which moves this ledger's master to the hive. |
 
-The agents figure is the placement load: worker sessions the hive reports, without its interactive master
-sessions, plus this runtime's launching, working or suspect non-master agents on the hive that the hive has not
-reported yet. Placement compares the same figure with max agents.
+Placement compares its own load with max agents: the worker sessions the hive reports plus this runtime's
+launching, working or suspect non-master agents on the hive that the hive has not reported yet. The panel shows only
+what the latest heartbeat reported.
 
 - The header count reads `<live> live · <n> hives`, or `—` when the read failed.
 - The Quota header count ends with each hive's `<name> <agents>/<max agents>`, such as
@@ -1248,6 +1249,20 @@ reported yet. Placement compares the same figure with max agents.
 - Swarm tab redraws skip the table while one of its fields holds focus; each fresh read still redraws it.
 - The panel folds and keeps its folded state, its height and its column widths across reloads, like the other Swarm
   tab panels.
+
+The panel lists no ephemeral hive that has been quiet for an hour.
+
+### Quiet hives
+
+A hive is quiet once its last heartbeat is older than an hour (`registry.QUIET_MS`).
+
+- The `hive sweep` tick step marks a quiet ephemeral hive, other than one with `ui=yes`, draining, and deletes its
+  registry records through the hive remove path once no agent record still runs on it.
+- A quiet hive with `ephemeral=no` raises one `quiet hive` health finding in `agentihooks swarm <slug> status`.
+- `scripts/packaging/hive-reproduce.sh` runs `agentihooks hive remove` on the member it invited when it exits;
+  `HIVE_KEEP=yes` keeps it. When that remove fails, the script prints the remove command to run again; the sweep
+  removes the hive only once its worker pod stops sending heartbeats.
+- A hive that never sent a heartbeat carries no time to age from, so it is neither swept nor reported.
 
 ### Editing a hive
 

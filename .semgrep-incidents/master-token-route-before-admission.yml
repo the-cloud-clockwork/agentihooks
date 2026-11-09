@@ -1,0 +1,17 @@
+rules:
+  - id: master-token-route-before-admission
+    languages: [python]
+    severity: ERROR
+    message: Report routed inside the admitted callback after taking the hive account slot.
+    paths:
+      include:
+        - /scripts/master_claude_login.py
+        - master-token-route-before-admission.py
+    patterns:
+      - pattern-inside: |
+          def launch_token(...):
+            ...
+      - pattern: |
+          _write_route_report(..., status="routed", ...)
+          ...
+          execute(...)
