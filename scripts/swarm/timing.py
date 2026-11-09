@@ -16,6 +16,7 @@ from scripts.swarm import tick_stop
 from scripts.tick import metrics as tick_metrics
 
 HISTORY_LIMIT = 50000
+ABANDONED = "abandoned"
 PASS: ContextVar[dict[str, Any] | None] = ContextVar("tick_pass", default=None)
 STORE: ContextVar[Any] = ContextVar("tick_store", default=None)
 SWARM: ContextVar[str | None] = ContextVar("tick_swarm", default=None)
@@ -201,6 +202,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         ended = time.monotonic()
         own_end = resource.getrusage(resource.RUSAGE_THREAD)
         child_end = resource.getrusage(resource.RUSAGE_CHILDREN)
+        outcome = record.get("outcome", outcome)
         record.update(
             phase="finished",
             outcome=outcome,
@@ -210,7 +212,7 @@ def step(name: str, report: bool = True) -> Iterator[dict[str, Any] | None]:
         )
         emit(sys.stderr, json.dumps(record))
         tick_metrics.step_finished(slug, record)
-        if outcome not in ("success", "waiting") and (current := PASS.get()) is not None:
+        if outcome not in ("success", "waiting", ABANDONED) and (current := PASS.get()) is not None:
             current["failed_steps"].append(name)
         if (store := STORE.get()) is not None:
             append_step(store, slug, record)
@@ -233,10 +235,16 @@ def call(function: Callable, *args, **kwargs) -> Any:
 
 
 def within(
-    budget_s: float, function: Callable[..., Any], *args: Any, lane: str | None = None, name: str | None = None
+    budget_s: float,
+    function: Callable[..., Any],
+    *args: Any,
+    lane: str | None = None,
+    name: str | None = None,
+    on_end: Callable[[], bool] | None = None,
 ) -> Any:
     """Run ``function`` as a timed step recorded as ``name``, else as the function's own name, whose record carries
-    ``budget_s``, its ``lane`` when given, and reads late when it overruns."""
+    ``budget_s``, its ``lane`` when given, and reads late when it overruns; ``on_end`` is called once as the run
+    ends and returns whether the run was already given up at its budget, which makes the record read abandoned."""
     keep()
     with step(name or named(function)) as record:
         if record is not None:
@@ -244,7 +252,11 @@ def within(
             if lane is not None:
                 record["lane"] = lane
         started = time.monotonic()
-        result = function(*args)
+        try:
+            result = function(*args)
+        finally:
+            if on_end is not None and on_end() and record is not None:
+                record["outcome"] = ABANDONED
         if record is not None:
             record["late"] = time.monotonic() - started > budget_s
         return result
