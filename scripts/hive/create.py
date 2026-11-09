@@ -54,6 +54,7 @@ class Options:
     timeout_s: int = 1800
     dry_run: bool = False
     name: str | None = None
+    repos: tuple[str, ...] = ()
 
 
 @dataclass
@@ -368,6 +369,31 @@ def _live(tools: Tools, options: Options) -> str:
     return f"hive {member} is live"
 
 
+def _swarm_repos(tools: Tools) -> list[str]:
+    """The repos of every running swarm that places engineers on hives, as origin identities where a path has one."""
+    from scripts.hive.daemon import origin
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(tools.redis)
+    configs = [store.config(slug) for slug in store.slugs()]
+    repos = [
+        origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo
+        for config in configs
+        if config.hive_placement and config.state == "running"
+    ]
+    return sorted(set(filter(None, repos)))
+
+
+def _registered(tools: Tools, options: Options) -> str:
+    repos = sorted(set(options.repos)) or _swarm_repos(tools)
+    name, listed = tools.state["name"], ", ".join(repos) or "no repos"
+    if options.dry_run:
+        return f"would record {name} with {listed} in the hive registry"
+    member = _member(tools)[invite.HIVE_ID]
+    registry.register(tools.redis, member, name, repos)
+    return f"recorded hive {member} as {name} with {listed} in the hive registry"
+
+
 def _target(state: Mapping) -> str:
     return f"ssh://{SSH_USER}@{state['lan_ip']}:{state['ssh_port']}"
 
@@ -433,6 +459,7 @@ STEPS = (
     ("merge", _merged),
     ("settings", _settings),
     ("live", _live),
+    ("registry", _registered),
     ("herdr", _herdr),
     ("engineer", _engineer),
 )

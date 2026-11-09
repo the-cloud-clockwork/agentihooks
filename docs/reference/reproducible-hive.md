@@ -49,6 +49,7 @@ agentihooks hive create
 | merge | `gh pr merge --squash --auto`; where the repository refuses auto merge, waits for the pull request checks to pass and runs `gh pr merge --squash`; then waits for the merge. A failed check stops the create naming it | the pull request merged |
 | settings | `hive setup` into the hive settings record | never; it rewrites the same keys |
 | live | waits for the member's heartbeat | never; a live hive passes at once |
+| registry | records the hive name and its repos in the member's hive registry record, so `hive list` shows `name=<name>`; the repos are `--repos` (comma separated), else the repos of every running swarm that places on hives. Every heartbeat keeps these repos listed beside the checkouts the hive reports | never; it rewrites the same fields |
 | herdr | trusts the host key in `~/.ssh/known_hosts`, then saves `ssh://worker@<LAN address>:<port>` in herdr with `herdr machine add --label <name>`; the pod keeps the member the invite wrote, so the step mints no second member and delivers no credential | the saved create holds the added member |
 | engineer | waits for a non master agent working on the hive | never |
 
