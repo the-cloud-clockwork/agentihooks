@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -70,7 +71,7 @@ def test_a_spawn_pass_computes_its_claim_order_once_for_every_lane(
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
-def test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget(
+def test_a_spawn_pass_over_the_replayed_ledger_orders_claims_once(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     offline(monkeypatch)
@@ -79,14 +80,24 @@ def test_a_spawn_pass_over_the_replayed_ledger_fits_its_budget(
     covers, orders = [], counted(monkeypatch, "_launch_order")
     real = freeze.covers
     monkeypatch.setattr(freeze, "covers", lambda *args: covers.append(1) or real(*args))
-    started = time.process_time()
     tick_module._spawn_order("sw", store.config("sw"), store, [], rows, doc, FakeRuntime())
-    spent = time.process_time() - started
     assert sum(task.get("state") == "open" for task in rows.values()) > 900
     assert len(doc["freezes"]) > 1300
     assert len(orders) == 1
     assert len(covers) < len(rows)
-    assert spent < budgets.FLOORS["spawn"].floor_s / BUDGET_SHARE
+
+
+@pytest.mark.feature("swarm-spawn-order-once-per-pass")
+@pytest.mark.skipif("MUTANT_UNDER_TEST" in os.environ, reason="mutation trampolines slow every call")
+def test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_spawn_floor(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    offline(monkeypatch)
+    doc = replay()
+    rows = {task["id"]: task for task in doc["tasks"]}
+    started = time.process_time()
+    tick_module._spawn_order("sw", store.config("sw"), store, [], rows, doc, FakeRuntime())
+    assert time.process_time() - started < budgets.FLOORS["spawn"].floor_s / BUDGET_SHARE
 
 
 @pytest.mark.feature("swarm-spawn-order-once-per-pass")
