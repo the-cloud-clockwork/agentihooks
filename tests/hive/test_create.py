@@ -919,11 +919,12 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
 
 
 @pytest.mark.feature("hive-create-resume-revoke")
-def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(world):
+def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(world: SimpleNamespace) -> None:
     from scripts.hive import hive_state
 
     kept = _keep_member(world)
     stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
+    world.bao.records[SIGNER]["member_swarms"][stray] = ["demo"]
     state = {**_state(world), "member": stray}
     (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(state))
     Store.working = False
@@ -935,16 +936,19 @@ def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_n
     assert stray not in hive_state.index(world.tools.redis)
     assert auth.member(world.tools.redis, kept) is not None
     assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
+    assert stray not in world.bao.records[SIGNER]["member_swarms"]
 
 
 @pytest.mark.feature("hive-create-resume-revoke")
-def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume(world, monkeypatch):
+def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts import openbao_kv
     from scripts.hive import hive_state
 
     real = openbao_kv.merge
 
-    def killed(bao, path, entries):
+    def killed(bao: openbao_kv.OpenBao, path: str, entries: dict[str, str]) -> int:
         if path == RECORD and "credential" in entries:
             raise KeyboardInterrupt
         return real(bao, path, entries)

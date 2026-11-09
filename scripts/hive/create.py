@@ -169,9 +169,14 @@ def _revoke_unfinished(tools: Tools) -> None:
     if not saved:
         return
     current = _member(tools).get(invite.HIVE_ID)
+    signer = _signer_path(tools.environ)
     for member in sorted(saved - {current}):
         for line in remove.revoke(tools.redis, member):
             tools.out(f"hive create {tools.state['name']}: resume: {line}")
+        if member_swarms.unassign(tools.bao, signer, member):
+            tools.out(
+                f"hive create {tools.state['name']}: resume: unlisted {member} from the hub signer record {signer}"
+            )
     tools.state["member"] = current
     _save(tools)
 
@@ -201,6 +206,10 @@ def _invite(tools: Tools, options: Options) -> str:
         done, member = f"would mint a hive member into {where} like {options.like}", "the new member"
     else:
         name, record = tools.state["name"], tools.state["record"]
+
+        def saved(minted: str) -> None:
+            _saved_member(tools, minted)
+
         request = invite.Request(
             name,
             record,
@@ -208,7 +217,7 @@ def _invite(tools: Tools, options: Options) -> str:
             ledger_ca=tools.ledger_ca,
             signer_path=listing.path,
             swarms=listing.swarms,
-            minted=lambda minted: _saved_member(tools, minted),
+            minted=saved,
         )
         done = invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
         member = _member(tools)[invite.HIVE_ID]
