@@ -318,17 +318,31 @@ def test_an_ephemeral_hive_quiet_past_the_window_is_not_listed_while_a_lasting_o
     assert refusal(request("GET", "/api/v1/hives/proof"), store) == (404, "resource_missing", "No such hive")
 
 
-def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(store: "RedisStore") -> None:
+@pytest.mark.parametrize("reported", [True, False])
+def test_a_row_reads_its_agent_counts_at_the_latest_heartbeat_and_a_quiet_row_counts_none(
+    store: "RedisStore", reported: bool
+) -> None:
     from scripts.hive import registry
 
-    store.redis.set(
-        f"{registry.key('desk')}:sessions",
-        json.dumps({"claude:luna": 3, "interactive:claude:luna": 1, "_executions": {"claude:luna": ["e1"]}}),
-    )
+    sessions = {
+        "claude:luna": 3,
+        "codex:sol": 5,
+        "interactive:claude:luna": 1,
+        "interactive:codex:sol": 2,
+        "_executions": {"claude:luna": ["e1"]},
+    }
+    if reported:
+        store.redis.set(f"{registry.key('desk')}:sessions", json.dumps(sessions))
+    else:
+        store.redis.delete(f"{registry.key('desk')}:sessions")
     store.redis.set(f"{registry.key('pod')}:sessions", json.dumps({"claude:luna": 3}))
     reply: Any = dispatch(request("GET"), store)
     desk, pod = reply["data"]
-    assert (desk["agents_at"], desk["agents"], desk["slots"][0]["agents"]) == (NOW_MS - 1000, 2, 3)
+    assert (desk["agents_at"], desk["agents"], desk["slots"][0]["agents"]) == (
+        NOW_MS - 1000,
+        5 if reported else 0,
+        3 if reported else 0,
+    )
     assert (pod["agents_at"], pod["agents"], pod["slots"][0]["agents"]) == (NOW_MS - registry.LIVE_MS - 1, 0, 0)
 
 

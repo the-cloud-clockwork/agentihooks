@@ -158,7 +158,11 @@ def test_purge_counts_only_agents_still_running_on_the_hive(store: RedisStore) -
 
 
 @pytest.mark.feature("hive-quiet-sweep")
-@pytest.mark.parametrize(("beat", "expected"), [(0, False), (NOW_MS - registry.QUIET_MS, False), (QUIET_AT, True)])
-def test_a_hive_is_quiet_only_once_a_beat_is_older_than_the_window(beat: int, expected: bool) -> None:
-    """A hive that never beat is never quiet; one beaten exactly at the window edge is not yet quiet."""
-    assert registry.quiet({"heartbeat_at": beat}, NOW_MS) is expected
+@pytest.mark.parametrize(
+    ("beat", "expected"),
+    [(None, False), (0, False), (1, True), (NOW_MS - registry.QUIET_MS, False), (QUIET_AT, True)],
+)
+def test_a_hive_is_quiet_only_once_a_beat_is_older_than_the_window(beat: int | None, expected: bool) -> None:
+    """A hive without a heartbeat is never quiet; every positive beat ages past the window."""
+    record = {} if beat is None else {"heartbeat_at": beat}
+    assert registry.quiet(record, NOW_MS) is expected
