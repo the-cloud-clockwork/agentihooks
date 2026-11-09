@@ -1,3 +1,4 @@
+import hashlib
 from typing import Any
 
 import pytest
@@ -15,7 +16,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
     monkeypatch.setattr(auth, "_LEDGER_OF", {})
     redis = fakeredis.FakeRedis(decode_responses=True)
-    store = auth._store(redis)
+    store = hive_state.credentials(redis, auth.PREFIX)
     hive_state.amend(store, "member.m1", lambda _: {"name": "hive", "ledger": "d", "agents": {}})
     hive_state.amend(store, "ledger.d", lambda _: "m1")
     hive_state.amend(store, "holder.m1", lambda _: "d")
@@ -23,12 +24,16 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
     return redis
 
 
+def _digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def test_compaction_preserves_legacy_tokens_and_removes_member_maps(client: Any) -> None:
     from scripts.hive import agent_credentials
 
-    store = auth._store(client)
+    store = hive_state.credentials(client, auth.PREFIX)
     token = "hive.m1.legacy"
-    held = auth._digest(token)
+    held = _digest(token)
     hive_state.amend(
         store, "member.m1", lambda _: {"name": "hive", "ledger": "d", "agents": {held: ["alpha", "engineer@1"]}}
     )
@@ -54,7 +59,9 @@ def test_ended_agent_tokens_are_removed_and_active_peers_keep_access(client: Any
     assert store.drop_agent("alpha", name)
     assert auth.agent_member(client, token, "alpha", name) is None
     assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
-    assert hive_state.read(auth._store(client), auth._agent_key("m1", "alpha", name)) is None
+    assert (
+        hive_state.read(hive_state.credentials(client, auth.PREFIX), hive_state.agent_key("m1", "alpha", name)) is None
+    )
     assert store.execution("alpha", agent.execution_id).state == "ended"
     assert store.drop_agent("alpha", name)
 
@@ -73,7 +80,9 @@ def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     store.put_agent("alpha", replace(agent, state="ended"))
 
     assert auth.agent_member(client, token, "alpha", name) is None
-    assert hive_state.read(auth._store(client), auth._agent_key("m1", "alpha", name)) is None
+    assert (
+        hive_state.read(hive_state.credentials(client, auth.PREFIX), hive_state.agent_key("m1", "alpha", name)) is None
+    )
 
 
 def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: Any) -> None:
@@ -84,9 +93,9 @@ def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: An
     store.create(SwarmConfig("alpha", "/repo", 1, 0))
     name = store.next_name("alpha", "eng")
     store.start_execution("alpha", AgentRecord(name, "eng", "task", seat="eng-1@alpha", hive="m1"))
-    credentials = auth._store(client)
+    credentials = hive_state.credentials(client, auth.PREFIX)
     token = "hive.m1.older"
-    key = f"agent.m1.{auth._digest(token)}"
+    key = f"agent.m1.{_digest(token)}"
     hive_state.amend(credentials, key, lambda _: {"ledger": "d", "scope": ["alpha", name]})
     scoped = auth.issue_agent(client, "m1", "alpha", name)
     peer = auth.issue_agent(client, "m1", "alpha", "engineer@peer")
@@ -103,7 +112,7 @@ def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: An
 def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(client: Any) -> None:
     from scripts.hive import agent_credentials
 
-    credentials = auth._store(client)
+    credentials = hive_state.credentials(client, auth.PREFIX)
     token = "hive.m1.retained"
     peer = "hive.m1.retained-peer"
     hive_state.amend(
@@ -113,8 +122,8 @@ def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(clie
             "name": "hive",
             "ledger": "d",
             "agents": {
-                auth._digest(token): ["alpha", "engineer@1"],
-                auth._digest(peer): ["alpha", "engineer@peer"],
+                _digest(token): ["alpha", "engineer@1"],
+                _digest(peer): ["alpha", "engineer@peer"],
             },
         },
     )
@@ -126,14 +135,14 @@ def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(clie
     assert auth.member(client, "m1") == {
         "name": "hive",
         "ledger": "d",
-        "agents": {auth._digest(peer): ["alpha", "engineer@peer"]},
+        "agents": {_digest(peer): ["alpha", "engineer@peer"]},
     }
     agent_credentials.retire(client, "m1", "alpha", "engineer@1")
     assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
 
 
 def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from concurrent.futures import ThreadPoolExecutor
     from contextlib import contextmanager
     from threading import Event
@@ -142,9 +151,9 @@ def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytes
 
     token = "hive.m1.interleaved"
     hive_state.amend(
-        auth._store(client),
+        hive_state.credentials(client, auth.PREFIX),
         "member.m1",
-        lambda _: {"name": "hive", "ledger": "d", "agents": {auth._digest(token): ["alpha", "engineer@1"]}},
+        lambda _: {"name": "hive", "ledger": "d", "agents": {_digest(token): ["alpha", "engineer@1"]}},
     )
     snapshot, release, retirement_attempted = Event(), Event(), Event()
     original_member, original_lock = auth.member, client.lock
@@ -157,7 +166,7 @@ def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytes
         return found
 
     @contextmanager
-    def observed_lock(name: str, **kwargs: Any) -> Iterator[None]:
+    def observed_lock(name: str, **kwargs: Any) -> Generator[None]:
         if snapshot.is_set():
             retirement_attempted.set()
         with original_lock(name, **kwargs):
@@ -184,7 +193,7 @@ def test_minted_members_omit_the_obsolete_agents_map(client: Any, monkeypatch: p
 
     grant = auth.mint(client, "new hive", "redis://example/0")
 
-    assert auth.member(client, grant["id"]) == {"name": "new hive", "ledger": auth._digest(grant["ledger_credential"])}
+    assert auth.member(client, grant["id"]) == {"name": "new hive", "ledger": _digest(grant["ledger_credential"])}
 
 
 @pytest.mark.parametrize(("members", "verified"), [(["m1"], False), ([], True)])
@@ -232,7 +241,11 @@ def test_cli_compacts_only_the_selected_members(
     from scripts.hive import cli
 
     monkeypatch.setattr(cli, "redis_client", lambda: client)
-    hive_state.amend(auth._store(client), "member.m2", lambda _: {"name": "peer", "ledger": "peer", "agents": {}})
+    hive_state.amend(
+        hive_state.credentials(client, auth.PREFIX),
+        "member.m2",
+        lambda _: {"name": "peer", "ledger": "peer", "agents": {}},
+    )
 
     assert cli.main(["compact-credentials", "--member", "m1", "--readers-compatible"]) == 0
     assert json.loads(capsys.readouterr().out) == {"m1": 31}
@@ -254,8 +267,8 @@ def test_compaction_replaces_large_history_and_preserves_existing_independent_re
 
     from scripts.hive import agent_credentials
 
-    store = auth._store(client)
-    held = auth._digest("hive.m1.existing")
+    store = hive_state.credentials(client, auth.PREFIX)
+    held = _digest("hive.m1.existing")
     record = {"ledger": "d", "scope": ["alpha", "engineer@peer"]}
     hive_state.amend(store, f"agent.m1.{held}", lambda _: record)
     hive_state.amend(

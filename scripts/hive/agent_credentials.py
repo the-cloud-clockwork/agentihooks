@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import partial
 from itertools import islice
@@ -21,7 +21,7 @@ def _without_agents(current: dict[str, Any]) -> dict[str, Any]:
 
 
 @contextmanager
-def _member_guard(client: Any, member_id: str) -> Iterator[None]:
+def _member_guard(client: Any, member_id: str) -> Generator[None]:
     with client.lock(f"{auth.PREFIX}:credential-maintenance:{member_id}", timeout=600, blocking_timeout=10):
         yield
 
@@ -34,8 +34,8 @@ def _without_scope(current: dict[str, Any] | None, slug: str, name: str) -> Any:
 
 
 def _compact_member(client: Any, member_id: str) -> int:
-    store = auth._store(client)
-    member = cast(dict[str, Any] | None, auth.member(client, member_id))
+    store = hive_state.credentials(client, auth.PREFIX)
+    member = auth.member(client, member_id)
     if member is None:
         raise auth.HiveError(f"unknown hive member {member_id}")
     if "agents" in member:
@@ -62,11 +62,11 @@ def compact(client: Any, members: list[str], readers_compatible: bool = False) -
 
 
 def _index_key(member_id: str, slug: str, name: str) -> str:
-    return auth._agent_key(member_id, slug, name).replace("agent.", "agent-index.", 1)
+    return hive_state.agent_key(member_id, slug, name).replace("agent.", "agent-index.", 1)
 
 
 def _index_legacy(client: Any, member_id: str) -> None:
-    store = cast(RedisStateStore, auth._store(client))
+    store = cast(RedisStateStore, hive_state.credentials(client, auth.PREFIX))
     keys = (key for key, _ in client.hscan_iter(store.watch_key, match=f"agent.{member_id}.*", count=128))
     grouped: dict[tuple[str, str], list[str]] = {}
     while batch := list(islice(keys, 128)):
@@ -88,14 +88,14 @@ def retire(client: Any, member_id: str, slug: str, name: str) -> None:
     if not member_id:
         return
     with _member_guard(client, member_id):
-        store = auth._store(client)
+        store = hive_state.credentials(client, auth.PREFIX)
         member = auth.member(client, member_id)
         if member and "agents" in member and hive_state.on_redis():
             _index_legacy(client, member_id)
         index = _index_key(member_id, slug, name)
         for key in hive_state.read(store, index) or ():
             hive_state.amend(store, key, lambda _: None)
-        hive_state.amend(store, auth._agent_key(member_id, slug, name), lambda _: None)
+        hive_state.amend(store, hive_state.agent_key(member_id, slug, name), lambda _: None)
         hive_state.amend(store, index, lambda _: None)
         hive_state.amend(store, f"member.{member_id}", partial(_without_scope, slug=slug, name=name))
 

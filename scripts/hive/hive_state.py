@@ -3,6 +3,7 @@
 On Redis each hive's record gets its own store, so a member's ACL user is granted its own record and no other.
 """
 
+import hashlib
 import json
 from collections.abc import Callable
 from typing import Any
@@ -36,8 +37,14 @@ def records(client: Any, hive_id: str) -> StateStore:
     return RedisStateStore(client, f"hive-{hive_id}") if on_redis() else _bus(RECORDS)
 
 
-def credentials(client, prefix: str) -> StateStore:
+def credentials(client: Any, prefix: str) -> StateStore:
     return RedisStateStore(client, "credentials", prefix) if on_redis() else _bus(CREDENTIALS)
+
+
+def agent_key(member_id: str, slug: str, name: str) -> str:
+    """The credential record key for one member and agent scope."""
+    digest = hashlib.sha256(json.dumps([slug, name]).encode()).hexdigest()
+    return f"agent.{member_id}.{digest}"
 
 
 def read(store: StateStore, key: str, legacy: Callable[[], object] = lambda: None) -> Any:
@@ -47,7 +54,7 @@ def read(store: StateStore, key: str, legacy: Callable[[], object] = lambda: Non
     return json.loads(entry.value) if entry.value else None
 
 
-def amend(store: StateStore, key: str, change: Callable, legacy: Callable[[], object] = lambda: None):
+def amend(store: StateStore, key: str, change: Callable[[Any], Any], legacy: Callable[[], Any] = lambda: None) -> Any:
     """Writes change(current) at the revision it read, retrying on a race; KEEP writes nothing, None removes."""
     for _ in range(TRIES):
         entry = store.get(key)

@@ -90,7 +90,7 @@ AGENT_TOKENS_KEPT = 8
 
 def _agent_key(member_id: str, slug: str, name: str) -> str:
     """The credential store key of the one record holding an agent's newest token digests."""
-    return f"agent.{member_id}.{_digest(json.dumps([slug, name]))}"
+    return hive_state.agent_key(member_id, slug, name)
 
 
 def _tokens(record: Any) -> list[str]:
@@ -142,7 +142,7 @@ def _refused(exc: BaseException, what: str) -> StoreRefused:
     return StoreRefused(f"{source} refused {what}", str(exc))
 
 
-def member(client, member_id: str) -> dict | None:
+def member(client: Any, member_id: str) -> dict[str, Any] | None:
     return hive_state.read(_store(client), f"member.{member_id}", _legacy(client, _legacy_member(member_id)))
 
 
