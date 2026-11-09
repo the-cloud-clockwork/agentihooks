@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.parametrize("master_first", [False, True])
 def test_one_master_seat_is_independent_of_lane_capacity(remote: bool, master_first: bool) -> None:
     from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
+    from scripts.events.memory import open_bus
     from scripts.hive import account_slots
     from scripts.hub import slots
 
@@ -29,6 +29,7 @@ def test_one_master_seat_is_independent_of_lane_capacity(remote: bool, master_fi
         assert local.take("extra-lane", "claude", "a") is None
         assert member.take("extra-master", "claude", "a", master=True) is None
         entry = bus.state("account-slots").get(account_slots.key("claude", "a"))
+        assert entry is not None
         holders = json.loads(entry.value)["holders"]
         assert holders["master"]["master"] is True
         assert "master" not in holders["lane"]
@@ -41,7 +42,7 @@ def test_one_master_seat_is_independent_of_lane_capacity(remote: bool, master_fi
 @pytest.mark.parametrize("cap", [0, 1])
 def test_master_admission_respects_quota_and_failed_launch_returns_its_seat(cap: int) -> None:
     from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
+    from scripts.events.memory import open_bus
     from scripts.hive import account_slots
 
     report = {"slots": [{"harness": "claude", "account": "a", "cap": cap}], "sessions": {}}
@@ -63,7 +64,7 @@ def test_master_admission_respects_quota_and_failed_launch_returns_its_seat(cap:
 @pytest.mark.feature("hive-master-account-seat")
 def test_master_seat_renews_and_expires_with_execution_ownership() -> None:
     from scripts.events.config import BusConfig
-    from scripts.events.factory import open_bus
+    from scripts.events.memory import open_bus
     from scripts.hive import account_slots
 
     report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {}}
