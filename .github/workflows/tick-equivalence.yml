@@ -95,7 +95,7 @@ jobs:
         working-directory: head
         env:
           TICK_BUDGET_FLOORS: ${{ runner.temp }}/tick-step-floors.json
-          TICK_BUDGET_OUTPUT: ${{ github.workspace }}/tick-evidence/step-budgets
+          TICK_BUDGET_OUTPUT: ${{ github.workspace }}/tick-budget-evidence
         run: |
           gate=tests/swarm/tick_scenarios/test_step_budgets.py
           if [[ -f "../base/$gate" ]]; then
@@ -122,6 +122,8 @@ jobs:
         with:
           after-cancel: true
           name: tick-equivalence
-          path: tick-evidence
+          path: |
+            tick-evidence
+            tick-budget-evidence
           if-no-files-found: error
           retention-days: 7

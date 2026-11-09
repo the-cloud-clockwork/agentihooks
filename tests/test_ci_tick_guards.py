@@ -122,7 +122,9 @@ def test_tick_equivalence_holds_every_scenario_step_to_its_floor_unconditionally
     assert "cd ../base" in step["run"]
     assert "from scripts.tick.steps.budgets import FLOORS" in step["run"]
     assert step["env"]["TICK_BUDGET_FLOORS"] == "${{ runner.temp }}/tick-step-floors.json"
-    assert step["env"]["TICK_BUDGET_OUTPUT"] == "${{ github.workspace }}/tick-evidence/step-budgets"
+    assert step["env"]["TICK_BUDGET_OUTPUT"] == "${{ github.workspace }}/tick-budget-evidence"
+    [upload] = [item for item in steps if item.get("uses") == "./head/.github/actions/retry-upload"]
+    assert set(upload["with"]["path"].split()) == {"tick-evidence", "tick-budget-evidence"}
 
 
 def test_tick_equivalence_grades_the_pattern_and_catalogue_unconditionally() -> None:
