@@ -2377,6 +2377,16 @@
       "tests": [
         "tests/test_gate_no_expiry.py::test_declaration_dates_never_interrupt_wiring_or_protected_grading"
       ]
+    },
+    {
+      "id": "reply-wait-reads-every-inbox-world",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
+      "behaviour": "A swarm wait on a reply reads its item by id from every inbox world the tick reaches, holds while the item is pending in a hive member's world and ends only when the item is replied, closed or gone from every world.",
+      "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply"
+      ]
     }
   ],
   "unmapped_rules": [
