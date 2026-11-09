@@ -23,8 +23,9 @@ crew = authority_crew
 @pytest.mark.feature("ledger-workflow-task-fields")
 def test_task_add_schema_accepts_workflow_and_case_as_strings() -> None:
     task = operation(
-        "task_add", by=MASTER, task="t20", title="Workflow proof", lane="eng", kind="workflow", workflow="review"
+        "task_add", by=MASTER, task="t20", title="Workflow proof", lane="eng", workflow="review"
     )
+    task["kind"] = "workflow"
     schema = schemas.operation_schema("task_add")
     assert schemas.mismatched_field(schema, task) is None
     assert schemas.mismatched_field(schema, {**task, "case": "/proof/case.json"}) is None
@@ -41,10 +42,10 @@ def test_a_master_adds_a_workflow_task_through_the_api(crew: dict) -> None:
         title="Workflow proof",
         lane="eng",
         phase="p1",
-        kind="workflow",
         workflow="review",
         case="/proof/case.json",
     )
+    added["kind"] = "workflow"
     with pinned(MASTER):
         reply = ledger.request(SLUG, [added])
         assert added["id"] not in reply["rejected"]
