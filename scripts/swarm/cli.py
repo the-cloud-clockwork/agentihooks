@@ -60,9 +60,9 @@ import sys
 import time
 import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
-from contextvars import Token
+from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
@@ -107,6 +107,7 @@ from scripts.swarm import (
     done_gate,
     failed_panes,
     git_https,
+    hive_release,
     idle,
     launch_check,
     ledger_events,
@@ -390,19 +391,30 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
-def _intent_pass(inbox, store, slug, doc, ledger, config):
-    view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, config: Any) -> tuple[Future, list[str]]:
+    """Start the pass view off the step and judge intent from one batched read of every watched pull request,
+    returning the pending view and the check's actions."""
+    building = ThreadPoolExecutor(max_workers=1)
+    view = building.submit(copy_context().run, timing.call, ledger_events.tick_view, inbox, store, slug, doc)
+    building.shutdown(wait=False)
+    mode = intent.mode_of(config)
+    urls = intent.watched_urls(slug, doc, mode)
+    pulls = intent.Pulls(lambda batch: timing.call(ledger_events.pull_texts, batch), urls)
     check = intent.Check(
         slug,
-        intent.mode_of(config),
+        mode,
         now_ms(),
         ledger,
         ledger_events.Mail(inbox, store, slug),
         intent.pr_view,
         intent.judged,
-        head=lambda url: getattr(view(url), "head", None),
+        head=pulls.head,
         named=intent.named_view,
-        text=intent.pr_text,
+        text=pulls.text,
+        merged=pulls.merged,
+        draft=pulls.draft,
+        limit=intent.JUDGED_PER_PASS,
+        judging=intent.TICK_JUDGING,
     )
     return view, skip_refused(check.run, doc)
 
@@ -529,7 +541,8 @@ class _Wrapper:
         self.ticks.close()
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
-            self.box["view"], self.checked = self.judging["judged"]
+            view, self.checked = self.judging["judged"]
+            self.box["view"] = view.result() if isinstance(view, Future) else view
         return True
 
     def _reread(self) -> bool:
@@ -2424,14 +2437,19 @@ def cmd_handoff(store, args):
     )
 
 
-def _hand_off(store, slug, agent, text, reason, ledger):
+def _hand_off(
+    store: RedisStore, slug: str, agent: AgentRecord, text: str, reason: str, ledger: Any
+) -> tuple[dict, dict]:
     recap = "\n\n".join(
         f"## {heading}\n{handoff_check.section(text, heading)}" for heading in ("Done", "Stopped at", "Next")
     )
     waits.settle_notices(InboxStore(store.redis), agent, "a handoff")
-    envelope = handoff_envelope.build(store, slug, agent, reason, _own_rows(ledger, slug, agent.task), now_ms())
+    rows = _own_rows(ledger, slug, agent.task)
+    envelope = handoff_envelope.build(store, slug, agent, reason, rows, now_ms())
     store.memory.add_recap(_seat(agent), agent.name, agent.task, recap, now_ms())
     store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=envelope)
+    if hive_release.release(ledger, slug, (rows or [{}])[0], agent.name):
+        store.release(slug, agent.task, agent.name)
     transfer = transfers.record(store, slug, agent, reason, text, now_ms())
     store.put_agent(slug, replace(agent, state="finished"))
     exits.settle(InboxStore(store.redis), agent.name, agent.seat, "handed off its seat")

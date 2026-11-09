@@ -421,6 +421,104 @@ def test_cancel_runs_cancels_the_run_on_an_open_fix_merge_commit(monkeypatch: py
     assert panic.cancel_runs([FIX], ["o/a"], runs) == ["o/a run 1 on dev"]
 
 
+@pytest.mark.feature("panic-merged-fix-integration-head")
+def test_cancel_runs_spares_the_integration_head_of_a_merged_fix(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    def change(url: str, refused: str) -> ChangeState:
+        return ChangeState(
+            ChangeRef("o/a", 1), "closed", "a" * 40, "dev", True, url, "fix-branch", merge_commit="m" * 40
+        )
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs(
+        {
+            "o/a": [
+                RepositoryRun(1, "dev", "workflow_dispatch", "in_progress", head_sha="d" * 40),
+                RepositoryRun(9, "dev", "push", "in_progress", head_sha=""),
+                RepositoryRun(2, "dev", "push", "in_progress", head_sha="n" * 40),
+                RepositoryRun(3, "dev", "push", "queued", head_sha="n" * 40),
+                RepositoryRun(4, "dev", "push", "in_progress", head_sha="m" * 40),
+                RepositoryRun(5, "dev", "push", "in_progress", head_sha="o" * 40),
+                RepositoryRun(6, "feature", "push", "in_progress", head_sha="f" * 40),
+                RepositoryRun(7, "other", "pull_request", "queued", head_sha="n" * 40),
+            ],
+            "o/b": [RepositoryRun(8, "dev", "push", "in_progress", head_sha="p" * 40)],
+        },
+    )
+    assert panic.cancel_runs([FIX], ["o/a", "o/b"], runs) == [
+        "o/a run 1 on dev",
+        "o/a run 9 on dev",
+        "o/a run 5 on dev",
+        "o/a run 6 on feature",
+        "o/b run 8 on dev",
+    ]
+
+
+@pytest.mark.feature("panic-merged-fix-integration-head")
+def test_cancel_runs_spares_the_integration_head_of_each_merged_fix_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    bases = {FIX: ("dev", 1), f"{FIX}0": ("hotfix", 10)}
+
+    def change(url: str, refused: str) -> ChangeState:
+        base, number = bases[url]
+        return ChangeState(ChangeRef("o/a", number), "closed", "a" * 40, base, True, url, f"fix-{number}")
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs(
+        {
+            "o/a": [
+                RepositoryRun(1, "hotfix", "push", "in_progress", head_sha="h" * 40),
+                RepositoryRun(2, "dev", "push", "in_progress", head_sha="n" * 40),
+                RepositoryRun(3, "hotfix", "push", "in_progress", head_sha="g" * 40),
+                RepositoryRun(4, "dev", "push", "in_progress", head_sha="o" * 40),
+            ],
+        },
+    )
+    assert panic.cancel_runs([FIX, f"{FIX}0"], ["o/a"], runs) == ["o/a run 3 on hotfix", "o/a run 4 on dev"]
+
+
+@pytest.mark.feature("panic-merged-fix-integration-head")
+def test_cancel_runs_spares_the_queue_merge_of_a_fix_before_it_reads_merged(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import stack
+    from scripts.tick.ports.source_control import ChangeRef, ChangeState
+
+    def change(url: str, refused: str) -> ChangeState:
+        return ChangeState(ChangeRef("o/a", 7), "open", "a" * 40, "dev", False, url, "fix-branch")
+
+    monkeypatch.setattr(stack, "change", change)
+    runs = Runs(
+        {
+            "o/a": [
+                RepositoryRun(1, "dev", "push", "in_progress", head_sha="q" * 40),
+                RepositoryRun(2, "gh-readonly-queue/dev/pr-7-abc", "merge_group", "completed", head_sha="q" * 40),
+                RepositoryRun(3, "gh-readonly-queue/dev/pr-70-abc", "merge_group", "completed", head_sha="r" * 40),
+                RepositoryRun(4, "dev", "push", "in_progress", head_sha="r" * 40),
+                RepositoryRun(5, "gh-readonly-queue/main/pr-7-abc", "merge_group", "completed", head_sha="s" * 40),
+                RepositoryRun(6, "main", "push", "in_progress", head_sha="s" * 40),
+                RepositoryRun(7, "gh-readonly-queue/dev/pr-7-abc", "pull_request", "completed", head_sha="t" * 40),
+                RepositoryRun(8, "dev", "push", "in_progress", head_sha="t" * 40),
+                RepositoryRun(9, None, "push", "in_progress", head_sha=""),
+                RepositoryRun(12, "gh-readonly-queue/dev/pr-7-def", "merge_group", "completed", head_sha=""),
+            ],
+            "o/b": [
+                RepositoryRun(10, "gh-readonly-queue/dev/pr-7-abc", "merge_group", "completed", head_sha="u" * 40),
+                RepositoryRun(11, "dev", "push", "in_progress", head_sha="u" * 40),
+            ],
+        },
+    )
+    assert panic.cancel_runs([FIX], ["o/a", "o/b"], runs) == [
+        "o/a run 4 on dev",
+        "o/a run 6 on main",
+        "o/a run 8 on dev",
+        "o/a run 9 on None",
+        "o/b run 11 on dev",
+    ]
+
+
 def test_the_fleet_repos_include_hooks_bundle_and_antoncore():
     assert panic.REPOS == (
         "the-cloud-clockwork/agentihooks",

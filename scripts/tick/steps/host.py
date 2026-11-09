@@ -242,7 +242,7 @@ STEPS = (
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
-    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view")),
+    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view"), kept=True),
 )
 
 for _step in STEPS:

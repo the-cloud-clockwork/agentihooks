@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
 from scripts.events.factory import open_bus
+from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
@@ -622,6 +623,8 @@ def _passes(
     outage: redis_grace.Outage,
 ) -> int:
     """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
+    if not once:
+        intent.keep_judging()
     while True:
         started = monotonic()
         try:

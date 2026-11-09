@@ -95,6 +95,13 @@ def ledger_client() -> TaskLedger:
     return LedgerClient()
 
 
+def process_namespace() -> str:
+    """The boot and process namespace this pod's agents record when they launch."""
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    return local_namespace()
+
+
 @dataclass(frozen=True)
 class Host:
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run
@@ -104,6 +111,7 @@ class Host:
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
     home: Path = field(default_factory=registry.home)
     ledger: Callable[[], TaskLedger] = ledger_client
+    namespace: Callable[[], str] = process_namespace
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
@@ -209,21 +217,22 @@ def _order(
             ordered[(slug, agent.name)] = sent.id
 
 
-def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
+def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str = "") -> str:
+    """Drains hive, or only member while another live member of the hive takes its new agents."""
     from scripts.inbox.store import InboxStore
 
-    if registry.show(store.redis, hive) is None:
+    client: Any = store.redis
+    if registry.show(client, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
     deadline_at = int((host.wall() + wait_s) * 1000)
-    registry.update(
-        store.redis,
-        hive,
-        ["draining=yes"],
-        drain=registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at),
-    )
-    inbox, ordered = InboxStore(store.redis), {}
+    drain = registry.Drain(registry.drain_owner(), "the hive is stopping", deadline_at)
+    own = host.namespace() if member else ""
+    shared = bool(own) and registry.leave(client, hive, member, drain)
+    if not shared:
+        registry.update(client, hive, ["draining=yes"], drain=drain)
+    inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive):
+    while remaining := _unhanded(store, hive, own if shared else ""):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -232,7 +241,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     else:
         ended = f"hive {hive} drained: every agent handed off, {len(ordered)} ordered to hand off"
     _withdraw(inbox, ordered, hive)
-    return ended
+    return f"{ended}; only member {member} drained, the hive stays open for its other members" if shared else ended
 
 
 def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: str) -> None:
@@ -242,8 +251,15 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
-    return [(slug, agent) for slug, agent in hosted(store, hive) if agent.task and not _handed(store, slug, agent)]
+def _unhanded(store: "RedisStore", hive: str, own: str) -> list[tuple[str, "AgentRecord"]]:
+    """The hive's agents still to hand off; with own, only those whose process runs in that namespace."""
+    return [
+        (slug, agent)
+        for slug, agent in hosted(store, hive)
+        if agent.task
+        and not _handed(store, slug, agent)
+        and (not own or agent.runtime_target.get("process_namespace") == own)
+    ]
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:

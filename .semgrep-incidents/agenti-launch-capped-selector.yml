@@ -1,0 +1,16 @@
+rules:
+  - id: agenti-launch-capped-selector
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The agenti launcher picks its account with the swarm worker selector, which refuses once swarm agents on other
+      hives fill every account's session cap. On 9 November the operator's own agentihooks claude refused with "no
+      Claude account has a free session under its quota band" while his accounts had most of their week left. Launch
+      through select_launch_credential, which keeps the cap for swarm and hive launches only.
+    patterns:
+      - pattern-inside: |
+          def cmd_claude(...):
+              ...
+      - pattern-either:
+          - pattern: select_credential(...)
+          - pattern: $BALANCER.select_credential(...)
