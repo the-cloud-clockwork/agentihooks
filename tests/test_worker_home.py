@@ -1081,3 +1081,72 @@ def test_cli_passes_the_bundle_flag_to_bootstrap_as_a_path(monkeypatch, capsys):
     assert worker_home.main(["bootstrap", "--attempt=a", "--bundle=/var/run/swarm/bundle"]) == 0
 
     assert requests[0].bundle == Path("/var/run/swarm/bundle")
+
+
+@pytest.mark.feature("managed-swarm-brain-rendering")
+def test_the_isolated_hive_render_carries_a_managed_binding_without_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import brain_binding
+
+    binding = {"status": "refused", "reason": "fixture binding refusal"}
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(binding))
+    monkeypatch.setenv("SWARM_BRAIN_API_TOKEN", "fixture-private-api")
+    monkeypatch.setenv("SWARM_BRAIN_MCP_KEY", "fixture-private-mcp")
+
+    environ = worker_home.child_environment(tmp_path, Path(sys.executable))
+
+    assert json.loads(environ[brain_binding.VARIABLE]) == binding
+    assert "SWARM_BRAIN_API_TOKEN" not in environ
+    assert "SWARM_BRAIN_MCP_KEY" not in environ
+
+
+@pytest.mark.feature("managed-swarm-brain-rendering")
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("status", ["bound", "refused"])
+def test_hive_materialization_uses_the_managed_brain_for_each_harness(
+    fixture: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, target: str, status: str
+) -> None:
+    from scripts.swarm import brain_binding
+
+    templates, volume = fixture
+    bundle = volume.parent / "brain-bundle"
+    shutil.copytree(WORKER_BUNDLE, bundle)
+    profile = bundle / "bundle" / "profiles" / "engineer" / "profile.yml"
+    profile.write_text(profile.read_text() + "allowedOverlays: [swarm-brain]\n")
+    overlay = profile.parent.parent / "swarm-brain"
+    (overlay / ".claude").mkdir(parents=True)
+    (overlay / "profile.yml").write_text("name: swarm-brain\nkind: overlay\nwears: [engineer]\n")
+    (overlay / "CLAUDE.md").write_text("Hive swarm brain marker\n")
+    (overlay / ".claude" / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"agentibrain": {"type": "http", "url": "https://wrong.example/mcp"}}})
+    )
+    binding = {
+        "status": status,
+        "api": "https://swarm-brain-api.example.test",
+        "api_env": "SWARM_BRAIN_API_TOKEN",
+        "mcp": "https://swarm-brain-mcp.example.test/mcp",
+        "mcp_env": "SWARM_BRAIN_MCP_KEY",
+        "mcp_header": "X-API-Key",
+        "mcp_scheme": "",
+    }
+    monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(binding))
+    req = request(templates, volume, profiles={target: "frontend"}, accounts={target: ACCOUNTS[target]}, bundle=bundle)
+
+    record = worker_home.bootstrap(req)
+
+    assert "swarm-brain" in record["chains"][target]
+    home = volume / "attempt-1" / record["homes"][target]
+    if target == "claude":
+        servers = json.loads((home / ".claude.json").read_text())["mcpServers"]
+        persona = home / ".claude" / "CLAUDE.md"
+    else:
+        servers = tomllib.loads((home / ".codex" / "config.toml").read_text())["mcp_servers"]
+        persona = home / ".codex" / "AGENTS.md"
+    assert "Hive swarm brain marker" in persona.read_text()
+    if status == "bound":
+        assert servers["agentibrain"]["url"] == binding["mcp"]
+        header = servers["agentibrain"].get("headers", servers["agentibrain"].get("env_http_headers"))
+        assert header == {"X-API-Key": "${SWARM_BRAIN_MCP_KEY}"} or header == {"X-API-Key": "SWARM_BRAIN_MCP_KEY"}
+    else:
+        assert "agentibrain" not in servers
