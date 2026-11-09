@@ -79,6 +79,29 @@ def test_an_expired_token_reads_as_expired(body):
     assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(401, body))) == CodexQuota(NOW, "?", expired=True)
 
 
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"error": {"code": "deactivated_workspace", "message": "Payment Required"}}',
+        b'{"code": "deactivated_workspace"}',
+    ],
+    ids=["nested", "flat"],
+)
+def test_a_deactivated_workspace_reads_as_expired(body):
+    assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(402, body))) == CodexQuota(NOW, "?", expired=True)
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(
+    "code, body",
+    [(402, b'{"code": "token_expired"}'), (401, b'{"code": "deactivated_workspace"}'), (402, b'{"code": "other"}')],
+    ids=["402-expired-code", "401-deactivated-code", "402-other"],
+)
+def test_a_refusal_code_counts_only_with_its_own_status(code, body):
+    assert codex_usage.read("tok", "ws", NOW, _opener(error=_http(code, body))) is None
+
+
 @pytest.mark.parametrize(
     "error, body",
     [

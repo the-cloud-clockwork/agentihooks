@@ -143,6 +143,7 @@ from scripts.tick.steps.claims import (  # noqa: F401
     _owned_tasks,
     agent_status,
     claim_view,
+    ready_by_lane,
     ready_in_order,
 )
 from scripts.tick.steps.common import (
