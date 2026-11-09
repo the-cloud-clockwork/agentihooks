@@ -962,4 +962,6 @@ def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume
 
     assert auth.member(world.tools.redis, stray) is None
     assert stray not in hive_state.index(world.tools.redis)
-    assert sorted(auth.members(world.tools.redis)) == [invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]]
+    assert sorted(auth.members(world.tools.redis)) == [
+        invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    ]
