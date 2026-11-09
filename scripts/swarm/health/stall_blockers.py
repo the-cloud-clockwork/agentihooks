@@ -136,14 +136,15 @@ def observe(
     if mode == "off":
         return []
     key = store.key(slug, KEY)
-    state = json.loads(store.redis.get(key) or "{}")
+    state: dict[str, Any] = json.loads(store.redis.get(key) or "{}")
     if now_ms - state.get("at", now_ms) > STALE_MS:
         state = {}
     state["at"] = now_ms
     stall = merge_stall(store, slug, doc, rows, github, now_ms)
-    state["open_since"] = (state.get("open_since") or now_ms) if stall else None
+    opened = int(state.get("open_since") or now_ms)
+    state["open_since"] = opened if stall else None
     if stall:
-        stall = replace(stall, since=max(stall.since, state["open_since"]))
+        stall = replace(stall, since=max(stall.since, opened))
     left = merged_in_pr(rows, github, held, now_ms)
     logged = state.setdefault("logged", {})
     lines = _apply(store, slug, MERGE_STALL, stall, mode, now_ms, logged)
