@@ -138,13 +138,9 @@ def observe(store: RedisStore, slug: str, live: set[str]) -> None:
         if occupancy.occupant != row["successor"] or occupancy.generation != row["generation"]:
             continue
         agent = agents.get(row["successor"])
-        host = reports.host(agent) if agent is not None else ""
-        report = hives.read(host) if host else None
+        report = hives.read(reports.host(agent)) if agent is not None else None
         hosted = (
-            agent is not None
-            and report is not None
-            and bool(hives.execution(agent))
-            and agent.name in report.get("names", [])
+            agent is not None and report is not None and bool(hives.execution(agent)) and agent.name in report["names"]
         )
         state = "live" if row["successor"] in live or hosted else "absent"
 
