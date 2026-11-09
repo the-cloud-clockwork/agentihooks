@@ -66,7 +66,6 @@ NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
 SERVICE_TTL_S = 300
-_LEDGER_OF: dict[str, str] = {}
 
 
 class HiveError(Exception):
@@ -261,24 +260,23 @@ def _mapped(redis: object, store: object, digest: str | None, member_id: str) ->
     )
 
 
-def _member_ledger(redis: object, store: object, member_id: str) -> str | None:
-    """The ledger digest of a member with no holder record, cached per process and reloaded once it is unmapped."""
-    digest = _LEDGER_OF.get(member_id)
-    if _mapped(redis, store, digest, member_id):
-        return digest
-    found = member(redis, member_id)
-    if found is None:
-        return None
-    digest = _LEDGER_OF[member_id] = found["ledger"]
-    return digest
+def backfill_holders(redis: object) -> str:
+    """Write the holder record of every indexed member that has none and whose ledger credential still maps to it."""
+    store = _store(redis)
+    written: list[str] = []
+    for member_id in hive_state.index(redis):
+        found = member(redis, member_id) if hive_state.read(store, f"holder.{member_id}") is None else None
+        digest = found["ledger"] if found else None
+        if _mapped(redis, store, digest, member_id):
+            hive_state.amend(store, f"holder.{member_id}", lambda _, held=digest: held)
+            written.append(member_id)
+    return f"wrote the holder record of {', '.join(written)}" if written else "no member lacked a holder record"
 
 
 def issue_agent(redis: object, member_id: str, slug: str, name: str) -> str:
     """A hive agent token scoped to one ledger and agent, recorded on its own without reading the member map."""
     store = _store(redis)
     digest = hive_state.read(store, f"holder.{member_id}")
-    if digest is None and switch.legacy(os.environ):
-        digest = _member_ledger(redis, store, member_id)
     if not _mapped(redis, store, digest, member_id):
         raise HiveError("Hive membership was revoked")
     token = f"hive.{member_id}.{secrets.token_urlsafe()}"
