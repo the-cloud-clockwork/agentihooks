@@ -2033,6 +2033,25 @@
       ]
     },
     {
+      "id": "swarm-tick-live-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-live-rows-only",
+      "behaviour": "The ledger read path a tick pass uses answers only tasks in a live state that are focused or free, each carrying its resolved freeze flag and focus rank, and answers closed or frozen tasks only when the reader passes the closed or frozen flag.",
+      "seam": "The live rows resolver, the export closed and frozen flags of the ledger API and the tick ledger view",
+      "tests": [
+        "tests/swarm_ledger/test_live_rows.py::test_marks_resolve_freeze_and_focus_per_task",
+        "tests/swarm_ledger/test_live_rows.py::test_marks_agree_with_the_claim_gate_freeze",
+        "tests/swarm_ledger/test_live_rows.py::test_rows_answer_closed_and_frozen_tasks_only_on_request",
+        "tests/swarm_ledger/test_live_rows.py::test_the_default_scope_holds_neither_closed_nor_frozen_tasks",
+        "tests/swarm_ledger/test_live_rows.py::test_the_scoped_full_export_carries_only_the_scoped_task_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_the_unscoped_full_export_keeps_every_task",
+        "tests/swarm_ledger/test_live_rows.py::test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full",
+        "tests/swarm_ledger/test_live_rows.py::test_unscoped_changes_still_carry_closed_task_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_the_export_schema_takes_boolean_closed_and_frozen_flags"
+      ]
+    },
+    {
       "id": "claude-settings-additive-merge",
       "origin": "inventory",
       "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
