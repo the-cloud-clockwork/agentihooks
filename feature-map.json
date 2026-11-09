@@ -1,6 +1,26 @@
 {
   "features": [
     {
+      "id": "herdr-hive-lifecycle",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-herdr-dead-hive-lifecycle",
+      "behaviour": "Operator terminal sync forgets removed hive machines immediately and silent hive machines after fifteen minutes, retaining brief restarts and manual machines, clearing host keys and logging the reason. Explicit removal reaches other clients and readding a name clears its removal record.",
+      "seam": "operator Service run_pass, hive machine forget, and hive remove unregister",
+      "tests": [
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_removed_and_unplugged_hives_leave_herdr_with_their_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_brief_restart_keeps_the_saved_machine_and_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_lifecycle_cleanup_runs_even_when_worker_attempts_do_not_change",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_recovered_hive_keeps_its_machine_past_the_first_outage_deadline",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_reaches_another_client_with_a_custom_hive_name",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_dry_run_removal_does_not_retire_another_clients_machine",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_readding_a_removed_name_clears_its_removal_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_unrelated_manual_machine_names_are_never_removed",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_hive_that_has_not_started_reporting_is_retained",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreadable_catalog_reports_failure_without_removing_machines",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale"
+      ]
+    },
+    {
       "id": "master-token-slot-route-report",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",

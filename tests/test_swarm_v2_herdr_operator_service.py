@@ -112,7 +112,7 @@ def test_an_unchanged_hive_runs_no_herdr_command(tmp_path):
     ran = len(herdr.commands)
 
     assert running.run_pass() is None
-    assert len(herdr.commands) == ran
+    assert herdr.commands[ran:] == [["herdr", "machine", "list", "--json"]]
 
 
 def test_only_kubernetes_workers_with_a_published_host_key_of_their_generation_are_saved(tmp_path):
@@ -298,7 +298,7 @@ def test_a_resumed_service_carries_the_pass_state_of_the_one_before(tmp_path):
     second.resume(json.loads(json.dumps(saved)))
     ran = len(herdr.commands)
     assert second.run_pass() is None
-    assert len(herdr.commands) == ran
+    assert herdr.commands[ran:] == [["herdr", "machine", "list", "--json"]]
     assert second.upkeep.terminal.home.jump == Jump("swarm.example", 2223, JUMP_KEY)
 
     now[0] += RENEW_SECONDS

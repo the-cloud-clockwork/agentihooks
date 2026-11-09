@@ -19,6 +19,8 @@ TARGET = "ssh://worker@10.10.30.207:2225"
 
 
 class Client(cases.Herdr):
+    reachable: bool = False
+
     def __init__(self) -> None:
         super().__init__(
             [
@@ -32,6 +34,9 @@ class Client(cases.Herdr):
         if command[0] == "ssh-keygen":
             self.commands.append(list(command))
             return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:2] == ["herdr", "--machine"]:
+            self.commands.append(list(command))
+            return subprocess.CompletedProcess(command, 0 if self.reachable else 1, "", "")
         return super().__call__(command)
 
 
@@ -174,3 +179,13 @@ def test_an_unreadable_catalog_reports_failure_without_removing_machines(tmp_pat
     assert "hives" in report.refused
     assert len(client.machines) == 2
     assert not client.mutating()
+
+
+def test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, NOW - LIMIT - 1)
+    client.reachable = True
+
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+    assert ["herdr", "--machine", LABEL, "status", "server", "--json"] in client.commands

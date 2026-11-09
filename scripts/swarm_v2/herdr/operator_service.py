@@ -1,8 +1,12 @@
+import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import asdict, replace
+from typing import Any
 
+from scripts.hive.auth import HiveError
 from scripts.swarm.store import RedisStore
+from scripts.swarm_v2.herdr import hive_lifecycle
 from scripts.swarm_v2.herdr.attach import Jump
 from scripts.swarm_v2.herdr.endpoints import CERTIFICATE_SECONDS
 from scripts.swarm_v2.herdr.publications import TransportRefused
@@ -32,6 +36,9 @@ class Service:
         self.upkeep, self.connect, self.clock = upkeep, connect, clock
         self.synced: float | None = None
 
+    def _hive_run(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return self.upkeep.terminal.run(command)
+
     def run_pass(self) -> Report | None:
         try:
             store = self.connect()
@@ -43,6 +50,14 @@ class Service:
             terminal.home = replace(terminal.home, jump=found)
             self.upkeep.due = True
         now = self.clock()
+        try:
+            lines = hive_lifecycle.reconcile(
+                store.redis, terminal.home.root / ".ssh" / "known_hosts", self._hive_run, int(now * 1000)
+            )
+        except HiveError as refused:
+            return Report(refused={"hives": str(refused)})
+        for line in lines:
+            print(line, flush=True)
         if self.synced is not None and now - self.synced >= RENEW_SECONDS:
             self.upkeep.due = True
         report = self.upkeep.change(attempts(store))
@@ -50,7 +65,7 @@ class Service:
             self.synced = now
         return report
 
-    def saved(self) -> dict:
+    def saved(self) -> dict[str, Any]:
         jump = self.upkeep.terminal.home.jump
         return {
             "due": self.upkeep.due,
@@ -59,7 +74,7 @@ class Service:
             "jump": None if jump is None else asdict(jump),
         }
 
-    def resume(self, saved: dict) -> None:
+    def resume(self, saved: dict[str, Any]) -> None:
         self.upkeep.due, self.upkeep.seen, self.synced = saved["due"], saved["seen"], saved["synced"]
         if saved["jump"] is not None:
             terminal = self.upkeep.terminal

@@ -1,0 +1,17 @@
+rules:
+  - id: operator-sync-without-hive-lifecycle
+    languages: [python]
+    severity: ERROR
+    message: Operator terminal passes must reconcile hive lifecycle before syncing worker attempts so retired hives leave the saved client.
+    paths:
+      include:
+        - /scripts/swarm_v2/herdr/operator_service.py
+        - operator-sync-without-hive-lifecycle.py
+    patterns:
+      - pattern-inside: |
+          class Service:
+              ...
+      - pattern: |
+          def run_pass(...):
+              ...
+      - pattern-not-regex: 'hive_lifecycle\.reconcile\('
