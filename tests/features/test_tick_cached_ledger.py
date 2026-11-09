@@ -94,7 +94,7 @@ class Proxy:
 
 def _roomy(
     pending: int, now_ms: int, proc: Path | None = None, previous: dict[str, object] | None = None
-) -> dict[str, int]:
+) -> dict[str, float]:
     """A fixed roomy machine reading, so the shared runner's own load never refuses the launch under test."""
     return {
         "cpus": 1000,

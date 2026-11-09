@@ -62,9 +62,14 @@ def _guarded(slug: str, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _moved(row: dict[str, Any], op: dict[str, Any]) -> bool:
     """Whether held task ``row`` fails the state or field guard of write ``op``, judged as the server judges it."""
     _ledger()
-    import ledger_tasks
-
+    ledger_tasks: Any = importlib.import_module("ledger_tasks")
     return bool(ledger_tasks._guarded(row, op))  # pyright: ignore[reportPrivateUsage]
+
+
+def _offline(slug: str, ops: list[dict[str, Any]], service: bool) -> dict[str, Any]:
+    """The answer of ``ops`` guarded against the held view and queued in the outbox while the pass runs offline."""
+    ledger: Any = _ledger()
+    return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))  # pyright: ignore[reportPrivateUsage]
 
 
 def _queued(ops: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
@@ -113,7 +118,7 @@ class LedgerClient:
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         try:
             if OFFLINE.get() and ops:
-                return _queued(ops, ledger.queue(slug, _guarded(slug, ops), service))
+                return _offline(slug, ops, service)
             state = ledger.call(slug, ops, service=service)
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc

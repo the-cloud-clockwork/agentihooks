@@ -142,15 +142,19 @@ def test_a_slow_or_down_server_leaves_the_pass_offline_on_the_stored_view(
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
-def test_a_down_server_without_a_stored_view_ends_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_down_server_without_a_stored_view_runs_the_pass_holding_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     def start(slug: str, service: bool = False, timeout: float | None = None) -> None:
         raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(cli.ledger_view, "start", start)
     monkeypatch.setattr(cli.ledger_view, "hold_stored", lambda slug: None)
-    with ExitStack() as beating, pytest.raises(LedgerUnreachable, match="no stored view"):
+    with ExitStack() as beating:
         cli._hold_view(beating, "sw", LedgerClient())
-    assert OFFLINE.get() is False
+        assert OFFLINE.get() is False
+        assert view.current() is None
+    assert "no view is stored" in capsys.readouterr().err
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
@@ -207,7 +211,7 @@ def test_an_offline_write_matching_a_held_field_is_queued(stored: Queued) -> Non
         view.hold_stored("sw")
         token = OFFLINE.set(True)
         try:
-            task = LedgerClient().update_task("sw", "t2", {"claimed_by": "e1"}, if_match={"state": "claimed"})
+            task = LedgerClient().update_task("sw", "t2", {"claimed_by": "e1"}, if_match={"claimed_by": ""})
         finally:
             OFFLINE.reset(token)
     assert task == {"id": "t2", "state": "claimed", "claimed_by": "e1"}

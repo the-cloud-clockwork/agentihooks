@@ -36,11 +36,7 @@ def test_the_first_pass_site_fences_the_runtime_every_later_step_reads(monkeypat
 
 
 @pytest.mark.feature("tick-pass-fence-first-site")
-def test_the_health_site_holds_the_ledger_view_without_fencing_again(monkeypatch: pytest.MonkeyPatch) -> None:
-    held: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(cli, "_hold_view", lambda beating, slug, ledger: held.append((beating, slug, ledger)))
-    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: pytest.fail("fenced twice"))
+def test_the_health_site_never_fences_again() -> None:
     state: dict[str, Any] = {"store": _Store(), "slug": "sw", "runtime": "raw", "ledger": "ledger"}
-    assert _wrapper(state).hooks()["wrapper health"]() is True
-    assert held == [("beating", "sw", "ledger")]
+    assert "wrapper health" not in _wrapper(state).hooks()
     assert state["runtime"] == "raw"
