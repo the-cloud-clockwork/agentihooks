@@ -746,10 +746,10 @@ class HiveLaunch:
         ack = self.orders.ack(order)
         if not ack:
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
+        admission.release(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if ack.status != "live":
             return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
         _match("ack host", order.hive, ack.target.get("host_id"))
-        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if agent.runtime_target != ack.target:
             bound = replace(
                 agent,
@@ -853,6 +853,7 @@ class HiveLaunch:
 
     def complete(self, order: LaunchOrder, ack: Ack) -> Outcome:
         agent = self.store.execution_registry.get(self.slug, order.execution_id)
+        admission.release(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         if ack.status != "live":
             if ack.failure in ("expired", orders.RESTARTED):
                 self.reap(order, agent)
@@ -880,7 +881,6 @@ class HiveLaunch:
             self.end(agent, LATE)
             self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             return Outcome("spawn", Status.REFUSED, HIVE, detail=LATE)
-        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
         placed = Placed(
             agent.pane_id,
             agent.harness,
