@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from nats.js.errors import APIError, NotFoundError
 
-from . import nats_payload
+from . import nats_batch, nats_payload
 from .bus import StateConflict, StateEntry
 from .nats_names import existing_stream
 from .resource_names import legacy_stream_name
@@ -72,6 +72,17 @@ class ScopedStateStore:
             return None
         value = self._root._loop.run(nats_payload.decode(self._read_chunk, message.data or b""))
         return StateEntry(key=key, value=value, revision=self._revision(message))
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        subjects = {key: self._subject(key) for key in keys}
+        found = self._root._loop.run(nats_batch.last_per_subject(self._root._js, self._stream, list(subjects.values())))
+        entries = {}
+        for key, name in subjects.items():
+            last = found.get(name)
+            if last is not None:
+                value = self._root._loop.run(nats_payload.decode(self._read_chunk, last.data))
+                entries[key] = StateEntry(key=key, value=value, revision=self._revision(last))
+        return [entries.get(key) for key in keys]
 
     def create(self, key: str, value: bytes) -> int:
         try:

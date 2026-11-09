@@ -10,9 +10,10 @@ from scripts.swarm.name_state import NameState, state_key
 from scripts.swarm.naming import NameRegistry
 from tests.events import nats_server
 
-pytestmark = [pytest.mark.integration, pytest.mark.feature("bus-state-batch")]
+pytestmark = pytest.mark.integration
 
 
+@pytest.mark.feature("bus-state-batch")
 def test_memory_batch_preserves_order_missing_keys_and_duplicates() -> None:
     bus = memory.open_bus(BusConfig())
     try:
@@ -27,6 +28,7 @@ def test_memory_batch_preserves_order_missing_keys_and_duplicates() -> None:
         bus.close()
 
 
+@pytest.mark.feature("bus-state-batch")
 @pytest.mark.parametrize("scoped", [False, True])
 def test_name_lookup_uses_one_bus_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scoped: bool) -> None:
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")

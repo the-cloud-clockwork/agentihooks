@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "bus-state-batch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2186",
+      "behaviour": "A swarm name lookup over several aliases reads every key from the bus state store with one JetStream request, keeping order, duplicates and missing keys.",
+      "seam": "StateStore.get_many used by NameRegistry.resolve_many",
+      "tests": [
+        "tests/events/test_state_batch.py::test_memory_batch_preserves_order_missing_keys_and_duplicates",
+        "tests/events/test_state_batch.py::test_name_lookup_uses_one_bus_request"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",

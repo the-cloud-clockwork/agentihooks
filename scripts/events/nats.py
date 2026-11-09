@@ -14,9 +14,9 @@ from nats.errors import NoRespondersError, NoServersError
 from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
-from nats.js.kv import KeyValue
+from nats.js.kv import KV_OP, KeyValue
 
-from . import nats_payload, nkey
+from . import nats_batch, nats_payload, nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -427,6 +427,19 @@ class NatsStateStore:
             return None
         value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value or b""))
         return StateEntry(key=key, value=value, revision=entry.revision)
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        prefix = f"$KV.{self._bucket}."
+        found = self._loop.run(
+            nats_batch.last_per_subject(self._js, f"KV_{self._bucket}", [prefix + key for key in keys])
+        )
+        entries = {}
+        for key in dict.fromkeys(keys):
+            last = found.get(prefix + key)
+            if last is not None and last.headers.get(KV_OP) is None:
+                value = self._loop.run(nats_payload.decode(self._read_chunk, last.data))
+                entries[key] = StateEntry(key=key, value=value, revision=last.seq)
+        return [entries.get(key) for key in keys]
 
     def create(self, key: str, value: bytes) -> int:
         return self._loop.run(self._write(key, value, 0, f"state key {key!r} exists"))
