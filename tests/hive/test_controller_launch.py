@@ -1550,7 +1550,7 @@ def test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admis
     assert admission.pending(setup.store.redis, order.hive) == 0
 
 
-def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
+def test_ambiguous_receipt_keeps_the_slot_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status
 

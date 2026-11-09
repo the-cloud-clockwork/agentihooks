@@ -471,6 +471,7 @@ def test_a_max_agents_refusal_falls_in_its_own_reason():
     assert admission.MAX_AGENTS in admission.REASONS
 
 
+@pytest.mark.feature("hive-admission-pending-launches")
 def test_a_released_launch_frees_its_room_at_once_while_an_unanswered_launch_holds_it(
     redis: "fakeredis.FakeRedis",
 ) -> None:
