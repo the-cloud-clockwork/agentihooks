@@ -2235,7 +2235,11 @@ def test_each_beat_reports_the_release_the_hive_runs(redis: Any, monkeypatch: py
     monkeypatch.setattr(daemon, "observe", observe)
     monkeypatch.setattr(updater, "installed_version", lambda: "1.4.2")
     daemon.beat(redis, "machine")
-    assert registry.show(redis, "machine")["version"] == "1.4.2"
+    first = registry.show(redis, "machine")
+    assert first is not None
+    assert first["version"] == "1.4.2"
     monkeypatch.setattr(updater, "installed_version", lambda: "1.4.3")
     daemon.beat(redis, "machine")
-    assert registry.show(redis, "machine")["version"] == "1.4.3"
+    second = registry.show(redis, "machine")
+    assert second is not None
+    assert second["version"] == "1.4.3"
