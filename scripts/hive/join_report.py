@@ -124,7 +124,7 @@ def end(redis: "Redis", hive: str, execution: str, session: str, reason: str, st
                 continue
 
 
-def cheap_checks(redis: "Redis", report: dict) -> dict:
+def cheap_checks(redis: "Redis", report: dict) -> dict[str, bool]:
     from scripts.hive.join_checks import cheap
 
     return cheap(redis, report)
@@ -212,6 +212,13 @@ def end_gone(redis: "Redis", hive: str, reports: list[dict], at: int) -> list[di
     return kept
 
 
+def held_checks(redis: "Redis", report: dict[str, Any]) -> dict[str, bool]:
+    """A check that passed at join stays passed; a check still missing takes the fresh probe."""
+    stored: dict[str, Any] = report["checks"]
+    fresh = cheap_checks(redis, report)
+    return {name: stored.get(name) is True or passed for name, passed in fresh.items()}
+
+
 def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     from redis.exceptions import WatchError
 
@@ -219,7 +226,7 @@ def heartbeat(redis: "Redis", hive: str, at: int) -> None:
     for report in end_gone(redis, hive, reports, at):
         if at - report["heartbeat_at"] < HEARTBEAT_MS:
             continue
-        checks = cheap_checks(redis, report)
+        checks = held_checks(redis, report)
         with redis.pipeline() as pipe:
             try:
                 pipe.watch(key(hive))
