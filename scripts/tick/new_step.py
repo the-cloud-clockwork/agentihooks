@@ -230,7 +230,9 @@ def _index_text(root: Path, spec: Spec) -> tuple[Path, str]:
 def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
     """The feature map with the step's test added to its entry, a new inventory entry for a new id."""
     path = root / catalogue.FEATURE_MAP
-    data = feature_map.load(path)
+    legacy = _read_json(path)
+    fragmented = legacy.get("fragments") and not any(entry["id"] == spec.feature for entry in legacy["features"])
+    data = feature_map.load(path) if fragmented else legacy
     entry = next((entry for entry in data["features"] if entry["id"] == spec.feature), None)
     if entry is None:
         data["features"].append(
@@ -245,7 +247,7 @@ def _feature_text(root: Path, spec: Spec) -> tuple[Path, str]:
         )
     else:
         entry["tests"] = [*entry.get("tests", []), test_node(spec.name)]
-    if data.get("fragments"):
+    if fragmented:
         entry = next(entry for entry in data["features"] if entry["id"] == spec.feature)
         return feature_map.entry_path(path, spec.feature), json.dumps(entry, indent=2) + "\n"
     return path, json.dumps(data, indent=2) + "\n"

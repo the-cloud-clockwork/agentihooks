@@ -595,6 +595,23 @@ def test_type_record_duplicate_and_invalid_counts_are_refused(tmp_path: Path) ->
             type_gate.load(root)
 
 
+def test_type_refresh_preserves_disjoint_legacy_and_fragment_owners(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 2})
+    record = root / "tests/type-baseline/hooks/b.py.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("2\n")
+    monkeypatch.setattr(type_gate, "measure", lambda _: {"hooks/a.py": 1, "hooks/b.py": 1})
+    type_gate.write(root)
+    assert json.loads((root / type_gate.BASELINE).read_text()) == {"hooks/a.py": 1}
+    assert not (record.parent / "a.py.json").exists()
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 1}
+    monkeypatch.setattr(type_gate, "measure", lambda _: {})
+    type_gate.write(root)
+    assert type_gate.load(root) == {}
+
+
 @pytest.mark.parametrize("order", [("left", "right"), ("right", "left")])
 @pytest.mark.feature("independent-ci-records")
 def test_independent_source_branches_merge_their_records_in_either_order(

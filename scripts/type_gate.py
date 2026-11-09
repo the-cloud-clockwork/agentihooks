@@ -180,17 +180,25 @@ def edited(base_baseline: dict[str, int], recorded: dict[str, int]) -> set[str]:
 
 
 def write(head: Path) -> None:
-    """Record measurements without rewriting records belonging to other sources."""
+    """Record measurements while preserving each source's existing owner."""
     counts = measure(head)
     directory = head / "tests/type-baseline"
     if not directory.is_dir():
         (head / BASELINE).write_text(json.dumps(counts, indent=2) + "\n")
         return
+    path = head / BASELINE
+    legacy: dict[str, int] = json.loads(path.read_text()) if path.is_file() else {}
+    owned = set(legacy)
+    refreshed = {source: counts[source] for source in legacy if source in counts}
+    if refreshed != legacy:
+        path.write_text(json.dumps(refreshed, indent=2) + "\n")
     for record in directory.rglob("*.json"):
         source = record.relative_to(directory).as_posix().removesuffix(".json")
         if source not in counts:
             record.unlink()
     for source, count in counts.items():
+        if source in owned:
+            continue
         record = directory / f"{source}.json"
         text = json.dumps(count) + "\n"
         if not record.is_file() or record.read_text() != text:

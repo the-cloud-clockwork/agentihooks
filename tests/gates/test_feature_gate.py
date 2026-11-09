@@ -255,3 +255,16 @@ def test_completion_refuses_a_fragment_with_the_wrong_id(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(feature, "read_map", read)
     assert feature.read_feature("dev", "chosen") is None
+
+
+def test_completion_preserves_inline_features_in_a_mixed_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = {"features": [{"id": "chosen", "tests": ["tests/test_chosen.py::test_it"]}], "fragments": True}
+    calls: list[str] = []
+
+    def read(ref: str) -> dict:
+        calls.append(ref)
+        return data
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") == data
+    assert calls == ["dev"]

@@ -74,7 +74,7 @@ def read_map(
 def read_feature(ref: str, feature: str) -> dict[str, Any] | None:
     """Read one requested fragment while preserving completion against legacy revisions."""
     data = read_map(ref)
-    if data is None or not data.get("fragments"):
+    if data is None or not data.get("fragments") or any(entry.get("id") == feature for entry in _features(data)):
         return data
     path = f"feature-map.d/{hashlib.sha256(feature.encode()).hexdigest()}.json"
     entry = read_map(ref, path=path)
