@@ -100,6 +100,7 @@ def frozen_views() -> bool:
 
 PARTS = LEDGER_PARTS
 FRESH_VIEW_S = 300.0
+ROWS_READ = "rows_read"
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -192,7 +193,17 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
         state = reply["data"]
     if exported is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
-    return LedgerView(reply["generation"], state)
+    return counted(LedgerView(reply["generation"], state))
+
+
+def counted(view: LedgerView) -> LedgerView:
+    """``view``, its task rows counted on the running pass's record as the most rows one read of the pass held."""
+    from scripts.swarm import timing
+
+    record = timing.PASS.get()
+    if record is not None:
+        record[ROWS_READ] = max(int(record.get(ROWS_READ, 0)), len(view.tasks))
+    return view
 
 
 def reads(ledger: object) -> bool:

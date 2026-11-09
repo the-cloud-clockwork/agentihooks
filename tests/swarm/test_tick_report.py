@@ -38,6 +38,7 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "rows_read_max": None,
     }
 
 
@@ -79,6 +80,20 @@ def test_tick_report_prints_each_lane_share(capsys: pytest.CaptureFixture[str]) 
     assert "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\nspawn  4  25.00%  1  2  3  5\n" in out
 
 
+@pytest.mark.feature("swarm-tick-live-rows")
+def test_report_names_the_most_task_rows_a_pass_read(capsys: pytest.CaptureFixture[str]) -> None:
+    passes = [
+        {"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0, "rows_read": 997},
+        {"pass_id": "b", "start_ms": 3000, "end_ms": 4000, "wall_s": 1.0, "rows_read": 990},
+        {"pass_id": "c", "start_ms": 5000, "end_ms": 6000, "wall_s": 1.0},
+    ]
+    report = tick_report.summarize(passes, [])
+    assert report["rows_read_max"] == 997
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=3))
+    assert "Task rows read per pass, most: 997\n" in capsys.readouterr().out
+
+
 def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
     rows = [{**step("a", "spawn", 1.0, 0.0, 0.0), "lane": "critical"}]
     assert tick_report.lane_shares(rows, 0.0) == [{"lane": "critical", "count": 1, "cpu_share": 0.0}]
@@ -116,6 +131,7 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "rows_read_max": None,
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
     assert tick_report.summarize(passes, [])["passes_without_steps"] == 1
