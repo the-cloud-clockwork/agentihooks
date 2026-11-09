@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -5,7 +6,7 @@ from typing import Any
 import fakeredis
 import pytest
 
-from scripts.hive import machine, registry, remove
+from scripts.hive import auth, machine, registry, remove
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.herdr.operator_service import Service
 from scripts.swarm_v2.herdr.upkeep import Upkeep
@@ -60,6 +61,13 @@ def setup(tmp_path: Path, beat: int | None) -> tuple[Service, Client, RedisStore
     return Service(Upkeep(terminal), connect, clock), client, store
 
 
+def advance(service: Service, elapsed_ms: int) -> None:
+    def clock() -> float:
+        return (NOW + elapsed_ms) / 1000
+
+    service.clock = clock
+
+
 @pytest.mark.parametrize("beat", [None, NOW - LIMIT, NOW - LIMIT - 1])
 def test_removed_and_unplugged_hives_leave_herdr_with_their_host_key(
     tmp_path: Path, beat: int | None, capsys: pytest.CaptureFixture[str]
@@ -67,6 +75,10 @@ def test_removed_and_unplugged_hives_leave_herdr_with_their_host_key(
     service, client, _ = setup(tmp_path, beat)
 
     service.run_pass()
+    if beat is not None:
+        assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+        advance(service, LIMIT)
+        service.run_pass()
 
     assert [entry["label"] for entry in client.machines] == ["devbox"]
     assert ["ssh-keygen", "-R", "[10.10.30.207]:2225", "-f", str(tmp_path / ".ssh" / "known_hosts")] in client.commands
@@ -102,6 +114,7 @@ def test_a_recovered_hive_keeps_its_machine_past_the_first_outage_deadline(tmp_p
     service, client, store = setup(tmp_path, NOW - LIMIT + 1)
     service.run_pass()
     registry.beat(store.redis, "hive-three", {"heartbeat_at": NOW + LIMIT})
+    client.reachable = True
 
     def clock() -> float:
         return (NOW + LIMIT + 1) / 1000
@@ -161,12 +174,17 @@ def test_unrelated_manual_machine_names_are_never_removed(tmp_path: Path, label:
     assert not client.mutating()
 
 
-def test_a_hive_that_has_not_started_reporting_is_retained(tmp_path: Path) -> None:
+@pytest.mark.parametrize("elapsed", [LIMIT - 1, LIMIT, LIMIT + 1])
+def test_a_hive_that_never_reports_has_a_bounded_startup_grace(tmp_path: Path, elapsed: int) -> None:
     service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
 
+    advance(service, elapsed)
     service.run_pass()
 
-    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+    expected = ["devbox"] if elapsed >= LIMIT else [LABEL, "devbox"]
+    assert [entry["label"] for entry in client.machines] == expected
 
 
 def test_an_unreadable_catalog_reports_failure_without_removing_machines(tmp_path: Path) -> None:
@@ -189,3 +207,56 @@ def test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale(tmp_pa
 
     assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
     assert ["herdr", "--machine", LABEL, "status", "server", "--json"] in client.commands
+
+
+def test_an_outage_after_a_stale_heartbeat_still_gets_the_full_restart_grace(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, NOW - LIMIT - 1)
+    service.run_pass()
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+
+    advance(service, LIMIT - 1)
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+
+
+def test_startup_failure_expires_even_when_the_member_has_no_hive_record(tmp_path: Path) -> None:
+    service, client, store = setup(tmp_path, None)
+    auth.mint(store.redis, LABEL, "redis://localhost")
+    service.run_pass()
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+
+    advance(service, LIMIT)
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == ["devbox"]
+
+
+def test_outage_deadlines_survive_scheduled_service_recreation(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    saved = json.loads(json.dumps(service.saved()))
+    replacement = Service(Upkeep(service.upkeep.terminal), service.connect)
+    replacement.resume(saved)
+
+    advance(replacement, LIMIT)
+    replacement.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == ["devbox"]
+
+
+def test_a_successful_connection_resets_the_outage_deadline(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    advance(service, LIMIT - 1)
+    client.reachable = True
+    service.run_pass()
+
+    advance(service, LIMIT + 1)
+    client.reachable = False
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == [LABEL, "devbox"]
+    advance(service, 2 * LIMIT + 1)
+    service.run_pass()
+    assert [entry["label"] for entry in client.machines] == ["devbox"]

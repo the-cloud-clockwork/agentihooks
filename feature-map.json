@@ -4,7 +4,7 @@
       "id": "herdr-hive-lifecycle",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-herdr-dead-hive-lifecycle",
-      "behaviour": "Operator terminal sync forgets removed hive machines immediately and silent hive machines after fifteen minutes, retaining brief restarts and manual machines, clearing host keys and logging the reason. Explicit removal reaches other clients and readding a name clears its removal record.",
+      "behaviour": "Operator terminal sync forgets removed hive machines immediately and unreachable registered hives after fifteen minutes of persisted failed connections, including hives that never report, retaining brief restarts and manual machines, clearing host keys and logging the reason. Recovery resets the deadline and explicit removal reaches other clients.",
       "seam": "operator Service run_pass, hive machine forget, and hive remove unregister",
       "tests": [
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_removed_and_unplugged_hives_leave_herdr_with_their_host_key",
@@ -15,9 +15,13 @@
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_dry_run_removal_does_not_retire_another_clients_machine",
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_readding_a_removed_name_clears_its_removal_record",
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_unrelated_manual_machine_names_are_never_removed",
-        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_hive_that_has_not_started_reporting_is_retained",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_hive_that_never_reports_has_a_bounded_startup_grace",
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreadable_catalog_reports_failure_without_removing_machines",
-        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale"
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_outage_after_a_stale_heartbeat_still_gets_the_full_restart_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_startup_failure_expires_even_when_the_member_has_no_hive_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_outage_deadlines_survive_scheduled_service_recreation",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_successful_connection_resets_the_outage_deadline"
       ]
     },
     {
