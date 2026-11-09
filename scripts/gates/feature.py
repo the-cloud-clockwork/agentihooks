@@ -3,12 +3,13 @@
 The map is read from dev and from the merged pull request head, so a feature mapped in the task's own pull request counts.
 """
 
-import hashlib
 import json
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from scripts import feature_map
 from scripts.gates.enforcement import FEATURE
 from scripts.swarm_ledger import ledger_kinds
 
@@ -76,7 +77,7 @@ def read_feature(ref: str, feature: str) -> dict[str, Any] | None:
     data = read_map(ref)
     if data is None or not data.get("fragments") or any(entry.get("id") == feature for entry in _features(data)):
         return data
-    path = f"feature-map.d/{hashlib.sha256(feature.encode()).hexdigest()}.json"
+    path = feature_map.entry_path(Path(MAP), feature).as_posix()
     entry = read_map(ref, path=path)
     if entry is None or entry.get("id") != feature:
         return None

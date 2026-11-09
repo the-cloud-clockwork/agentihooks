@@ -194,7 +194,7 @@ def write(head: Path) -> None:
         path.write_text(json.dumps(refreshed, indent=2) + "\n")
     for record in directory.rglob("*.json"):
         source = record.relative_to(directory).as_posix().removesuffix(".json")
-        if source not in counts:
+        if source not in counts or source in owned:
             record.unlink()
     for source, count in counts.items():
         if source in owned:
