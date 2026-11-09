@@ -104,3 +104,15 @@ def test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus(
     with pytest.raises(InboxError) as refused:
         seen.SeenMarks(store.redis).mark("sw-eng-1", "sw:7:note")
     assert str(refused.value) == "the delivery owner of sw-eng-1 changed meanwhile; run it again"
+
+
+@pytest.mark.feature("inbox-alias-store-revision")
+def test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
+    names = name_state.NameState(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    names.amend("alias", "sw-eng-1", lambda _: "engineer@abcdef-0002", lambda _: None)
+    assert names.revisions(("alias", "sw-eng-1"), ("aliases-of", "engineer@abcdef-0002")) == ()
