@@ -2492,6 +2492,16 @@
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
+    },
+    {
+      "id": "tick-merged-task-settlement-after-overrun",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2432",
+      "behaviour": "A merged code or ci task closes and its engineer leaves the seat within two passes when an intent or spawn barrier overruns its budget.",
+      "seam": "tick view, waits end and merge pass scheduling after an abandoned dependency, then ended agent reaping",
+      "tests": [
+        "tests/tick/steps/test_merge_settlement.py::test_merged_task_closes_and_releases_its_seat_after_an_abandoned_barrier"
+      ]
     }
   ],
   "unmapped_rules": [
