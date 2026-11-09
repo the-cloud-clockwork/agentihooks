@@ -18,13 +18,12 @@ from tests.tick.test_master_steps_kept import Step
 
 _fixtures = env
 pytestmark = pytest.mark.unit
-FEATURE = "tick-merged-task-settlement-after-overrun"
 AGENT = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
 NOW = 5_000
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("tick-merged-task-settlement-after-overrun")
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_merged_task_closes_and_releases_its_seat_after_an_abandoned_barrier(
     env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytest.MonkeyPatch, kind: str
