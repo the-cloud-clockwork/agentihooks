@@ -175,7 +175,10 @@ def write(head: Path) -> None:
 def grade(
     base: dict[str, int], head: dict[str, int], recorded: dict[str, int] | None, touched: set[str] | None = None
 ) -> list[str]:
-    """Return every changed file whose errors grew against the base, and drift between the head and its baseline.
+    """Return every changed file whose errors grew against the base, a head above its baseline, or a raised baseline.
+
+    A head below its baseline passes without a rewrite, so fixing errors never forces a baseline edit that
+    conflicts with other pull requests.
 
     Growth and drift are graded on ``touched``, the files the head changes and their importers, drift also on any
     baseline entry it edits; with ``touched`` None, on every file. An untouched file keeps the
@@ -191,7 +194,11 @@ def grade(
         f"{BASELINE} records {recorded.get(path, 0)} type errors in {path}, the head has {head.get(path, 0)}; "
         "run python -m scripts.type_gate --write"
         for path in sorted(set(recorded) | set(head))
-        if recorded.get(path, 0) != head.get(path, 0)
+        if (
+            head.get(path, 0) > recorded.get(path, 0)
+            or recorded.get(path, 0) > max(base.get(path, 0), head.get(path, 0))
+            or (touched is None and recorded.get(path, 0) != head.get(path, 0))
+        )
         and (touched is None or path in touched or recorded.get(path, 0) != base.get(path, 0))
     ]
     return errors
