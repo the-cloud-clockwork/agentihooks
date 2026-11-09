@@ -998,7 +998,7 @@
   "tests/codex_session/test_runtime_homes.py": 3,
   "tests/codex_session/test_supervisor.py": 2,
   "tests/conftest.py": 5,
-  "tests/context/test_account_sessions.py": 3,
+  "tests/context/test_account_sessions.py": 2,
   "tests/context/test_brain_http.py": 1,
   "tests/context/test_brain_scope_isolation.py": 3,
   "tests/context/test_brain_writer_hook.py": 2,
