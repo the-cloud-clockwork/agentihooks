@@ -52,9 +52,33 @@ def frozen(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str]
 
 
 def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
-    targets: list[str] = [r["target"] for r in records if r["verb"] == verb]
-    levels = [chain.index(t) if t in chain else len(chain) for t in targets if covers(t, task, chain)]
+    nodes, selectors = _targets(records)[verb]
+    levels = [level for level, node in enumerate(chain) if node in nodes]
+    if any(SELECTORS[selector](task) == value for selector, value in selectors):  # pyright: ignore[reportUnknownArgumentType]
+        levels.append(len(chain))
     return min(levels, default=sys.maxsize)
+
+
+_TARGETS: list[Any] = []
+
+
+def _targets(records: list[dict[str, Any]]) -> dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]]:
+    """Each verb's node targets and lane or kind selector pairs, indexed once per freeze list."""
+    if _TARGETS and _TARGETS[0] is records and _TARGETS[1] == len(records):
+        return _TARGETS[2]
+    found: dict[str, tuple[frozenset[str], tuple[tuple[str, str], ...]]] = {}
+    for verb in ("freeze", "focus"):
+        targets = [r["target"] for r in records if r["verb"] == verb]
+        selected = [t for t in targets if _selects(t)]
+        pairs = tuple((selector, value) for selector, _, value in (t.partition(":") for t in selected))
+        found[verb] = (frozenset(targets) - frozenset(selected), pairs)
+    _TARGETS[:] = [records, len(records), found]
+    return found
+
+
+def _selects(target: str) -> bool:
+    selector, _, value = target.partition(":")
+    return selector in SELECTORS and bool(value)
 
 
 def unfocused(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str) -> bool:
@@ -87,7 +111,9 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     waits_on = _waits(doc, tasks)
     cold: set[str] = _cold(tasks, records, graph) if any(r["verb"] == "freeze" for r in records) else set()
     queue = [
-        task["id"] for task in tasks if _open_focus(task, focus, graph) and not _stuck(task["id"], rows, cold, waits_on)
+        task["id"]
+        for task in tasks
+        if _open_focus(task, records, graph) and not _stuck(task["id"], rows, cold, waits_on)
     ]
     seen: set[str] = set()
     for task_id in queue:
@@ -146,11 +172,10 @@ def _stuck(
     return bool(reached & cold)
 
 
-def _open_focus(task: dict[str, Any], focus: list[str], graph: dict[str, Any]) -> bool:
+def _open_focus(task: dict[str, Any], records: list[dict[str, Any]], graph: dict[str, Any]) -> bool:
     if task.get("state") == "done" or task.get("out_of_scope"):
         return False
-    chain = ancestry(task, graph)
-    return any(covers(target, task, chain) for target in focus)
+    return _nearest(records, "focus", task, ancestry(task, graph)) != sys.maxsize
 
 
 def exempt(task: dict[str, Any], fix_phase: str) -> bool:
