@@ -2763,6 +2763,34 @@
         "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
         "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
       ]
+    },
+    {
+      "id": "swarm-intent-check-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
+      "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
+      "tests": [
+        "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
+        "tests/gates/test_intent_budget.py::test_thirty_changed_pulls_judge_at_most_the_pass_limit_and_the_rest_later",
+        "tests/gates/test_intent_budget.py::test_a_changed_pull_is_judged_off_the_pass_and_settled_by_a_later_pass",
+        "tests/gates/test_intent_budget.py::test_only_a_process_that_keeps_running_passes_judges_off_the_pass",
+        "tests/gates/test_intent_budget.py::test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
+        "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
+        "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
+        "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
+        "tests/gates/test_intent_budget.py::test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another",
+        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled",
+        "tests/gates/test_intent_budget.py::test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name",
+        "tests/gates/test_intent_budget.py::test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches",
+        "tests/gates/test_intent_budget.py::test_each_minute_judges_the_changed_pulls_from_its_own_turn",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_builds_its_view_timed_inside_the_callers_context",
+        "tests/gates/test_intent_budget.py::test_a_kept_judging_settles_draft_pulls_inside_the_pass"
+      ]
     }
   ],
   "unmapped_rules": [
