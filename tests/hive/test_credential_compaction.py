@@ -59,6 +59,23 @@ def test_ended_agent_tokens_are_removed_and_active_peers_keep_access(client: Any
     assert store.drop_agent("alpha", name)
 
 
+def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
+    from dataclasses import replace
+
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(client)
+    store.create(SwarmConfig("alpha", "/repo", 1, 0))
+    name = store.next_name("alpha", "eng")
+    agent = store.start_execution("alpha", AgentRecord(name, "eng", "task", seat="eng-1@alpha", hive="m1"))
+    token = auth.issue_agent(client, "m1", "alpha", name)
+
+    store.put_agent("alpha", replace(agent, state="ended"))
+
+    assert auth.agent_member(client, token, "alpha", name) is None
+    assert hive_state.read(auth._store(client), auth._agent_key("m1", "alpha", name)) is None
+
+
 def test_minted_members_omit_the_obsolete_agents_map(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth, "_set_user", lambda *_: None)
     monkeypatch.setattr(auth.redis_acl, "save", lambda *_: None)

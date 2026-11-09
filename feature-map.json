@@ -2602,7 +2602,8 @@
         "tests/hive/test_credential_compaction.py::test_compaction_refuses_unknown_members",
         "tests/hive/test_credential_compaction.py::test_cli_compacts_only_the_selected_members",
         "tests/hive/test_credential_compaction.py::test_compaction_replaces_large_history_and_preserves_existing_independent_records",
-        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition"
+        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition",
+        "tests/hive/test_credential_compaction.py::test_recording_an_ended_execution_removes_its_token"
       ]
     }
   ],
