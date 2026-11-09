@@ -1,0 +1,18 @@
+rules:
+  - id: tick-step-rows-from-doc-tasks
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step builds task rows from a ledger document's tasks, so every pass walks every task the document
+      holds, closed and frozen ones included: on 9 November the persisted view held 4880 tasks while 292 were live
+      and unfrozen. Read the pass's ledger view (ctx.view.read, view.current().tasks), which holds only the tasks
+      the tick may act on, and pass a closed or frozen scope to pass_state only where a reader needs those tasks.
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - tick-step-rows-from-doc-tasks.py
+    pattern-either:
+      - pattern: '{$T["id"]: $T for $T in $DOC["tasks"]}'
+      - pattern: '{$T["id"]: $T for $T in $DOC.get("tasks", ...)}'
+      - pattern: '{$T["id"]: $T for $T in $DOC.get("tasks") or []}'
+      - pattern: '{$T["id"]: $T for $T in $L.state(...)["tasks"]}'

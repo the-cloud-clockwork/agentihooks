@@ -101,6 +101,7 @@ def frozen_views() -> bool:
 PARTS = LEDGER_PARTS
 FRESH_VIEW_S = 300.0
 ROWS_READ = "rows_read"
+TICK_SCOPE = live_rows.Scope(closed=True, frozen=True)
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -175,7 +176,7 @@ def current() -> LedgerView | None:
 
 def view_file(base: str, slug: str, directory: Path, scope: live_rows.Scope | None = None) -> Path:
     """The file holding the view of ledger ``slug`` on the server at ``base`` read with ``scope``."""
-    scope = live_rows.Scope() if scope is None else scope
+    scope = TICK_SCOPE if scope is None else scope
     key = f"{base} {slug} live closed={scope.closed} frozen={scope.frozen}"
     return directory / "ledger-views" / f"{hashlib.sha256(key.encode()).hexdigest()[:32]}.json"
 
@@ -224,7 +225,7 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
 
     def refresh() -> LedgerView:
         """The held view patched with one delta read."""
-        return refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+        return refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
 
     try:
         view = refresh()
