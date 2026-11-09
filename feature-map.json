@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "master-token-slot-route-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2129",
+      "behaviour": "Master token launch reports routed only after hive account admission; refused slots report the refusal without a routed report.",
+      "seam": "launch_token account slot callback and route report",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
+        "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
@@ -2491,6 +2502,17 @@
         "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
         "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
+      ]
+    },
+    {
+      "id": "scoped-member-inbox-publish",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2151",
+      "behaviour": "A scoped hive member selects its swarm before opening inbox state and publishes immediately; only a real bus failure leaves delivery to the Redis recheck.",
+      "seam": "InboxStore.send through SeatPublisher and SeatInbox on a scoped member bus",
+      "tests": [
+        "tests/inbox/test_scoped_publish.py::test_scoped_member_send_selects_swarm_before_state_and_only_falls_back_on_failure",
+        "tests/inbox/test_scoped_publish.py::test_scoped_nats_member_sends_without_root_state_or_redis_fallback"
       ]
     },
     {
