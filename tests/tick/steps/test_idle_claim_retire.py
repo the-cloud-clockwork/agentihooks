@@ -21,28 +21,32 @@ PASSES = 25
 WAITS_END = agents.WAITS_END
 
 
-class Redis(dict[str, Any]):
+class Redis:
     """A Redis holding plain keys and hashes in one dict."""
+
+    def __init__(self) -> None:
+        """Start empty."""
+        self.data: dict[str, Any] = {}
 
     def get(self, key: str) -> Any:
         """Return the plain value at ``key``, or None."""
-        return super().get(key)
+        return self.data.get(key)
 
     def set(self, key: str, value: Any, **_: Any) -> None:
         """Store ``value`` at ``key``."""
-        self[key] = value
+        self.data[key] = value
 
     def delete(self, key: str) -> None:
         """Remove ``key``."""
-        self.pop(key, None)
+        self.data.pop(key, None)
 
     def hgetall(self, key: str) -> dict[str, Any]:
         """Return the hash at ``key``."""
-        return dict(super().get(key) or {})
+        return dict(self.data.get(key) or {})
 
     def hset(self, key: str, field: str, value: Any) -> None:
         """Set ``field`` of the hash at ``key``."""
-        self.setdefault(key, {})[field] = value
+        self.data.setdefault(key, {})[field] = value
 
 
 class Store:
