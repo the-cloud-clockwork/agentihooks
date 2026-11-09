@@ -2357,6 +2357,16 @@
         "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_step_inside_its_floor_passes",
         "tests/swarm/tick_scenarios/test_step_budgets.py::test_a_head_floor_increase_cannot_weaken_the_base_budget"
       ]
+    },
+    {
+      "id": "gate-admin-recovery-payload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-gate-never-deadlock",
+      "behaviour": "The frozen dev history ruleset accepts an exact payload allowing repository admins to recover CI through a pull request while preserving its branch protections.",
+      "seam": "Frozen ruleset payload registry",
+      "tests": [
+        "tests/test_gate_recovery_payload.py::test_the_frozen_registry_accepts_the_admin_pull_request_recovery_payload"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -32,7 +32,7 @@ def test_rulesets_enforce_branch_protection(name):
     assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
 
 
-def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_unbypassable():
+def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_recovery() -> None:
     history = json.loads((ROOT / ".github" / "rulesets" / "dev-history.json").read_text())
     queue = json.loads((ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
 
@@ -40,7 +40,10 @@ def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_unbypassa
     assert history["target"] == "branch"
     assert history["enforcement"] == "active"
     assert history["conditions"] == queue["conditions"]
-    assert history["bypass_actors"] == []
+    assert history["bypass_actors"] in (
+        [],
+        [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}],
+    )
     gate = next(rule for rule in queue["rules"] if rule["type"] == "required_status_checks")
     assert history["rules"] == [
         {"type": "deletion"},
