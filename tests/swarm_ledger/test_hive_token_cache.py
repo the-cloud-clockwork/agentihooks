@@ -132,5 +132,22 @@ def test_the_hive_token_cache_keeps_at_most_its_bound(
     for n, token in enumerate(tokens):
         assert authority.hive_principal(SLUG, token, f"engineer@{n}") == f"engineer@{n}"
 
+    assert authority.hive_principal(SLUG, tokens[1], "engineer@1") == "engineer@1"
+    assert authority.hive_principal(SLUG, tokens[2], "engineer@2") == "engineer@2"
+    assert len(lookups) == 3
+
     assert authority.hive_principal(SLUG, tokens[0], "engineer@0") == "engineer@0"
     assert len(lookups) == 4
+
+
+@pytest.mark.feature("hive-agent-token-cache")
+def test_a_hive_token_check_is_read_again_once_exactly_its_window_has_passed(
+    client: Any, member: str, lookups: list[str], clock: list[float]
+) -> None:
+    token = auth.issue_agent(client, member, SLUG, WORKER)
+    assert authority.hive_principal(SLUG, token, WORKER) == WORKER
+
+    clock[0] += authority.HIVE_CHECK_TTL_S
+
+    assert authority.hive_principal(SLUG, token, WORKER) == WORKER
+    assert len(lookups) == 2

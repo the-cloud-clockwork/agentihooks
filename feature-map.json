@@ -2597,7 +2597,8 @@
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_revoked_hive_token_is_refused_once_its_cached_check_expires",
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_is_refused_once_its_agent_leaves_the_hive",
         "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_check_holds_only_its_own_ledger_and_agent",
-        "tests/swarm_ledger/test_hive_token_cache.py::test_the_hive_token_cache_keeps_at_most_its_bound"
+        "tests/swarm_ledger/test_hive_token_cache.py::test_the_hive_token_cache_keeps_at_most_its_bound",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_hive_token_check_is_read_again_once_exactly_its_window_has_passed"
       ]
     }
   ],
