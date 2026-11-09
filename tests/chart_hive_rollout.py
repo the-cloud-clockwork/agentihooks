@@ -3,6 +3,10 @@ from pathlib import Path
 
 import yaml
 
+ROLLOUT = (Path(__file__).resolve().parents[1] / "scripts/hive/rollout.py").read_text()
+ACQUIRE_SECONDS = 5400
+assert "LEASE_SECONDS = 3600\nACQUIRE_SECONDS = LEASE_SECONDS + 1800\n" in ROLLOUT
+
 CHART = Path(__file__).resolve().parents[1] / "deploy/helm/agentihooks-swarm"
 
 
@@ -43,6 +47,7 @@ def test_every_roll_acquires_before_sync_and_releases_after_serving():
     assert "abandon" in abandon["spec"]["template"]["spec"]["containers"][0]["command"]
     for job in jobs:
         assert job["spec"]["ttlSecondsAfterFinished"] == 3600
+        assert job["spec"]["activeDeadlineSeconds"] > ACQUIRE_SECONDS
         pod = job["spec"]["template"]["spec"]
         assert pod["automountServiceAccountToken"] is True
         command = pod["containers"][0]["command"]

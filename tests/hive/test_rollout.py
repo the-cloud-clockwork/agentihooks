@@ -1,5 +1,7 @@
 import copy
 import importlib
+from collections.abc import Callable
+from types import ModuleType
 
 import pytest
 
@@ -65,7 +67,7 @@ def test_a_waiting_release_cannot_take_ownership_or_mutate_a_hive():
     )
 
 
-def test_a_failed_replacement_holds_the_lock_until_it_expires():
+def test_a_failed_replacement_holds_the_lock_with_an_expiry() -> None:
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
@@ -76,40 +78,74 @@ def test_a_failed_replacement_holds_the_lock_until_it_expires():
     assert cluster.lease["spec"]["leaseDurationSeconds"] == module.LEASE_SECONDS
 
 
+def wall_clock(monkeypatch: pytest.MonkeyPatch, module: ModuleType, step: Callable[[float], None]) -> list[float]:
+    clock = [1_000_000.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+        step(clock[0])
+
+    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module.time, "sleep", sleep)
+    return clock
+
+
 @pytest.mark.feature("hive-rollout-lease-failed-sync")
-def test_a_failed_sync_frees_the_lease_for_the_next_hive():
+def test_a_failed_sync_frees_the_lease_for_the_next_hive(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
+    failed = []
+
+    def sync_fails(now: float) -> None:
+        if not failed:
+            failed.append(now)
+            module.abandon(cluster, "default", "shared", "second", "hive", "own")
+            assert cluster.lease["spec"]["holderIdentity"] == "first"
+            module.abandon(cluster, "default", "shared", "first", "hive", "own")
+
+    clock = wall_clock(monkeypatch, module, sync_fails)
     module.acquire(cluster, "default", "shared", "first", timeout=0)
-    cluster.healthy = False
-    module.abandon(cluster, "default", "shared", "second")
-    assert cluster.lease["spec"]["holderIdentity"] == "first"
-    module.abandon(cluster, "default", "shared", "first")
-    module.acquire(cluster, "default", "shared", "second", timeout=0)
+    module.acquire(cluster, "default", "shared", "second")
+    assert failed == [clock[0]]
     assert cluster.lease["spec"]["holderIdentity"] == "second"
 
 
 @pytest.mark.feature("hive-rollout-lease-failed-sync")
-def test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive(monkeypatch):
+def test_a_lease_left_by_a_dead_sync_expires_to_the_waiting_hive(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
-    clock = [1_000_000.0]
-    monkeypatch.setattr(module.time, "time", lambda: clock[0])
+    cluster.healthy = False
+    seen = []
+
+    def sync_died(now: float) -> None:
+        module.abandon(cluster, "default", "shared", "first", "hive", "own")
+        seen.append(cluster.lease["spec"]["holderIdentity"])
+
+    clock = wall_clock(monkeypatch, module, sync_died)
+    start = clock[0]
     module.acquire(cluster, "default", "shared", "first", timeout=0)
-    clock[0] += module.LEASE_SECONDS
-    with pytest.raises(TimeoutError):
-        module.acquire(cluster, "default", "shared", "second", timeout=0)
-    assert cluster.lease["spec"]["holderIdentity"] == "first"
-    clock[0] += 1
-    module.acquire(cluster, "default", "shared", "second", timeout=0)
+    module.acquire(cluster, "default", "shared", "second")
+    assert set(seen) == {"first"}
+    assert module.LEASE_SECONDS < clock[0] - start <= module.LEASE_SECONDS + 5
+    assert module.ACQUIRE_SECONDS > module.LEASE_SECONDS
     assert cluster.lease["spec"]["holderIdentity"] == "second"
     assert cluster.lease["spec"]["renewTime"] == module.micro_time(clock[0])
 
 
-def test_abandon_without_a_lease_changes_nothing():
+def test_a_lease_without_a_renew_time_or_duration_never_expires() -> None:
+    module = rollout()
+    renewed = module.micro_time(100.0)
+    assert not module.expired({"leaseDurationSeconds": 10}, 1e9)
+    assert not module.expired({"renewTime": renewed}, 1e9)
+    assert not module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.0)
+    assert module.expired({"renewTime": renewed, "leaseDurationSeconds": 10}, 110.5)
+
+
+def test_abandon_without_a_lease_changes_nothing() -> None:
     module = rollout()
     cluster = Cluster()
-    module.abandon(cluster, "default", "shared", "first")
+    module.abandon(cluster, "default", "shared", "first", "hive", "own")
     assert cluster.lease is None
     assert [call[0] for call in cluster.calls] == ["GET"]
 
@@ -287,7 +323,7 @@ def test_hook_entrypoint_routes_to_the_exclusive_protocol(monkeypatch, tmp_path,
         assert cluster.lease["spec"]["holderIdentity"] == ("first" if action == "acquire" else "")
 
 
-def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection(monkeypatch):
+def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection(monkeypatch: pytest.MonkeyPatch) -> None:
     module = rollout()
     cluster = Cluster()
     monkeypatch.setattr(module.time, "time", lambda: 1794215510.407518)
@@ -303,7 +339,7 @@ def test_kubernetes_creation_uses_the_exact_lease_envelope_and_collection(monkey
                 "metadata": {"name": "capacity", "namespace": "rolls"},
                 "spec": {
                     "holderIdentity": "hive/app",
-                    "leaseDurationSeconds": 1500,
+                    "leaseDurationSeconds": 3600,
                     "renewTime": "2026-11-09T09:11:50.407518Z",
                 },
             },
@@ -343,7 +379,7 @@ def test_ownership_wait_ends_at_the_exact_deadline(monkeypatch, timeout):
     module = rollout()
     cluster = Cluster()
     module.acquire(cluster, "default", "shared", "first", timeout=0)
-    ticks = iter([0, 1800 if timeout is None else 0])
+    ticks = iter([0, module.ACQUIRE_SECONDS if timeout is None else 0])
     monkeypatch.setattr(module.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(module.time, "sleep", lambda seconds: pytest.fail("slept beyond the acquisition deadline"))
     kwargs = {} if timeout is None else {"timeout": timeout}
@@ -365,7 +401,7 @@ def test_resource_names_are_quoted_as_single_url_segments():
     assert cluster.calls[-2][:2] == ("GET", "/apis/apps/v1/namespaces/team%2Fone/deployments/hive%2Ftwo")
 
 
-@pytest.mark.parametrize("action", ["acquire", "release"])
+@pytest.mark.parametrize("action", ["acquire", "release", "abandon"])
 def test_hook_cli_defaults_and_overrides_reach_the_protocol(monkeypatch, action):
     import sys
 

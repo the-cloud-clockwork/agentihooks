@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-LEASE_SECONDS = 1500
+LEASE_SECONDS = 3600
+ACQUIRE_SECONDS = LEASE_SECONDS + 1800
 
 
 class Conflict(Exception):
@@ -56,7 +57,7 @@ def expired(spec: dict, now: float) -> bool:
     return now > datetime.strptime(renewed, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC).timestamp() + duration
 
 
-def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int = 1800) -> None:
+def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int = ACQUIRE_SECONDS) -> None:
     """Take the rollout lease for owner, waiting for a free or expired lease until timeout."""
     path = lease_path(namespace, name)
     deadline = time.monotonic() + timeout
@@ -83,11 +84,24 @@ def acquire(api: Kubernetes, namespace: str, name: str, owner: str, timeout: int
         time.sleep(5)
 
 
-def abandon(api: Kubernetes, namespace: str, name: str, owner: str) -> None:
-    """Free the rollout lease after a failed sync when owner still holds it."""
+def hive_serving(api: Kubernetes, hive_namespace: str, deployment: str) -> bool:
+    """Tell whether every named worker deployment serves its current generation."""
+    for worker in deployment.split(","):
+        workload = api.request(
+            "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(worker, safe='')}"
+        )
+        if workload is None or not serving(workload):
+            return False
+    return True
+
+
+def abandon(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespace: str, deployment: str) -> None:
+    """Free the rollout lease after a failed sync when owner holds it and its hive still serves."""
     path = lease_path(namespace, name)
     lease = api.request("GET", path)
     if lease is None or lease["spec"].get("holderIdentity") != owner:
+        return
+    if not hive_serving(api, hive_namespace, deployment):
         return
     lease["spec"]["holderIdentity"] = ""
     api.request("PUT", path, lease)
@@ -98,12 +112,8 @@ def release(api: Kubernetes, namespace: str, name: str, owner: str, hive_namespa
     lease = api.request("GET", path)
     if lease is None or lease["spec"].get("holderIdentity") != owner:
         raise RuntimeError("only the rollout owner can release the lease")
-    for worker in deployment.split(","):
-        workload = api.request(
-            "GET", f"/apis/apps/v1/namespaces/{quote(hive_namespace, safe='')}/deployments/{quote(worker, safe='')}"
-        )
-        if workload is None or not serving(workload):
-            raise RuntimeError("replacement hive is not serving; rollout ownership retained")
+    if not hive_serving(api, hive_namespace, deployment):
+        raise RuntimeError("replacement hive is not serving; rollout ownership retained")
     lease["spec"]["holderIdentity"] = ""
     api.request("PUT", path, lease)
 
@@ -127,7 +137,7 @@ def main() -> None:
     if args.action == "acquire":
         acquire(api, args.namespace, args.name, args.owner)
     elif args.action == "abandon":
-        abandon(api, args.namespace, args.name, args.owner)
+        abandon(api, args.namespace, args.name, args.owner, args.hive_namespace, args.deployment)
     else:
         release(api, args.namespace, args.name, args.owner, args.hive_namespace, args.deployment)
 
