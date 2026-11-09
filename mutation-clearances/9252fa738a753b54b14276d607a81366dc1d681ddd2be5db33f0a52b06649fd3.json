@@ -1,0 +1,6 @@
+{
+  "scripts/hive/member_swarms.py:scripts.hive.member_swarms.x_sync:efaf58afcea61b734d8542758b05ae523e2799b1fb37132216a020a1cb15015c": {
+    "reader": "Standards",
+    "reason": "Under the subprocess-compatible runner contract, omitting check uses its false default, preserving return code handling."
+  }
+}

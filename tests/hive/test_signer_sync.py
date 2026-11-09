@@ -1,6 +1,7 @@
 """Hive membership changes request signer refreshes and join sees the reconciled listing."""
 
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -40,6 +41,8 @@ class Eso:
         self.commands: list[list[str]] = []
 
     def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert kwargs.get("capture_output") is True
+        assert kwargs.get("text") is True
         self.commands.append(command)
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -70,7 +73,12 @@ def _ledger_credential(fake: Bao) -> str:
 
 
 def _failing(code: int, stderr: str) -> Callable[..., subprocess.CompletedProcess[str]]:
-    return lambda command, **kwargs: subprocess.CompletedProcess(command, code, "", stderr)
+    def run(command: list[str], check: bool = False, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        if check and code:
+            raise subprocess.CalledProcessError(code, command, stderr=stderr)
+        return subprocess.CompletedProcess(command, code, "", stderr)
+
+    return run
 
 
 def _missing(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -159,7 +167,12 @@ def revoking(admin: Any, monkeypatch: pytest.MonkeyPatch) -> tuple[Bao, list[lis
     monkeypatch.delenv(member_swarms.SYNC_ENV, raising=False)
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr(cli, "_signer", lambda: None)
-    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake))
+
+    def from_env(environ: Any) -> openbao_kv.OpenBao:
+        assert environ is os.environ
+        return openbao_kv.OpenBao(BAO_URL, BAO_TOKEN, fake)
+
+    monkeypatch.setattr(openbao_kv, "from_env", from_env)
     host = remove.Host
     monkeypatch.setattr(
         remove,
@@ -242,3 +255,17 @@ def test_the_remove_command_names_the_sync_target(admin: Any, monkeypatch: pytes
     monkeypatch.setattr(remove, "remove", lambda store, bao, plan, host: seen.append(plan) or [])
     assert cli.main(["remove", "m1", "--label", "anton-9"]) == 0
     assert [plan.sync for plan in seen] == [TARGET]
+
+
+@pytest.mark.feature("hive-signer-membership-sync")
+def test_the_invite_command_passes_the_signer_sync_target(
+    admin: Any,
+    revoking: tuple[Bao, list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[invite.Request] = []
+    monkeypatch.setattr(
+        invite, "invite", lambda redis, bao, request, local_redis_url: seen.append(request) or "invited"
+    )
+    assert cli.main(["invite", "lab", "--url", URL, "--swarm", "rig"]) == 0
+    assert [request.sync for request in seen] == [TARGET]
