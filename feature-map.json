@@ -2357,10 +2357,11 @@
       "id": "hive-placement-slot-before-room",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2427",
-      "behaviour": "Placement keeps only the hives that advertise the launch slot before it checks room, so a launch whose slot holders are full waits on their room refusal instead of naming the slot as missing beside a slotless hive with room.",
+      "behaviour": "Placement keeps only the hives that advertise the launch slot before it checks room, so a launch whose slot holders are full waits on their room refusal instead of naming the slot as missing beside a slotless hive with room. A preferred hive without the slot spills on the slot refusal.",
       "seam": "scripts.hive.placement.choose",
       "tests": [
         "tests/hive/test_placement.py::test_a_full_hive_holding_the_slot_waits_on_room_beside_a_slotless_hive_with_room",
+        "tests/hive/test_placement.py::test_a_preferred_hive_without_the_slot_spills_on_the_slot_even_when_it_is_full",
         "tests/hive/test_placement.py::test_a_slot_no_hive_holds_waits_on_the_slot_even_when_every_hive_is_full"
       ]
     }
