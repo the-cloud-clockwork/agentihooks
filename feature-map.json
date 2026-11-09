@@ -2227,6 +2227,25 @@
       ]
     },
     {
+      "id": "hive-quiet-sweep",
+      "origin": "inventory",
+      "behaviour": "The tick step hive sweep drains an ephemeral hive quiet past the registry window and removes its records once no agent runs on it; a quiet lasting hive raises one quiet hive finding; the hives page hides quiet ephemeral hives and counts no agents on a quiet row; the hive reproduce proof removes its invited member on exit.",
+      "seam": "scripts.hive.registry.quiet, scripts.hive.sweep.sweep through tick step hive sweep, scripts.swarm.health.quiet_hives.findings, scripts.swarm_ledger.api.hives.view, scripts/packaging/hive-reproduce.sh exit trap",
+      "tests": [
+        "tests/tick/steps/test_hive_sweep.py::test_hive_sweep",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_ephemeral_hive_is_drained_and_removed_after_the_window",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_ephemeral_hive_with_a_running_agent_record_is_drained_and_kept",
+        "tests/tick/steps/test_hive_sweep.py::test_a_kept_hive_does_not_stop_the_sweep_and_a_draining_hive_is_not_drained_again",
+        "tests/tick/steps/test_hive_sweep.py::test_the_sweep_reads_only_the_state_index_and_skips_ids_without_a_record",
+        "tests/tick/steps/test_hive_sweep.py::test_a_quiet_lasting_hive_raises_one_finding_and_an_ephemeral_one_none",
+        "tests/tick/steps/test_hive_sweep.py::test_a_hive_is_quiet_only_once_a_beat_is_older_than_the_window",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_deletes_every_record_of_a_hive_and_keeps_its_wait_histories",
+        "tests/tick/steps/test_hive_sweep.py::test_purge_counts_only_agents_still_running_on_the_hive",
+        "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_that_stops_after_its_invite_removes_the_member",
+        "tests/test_hive_reproduce_exit.py::test_a_reproduce_run_told_to_keep_its_hive_leaves_it"
+      ]
+    },
+    {
       "id": "hive-agent-ceiling",
       "origin": "operator",
       "operator_words": "a hive's max agents must not be a fixed number such as the default twenty or ten. With no cap set, the ceiling is computed each tick from the hive's own reported memory, swap and load, the same host room rule the workstation autoscale uses, and placement uses that number. A cap set by the operator through the hive command or the page bounds it from above.",
