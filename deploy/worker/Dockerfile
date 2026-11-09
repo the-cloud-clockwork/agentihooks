@@ -25,7 +25,8 @@ ARG AGENTIHOOKS_VERSION=0.0.0
 WORKDIR /build
 RUN python -c "import tomllib; print(*tomllib.load(open('pyproject.toml', 'rb'))['build-system']['requires'], sep='\\n')" > /build-env/source-requires.txt \
     && pip install --no-cache-dir -r /build-env/source-requires.txt \
-    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --no-build-isolation --wheel-dir /wheels .
+    && SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS="$AGENTIHOOKS_VERSION" pip wheel --no-deps --no-build-isolation --wheel-dir /wheels . \
+    && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
 FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
 RUN apt-get update && apt-get install -y --no-install-recommends gh
@@ -46,7 +47,7 @@ RUN dpkg-query -W -f='${Package}\n' | sort > /base-packages \
 FROM build-env AS overlay
 COPY --from=wheel /wheels /wheels
 WORKDIR /opt/venv
-RUN bin/pip install --no-cache-dir --no-deps /wheels/*.whl \
+RUN bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \
     && rm -rf bin/python* bin/pip* bin/activate* bin/Activate.ps1 pyvenv.cfg include lib64 lib/python3.12/site-packages/pip lib/python3.12/site-packages/pip-*.dist-info \
     && helper=lib/python3.12/site-packages/profiles/package/skills/worktree/scripts/wt.sh \
     && chmod 0755 "$helper" \

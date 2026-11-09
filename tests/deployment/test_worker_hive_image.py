@@ -106,7 +106,7 @@ def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it
     assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
     assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
     overlay = worker_stage("overlay")
-    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl \\\n" in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \\\n" in overlay
     assert "lib/python3.12/site-packages/pip " in overlay
     assert (
         "useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker"
@@ -129,11 +129,11 @@ def test_hive_build_tools_install_in_a_layer_cached_apart_from_the_source() -> N
     assert "pip wheel --no-deps --no-build-isolation --wheel-dir /wheels ." in wheel
     assert "open('pyproject.toml', 'rb'))['build-system']['requires']" in wheel
     assert wheel.index("pip install --no-cache-dir -r /build-env/source-requires.txt") < wheel.index("pip wheel")
-    assert "tools.txt" not in wheel
+    assert "r.startswith('ruff==')])\" > /wheels/tools.txt" in wheel
     overlay = worker_stage("overlay")
     assert overlay.startswith("FROM build-env AS overlay\n")
     assert "python -m venv" not in overlay
-    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl \\\n" in overlay
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \\\n" in overlay
 
 
 def test_hive_image_can_install_agentihooks_from_the_local_build_context():
