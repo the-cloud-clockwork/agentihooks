@@ -1,15 +1,18 @@
 """Reads the last message of many JetStream subjects with one API request, through a short lived consumer."""
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from nats.js import JetStreamContext
 from nats.js.errors import APIError
 
 from . import nats_payload
+from .bus import StateEntry
 
 INACTIVE_NS = 5_000_000_000
 TIMEOUT_S = 5.0
+KV_OPERATION = "KV-Operation"
 
 
 @dataclass(frozen=True)
@@ -24,8 +27,8 @@ async def last_per_subject(js: JetStreamContext, stream: str, subjects: list[str
     wanted = list(dict.fromkeys(subjects))
     if not wanted:
         return {}
-    nc = js._nc
-    sub = await nc.subscribe(nc.new_inbox())
+    nc = js._nc  # pyright: ignore[reportPrivateUsage]
+    sub = await nc.subscribe(nc.new_inbox())  # pyright: ignore[reportUnknownMemberType]
     try:
         config = {
             "deliver_policy": "last_per_subject",
@@ -37,7 +40,7 @@ async def last_per_subject(js: JetStreamContext, stream: str, subjects: list[str
             "num_replicas": 1,
         }
         body = json.dumps({"stream_name": stream, "config": config}).encode()
-        create = f"{js._prefix}.CONSUMER.CREATE.{stream}"
+        create = f"{js._prefix}.CONSUMER.CREATE.{stream}"  # pyright: ignore[reportPrivateUsage]
         nats_payload.validate(nc, create, body)
         reply = await nc.request(create, body, timeout=TIMEOUT_S)
         info = json.loads(reply.data)
@@ -50,3 +53,22 @@ async def last_per_subject(js: JetStreamContext, stream: str, subjects: list[str
         return found
     finally:
         await sub.unsubscribe()
+
+
+async def read_entries(
+    js: JetStreamContext,
+    stream: str,
+    keys: list[str],
+    subject: Callable[[str], str],
+    read_chunk: Callable[[str], Awaitable[bytes]],
+    revision: Callable[[Last], int],
+) -> list[StateEntry | None]:
+    """Answers each key, in order, with its decoded last entry, or None when it is missing or deleted."""
+    found = await last_per_subject(js, stream, [subject(key) for key in keys])
+    entries: dict[str, StateEntry] = {}
+    for key in dict.fromkeys(keys):
+        last = found.get(subject(key))
+        if last is not None and last.headers.get(KV_OPERATION) is None:
+            value = await nats_payload.decode(read_chunk, last.data)
+            entries[key] = StateEntry(key=key, value=value, revision=revision(last))
+    return [entries.get(key) for key in keys]
