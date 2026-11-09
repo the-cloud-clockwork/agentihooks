@@ -1124,7 +1124,8 @@ def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task
     assert setup.launcher.collect(request) == Outcome("spawn", Status.OK, "hive")
 
 
-def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_finished_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     request, order, _ = live_order(setup)
@@ -1132,7 +1133,24 @@ def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
     admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
     setup.store.put_agent("fixture", replace(worker, state="finished"))
     assert setup.launcher.collect(request).ok
-    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{worker.name}{admission.JOINED}"]
+    assert admission.pending(setup.store.redis, order.hive) == 0
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_failed_receipt_for_a_finished_worker_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    setup.store.redis.hset(setup.launcher.orders.receipt(order), "ack", Ack("failed", {}, "prompt").encode())
+    assert not setup.launcher.collect(request).ok
+    assert admission.pending(setup.store.redis, order.hive) == 0
 
 
 def test_an_ended_worker_receipt_is_still_refused(setup):
@@ -1270,14 +1288,17 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
 
 
-def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_live_acknowledgement_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
     from scripts.hive import admission
 
     _, order, ack = live_order(setup)
     name = setup.store.execution_registry.get("fixture", order.execution_id).name
     admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert admission.pending(setup.store.redis, order.hive) == 1
     assert setup.launcher.complete(order, ack).ok
-    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
+    assert admission.pending(setup.store.redis, order.hive) == 0
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == []
 
 
 @pytest.mark.parametrize(
@@ -1502,7 +1523,34 @@ def test_an_acknowledgement_records_an_expired_slot_live_only_for_a_named_slot_a
     assert slots.counts() == {"claude:account": 1}
 
 
-def test_ambiguous_receipt_keeps_the_reservation_and_order(setup):
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_an_ambiguous_receipt_releases_its_admission_reservation(setup: SimpleNamespace) -> None:
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    _, order, _ = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert not setup.launcher.complete(order, Ack("failed", {}, "ambiguous")).ok
+    assert admission.pending(setup.store.redis, order.hive) == 0
+
+
+@pytest.mark.feature("hive-admission-pending-launches")
+def test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation(
+    setup: SimpleNamespace,
+) -> None:
+    from scripts.hive import admission
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    with pytest.raises(SwarmError):
+        setup.launcher.complete(replace(order, generation=order.generation + 1), ack)
+    assert admission.pending(setup.store.redis, order.hive) == 0
+
+
+def test_ambiguous_receipt_keeps_the_slot_and_order(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
