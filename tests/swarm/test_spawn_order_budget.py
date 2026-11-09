@@ -104,7 +104,7 @@ def test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_sp
 @pytest.mark.parametrize("verb", ["freeze", "focus"])
 def test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds(verb: str) -> None:
     other = "freeze" if verb == "focus" else "focus"
-    targets = ("lane:eng", "kind:ops", "lane:", "kind", "tasks/t1", "phases/p1", "plans/q", "lane:ci")
+    targets = ("lane:eng", "kind:ops", "lane:", "kind", "tasks/t1", "phases/p1", "plans/q", "lane:ci", "lane:eng:x")
     records = [{"verb": verb, "target": target} for target in targets] + [{"verb": other, "target": "tasks/t2"}]
     tasks = [
         ({"id": "t1", "lane": "eng"}, ["tasks/t1", "slices/s", "phases/p1", "plans/q"]),
@@ -112,6 +112,7 @@ def test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds(verb: str) 
         ({"id": "t3", "lane": "plan"}, ["tasks/t3", "lane:", "phases/p1"]),
         ({"id": "t4", "lane": "ci"}, ["tasks/t4"]),
         ({"id": "t5", "lane": "plan"}, ["tasks/t5", "phases/p9"]),
+        ({"id": "t6", "lane": "plan"}, ["tasks/t6", "lane:eng:x"]),
     ]
     for task, chain in tasks:
         assert freeze._nearest(records, verb, task, chain) == scanned(records, verb, task, chain)
