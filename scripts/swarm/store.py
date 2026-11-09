@@ -188,7 +188,7 @@ class AgentRecord:
 
 
 class RedisStore:
-    def __init__(self, redis):
+    def __init__(self, redis: Any) -> None:
         if redis is None:
             raise SwarmError("no Redis client; the swarm refuses to run without it")
         self.redis = redis
