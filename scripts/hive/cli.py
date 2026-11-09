@@ -224,6 +224,8 @@ def _retire(args: argparse.Namespace) -> str:
         return "\n".join([*bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
+    if args.command == "holders":
+        return auth.backfill_holders(redis_client())
     return "\n".join(_remove(args))
 
 
@@ -317,6 +319,7 @@ def _parser() -> argparse.ArgumentParser:
     joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    sub.add_parser("holders", help="Write the holder record of every member minted before holder records")
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
@@ -545,7 +548,7 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command in ("revoke", "remove", "drain"):
+        elif args.command in ("revoke", "remove", "drain", "holders"):
             print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)
