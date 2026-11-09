@@ -148,7 +148,7 @@ def hook_images(objects: list[dict]) -> set[str]:
     }
 
 
-def test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version():
+def test_a_released_chart_runs_its_hooks_on_the_hive_worker_of_its_own_version() -> None:
     repository = "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
     for tag in ("release", "dev", "2.17.400"):
         objects = render_released("2.17.467", f"workers.image.tag={tag}")
