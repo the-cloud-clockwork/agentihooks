@@ -1,5 +1,5 @@
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.hive import registry
 
@@ -69,7 +69,7 @@ def host(agent: "AgentRecord") -> str:
     return agent.hive or agent.runtime_target.get("host_id", "")
 
 
-def read(redis: "Redis", agent: "AgentRecord") -> dict:
+def read(redis: "Redis", agent: "AgentRecord") -> dict[str, Any]:
     if not host(agent) or not agent.execution_id:
         return {}
     raw = redis.hget(key(host(agent)), agent.execution_id)
