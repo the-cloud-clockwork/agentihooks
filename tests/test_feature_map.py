@@ -782,6 +782,7 @@ def test_lint_grades_the_feature_map_from_the_protected_grader_against_the_base(
         )
     )
 
+
 @pytest.mark.feature("independent-ci-records")
 def test_feature_fragments_preserve_validation_and_retirement(
     mapped_repo: tuple[Path, Path, dict], tmp_path: Path

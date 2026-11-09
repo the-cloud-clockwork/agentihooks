@@ -563,6 +563,7 @@ def test_the_parser_reads_paths_and_defaults_the_head_to_the_working_directory(
     args = type_gate.build_parser().parse_args(["--base", "b"])
     assert (args.base, args.head) == (Path("b"), Path.cwd())
 
+
 @pytest.mark.feature("independent-ci-records")
 def test_type_records_load_and_refresh_without_rewriting_the_shared_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -588,7 +589,7 @@ def test_type_record_duplicate_and_invalid_counts_are_refused(tmp_path: Path) ->
     with pytest.raises(ValueError, match="duplicate"):
         type_gate.load(root)
     (root / type_gate.BASELINE).write_text("{}")
-    for invalid in ("-1", "true", "\"one\"", "{}"):
+    for invalid in ("-1", "true", '"one"', "{}"):
         record.write_text(invalid)
         with pytest.raises(ValueError, match="count"):
             type_gate.load(root)
