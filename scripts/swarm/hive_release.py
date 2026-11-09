@@ -13,9 +13,9 @@ def fields(row: Mapping[str, Any], name: str) -> dict[str, str]:
     return {"claimed_by": ""} if row.get("state") == "pr" else {"state": "open", "claimed_by": ""}
 
 
-def release(ledger: Any, slug: str, task_id: str, name: str) -> dict[str, str]:
-    """Clear ``name``'s claim on a workstation task it leaves from a hive seat and return the fields written."""
-    found = fields(ledger.task(slug, task_id) or {}, name)
+def release(ledger: Any, slug: str, row: Mapping[str, Any], name: str) -> dict[str, str]:
+    """Clear ``name``'s claim on the workstation task ``row`` it leaves from a hive seat and return the fields written."""
+    found = fields(row, name)
     if found:
-        ledger.update_task(slug, task_id, found, by=name, if_match={"claimed_by": name})
+        ledger.update_task(slug, row["id"], found, by=name, if_match={"claimed_by": name})
     return found
