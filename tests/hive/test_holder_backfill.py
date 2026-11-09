@@ -12,7 +12,6 @@ pytestmark = pytest.mark.unit
 SLUG = "alpha"
 WORKER = "engineer@323133-7776"
 PUBLIC = "redis://hive.example:6380/2"
-FEATURE = "hive-agent-token-holder-only"
 
 
 @pytest.fixture
@@ -33,7 +32,7 @@ def _holder(client: Any, member_id: str) -> object:
     return auth.hive_state.read(auth._store(client), f"holder.{member_id}")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-agent-token-holder-only")
 def test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_on(
     client: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -48,7 +47,7 @@ def test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_o
         auth.issue_agent(client, grant["id"], SLUG, WORKER)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-agent-token-holder-only")
 def test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map(
     client: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -65,7 +64,7 @@ def test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map(
     assert auth.agent_member(client, token, SLUG, WORKER) == grant["id"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-agent-token-holder-only")
 def test_the_backfill_leaves_held_and_unmapped_members_alone(client: Any) -> None:
     held = auth.mint(client, "held", PUBLIC)
     auth.hive_state.amend(auth._store(client), f"holder.{held['id']}", lambda _: "stale")
@@ -77,7 +76,7 @@ def test_the_backfill_leaves_held_and_unmapped_members_alone(client: Any) -> Non
     assert _holder(client, unmapped["id"]) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-agent-token-holder-only")
 def test_the_hive_holders_command_prints_the_backfill(client: Any, capsys: pytest.CaptureFixture[str]) -> None:
     first, second = sorted((_legacy(client, "one")["id"], _legacy(client, "two")["id"]))
 
