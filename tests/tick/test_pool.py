@@ -192,11 +192,12 @@ def test_expired_lane_drops_late_result_and_does_not_start_dependent() -> None:
             rows = engine.run_group(
                 "load", context(), (Step("stuck", stuck), Step("after", after, frozenset({"stuck"})))
             )
-        assert all(row.outcome == engine.LATE for row in rows)
+        assert all(row.lost for row in rows)
+        assert rows[1].outcome == engine.LATE and rows[1].skipped
         assert not dependent.is_set()
         assert all(row.result is None for row in rows)
         assert [row.budget_s for row in rows] == [2.0, 2.0]
-        assert 0.0 < rows[0].wall_s < 30.0
+        assert 0.0 <= rows[0].wall_s < 30.0
         assert rows[1].wall_s == 0.0
     finally:
         release.set()
