@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 
 from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
@@ -7,6 +8,19 @@ from scripts.swarm.store import RedisStore
 WAIT_MS = 30 * 60_000
 FRESH_MS = 5 * 60_000
 WAITS = "hive-placement-waits"
+TOTALS = "admission-outcome-total"
+ADMITTED = "admitted"
+
+
+def _outcome(reason: str, lane: str, previous: Mapping[str, object]) -> str:
+    """The admission outcome one observation adds: admitted on a placement, a refusal category when the wait is new."""
+    if not reason:
+        return ADMITTED
+    if previous.get("reason") == reason and previous.get("lane") == lane:
+        return ""
+    from scripts.hive import admission
+
+    return admission.category(reason)
 
 
 def read(store: RedisStore, slug: str) -> dict:
@@ -27,6 +41,8 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
                 if reason and previous.get("reason") == reason and previous.get("lane") == lane:
                     started = previous["started_at"]
                 pipe.multi()
+                if outcome := _outcome(reason, lane, previous):
+                    pipe.hincrby(store.key(slug, TOTALS), outcome)
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
                     if workstation:
