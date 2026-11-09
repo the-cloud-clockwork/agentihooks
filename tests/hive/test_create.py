@@ -916,3 +916,167 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
     assert create.create(world.tools, create.Options(dry_run=True)) == (
         "dry run of hive create swarm-hive-002: nothing written"
     )
+
+
+class RacingRun(Run):
+    def __init__(self, barrier):
+        super().__init__()
+        self.barrier = barrier
+
+    def _gh(self, argv, stdin):
+        if argv[:2] == ["pr", "list"] and "open" in argv:
+            self.barrier.wait(timeout=10)
+        return super()._gh(argv, stdin)
+
+
+def _racer(world, home, barrier):
+    import dataclasses
+
+    environ = {**world.tools.environ, "AGENTIHOOKS_HOME": str(world.home / home)}
+    return dataclasses.replace(world.tools, environ=environ, run=RacingRun(barrier), state={})
+
+
+def _reserved(world, name):
+    return world.tools.redis.get(f"{create.RESERVED}:{name}")
+
+
+def test_two_concurrent_creates_reserve_different_names(world):
+    import threading
+
+    barrier = threading.Barrier(2)
+    racers = [_racer(world, home, barrier) for home in ("one", "two")]
+    started = {}
+
+    def start(tools):
+        started[tools.environ["AGENTIHOOKS_HOME"]] = create._start(tools, create.Options())
+
+    threads = [threading.Thread(target=start, args=(tools,)) for tools in racers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    names = sorted(state["name"] for state in started.values())
+    assert names == ["swarm-hive-001", "swarm-hive-002"]
+    for state in started.values():
+        assert _reserved(world, state["name"]) == state["reservation"]
+        assert state["reservation"].startswith("root:")
+        assert 0 < world.tools.redis.ttl(f"{create.RESERVED}:{state['name']}") <= create.RESERVE_S
+
+
+def test_a_name_another_create_reserved_is_skipped(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )
+    assert _reserved(world, "swarm-hive-002") is None
+
+
+def test_an_explicit_name_another_create_reserved_is_refused(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(name=NAME, timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create refuses {NAME}: it is already held by another hive create run; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
+    assert _reserved(world, NAME) == "other:run"
+
+
+def test_a_failed_create_releases_its_reservation(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _state(world)["name"] == NAME
+    assert _reserved(world, NAME) is None
+
+
+def test_a_finished_create_releases_its_reservation(world):
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
+
+
+def test_a_failed_service_read_releases_the_reservation(world, monkeypatch):
+    def broken(tools, argv):
+        raise auth.HiveError("no cluster")
+
+    monkeypatch.setattr(create, "_kubectl", broken)
+    with pytest.raises(auth.HiveError, match="no cluster"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _reserved(world, NAME) is None
+
+
+def test_a_release_leaves_a_reservation_another_run_took(world):
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+    world.tools.state = {"name": NAME, "reservation": "root:mine"}
+
+    create._release(world.tools)
+
+    assert _reserved(world, NAME) == "other:run"
+
+
+def test_a_resumed_create_takes_its_reservation_back(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    token = _state(world)["reservation"]
+    seen = []
+    monkeypatch.setattr(invite, "invite", lambda *args: seen.append(_reserved(world, NAME)) or crash())
+
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert seen == [token]
+    assert _reserved(world, NAME) is None
+
+
+def test_a_resumed_create_refuses_a_name_another_run_reserved(world, monkeypatch):
+    def crash(*args):
+        raise auth.HiveError("killed")
+
+    monkeypatch.setattr(invite, "invite", crash)
+    with pytest.raises(auth.HiveError, match="killed"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(timeout_s=60))
+
+    assert str(refused.value) == (
+        f"hive create cannot resume {NAME}: another hive create run reserved it; "
+        f"remove {create.STATE_FILE} under the agentihooks home to name a new hive"
+    )
+    assert _reserved(world, NAME) == "other:run"
+
+
+def test_a_resumed_create_with_its_pull_request_reserves_nothing(world):
+    world.run.state = "CLOSED"
+    with pytest.raises(auth.HiveError, match="closed without merging"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    saved = _state(world)
+    saved["pr"] = PR
+    (world.home / "agentihooks" / create.STATE_FILE).write_text(json.dumps(saved))
+    world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
+    world.run.state = "MERGED"
+
+    with pytest.raises(auth.HiveError, match="rerun hive create to resume$"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert _reserved(world, NAME) == "other:run"
+
+
+def test_the_dry_run_reserves_nothing(world):
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert world.tools.redis.keys(f"{create.RESERVED}:*") == []
