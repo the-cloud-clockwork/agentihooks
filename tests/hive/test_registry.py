@@ -114,6 +114,31 @@ def test_a_heartbeat_seeded_interface_hive_reads_as_swarm_master(redis):
     assert registry.show(redis, "root")["name"] == "swarm-master"
 
 
+def test_two_headed_hives_joining_take_unique_names(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    joined = registry.update(redis, "vm", ["ui=yes", "name=swarm-master"])
+    assert joined["name"] == "swarm-master-2"
+    assert registry.show(redis, "root")["name"] == "swarm-master"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["swarm-master", "swarm-master-2"]
+    assert registry.update(redis, "vm", ["max-agents=2"])["name"] == "swarm-master-2"
+    assert registry.update(redis, "root", ["max-agents=3"])["name"] == "swarm-master"
+
+
+def test_a_restarted_headed_hive_keeps_its_derived_name(redis):
+    registry.update(redis, "root", ["ui=yes"])
+    registry.update(redis, "vm", ["ui=yes"])
+    assert registry.update(redis, "vm", ["ui=yes", "name=vm"], keep=True)["name"] == "swarm-master-2"
+    assert registry.update(redis, "vm", ["name=Desk"])["name"] == "swarm-master-2"
+
+
+def test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix(redis):
+    registry.update(redis, "a", ["name=box"])
+    registry.update(redis, "b", ["name=box-2"])
+    assert registry.update(redis, "c", ["name=box"])["name"] == "box-3"
+    assert registry.update(redis, "a", ["name=box"])["name"] == "box"
+    assert sorted(hive["name"] for hive in registry.hives(redis)) == ["box", "box-2", "box-3"]
+
+
 def test_a_restarted_registration_keeps_the_stored_settings(redis):
     pod = ["ui=no", "ephemeral=yes", "excluded=master", "max-agents=9"]
     first = registry.update(redis, "box", pod, keep=True)
