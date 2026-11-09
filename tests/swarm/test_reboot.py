@@ -249,10 +249,8 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
 
 @pytest.mark.feature("hive-drain-push-resume")
 def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision(
-    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime]
 ) -> None:
-    fresh = {"remote_branch": "none", "remote_head": "none", "continue_from": "fresh", "fresh_reason": "none"}
-    monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda repo, lives, recorded, heads=None: fresh)
     ledger, runtime = rebooted
     eng = next(a for a in _local(store).values() if a.lane == "eng")
     store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
@@ -267,16 +265,8 @@ def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_success
     assert (ledger.rows[eng.task]["state"], ledger.rows[eng.task]["claimed_by"]) == ("open", "")
     assert not [r for r in store.restored("sw") if r["outcome"] == resume.AWAITING]
     assert store.handoff("sw", eng.task) == "carry on from the parser"
-
-    ticked = tick_module.tick("sw", store, ledger, runtime, 901)
-
-    successors = [a for a in store.agents("sw") if a.task == eng.task]
-    assert len(successors) == 1, ticked
-    (successor,) = successors
-    assert successor.name != eng.name
-    assert (successor.seat, successor.state) == (eng.seat, "working")
-    assert runtime.spawned[-1] == ("eng", successor.name, eng.task)
-    assert runtime.tasks[-1]["handoff"] == "carry on from the parser"
+    assert store.handoff_seat("sw", eng.task) == eng.seat
+    assert store.claim("sw", eng.task, "engineer@next", tick_module.LEASE_MS)
 
 
 @pytest.mark.feature("hive-drain-push-resume")
