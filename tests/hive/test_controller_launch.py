@@ -148,8 +148,9 @@ def test_a_fresh_runtime_places_without_pass_rows_or_pod_quota(
     )
     runtime = HerdrRuntime()
     runtime._profile_decision = setup.herdr._profile_decision
+    reader = Mock(return_value=setup.herdr._quota_accounts)
     if deployment_reader:
-        runtime.quota_accounts = Mock(return_value=setup.herdr._quota_accounts)
+        runtime.quota_accounts = reader
     assert not hasattr(runtime, "_quota_accounts")
     assert balancer.cached_observations() == []
     launcher = launch.HiveLaunch(setup.store, setup.config.slug, setup.held, runtime)
@@ -157,8 +158,8 @@ def test_a_fresh_runtime_places_without_pass_rows_or_pod_quota(
     assert isinstance(selected, launch.Selection)
     assert (selected.hive, selected.account.name) == ("remote", "account")
     if deployment_reader:
-        runtime.quota_accounts.assert_called_once()
-        assert runtime.quota_accounts.call_args.kwargs == {"refresh": False}
+        reader.assert_called_once()
+        assert reader.call_args.kwargs == {"refresh": False}
 
 
 @pytest.mark.feature("controller-quota-after-restart")
