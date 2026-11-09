@@ -26,7 +26,8 @@ def envelope(document: dict[str, Any], revision: int = 1) -> bytes:
 
 
 @pytest.mark.feature("scheduler-bounded-history")
-def test_streaming_recovery_keeps_active_pending_and_operator_timers() -> None:
+@pytest.mark.parametrize("retired_first", [False, True])
+def test_streaming_recovery_keeps_active_pending_and_operator_timers(retired_first: bool) -> None:
     document = {
         "entries": {
             **{str(i): timer(str(i)) for i in range(1_000)},
@@ -38,6 +39,8 @@ def test_streaming_recovery_keeps_active_pending_and_operator_timers() -> None:
         "lease": {"token": "holder", "expires": 20_000},
         "retired": {"retired": True},
     }
+    if retired_first:
+        document = {"retired": document["retired"], **document}
     raw = envelope(document)
     decoded = Envelope(BulkReader(io.BytesIO(raw), len(raw)))
     assert compact(decoded, 10_000) == {
@@ -66,7 +69,12 @@ def test_raw_redis_field_disconnects_its_dedicated_connection() -> None:
     connection = Mock()
     connection._sock.makefile.return_value = io.BytesIO(b"$5\r\nhello\r\n")
     redis = Mock()
-    redis.connection_pool.get_connection.return_value = connection
+
+    def connection_for(command_name: str) -> Mock:
+        assert command_name == "HGET"
+        return connection
+
+    redis.connection_pool.get_connection.side_effect = connection_for
     with redis_stream.field(redis, "state", "entries") as source:
         assert source.read(3) == b"hel"
         assert source.read(100) == b"lo"

@@ -20,6 +20,7 @@ def compact(source: BinaryIO | io.RawIOBase, now: float) -> dict[str, Any]:
     from scripts.scheduler.core import abandoned as is_abandoned
 
     document: dict[str, Any] = {"entries": {}, "retired": {}}
+    retired: set[str] = set()
     builder: Any = None
     target = ""
     parser: Any = import_module("ijson")
@@ -37,7 +38,7 @@ def compact(source: BinaryIO | io.RawIOBase, now: float) -> dict[str, Any]:
                 builder = None
             continue
         if prefix == "retired" and event == "map_key":
-            document["entries"].pop(value, None)
+            retired.add(value)
         elif prefix.startswith("entries.") and event == "start_map":
             builder, target = builder_type(), prefix
             builder.event(event, value)
@@ -47,6 +48,8 @@ def compact(source: BinaryIO | io.RawIOBase, now: float) -> dict[str, Any]:
                 builder.event(event, value)
             elif event not in {"map_key", "end_map", "end_array"}:
                 document[prefix] = value
+    for entry_id in retired:
+        document["entries"].pop(entry_id, None)
     return document
 
 

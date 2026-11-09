@@ -57,8 +57,8 @@ def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
         if "entries" in document:
             return stored
         now = time.time()
-        entries = {}
-        abandoned = []
+        entries: dict[str, object] = {}
+        abandoned: list[str] = []
         for entry_id, raw in state.redis.hscan_iter(legacy_key, count=128):
             entry = json.loads(raw)
             if entry.get("owner") == "process" and is_abandoned(entry, now):

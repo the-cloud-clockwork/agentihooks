@@ -72,7 +72,7 @@ class Entry:
     id: str
 
     @property
-    def record(self) -> dict:
+    def record(self) -> dict[str, Any]:
         return self.scheduler.record(self.id)
 
     @property
@@ -155,7 +155,7 @@ class Scheduler:
     def name(self, suffix: str) -> str:
         return self.key(suffix).replace(":", ".")
 
-    def document(self) -> dict:
+    def document(self) -> dict[str, Any]:
         return self._read()[0]
 
     def record(self, entry_id: str) -> dict[str, Any]:

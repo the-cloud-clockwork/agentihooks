@@ -26,7 +26,7 @@ class BulkReader:
 
 @contextmanager
 def field(redis: Any, key: str, name: str) -> Generator[BulkReader | None, None, None]:
-    connection = redis.connection_pool.get_connection()
+    connection = redis.connection_pool.get_connection("HGET")
     source = None
     try:
         connection.send_command("HGET", key, name)
