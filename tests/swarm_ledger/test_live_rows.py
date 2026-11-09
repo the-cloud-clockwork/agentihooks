@@ -11,8 +11,6 @@ from scripts.swarm_ledger.api.client import patched
 from scripts.swarm_ledger.repository import fragments, hierarchy, live_rows
 from scripts.swarm_ledger.repository.rows import encode
 
-FEATURE = "swarm-tick-live-rows"
-
 
 def _doc() -> dict:
     """A ledger with a done task, a frozen phase and a focus inside it."""
@@ -40,7 +38,7 @@ def _ids(rows: list[dict]) -> list[str]:
     return [row["id"] for row in rows]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_marks_resolve_freeze_and_focus_per_task() -> None:
     marks = live_rows.marks(_doc())
     assert marks == {
@@ -53,7 +51,7 @@ def test_marks_resolve_freeze_and_focus_per_task() -> None:
     }
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_marks_agree_with_the_claim_gate_freeze() -> None:
     doc = _doc()
     graph = hierarchy.project(doc)[0]
@@ -63,7 +61,7 @@ def test_marks_agree_with_the_claim_gate_freeze() -> None:
         assert marks[task["id"]][0] is expected, task["id"]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 @pytest.mark.parametrize(
     ("closed", "frozen", "ids"),
     [
@@ -86,14 +84,14 @@ def test_rows_answer_closed_and_frozen_tasks_only_on_request(closed: bool, froze
     }.items()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_default_scope_holds_neither_closed_nor_frozen_tasks() -> None:
     assert live_rows.Scope() == live_rows.Scope(closed=False, frozen=False)
     assert live_rows.answer(_doc(), live_rows.Scope()).frozen_ids == ["c"]
     assert live_rows.answer(_doc(), live_rows.Scope(frozen=True)).frozen_ids == []
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_scoped_full_export_carries_only_the_scoped_task_rows() -> None:
     doc = _doc()
     answer = live_rows.answer(doc, live_rows.Scope())
@@ -101,7 +99,7 @@ def test_the_scoped_full_export_carries_only_the_scoped_task_rows() -> None:
     assert json.loads(text) == {"data": {"tasks": answer.rows, "phases": doc["phases"], "frozen_ids": ["c"]}}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_unscoped_full_export_keeps_every_task() -> None:
     doc = _doc()
     assert json.loads(routes.export_text(fragments.document(doc), ("tasks",)))["data"]["tasks"] == doc["tasks"]
@@ -112,7 +110,7 @@ def _path(*parts: object) -> str:
     return encode(list(parts))
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
     before = _doc()
     held = {"tasks": live_rows.rows(before, live_rows.Scope())}
@@ -128,7 +126,7 @@ def test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows() -> None:
     assert result == {"tasks": answer.rows, "frozen_ids": ["c"]}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 @pytest.mark.parametrize("part", ["freezes", "phases"])
 def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str) -> None:
     doc = _doc()
@@ -137,7 +135,7 @@ def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str)
     assert routes.export_changes(doc, paths, ("tasks",), answer) is None
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_unscoped_changes_still_carry_closed_task_rows() -> None:
     doc = _doc()
     reply = json.loads(routes.export_changes(doc, {_path("tasks", ["id", "b", 0], "state")}, ("tasks",)) or "null")
@@ -146,7 +144,7 @@ def test_unscoped_changes_still_carry_closed_task_rows() -> None:
     assert len(touched["order"]) == len(doc["tasks"])
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_export_schema_takes_boolean_closed_and_frozen_flags() -> None:
     from scripts.swarm_ledger.api import schemas
 

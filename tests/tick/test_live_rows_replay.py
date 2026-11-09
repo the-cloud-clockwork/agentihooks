@@ -16,7 +16,6 @@ from scripts.swarm_ledger.repository.rows import encode
 from scripts.tick import view
 
 FIXTURE = Path(__file__).parents[1] / "swarm_ledger" / "fixtures" / "ledger-2026-11-09.json.gz"
-FEATURE = "swarm-tick-live-rows"
 
 
 def _ledger() -> dict[str, Any]:
@@ -59,7 +58,7 @@ def _pass(path: Path, reader: view.Reader) -> dict[str, Any]:
     return record
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read() -> None:
     doc = _ledger()
     assert len(doc["tasks"]) == 4880
@@ -67,14 +66,14 @@ def test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read() -> None
     assert _live_unfrozen(doc) == 292
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_a_pass_reads_only_the_live_unfrozen_tasks_of_the_replayed_ledger(tmp_path: Path) -> None:
     doc = _ledger()
     record = _pass(tmp_path / "view.json", _reader(doc))
     assert record[view.ROWS_READ] == _live_unfrozen(doc) == 292
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_a_delta_pass_after_a_task_closes_reads_one_row_fewer(tmp_path: Path) -> None:
     doc = _ledger()
     path = tmp_path / "view.json"
@@ -89,7 +88,7 @@ def test_a_delta_pass_after_a_task_closes_reads_one_row_fewer(tmp_path: Path) ->
     assert closing["id"] not in {task["id"] for task in view.refreshed(path, _reader(after, changed)).tasks}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_held_view_names_the_frozen_tasks_it_left_out(tmp_path: Path) -> None:
     doc = _ledger()
     held = view.refreshed(tmp_path / "view.json", _reader(doc))
