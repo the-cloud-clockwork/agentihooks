@@ -108,11 +108,62 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         if earlier is not None and earlier.is_alive():
             return StepRecord(step.name, 0.0, step.budget_s, held=True)
         tools = None if ctx.tools is None else ctx.tools.for_effects(step.effects)
-        worker = Thread(target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools)), daemon=True)
+        run = _Run()
+        worker = Thread(
+            target=_record, args=(outcome, caller, step, Context(ctx.view, deadline, tools), run), daemon=True
+        )
         _RUNNING[key] = worker
         worker.start()
     worker.join(step.budget_s)
-    return (_finished if outcome else _left)(step, outcome, clock() - started)
+    if run.give_up():
+        return _left(step, outcome, clock() - started)
+    worker.join()
+    return _finished(step, outcome, clock() - started)
+
+
+@dataclass
+class _Run:
+    """One step run's end, decided once under a lock: it ended inside its budget, or was given up at it."""
+
+    lock: Lock = field(default_factory=Lock)
+    ended: bool = False
+    given_up: bool = False
+
+    def end(self) -> bool:
+        """Mark the run ended and return whether it had already been given up at its budget."""
+        with self.lock:
+            self.ended = True
+            return self.given_up
+
+    def give_up(self) -> bool:
+        """Give the run up at its budget unless it already ended, and return whether it was given up."""
+        with self.lock:
+            self.given_up = not self.ended
+            return self.given_up
+
+
+@dataclass
+class _Start:
+    """When one scheduled step's run began, decided once under a lock against the end of its lane."""
+
+    clock: Callable[[], float]
+    lock: Lock = field(default_factory=Lock)
+    at: float | None = None
+    closed: bool = False
+
+    def begin(self) -> bool:
+        """Record that the run starts now and return True, or return False when its lane end already closed it."""
+        with self.lock:
+            if self.closed:
+                return False
+            self.at = self.clock()
+            return True
+
+    def close(self) -> float | None:
+        """Close the step to any later start and return when its run began, or None when it never began."""
+        with self.lock:
+            self.closed = True
+            return self.at
 
 
 def _left(step: Step, outcome: list[Result | BaseException], wall_s: float) -> StepRecord:
@@ -140,13 +191,17 @@ def _finished(step: Step, outcome: list[Result | BaseException], wall_s: float) 
     return StepRecord(step.name, wall_s, step.budget_s, result=found)
 
 
-def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context) -> None:
+def _record(outcome: list[Result | BaseException], caller: ContextCopy, step: Step, ctx: Context, run: _Run) -> None:
     """Run ``step`` in the caller's copied context, recorded under its registered name, and append its result or the
-    error it raised."""
+    error it raised; the run reads abandoned when ``run`` was given up at its budget before it ended."""
     try:
-        outcome.append(caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name))
+        outcome.append(
+            caller.run(timing.within, step.budget_s, step.run, ctx, lane=step.lane, name=step.name, left=run.end)
+        )
     except BaseException as exc:
         outcome.append(exc)
+    finally:
+        run.end()
 
 
 def run_group(
@@ -449,11 +504,13 @@ def _lane_context(lane: Deadline, ctx: Context) -> Context:
     return Context(ctx.view, Deadline(clock() + min(ctx.deadline.remaining, lane.remaining), clock), ctx.tools)
 
 
-def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
+def _after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, start: _Start) -> StepRecord:
     """Run ``step`` once every handed off step of an earlier group in ``earlier`` has ended or was held, dropping it
-    when one of them was dropped or its lane ran out first."""
+    when one of them was dropped or its lane ran out before it started."""
     lane = found.lane(step.lane)
-    if earlier and (not found.ended(earlier, lane.remaining) or lane.expired):
+    if earlier and not found.ended(earlier, lane.remaining):
+        return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
+    if lane.expired or not start.begin():
         return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
     return run_step(step, ctx)
 
@@ -479,29 +536,38 @@ def _kept(step: Step) -> bool:
     return bool(getattr(step, "kept", False))
 
 
-def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass) -> StepRecord:
+def _kept_after(earlier: frozenset[str], step: Step, ctx: Context, found: pool.Pass, start: _Start) -> StepRecord:
     """Run the kept ``step`` once every handed off step of an earlier group in ``earlier`` ended, waiting at most its
-    own budget for them, and run it even when one of them was dropped."""
+    own budget for them, and run it even when one of them was dropped, unless the pass ended before it started."""
     found.ended(earlier, step.budget_s)
+    if not start.begin():
+        return StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
     return run_step(step, ctx)
 
 
 def _expire(
-    running: dict[Future[StepRecord], tuple[Step, float, Deadline]],
+    running: dict[Future[StepRecord], tuple[Step, _Start, Deadline]],
     lost: tuple[set[str], set[str]],
     records: dict[str, StepRecord],
     found: pool.Pass,
     clock: Callable[[], float],
 ) -> None:
-    """Abandon every running step whose lane expired, recording it ended on the pass and in the dropped set of
-    ``lost``, or in its cut set when only the reserve it leaves to a step that needs it ran out."""
+    """Stop waiting on every submitted step whose lane expired, recording it ended on the pass and in the dropped set
+    of ``lost``, or in its cut set when only the reserve it leaves to a step that needs it ran out.
+
+    A step that had not started is skipped and never starts. A step already running is left to its own budget, its
+    wall counted from its own start; only its run past that budget journals it abandoned.
+    """
     dropped, cut = lost
-    for future, (step, started, lane) in list(running.items()):
+    for future, (step, start, lane) in list(running.items()):
         if lane.expired:
             running.pop(future)
             (dropped if _drops(step, dropped, found) else cut).add(step.name)
-            _abandoned(step)
-            left = StepRecord(step.name, clock() - started, step.budget_s, abandoned=True)
+            began = start.close()
+            if began is None:
+                left = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
+            else:
+                left = StepRecord(step.name, clock() - began, step.budget_s, abandoned=True)
             records[step.name] = _ended(found, left)
 
 
@@ -526,7 +592,7 @@ def _eager(
     dropped: set[str] = set()
     cut: set[str] = set()
     pending = list(ordered)
-    running: dict[Future[StepRecord], tuple[Step, float, Deadline]] = {}
+    running: dict[Future[StepRecord], tuple[Step, _Start, Deadline]] = {}
     offsets: dict[str, float | None] = {}
     submitted: list[Future[StepRecord]] = []
     held_back = _held_back(ordered, found.reserves)
@@ -548,15 +614,17 @@ def _eager(
                     )
                 elif _kept(step):
                     earlier = found.handed_of(step.needs - names)
-                    future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found)
+                    start = _Start(clock)
+                    future = found.steps.submit(copy_context().run, _kept_after, earlier, step, ctx, found, start)
                     submitted.append(future)
-                    running[future] = (step, clock(), ctx.deadline)
+                    running[future] = (step, start, ctx.deadline)
                 else:
                     earlier = found.handed_of(step.needs - names)
                     lane_ctx = _lane_context(lane, ctx)
-                    future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found)
+                    start = _Start(clock)
+                    future = found.steps.submit(copy_context().run, _after, earlier, step, lane_ctx, found, start)
                     submitted.append(future)
-                    running[future] = (step, clock(), lane)
+                    running[future] = (step, start, lane)
             ended = [0.0] if any(step.name in records for step in ready) else []
             held = any(_waiting(step, names, found) for step in pending)
             if not running:

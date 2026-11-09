@@ -1,0 +1,23 @@
+rules:
+  - id: abandon-at-lane-expiry
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step is journaled abandoned when its lane expires, so a step still queued behind a sibling, or one that
+      started late and ends inside its budget, reads abandoned and then also reports success. Only run_step journals
+      an abandon, when the step's own run passes its budget; at a lane end close the step's start instead.
+    paths:
+      include:
+        - /scripts/tick/
+        - abandon-at-lane-expiry.py
+    pattern-either:
+      - pattern: |
+          if $LANE.expired:
+              ...
+              _abandoned($STEP)
+              ...
+      - pattern: |
+          if $LANE.expired:
+              ...
+              _left(...)
+              ...
