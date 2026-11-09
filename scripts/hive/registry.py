@@ -204,11 +204,8 @@ def _settle(hive_id: str, record: dict) -> dict:
 
 
 def _held(client: object, hive_id: str) -> set[str]:
-    """The names every other registered hive reads as, or none where this caller cannot read the index."""
-    try:
-        return {record["name"] for record in hives(client) if record["id"] != hive_id}
-    except state.unavailable():
-        return set()
+    """The names every other registered hive reads as."""
+    return {record["name"] for record in hives(client) if record["id"] != hive_id}
 
 
 def _unique(name: str, held: set[str]) -> str:
