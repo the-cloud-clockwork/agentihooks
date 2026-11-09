@@ -38,7 +38,7 @@ def render(*settings):
     return [item for item in yaml.safe_load_all(result.stdout) if item]
 
 
-def test_every_roll_acquires_before_sync_and_releases_after_serving():
+def test_every_roll_acquires_before_sync_and_releases_after_serving() -> None:
     objects = render()
     jobs = [item for item in objects if item["kind"] == "Job"]
     assert {item["metadata"]["annotations"]["argocd.argoproj.io/hook"] for item in jobs} == {
@@ -111,7 +111,7 @@ def test_storage_preparation_is_not_suppressed_by_native_rollout_hooks():
     assert annotations["argocd.argoproj.io/hook-delete-policy"] == "BeforeHookCreation,HookSucceeded"
 
 
-def test_a_drain_that_consumes_the_rollout_budget_is_refused():
+def test_a_drain_that_consumes_the_rollout_budget_is_refused() -> None:
     assert ROLLOUT.LEASE_SECONDS > 1500 + 600
     try:
         render("workers.rollout.drainSeconds=1800")
