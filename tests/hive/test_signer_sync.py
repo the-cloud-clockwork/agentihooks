@@ -15,7 +15,7 @@ from tests.codex_fakes import BAO_TOKEN, BAO_URL
 from tests.hive.test_invite import RECORD, URL, Bao
 from tests.hive.test_nats_grant import _refresh
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.feature("hive-signer-membership-sync")]
 
 SIGNER = "agentihooks/hub/nats-signer"
 TARGET = "agentihooks-swarm/agentihooks-swarm-nats-signer"

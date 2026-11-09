@@ -2415,6 +2415,18 @@
       "tests": [
         "tests/hive/test_controller_launch.py::test_a_fresh_runtime_places_without_pass_rows_or_pod_quota"
       ]
+    },
+    {
+      "id": "hive-signer-membership-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2194",
+      "behaviour": "Invite refreshes the mounted signer after adding a member; revoke and remove unlist the member and refresh the signer without waiting for the hourly secret sync.",
+      "seam": "hive invite, revoke and remove signer member listing",
+      "tests": [
+        "tests/hive/test_signer_sync.py::test_an_invited_member_joins_at_once_through_the_mounted_signer",
+        "tests/hive/test_signer_sync.py::test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs",
+        "tests/hive/test_signer_sync.py::test_hive_remove_syncs_the_signer_record_after_it_unlists"
+      ]
     }
   ],
   "unmapped_rules": [
