@@ -381,10 +381,10 @@ def test_unknown_liveness_holds_the_slot_and_termination_releases_it(tmp_path, m
     assert acc.codex_sessions_by_account(root) == {"alpha": 2, "default": 1}
 
 
-def test_a_finished_execution_releases_its_slot(tmp_path, monkeypatch):
+def test_a_finished_execution_releases_its_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.codex_session import supervisor
     from scripts.codex_session.binding import BindingStore
-    from scripts.swarm.store import RedisStore
+    from scripts.swarm.store import AgentRecord, RedisStore
 
     root = tmp_path / "proc"
     root.mkdir()
@@ -392,7 +392,7 @@ def test_a_finished_execution_releases_its_slot(tmp_path, monkeypatch):
     store = RedisStore(_held_store(monkeypatch, (execution, "connected", "alpha")))
     record = BindingStore(store).get("sw", execution)
     assert acc.codex_sessions_by_account(root) == {"alpha": 1}
-    supervisor.finish(store, "sw", supervisor.Started(record, None, None), 1)
+    supervisor.finish(store, "sw", supervisor.Started(record, AgentRecord("eng-1", "eng", "t1"), None), 1)
     assert acc.codex_sessions_by_account(root) == {}
 
 
