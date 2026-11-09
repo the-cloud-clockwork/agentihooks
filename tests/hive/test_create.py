@@ -919,8 +919,14 @@ def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
 
 
 @pytest.mark.feature("hive-create-resume-revoke")
-def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(world: SimpleNamespace) -> None:
+def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_name(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive import hive_state
+
+    signer, bus = object(), []
+    world.tools.signer = lambda: signer
+    monkeypatch.setattr(nats_grant, "revoke", lambda redis, given, member: bus.append((given, member)) or "bus")
 
     kept = _keep_member(world)
     stray = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")["id"]
@@ -937,6 +943,7 @@ def test_a_resumed_create_revokes_the_member_it_saved_that_the_record_does_not_n
     assert auth.member(world.tools.redis, kept) is not None
     assert f"hive create {NAME}: resume: revoked member {stray} and its Redis user" in world.lines
     assert stray not in world.bao.records[SIGNER]["member_swarms"]
+    assert bus == [(signer, stray)]
 
 
 @pytest.mark.feature("hive-create-resume-revoke")

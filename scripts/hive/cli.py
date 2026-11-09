@@ -172,7 +172,9 @@ def _create(args: argparse.Namespace) -> str:
     bao = openbao_kv.from_env(os.environ)
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
-    tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
+    tools = create.Tools(
+        redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
+    )
     given = {
         "repo": args.repo,
         "base": args.base,

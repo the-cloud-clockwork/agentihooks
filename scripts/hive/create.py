@@ -40,6 +40,11 @@ def report(line: str, clock: Callable[[], float] = time.time) -> None:
     sys.stdout.flush()
 
 
+def _no_signer() -> "nats_grant.Signer | None":
+    """Name no NATS signer, so a resumed create revokes only the Redis side of a saved member."""
+    return None
+
+
 @dataclass(frozen=True)
 class Options:
     repo: str = "the-cloud-clockwork/antoncore"
@@ -64,6 +69,7 @@ class Tools:
     sleep: Callable[[float], None] = time.sleep
     out: Callable[[str], None] = report
     state: dict = field(default_factory=dict)
+    signer: Callable[[], "nats_grant.Signer | None"] = _no_signer
 
 
 def create(tools: Tools, options: Options) -> str:
@@ -169,9 +175,9 @@ def _revoke_unfinished(tools: Tools) -> None:
     if not saved:
         return
     current = _member(tools).get(invite.HIVE_ID)
-    signer = _signer_path(tools.environ)
+    signer, bus = _signer_path(tools.environ), tools.signer()
     for member in sorted(saved - {current}):
-        for line in remove.revoke(tools.redis, member):
+        for line in remove.revoke(tools.redis, member, bus):
             tools.out(f"hive create {tools.state['name']}: resume: {line}")
         if member_swarms.unassign(tools.bao, signer, member):
             tools.out(
