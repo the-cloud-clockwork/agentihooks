@@ -2443,7 +2443,8 @@
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_each_account_s_real_refusal_when_every_account_is_closed",
         "tests/test_claude_quota_balancer.py::test_the_launch_selector_forwards_every_option_to_the_selector_it_picks",
         "tests/test_claude_quota_balancer.py::test_the_launch_refusal_names_the_rule_that_closes_the_account",
-        "tests/test_claude_quota_balancer.py::test_an_operator_launch_keeps_a_refusal_that_read_no_account"
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_keeps_a_refusal_that_read_no_account",
+        "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_the_fable_week_when_it_closes_the_only_account"
       ]
     }
   ],

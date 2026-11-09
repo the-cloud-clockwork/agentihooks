@@ -1470,13 +1470,14 @@ def _window_result(
     status: str = "allowed",
     fable: float | None = None,
     week_resets: int = 91000,
+    five_resets: int = 4600,
 ) -> balancer.ProbeResult:
     return balancer.ProbeResult(
         account,
         status,
         "NORMAL",
         None,
-        balancer.QuotaWindow(five, 4600),
+        balancer.QuotaWindow(five, five_resets),
         balancer.QuotaWindow(week, week_resets),
         balancer.QuotaWindow(fable, 91000),
     )
@@ -1498,6 +1499,7 @@ def _window_result(
         (_window_result("A", 96, 10), False, "4% of its five hour window left, under the 5% floor"),
         (_window_result("A", 95, 10), False, "open"),
         (_window_result("A", None, 10), False, "open"),
+        (_window_result("A", 99, 10, five_resets=500), False, "open"),
         (_window_result("PRIMARY", 10, 85), False, "the primary login keeps its week reserve"),
     ],
 )
@@ -1529,3 +1531,16 @@ def test_an_operator_launch_keeps_a_refusal_that_read_no_account(monkeypatch: py
     with pytest.raises(balancer.RoutingError) as raised:
         balancer.select_launch_credential({})
     assert raised.value is refusal
+
+
+@pytest.mark.feature("agenti-operator-launch-overflow")
+def test_an_operator_launch_names_the_fable_week_when_it_closes_the_only_account(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fable = balancer.parse_probe("FABLE", _stream(0.10, 0.10, 0.97), 100)
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([fable], "cached"))
+    with pytest.raises(balancer.RoutingError) as raised:
+        balancer.select_launch_credential(
+            {"AH_CC_TOKEN_FABLE": "f"}, include_fable=True, cache_file=tmp_path / "c.json", sessions={}, now=1000
+        )
+    assert str(raised.value) == "no Claude account is open: FABLE: 3% of its week left, under the 5% floor"
