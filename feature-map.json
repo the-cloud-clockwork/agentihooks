@@ -2587,6 +2587,17 @@
       ]
     },
     {
+      "id": "hive-join-heartbeat-keeps-passed-grade",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
+      "behaviour": "A hive heartbeat never re-evaluates a join check that passed at launch, for a live or a closed session, so an agent whose session closed before its report ended keeps its passed launch grade; the heartbeat re-probes only checks still missing and can recover them.",
+      "seam": "join_report.heartbeat",
+      "tests": [
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
+        "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
+      ]
+    },
+    {
       "id": "inbox-alias-store-revision",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
