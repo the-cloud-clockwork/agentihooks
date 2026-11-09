@@ -263,10 +263,11 @@ HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None) -> bytes:
     """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
-    scoped = {} if answer is None else {"tasks": encode(answer.rows).encode()}
+    scoped: dict[str, bytes] = {} if answer is None else {"tasks": encode(answer.rows).encode()}
+    named: dict[str, Fragment] = fragments.parts  # pyright: ignore[reportAssignmentType]
     body = b",".join(
         encode(key).encode() + b":" + (meta if key == "_meta" else scoped.get(key) or exported(part))
-        for key, part in fragments.parts.items()
+        for key, part in named.items()
         if not parts or key in parts
     )
     if answer is not None and (not parts or "tasks" in parts):
@@ -304,7 +305,7 @@ def export_changes(
     if () in units:
         return None
     kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]
-    changes = {"set": [], "drop": [], "lists": {}}
+    changes: dict[str, Any] = {"set": [], "drop": [], "lists": {}}
     for unit in sorted(kept):
         path, parent = [json.loads(part) for part in unit], view
         for part in path[:-1]:

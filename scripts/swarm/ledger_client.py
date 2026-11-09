@@ -441,21 +441,18 @@ class LedgerClient:
 
 def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -> dict[str, Any]:
     """The tasks of ledger ``slug`` the tick reads, with its metadata and phases: the tick pass's held view patched
-    with one delta read while the pass holds a view of that ledger, else this host's stored view for the scope
-    patched with one delta read. ``scope`` names which closed or frozen tasks the reader needs."""
+    with one delta read while the pass holds a view of that ledger, else the ledger's own whole read. ``scope``
+    names which closed or frozen tasks a reader needs; any scope but the tick's filters the whole read."""
     from scripts.swarm_ledger.repository import live_rows
     from scripts.tick import view
 
     held = view.document(slug) if scope is None else None
     if held is not None:
         return held
-    wanted = view.TICK_SCOPE if scope is None else scope
-    if view.reads(ledger):
-        return view.scoped(slug, wanted, ledger.service)
     doc = ledger.state(slug)
-    if wanted == view.TICK_SCOPE:
+    if scope is None or scope == view.TICK_SCOPE:
         return doc
-    answer = live_rows.answer(doc, wanted)
+    answer = live_rows.answer(doc, scope)
     return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}
 
 

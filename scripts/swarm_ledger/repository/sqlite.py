@@ -625,12 +625,13 @@ class SQLiteLedgerRepository:
         return entry.generation, entry.views[key]
 
     def _answer(self, entry: Entry, scope: live_rows.Scope) -> live_rows.Answer:
+        views: dict[Any, Any] = entry.views  # pyright: ignore[reportUnknownMemberType]
         key = (live_rows.answer, scope)
-        if key not in entry.views:
+        if key not in views:
             with VIEW_BUILD:
-                if key not in entry.views:
-                    entry.views[key] = live_rows.answer(entry.state, scope)
-        return entry.views[key]
+                if key not in views:
+                    views[key] = live_rows.answer(entry.state, scope)  # pyright: ignore[reportUnknownArgumentType]
+        return views[key]
 
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""

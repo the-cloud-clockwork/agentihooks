@@ -43,7 +43,6 @@ __all__ = [
     "holding",
     "queued",
     "refreshed",
-    "scoped",
     "slow",
     "start",
     "stored",
@@ -330,19 +329,6 @@ def document(slug: str) -> dict[str, Any] | None:
     if kept is not None:
         kept.view, kept.stale = view, False
     return view.document
-
-
-def scoped(slug: str, scope: live_rows.Scope, service: bool) -> dict[str, Any]:
-    """The document of ledger ``slug`` read with ``scope`` from the view this host stores for that scope, patched
-    with one delta read, for a reader that needs closed or frozen tasks or reads outside a held pass."""
-    from scripts.scheduler import service as scheduler
-    from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
-
-    ledger: Any = _ledger()
-    base: str = ledger.base(slug)
-    client = ResourceClient(base, ledger.credentials(slug, service), ledger.REQUEST_TIMEOUT)
-    path = view_file(base, slug, scheduler.runtime_dir(), scope)
-    return refreshed(path, lambda since, parts: client.changes(slug, since, parts, scope)).document
 
 
 @contextmanager

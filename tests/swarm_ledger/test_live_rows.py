@@ -177,7 +177,9 @@ def test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full(part: str,
 def test_a_phase_change_outside_its_plan_link_stays_a_delta() -> None:
     doc = _doc()
     answer = live_rows.answer(doc, live_rows.Scope())
-    reply = json.loads(routes.export_changes(doc, {_path("phases", ["id", "p1", 0], "review")}, ("tasks",), answer))
+    reply = json.loads(
+        routes.export_changes(doc, {_path("phases", ["id", "p1", 0], "review")}, ("tasks",), answer) or "null"
+    )
     assert reply["changes"]["set"] == [[["frozen_ids"], ["c"]]]
 
 

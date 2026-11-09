@@ -211,6 +211,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Step  Count  Median  P95  CPU share\n"
         "launch  1  1.000s  1.000s  100.00%\n"
         "Critical lane end p95: 1.250s\n"
+        "Task rows read per pass, most: n/a\n"
         "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
         "launch  1  100.00%  1  0  0  2\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"

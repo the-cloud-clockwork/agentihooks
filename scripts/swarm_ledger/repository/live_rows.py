@@ -1,4 +1,5 @@
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -7,7 +8,18 @@ from scripts.swarm_ledger.repository import hierarchy
 
 CLOSED = ("done",)
 HELD = ("open", "blocked")
-SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
+Row = dict[str, Any]
+
+
+def _lane(task: Row) -> object:
+    return task.get("lane")
+
+
+def _kind(task: Row) -> object:
+    return ledger_kinds.kind(task)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
+SELECTORS: dict[str, Callable[[Row], object]] = {"lane": _lane, "kind": _kind}
 SCOPE_PATHS = ("freezes", "phases", "slices", "plans")
 FROZEN_IDS = "frozen_ids"
 TASK_LINKS = ("phase", "slice", "merged_into")
@@ -27,7 +39,7 @@ class Answer:
 
 def ancestry(task: dict[str, Any], graph: dict[str, Any]) -> list[str]:
     chain = [f"tasks/{task['id']}"]
-    roots = [hierarchy.parent("tasks", task)]
+    roots: list[str | None] = [hierarchy.parent("tasks", task)]  # pyright: ignore[reportUnknownMemberType]
     if task.get("merged_into"):
         roots.append(f"tasks/{task['merged_into']}")
     for up in roots:
@@ -71,9 +83,10 @@ def nearest(targets: tuple[set[str], list[str]], task: dict[str, Any], chain: li
 def marks(doc: dict[str, Any]) -> dict[str, tuple[bool, int | None]]:
     records: list[dict[str, Any]] = doc.get("freezes") or []
     freezes, focuses = targets(records, "freeze"), targets(records, "focus")
-    graph = hierarchy.project(doc)[0] if records else {}
+    graph: dict[str, Any] = hierarchy.project(doc)[0] if records else {}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
     found: dict[str, tuple[bool, int | None]] = {}
-    for task in doc.get("tasks") or []:
+    tasks: list[Row] = doc.get("tasks") or []
+    for task in tasks:
         if not records:
             found[task["id"]] = (False, None)
             continue
@@ -87,7 +100,8 @@ def answer(doc: dict[str, Any], scope: Scope) -> Answer:
     resolved = marks(doc)
     kept: list[dict[str, Any]] = []
     held: list[str] = []
-    for task in doc.get("tasks") or []:
+    tasks: list[Row] = doc.get("tasks") or []
+    for task in tasks:
         cold, focus = resolved[task["id"]]
         if not scope.closed and task.get("state") in CLOSED:
             continue
