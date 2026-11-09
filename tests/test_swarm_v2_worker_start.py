@@ -1219,6 +1219,7 @@ def test_the_hive_start_decides_the_managed_brain_before_rendering(
     monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
     monkeypatch.setenv("SWARM_BRAIN_API_TOKEN", "fixture-private-api")
     monkeypatch.setenv("SWARM_BRAIN_MCP_KEY", "fixture-private-mcp")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_BRAIN", "")
     boot = BindingBoot()
 
     prepare(tmp_path, material(tmp_path), Controller((200, ANSWER)), boot)
