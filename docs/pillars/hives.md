@@ -582,7 +582,7 @@ Quota belongs to the account, so every hive reports the same cap for it. See
 [automatic quota refresh](#automatic-quota-refresh) for how a new hive obtains its own reading before its first
 heartbeat. A subscription slot whose own reading is
 missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
-that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+that holds a token but has not obtained its own reading still shows the account's real cap; interactive and
 api slots keep their own.
 
 A hive's subscription cap scales with quota left: the ceiling `AGENTIHOOKS_HIVE_SESSION_CEILING` (default 12) times
