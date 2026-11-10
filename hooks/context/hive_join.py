@@ -44,6 +44,7 @@ def run(payload: dict, event: str) -> None:
         "harness": agent.harness,
         "pane": os.environ.get("HERDR_PANE_ID", agent.pane_id),
         "transcript_dir": str(Path(transcript).parent) if transcript else "",
+        "headed": join_checks.headed(store.redis, hive or ""),
     }
     report = {"agent": name, "slug": slug, "execution_id": agent.execution_id, "started_at": at, "context": context}
     checks = join_checks.startup(store.redis, report)
