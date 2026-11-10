@@ -59,9 +59,9 @@ agentihooks hive install          # user service that runs agentihooks hive run
   own Redis user: `AGENTIHOOKS_HIVE_ID`, `AGENTIHOOKS_HIVE_URL`, `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` and
   `AGENTIHOOKS_HIVE_REDIS_URL`. `agentihooks hive refresh` posts to the URL saved there. The hive URL must be https
   unless it is loopback.
-- When the hive endpoint trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive refresh`
-  writes it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home.
-  A grant without one leaves that file as it is. The Helm hive endpoint reads the CA from the ledger TLS secret.
+- When the hive serves a ledger CA, `hive add` delivers it beside `hive.env` and `hive refresh` rewrites it, so
+  agents the new machine launches trust a ledger on a private certificate authority with no manual step; see
+  [Ledger CA on a hive](#ledger-ca-on-a-hive).
 - The hive endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
   The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
   and `--tls-key`, and refuses to serve on a non-loopback address without them. It serves only
@@ -99,6 +99,92 @@ A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver it
 `agentihooks hive invite <label>` writes into OpenBao, which brings a new hive up from an empty namespace; see
 [Reproducible hive](../reference/reproducible-hive.md).
 
+## Ledger CA on a hive
+
+A hosted ledger signed by a private certificate authority is reachable only by clients that trust that CA. A hive
+installs the CA into its own home when it joins and on every refresh, so a master or engineer the hive launches
+passes its ledger join and launch check without anyone copying the certificate by hand.
+
+### Where the CA comes from
+
+The UI hive and the hive endpoint hand out the CA they trust themselves:
+
+1. `LEDGER_CA_PEM`, when set and not blank.
+2. Otherwise the file `LEDGER_CA_FILE` names, else `ledger-ca.pem` in their agentihooks home. `agentihooks init`
+   writes that file from OpenBao `k8s/agentihooks-swarm-ledger-ca`, field `ca.crt`, when `OPENBAO_URL` and
+   `OPENBAO_TOKEN` are set.
+
+The value is served only when it parses as a PEM certificate and carries no `PRIVATE KEY` block. Anything else
+counts as no CA, and nothing is delivered. The endpoint reads its CA once, when `hive serve` starts: after changing
+the CA source, restart `hive serve`, or roll the `hive-join` pod on Helm. While `hive.join.serveLedgerCa` is `true`
+(the default), the Helm `hive-join` deployment sets `LEDGER_CA_PEM` from the `ca.crt` key of
+`ledger.tls.secretName`. Set it to `false` for hives that trust another ledger's CA.
+
+```yaml
+# values.yaml: the hive endpoint serves the ledger CA from this secret
+ledger:
+  tls:
+    secretName: agentihooks-swarm-ledger-tls   # must hold ca.crt
+hive:
+  join:
+    serveLedgerCa: true
+```
+
+```bash
+# A workstation UI hive serving its own CA file
+LEDGER_CA_FILE=~/.agentihooks/ledger-ca.pem agentihooks hive serve \
+  --tls-cert swarm.crt --tls-key swarm.key
+```
+
+### Where the hive writes it
+
+| Step | What it writes | Target file |
+|---|---|---|
+| `hive add` | The UI hive's served CA, over the same `ssh -o BatchMode=yes` session family that delivers `hive.env`, after `hive.env` lands | `$LEDGER_CA_FILE` in the remote shell when set, else `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/ledger-ca.pem` |
+| `hive refresh` | The `ledger_ca` field of the endpoint's answer | `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home (`AGENTIHOOKS_HOME`, else `~/.agentihooks`) |
+
+- Both writes stage a new file beside the target and rename it into place, so a reader never sees half a
+  certificate. Missing parent folders are created.
+- A refresh answer without a valid `ledger_ca` leaves the existing file as it is: an endpoint that stops serving the
+  CA never removes one a hive already holds.
+- `hive add` for a label that already has a member delivers nothing, the CA included. Repair a missing CA with
+  `agentihooks hive refresh` on that machine.
+- A failed CA delivery is a failed `hive add`: the minted member is revoked and the command exits 1 with
+  `hive add refused: ssh exited <code>: <stderr>`. The `hive.env` written just before stays on the machine with the
+  revoked credential until the next `hive add` replaces it.
+
+Agents the hive launches inherit the `hive run` environment and resolve the CA file from it: `LEDGER_CA_FILE`, else
+`ledger-ca.pem` in `AGENTIHOOKS_HOME`, else in `~/.agentihooks`. That must name the path `hive add` (the remote login
+shell) and `hive refresh` wrote to; with neither variable set anywhere, all three agree on the default. Every ledger
+client trusts the system roots plus that file, or only `LEDGER_CA_PEM` when that is set; see
+[Hosted ledger authentication](../reference/hosted-ledger-auth.md). A hive whose environment sets `LEDGER_CA_PEM`
+ignores the delivered file. Neither variable is written into `hive.env`.
+
+### Checking a hive's CA
+
+```bash
+# On the hive: the file agents trust, and the certificate it holds
+ca="${LEDGER_CA_FILE:-${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/ledger-ca.pem}"
+openssl x509 -in "$ca" -noout -subject -enddate
+
+# Rewrite it from the hive endpoint
+agentihooks hive refresh
+
+# The ledger's certificate verifies against it
+curl -sS --cacert "$ca" -o /dev/null -w '%{http_code}\n' https://swarm.example.internal/healthz
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A master or engineer launched on the hive fails its ledger join with `certificate verify failed` | No `ledger-ca.pem` in the hive home: the hive joined before its UI hive or endpoint served a CA | Serve the CA there (see [Where the CA comes from](#where-the-ca-comes-from)), then run `agentihooks hive refresh` on the hive |
+| `hive refresh` succeeds but the file stays absent or stale | The endpoint serves no valid CA: `LEDGER_CA_PEM` and its CA file are both unset, empty, not a certificate or carry a private key; or the endpoint started before its CA source changed; or `hive.join.serveLedgerCa` is `false` | Fix the endpoint's CA source and restart `hive serve` or roll the `hive-join` pod; on Helm, check `ledger.tls.secretName` names a secret with `ca.crt` |
+| Agents still fail after the file is correct | The `hive run` environment sets `LEDGER_CA_PEM` to another CA, or `LEDGER_CA_FILE` to another path than the hive wrote | Unset the stray variable, or set it to the same value where `hive refresh` and `hive run` both read it, then restart the hive service |
+| `LEDGER_CA_FILE names no file: <path>` | `LEDGER_CA_FILE` is set and the file is missing | Run `agentihooks hive refresh` with the same `LEDGER_CA_FILE`, or unset it to use `ledger-ca.pem` in the home |
+| `the ledger CA file <path> holds no valid certificate: <reason>` | The file exists but holds no certificate the client can load. `hive refresh` stops on the same error before it writes | Remove the file, or set `LEDGER_CA_PEM` for that one command, then run `agentihooks hive refresh` |
+| `hive add refused: ssh exited 1` after the `hive.env` write | The remote shell could not create the CA folder or file | Fix the permissions on the remote home or the `LEDGER_CA_FILE` folder, then `hive add` again |
+
 ## Repos and checkouts
 
 Each heartbeat reports the repos the hive can work in. `hive run` scans one folder, `HIVE_REPO_ROOT`, default
@@ -119,10 +205,37 @@ HIVE_REPO_ROOT=/srv/repos agentihooks hive run
 agentihooks hive show lab-vm        # the "repos" list
 ```
 
-Placement drops a hive whose list lacks the task's repo, with "no hive for `<role>` lists the repo `<repo>`"
-("no headless hive for ..." when only headless hives were tried).
-When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
-the first by path when it holds several. A repo given as a path launches in that path.
+### Matching a repo across machines
+
+A swarm may name its repo by a local checkout path even though a worker keeps its clone elsewhere. Launch
+selection reads the local checkout's `origin` and matches that identity against the hive's advertised `repos`.
+This applies to worker and master launch selection. The two machines do not need matching home directories.
+
+For example, these records describe the same repository:
+
+| Machine | Checkout or advertised repo |
+|---|---|
+| Workstation, swarm repo | `/home/me/dev/agentihooks` |
+| Headless worker, checkout | `/home/worker/dev/agentihooks` |
+| Headless worker, advertised origin | `github.com/the-cloud-clockwork/agentihooks` |
+
+If the workstation checkout's origin is `https://github.com/the-cloud-clockwork/agentihooks.git`, the worker
+qualifies through `github.com/the-cloud-clockwork/agentihooks`. Selection sends the matched origin with the launch,
+so the worker resolves its own checkout. When several checkouts share that origin, it uses the first by path.
+A directly matched path needs no origin translation.
+
+```bash
+git -C /home/me/dev/agentihooks remote get-url origin
+agentihooks hive list
+agentihooks hive show <worker-hive-id>
+```
+
+Compare the normalized origin with the worker's `repos` list. An origin match needs a readable local checkout
+and a worker heartbeat advertising that identity. A missing or unreadable origin cannot establish that match;
+check the advertised path as well. A different owner or host is a different origin, even when the repo folder
+has the same name. Placement refuses when no eligible hive lists a matching repo, with
+`no hive for <role> lists the repo <repo>`. Set `HIVE_REPO_ROOT` to the parent of the worker checkouts before
+starting its daemon, and allow its next heartbeat to publish them; listing a repo does not clone it.
 
 `swarm prepare` and `swarm publish` search the same `HIVE_REPO_ROOT` checkouts by repository name when a task
 repository entry is not a directory on this host, such as a path recorded on another host; see
@@ -531,13 +644,12 @@ any hive differs or published nothing.
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that are not draining
-and do not exclude its lane, role or profile,
-then drops, in order, those that do not advertise the account slot the router picked, those with no room under
-their agent ceiling, those that do not list the task's repo, and, for an interactive or master login, those that do
-not hold that login. Each step that empties the list names its reason, and the launch waits with it.
+and do not exclude its lane, role or profile. It checks the selected account slot, admission room, the
+[repository match](#matching-a-repo-across-machines), and any required interactive or master login.
+Each check that empties the candidate list names its reason, and the launch waits with it.
 
-Among the hives left, placement picks the lowest `prefer` rank for the role, then the smallest share of its agent
-ceiling in use, then a lasting hive over an ephemeral one, then the hive id.
+Among eligible worker hives, placement picks the lowest `prefer` rank for the role, then the lowest fraction of
+agent capacity in use, then a lasting hive over an ephemeral one, then the hive id.
 
 `agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
 this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
@@ -547,7 +659,61 @@ same tick. When every kept hive is full the launch waits rather than use another
 and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
 switches back on the next tick.
 
+### Workstation fallback for workers
+
+A headless hive refusing an `eng`, `ci`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
+such as the workstation, from taking it. This covers a missing account slot, a repo mismatch, a missing login,
+no admission room, or no live headless hive. The workstation must pass the same account, repo, role and room
+checks. A fallback never bypasses a task's hive pin or workstation requirement.
+
+Worker selection now ranks eligible headed and headless hives together using `prefer` and utilization. Set a
+lower `prefer` rank for a worker to favor it; being headless alone does not force that worker to win. The engineer,
+cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; frontend and qa profiles keep
+their UI role on any lane.
+
+For a workstation reporting five accounts and a headless worker reporting one, a launch can use the worker's
+account there even though an earlier account candidate could run only on the workstation. The account loop
+prefers a choice without a fallback reason over an earlier choice carrying one. If the worker cannot accept the
+selected account or repo, an eligible workstation remains available.
+
+```bash
+agentihooks hive list
+agentihooks hive set <workstation-hive-id> ui=yes max-agents=5
+agentihooks hive set <worker-hive-id> ui=no prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive show <worker-hive-id>
+agentihooks hive show <workstation-hive-id>
+```
+
+These commands configure role preference and the workstation ceiling; account slots and repos come from each
+hive's heartbeat. An account count is not an agent ceiling: quota caps and measured headroom still apply.
+For one swarm in local mode, also enable [hive placement](#hive-placement-for-one-swarm-on-a-local-machine).
+
+Where selection records a fallback reason, the agent's profile decision carries it as `placement_fallback`;
+a task pinned to a UI hive records the pin as its reason. Ranked worker spill also records the preferred hive's
+refusal; see [Headroom](#headroom). Masters keep their separate [placement chain](#master-placement).
+
+### Placement waits
+
+A ready task refused during placement appears in tick output as `task <id> waits: <reason>`. For example:
+
+```text
+task example waits: no hive for eng advertises the claude slot worker-account
+task example waits: no hive for eng lists the repo /home/me/dev/agentihooks
+```
+
+The tick reports the tasks it evaluates while filling free launch slots. A task not reached because those slots
+are already filled has no new placement decision in that pass.
+
+| Wait or symptom | Check | Resolution |
+|---|---|---|
+| `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
+| `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
+| `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
+| Headless worker refuses and workstation still receives no launch | Workstation heartbeat, role exclusions, repo, account, headroom and task pin | A fallback needs an eligible workstation; a pin does not spill to another hive. |
+
 ### Placement by role
+
 
 The host kind an agent lands on follows from its placement role. A hive's `ui` setting declares its kind: `ui=yes`
 is a UI hive, such as the workstation that runs the herdr server the operator watches; `ui=no` is a headless hive,
@@ -718,9 +884,11 @@ or roll its pod, to pick up the publisher.
 
 ### Account caps on every hive
 
-Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
+Quota belongs to the account, so every hive reports the same cap for it. See
+[automatic quota refresh](#automatic-quota-refresh) for how a new hive obtains its own reading before its first
+heartbeat. A subscription slot whose own reading is
 missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
-that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+that holds a token but has not obtained its own reading still shows the account's real cap; interactive and
 api slots keep their own.
 
 A hive's subscription cap scales with quota left: the ceiling `AGENTIHOOKS_HIVE_SESSION_CEILING` (default 12) times
@@ -729,6 +897,69 @@ the smaller of the five hour and week percentage left, at least the band in
 account at 96% of both windows left reports 11; one with under 10% of its five hour window left keeps the band's 2;
 under 5% of either window it reports 0. Worker admission under a hive or cluster spawn backend reads every Claude
 row this way, interactive slots included. Launches routed by one machine's own processes keep the band.
+
+### Automatic quota refresh
+
+`agentihooks hive run` reads Claude subscription quota itself. A newly joined worker with no cached observation
+does not need a manual `agentihooks balance` command to make its slots usable. Before the first heartbeat, the
+daemon synchronously probes each configured subscription whose reading is missing or due for refresh. When the
+probe returns usable quota and the account has room, that first heartbeat reports a nonzero subscription `cap`.
+The startup probe must finish before the heartbeat can be published; this is not a fifteen second probe timeout.
+
+After startup, each beat checks whether a refresh is due. The newest cached observation for each account decides
+its age; fresh accounts are left alone. Refresh becomes due once an observation is more than ten minutes old,
+five minutes before the fifteen minute freshness limit. Later probes run on one background thread, so they do
+not hold up the heartbeat. A running refresh is reused, and attempts are spaced at least five minutes apart,
+including after a failed attempt. These timings are fixed; there is no hive setting for the refresh interval.
+
+#### Configure and start
+
+The hive must already be joined and have its normal Redis configuration. Supply subscription credentials to
+the daemon as nonempty `AH_CC_TOKEN_<slug>` environment variables; `<slug>` is the account name shown in its slots.
+Keep its `AGENTIHOOKS_HOME` writable so the quota cache survives between beats. The installed Claude CLI must be
+available to the daemon. With the worker token already supplied securely as `CLAUDE_WORKER_TOKEN`, a foreground
+daemon can be started as follows:
+
+```bash
+AH_CC_TOKEN_lab="$CLAUDE_WORKER_TOKEN" \
+  AGENTIHOOKS_HIVE_SESSION_CEILING=6 \
+  agentihooks hive run
+```
+
+The ceiling limits the cap computed from quota; it does not change the refresh schedule or create quota. For a
+managed daemon, make the same variables available to its service or container, then use `agentihooks hive install`
+on a machine with user services. Shell variables set only in an interactive terminal do not configure an already
+running service. A worker pod runs the same daemon and refreshes its own readings on startup.
+
+From another joined machine, inspect the hive after its first heartbeat:
+
+```bash
+agentihooks hive list
+agentihooks hive show lab-vm
+```
+
+In the JSON record, find the slot with `"harness": "claude"`, `"account": "lab"` and
+`"kind": "subscription"`, and read its `cap`. For example, an account with 96% left in both windows and the
+ceiling above reports `"cap": 6`. This is an account session limit, not a count of free places: existing
+reservations, the hive's `max-agents`, headroom and repo eligibility still govern placement.
+
+#### Limits and troubleshooting
+
+Automatic refresh covers the Claude subscription credentials available to the daemon. With no such credentials,
+there is no Claude subscription to probe. A missing, stale, refused or incomplete quota reading can still leave
+a slot at cap zero, as can an account below the quota floor or a configured ceiling of zero. A successful startup
+does not guarantee that the provider supplies usable quota.
+
+| Symptom | Check | Action |
+|---|---|---|
+| A new hive has no Claude subscription slot | Whether the daemon received a nonempty `AH_CC_TOKEN_<slug>` variable | Supply the account through the service or container environment, then restart the daemon. Never print the token. |
+| A new slot stays at cap zero | The daemon's quota probe errors and whether its account can return quota | Restore account access, Claude CLI availability or provider connectivity. Allow the five minute retry spacing and a following heartbeat for the next result. |
+| A slot becomes zero after previously working | The reading's freshness, quota left and configured ceiling | Restore failed probes when the reading is stale; when quota is spent, wait for its window to reset. Raising the ceiling does not bypass the quota floor. |
+| The first heartbeat has not arrived | The daemon log and its initial quota probe, then Redis connectivity | Resolve the reported startup failure. The initial probe runs before the first Redis connection and heartbeat. |
+
+The regression test `test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start` plants a hive with no
+cache, observes a zero cap before startup, supplies a successful quota probe and verifies a nonzero cap on the
+first beat. It tests daemon startup without requiring a manual balance read or a live provider.
 
 ### Master placement
 
@@ -1328,6 +1559,7 @@ The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (de
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
 below the request, and memory set under `workers.resources`. `workers.nodeSelector`, `workers.affinity` and
 `workers.tolerations` place the pod; by default it schedules on any node and never uses the host network.
+[Worker hive memory and placement](#worker-hive-memory-and-placement) gives examples.
 
 `workers.homeVolume` is the volume source of `/home/worker`, which holds the repo clones, worktrees and scratchpad. It
 defaults to an emptyDir on the node root disk; a `hostPath` of type `Directory` on a data disk, or a
@@ -1350,9 +1582,129 @@ system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is 
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
 lists.
 
+### Accounts on a worker pod
+
+A worker pod holds every Claude and Codex account the workstation routes, never one account per pod. Its hive reads
+each `AH_CC_TOKEN_<slug>` and `AH_CX_TOKEN_<slug>` in its environment by name and advertises one subscription slot per
+account, so placement and the launch reservation can put an agent of any account on the pod. Give the pod the tokens
+through one Secret in `workers.envFromSecrets` whose keys are the environment variable names. In Anton the
+`<hive>-accounts` ExternalSecret extracts every `AH_CC_TOKEN_*` key from the `agentihooks/claude-creds` record and
+every `AH_CX_TOKEN_*` key from `agentihooks/codex-creds` in OpenBao, and drops any other key:
+
+```yaml
+workers:
+  envFromSecrets:
+    - swarm-hive-001-env
+    - swarm-hive-001-accounts   # every AH_CC_TOKEN_* and AH_CX_TOKEN_* key, named as its variable
+    - swarm-hive-001-settings
+```
+
+A token added to either record reaches the pod at the next ExternalSecret refresh (one hour in Anton) and the next pod
+start, since environment variables are read at container start. `agentihooks hive setup` never writes account tokens
+into the settings record; the accounts records carry them.
+
+The pod holds the tokens but never probes their quota, so its own readings stay missing and its subscription caps
+would read 0. Each beat, a subscription slot with no reading, or an older one, takes the cap and quota reading of the
+newest reading any other live hive published for the same account, usually the workstation's; see
+[Account caps on every hive](#account-caps-on-every-hive). The pod therefore admits up to the account's real cap, and
+the launch reservation still counts the account's sessions across every hive against that one cap.
+
+Check that a pod carries every account and real caps from the workstation:
+
+```bash
+agentihooks hive compare --base <workstation id>   # no "accounts missing AH_CC_TOKEN_<slug>" line for the pod
+agentihooks hive show <pod hive id>                # "slots": one subscription slot per account, each with its cap
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive compare` prints `accounts missing AH_CC_TOKEN_<slug>` or `AH_CX_TOKEN_<slug>` for the pod | The accounts Secret lacks the key: the token is not in the OpenBao record, the key is not prefixed `AH_CC_TOKEN_` or `AH_CX_TOKEN_`, or the pod started before the Secret refreshed. | Add the token to the record under its variable name, wait for the ExternalSecret refresh or force one, then roll the pod. |
+| A pod slot shows `cap` 0 while the workstation shows a cap for that account | No other live hive has published a reading for the account: the workstation is stale or does not hold that token either. | Start or restart the workstation hive so it probes the account; `agentihooks hive list` shows which hives are live. |
+| The pod lists no Codex slot for an account it holds | The Codex router refuses the token: it is not a usable Codex credential, or it expires sooner than the router's minimum token life. | Replace the token in `agentihooks/codex-creds`; see [Codex accounts](load-balancing.md#codex-accounts). |
+
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
+### Worker hive memory and placement
+
+With the defaults, every worker hive pod has no node pin and no host network: the scheduler places it on any node
+whose free memory covers its request, and the hive reaches the swarm over the network the node already has, so a new
+node joins the pool with no chart change.
+
+**Memory per agent.** The chart computes the container's memory from two values and the agent count:
+
+```yaml
+workers:
+  maxAgents: 4
+  memoryPerAgentMi:
+    request: 700    # MiB the scheduler reserves per agent
+    limit: 2048     # MiB the pod may use per agent before the kernel kills it
+  resources:        # CPU and ephemeral storage only; memory here is refused
+    requests:
+      cpu: 100m
+```
+
+| `workers.maxAgents` | Memory request | Memory limit |
+|---|---|---|
+| 1 | `700Mi` | `2048Mi` |
+| 3 | `2100Mi` | `6144Mi` |
+| 4 | `2800Mi` | `8192Mi` |
+| 8 | `5600Mi` | `16384Mi` |
+
+Each `workers.hives` entry computes its own memory from its own `maxAgents`, or the inherited one. A
+`memoryPerAgentMi` set on an entry replaces the whole map, so give both `request` and `limit`. Raise `request` when
+agents on the hive measure above 700 MiB each, so the scheduler stops placing more agents on a node than it can hold;
+raise `limit` when the pod log shows agents killed for memory while the node has room.
+
+Inside the pod, admission counts the pod's memory limit as one more limit, at 850 MB per agent under 80 percent of that
+limit ([Headroom](#headroom)); `hive list` prints it as `pod-limit-mb`. A launch refused with a `ram` detail that
+names the pod, `pod <n> of <total> MB available`, means the agents already running use the pod limit: raise
+`memoryPerAgentMi.limit`, or lower `maxAgents`.
+
+**What pins a pod.** A hive pod is held to particular nodes only by these keys:
+
+| Key | Effect |
+|---|---|
+| `workers.node` | Adds `kubernetes.io/hostname: <node>` to the pod's `nodeSelector` and uses that node's `hiveStorage` homes and tmp paths for its home and `/tmp` volumes. |
+| `workers.nodeSelector` | Copied into the pod's `nodeSelector`. |
+| `workers.affinity` | Copied into the pod's `affinity`. |
+
+With all three empty, the defaults, the rendered pod has no `nodeSelector`, `affinity`, `nodeName` or `hostNetwork`.
+`workers.tolerations` only lets the pod onto tainted nodes; it never limits where it goes. Check a values file for
+pins before installing it:
+
+```bash
+helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml \
+  | grep -nE '^ +(nodeSelector|affinity|nodeName|hostNetwork):'
+```
+
+No output means every worker hive in the release can schedule on any node. The chart's other components set their
+own affinity in their own values keys; a match the grep shows outside a `-worker-hive` Deployment is theirs.
+
+**Raising agents step by step.** Raise `maxAgents` on one hive at a time, so each step proves the new agents launch
+before the next one:
+
+1. Check the node room. The new request is `maxAgents` times `memoryPerAgentMi.request`; at least one node must have
+   that much allocatable memory free:
+
+   ```bash
+   kubectl describe nodes | grep -A8 'Allocated resources'
+   ```
+
+2. Set the new `workers.maxAgents` (or the entry's `maxAgents`) in the release values and deliver it through the
+   values repository, as every other chart change. The Deployment rolls the pod; its preStop drains the old hive first
+   (see the drain above).
+3. Confirm the pod scheduled and the hive took the new cap. A pod held `Pending` with `Insufficient memory` in
+   `kubectl describe pod` means no node has room for the new request: lower `maxAgents` or add a node.
+
+   ```bash
+   agentihooks hive list   # tab separated; headroom fields abridged
+   # anton-2  live  ui=no  workers=0 of 4 (cap 4)  excluded=master  ...  pod-limit-mb=8192  pending=0
+   ```
+
+4. Confirm agents use the room: within the next ticks `workers=<n> of <maxAgents>` rises as placement sends the hive
+   agents, and each new agent claims its task on the ledger. Then take the next step.
 
 ### Scaling worker hives
 
@@ -1409,8 +1761,10 @@ and a refusal from the table below stops the render instead:
 helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml | grep -E '^  name: .*-worker-hive'
 ```
 
-`deploy/worker/chart-proof.sh` renders one replica and asserts that a missing credential and `workers.replicas=2` with
-one credential are both refused.
+`deploy/worker/chart-proof.sh`, run by the `contracts` job of the Worker hive pod workflow, renders one replica at
+`maxAgents` 3 and asserts its `2100Mi` request, `6144Mi` limit and that the pod has no `nodeSelector`, `affinity`,
+`nodeName` or `hostNetwork`. It also asserts that a missing credential, `workers.replicas=2` with one credential, a per
+agent limit below its request and a memory value under `workers.resources` are each refused.
 
 ### Scaling refusals
 
@@ -1422,6 +1776,9 @@ one credential are both refused.
 | `workers.hives name "<name>" must be a lowercase DNS label of at most 20 characters` | The name has upper case, dots or underscores, starts or ends with a dash, or is longer than 20 characters. | Use lowercase letters, digits and inner dashes. |
 | `workers.hives name <name> appears twice` | Two entries share a name. | Rename one. |
 | `workers.hives <name> shares its home volume with another hive; give it its own homeVolume` | The entry's hostPath or claim home is the same path or claim as another hive's. | Give the entry its own `homeVolume`; `workers.node` alone does not clear this check, which runs on the inherited `homeVolume`. |
+| `workers.maxAgents must be positive` | `workers.maxAgents`, or an entry's `maxAgents`, is 0 or below. | Set it to the number of agents the hive may run, 1 or more. |
+| `workers.memoryPerAgentMi needs a positive request and a limit no lower than it` | `memoryPerAgentMi.request` is below 1, or `.limit` is below `.request`. An entry that sets only one of the two keys drops the other. | Set both keys, with `limit` at or above `request`. |
+| `set worker hive memory with workers.memoryPerAgentMi, not workers.resources` | `workers.resources.requests.memory` or `.limits.memory` is set. | Remove the memory key from `resources` and size memory per agent with `memoryPerAgentMi`. |
 
 If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
 chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
@@ -1605,7 +1962,7 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | A launch waits with "no hive for `<role>` lists the repo `<repo>`" | `agentihooks hive show <id>`, the `repos` list | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the swarm's repo name, or point `HIVE_REPO_ROOT` at the clones. |
 | A launch waits with "no live hive takes" a role | `agentihooks hive list`: `stale` hives, roles | Restart `agentihooks hive run` (`agentihooks hive install` keeps it running), or add the role with `agentihooks hive set`. |
-| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | A `cap` of 0 means the hive has no fresh quota reading for the account; otherwise end a session on that account or wait for its five hour window to recover. |
+| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | For zero capacity, check quota freshness, account access, quota left and the ceiling under [automatic quota refresh](#automatic-quota-refresh). Otherwise end a session on that account or wait for its five hour window to recover. |
 
 ## Related pages
 

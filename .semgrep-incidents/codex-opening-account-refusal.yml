@@ -1,0 +1,19 @@
+rules:
+  - id: codex-opening-account-refusal
+    languages: [python]
+    severity: ERROR
+    message: Reject account refusals observed during the opening turn before returning its id; the inbox pump starts afterward and cannot observe that completion.
+    patterns:
+      - pattern: |
+          $TURN = opening_end(...)
+          ...
+          if CAPACITY not in $ERROR:
+              return $ID
+      - pattern-not: |
+          $TURN = opening_end(...)
+          ...
+          if $REASON := account_refusal($TURN):
+              ...
+          ...
+          if CAPACITY not in $ERROR:
+              return $ID

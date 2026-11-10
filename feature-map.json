@@ -1,6 +1,25 @@
 {
   "features": [
     {
+      "id": "bus-state-batch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2186",
+      "behaviour": "A swarm name lookup over several aliases reads every key from the bus state store with one JetStream request, keeping order, duplicates and missing keys.",
+      "seam": "NameRegistry.resolve_many through NameState.get_many to StateStore.get_many",
+      "tests": [
+        "tests/events/test_state_batch.py::test_memory_batch_preserves_order_missing_keys_and_duplicates",
+        "tests/events/test_state_batch.py::test_name_lookup_uses_one_bus_request",
+        "tests/events/test_nats_batch.py::test_last_per_subject_answers_the_newest_message_of_each_held_subject",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_creates_one_last_per_subject_consumer_and_reads_what_it_counts",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_sends_nothing_for_no_subjects",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_raises_the_create_error_and_unsubscribes",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_refuses_a_create_over_the_payload_limit",
+        "tests/events/test_nats_batch_units.py::test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none",
+        "tests/events/test_nats_batch_units.py::test_the_key_value_store_reads_many_keys_through_its_bucket_stream",
+        "tests/events/test_nats_batch_units.py::test_the_scoped_store_reads_many_keys_through_its_swarm_stream"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
@@ -165,6 +184,19 @@
       "seam": "tick over a hive settled by remove.settle",
       "tests": [
         "tests/swarm/test_tick_hive_stop_recovery.py::test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer"
+      ]
+    },
+    {
+      "id": "hive-drain-push-resume",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-drain-resume",
+      "behaviour": "A stopping hive orders each agent to commit and push its branch before it hands off, pushes the unpushed worktrees of an agent still running at the deadline to wip branches named in its recovery handoff, and after a restart an agent that left a handoff gives its task and seat to a successor primed with it instead of awaiting a restore decision.",
+      "seam": "remove.settle and the reboot boot pass",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off",
+        "tests/hive/test_remove.py::test_an_agent_still_running_at_the_deadline_has_its_unpushed_worktrees_pushed_and_named_in_its_recovery",
+        "tests/swarm/test_reboot.py::test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision",
+        "tests/swarm/test_reboot.py::test_a_master_with_a_submitted_handoff_keeps_its_seat_and_awaits_its_decision"
       ]
     },
     {
@@ -1495,6 +1527,17 @@
       ]
     },
     {
+      "id": "hive-release-drain-live-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
+      "behaviour": "A hive release drain orders and waits only for agents still running on the hive; an agent whose join report ended gets no hand off order.",
+      "seam": "hive release roll drain settle",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_orders_no_seat_whose_agent_ended_or_never_reported_past_a_heartbeat",
+        "tests/hive/test_remove.py::test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_heartbeat_ago_or_at_no_time"
+      ]
+    },
+    {
       "id": "reply-wait-reads-every-inbox-world",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
@@ -2632,6 +2675,26 @@
       ]
     },
     {
+      "id": "hive-create-registers-name-and-repos",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1750",
+      "behaviour": "Hive create records the new hive's name and the repos it was given, defaulting to the repos of every swarm it joins, in the hive registry; every heartbeat keeps those repos listed and hive list prints the name.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_create_records_the_hive_name_and_the_swarm_repos_and_hive_list_prints_the_name",
+        "tests/hive/test_create.py::test_create_records_the_repos_it_was_given_over_the_swarm_repos",
+        "tests/hive/test_create.py::test_a_resumed_create_records_the_repos_its_first_run_was_given",
+        "tests/hive/test_create.py::test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin",
+        "tests/hive/test_create.py::test_no_swarm_gives_no_default_repo",
+        "tests/hive/test_create.py::test_the_dry_run_names_the_registry_record_and_writes_none",
+        "tests/hive/test_create.py::test_no_repo_is_named_as_no_repos",
+        "tests/hive/test_create.py::test_cli_create_passes_its_repos",
+        "tests/hive/test_create.py::test_cli_create_names_its_repos_option",
+        "tests/hive/test_create.py::test_cli_create_refuses_a_repo_that_is_not_host_owner_name",
+        "tests/hive/test_registry.py::test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones"
+      ]
+    },
+    {
       "id": "hive-create-resume-revoke",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
@@ -2771,6 +2834,18 @@
       ]
     },
     {
+      "id": "independent-ci-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",
+      "behaviour": "Independent source changes retain independently owned type counts and feature entries when their branches merge in either order.",
+      "seam": "Type baseline loader and writer, feature map loaders and Git merge of disjoint source records",
+      "tests": [
+        "tests/test_type_gate.py::test_type_records_load_and_refresh_without_rewriting_the_shared_baseline",
+        "tests/test_type_gate.py::test_independent_source_branches_merge_their_records_in_either_order",
+        "tests/test_feature_map.py::test_feature_fragments_preserve_validation_and_retirement"
+      ]
+    },
+    {
       "id": "hive-master-closed-account",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
@@ -2823,6 +2898,19 @@
         "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs",
         "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends",
         "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group"
+      ]
+    },
+    {
+      "id": "codex-opening-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-canary-regress",
+      "behaviour": "A provider account refusal in the opening Codex turn fails the launch and its profile binding immediately, before the inbox pump starts. The routed account becomes expired so later hive launches select an eligible account instead of exhausting the canary deadline.",
+      "seam": "scripts.codex_session.supervisor.launch opening turn and scripts.codex_session.serve.main binding refusal and account exclusion",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_refused_opening_fails_the_canary_before_the_pump_starts",
+        "tests/codex_session/test_serve.py::test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary",
+        "tests/codex_session/test_serve.py::test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report",
+        "tests/inbox/test_codex_pump.py::test_a_refused_recorded_opening_is_recovered_when_the_pump_starts"
       ]
     },
     {
