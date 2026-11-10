@@ -115,8 +115,7 @@ def _ended(agent: Any, rows: dict[str, Any]) -> bool:
 
 
 def _current_owner(agent: Any, row: dict[str, Any]) -> bool:
-    hive = bool(row) and not row.get("claimed_by") and _on_hive(agent)
-    return not claim_lost.lost(agent.name, row, hive)
+    return not claim_lost.lost(agent.name, row, _on_hive(agent))
 
 
 def _on_hive(agent: Any) -> bool:
