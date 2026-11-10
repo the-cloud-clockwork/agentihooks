@@ -14,7 +14,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
@@ -576,6 +576,37 @@ def _workflow_gates(data: dict[str, Any], source: SourceControl, cache: Any) -> 
     return gates
 
 
+SHARED_VIEW_KEY = "pr-view-cache"
+
+
+def _shared_views(store: object, slug: str, now_s: float) -> dict[str, PullRequest]:
+    """Return the pull requests cached for ``slug`` within ``github_reads.RUN_TTL_S`` of ``now_s``, read from the
+    store any caller of ``tick_view`` last fetched them into."""
+    found: dict[str, PullRequest] = {}
+    for url, raw in store.redis.hgetall(store.key(slug, SHARED_VIEW_KEY)).items():
+        try:
+            entry = json.loads(raw)
+            if now_s - entry["at"] >= github_reads.RUN_TTL_S:
+                continue
+            fields = dict(entry["pr"])
+            fields["failed"] = tuple(fields.get("failed", ()))
+            found[url] = PullRequest(**fields)
+        except (ValueError, KeyError, TypeError):
+            continue
+    return found
+
+
+def _save_shared_views(store: object, slug: str, now_s: float, snapshots: dict[str, "PullRequest | None"]) -> None:
+    """Add every resolved pull request of ``snapshots`` to the store any caller of ``tick_view`` reads back within
+    ``github_reads.RUN_TTL_S``, each keeping its own fetch time so an unfetched entry is never kept past its own."""
+    fresh = {url: pr for url, pr in snapshots.items() if isinstance(pr, PullRequest)}
+    if not fresh:
+        return
+    key = store.key(slug, SHARED_VIEW_KEY)
+    store.redis.hset(key, mapping={url: json.dumps({"at": now_s, "pr": asdict(pr)}) for url, pr in fresh.items()})
+    store.redis.expire(key, int(github_reads.RUN_TTL_S) * 2)
+
+
 def tick_view(
     inbox: object, store: object, slug: str, doc: dict, earlier: Callable | None = None
 ) -> Callable[[str], PullRequest | None]:
@@ -585,13 +616,19 @@ def tick_view(
         task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
     ]
     at = int(datetime.now().timestamp() * 1000)
+    now_s = at / 1000
     recent = metrics_outbox.read_recent("delivery_events", at)
     if recent is not None:
         urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
-    snapshots = {**known, **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)}
+    known = {
+        **_shared_views(store, slug, now_s),
+        **{url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None},
+    }
+    fetched = views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)
+    _save_shared_views(store, slug, now_s, fetched)
+    snapshots = {**known, **fetched}
 
     @functools.cache
     def lookup(url):

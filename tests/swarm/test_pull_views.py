@@ -686,3 +686,79 @@ def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
         False,
         True,
     )
+
+
+@pytest.mark.feature("swarm-tick-view-shared-pr-cache")
+def test_the_shared_view_cache_round_trips_a_pull_request_and_expires_it():
+    import fakeredis
+
+    from scripts.swarm import github_reads
+    from scripts.swarm.ledger_events import _save_shared_views, _shared_views
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    pull = PullRequest("OPEN", None, 1_000, False, failed=("lint",))
+    _save_shared_views(store, "sw", 1_000.0, {"a": pull, "b": "not a pull request", "c": None})
+    assert _shared_views(store, "sw", 1_000.0) == {"a": pull}
+    assert _shared_views(store, "sw", 1_000.0 + github_reads.RUN_TTL_S) == {}
+
+
+@pytest.mark.feature("swarm-tick-view-shared-pr-cache")
+def test_a_caller_with_no_earlier_view_reuses_what_another_caller_just_fetched(monkeypatch):
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    inbox = InboxStore(store.redis)
+    doc = {"tasks": [{"state": "pr", "pr_url": "a"}]}
+    batched = []
+    pull = PullRequest("OPEN", None, None, False)
+    monkeypatch.setattr(ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: pull for url in urls})
+    ledger_events.tick_view(inbox, store, "sw", doc)
+    later = ledger_events.tick_view(inbox, store, "sw", doc)
+    assert batched == [["a"]]
+    assert later("a") == pull
+
+
+@pytest.mark.feature("swarm-tick-view-shared-pr-cache")
+def test_a_multi_page_pull_request_is_shared_across_calls_without_a_second_pagination_pass(monkeypatch, tmp_path):
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, stack
+    from scripts.swarm.store import RedisStore
+    from tests.swarm.graph_port import RunPort
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    url = "https://github.com/o/r/pull/1"
+    big = resource("h2")
+    commit = big["commits"]["nodes"][0]["commit"]
+    commit["id"] = "C_h2"
+    first_page = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+    commit["statusCheckRollup"] = {
+        "contexts": {"nodes": first_page, "pageInfo": {"hasNextPage": True, "endCursor": "c"}}
+    }
+    rest = [{"name": "job 100", "conclusion": "FAILURE", "databaseId": 100}]
+    page = {"node": {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}}
+    replies = [{"data": {"p0": big}}, {"data": page}]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(replies[len(calls) - 1]))
+
+    monkeypatch.setattr(stack, "login_source_control", lambda: RunPort(run))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    inbox = InboxStore(store.redis)
+    doc = {"tasks": [{"state": "pr", "pr_url": url}]}
+
+    first = ledger_events.tick_view(inbox, store, "sw", doc)
+    assert len(calls) == 2
+    assert first(url).failed == ("job 100",)
+
+    later = ledger_events.tick_view(inbox, store, "sw", doc)
+    assert len(calls) == 2
+    assert later(url) == first(url)
