@@ -71,7 +71,9 @@ def test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent(monke
 
 
 @pytest.mark.feature("swarm-tick-agents-reap")
-def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.swarm import tick
     from scripts.swarm.store import SwarmError
 
@@ -92,5 +94,6 @@ def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(monkeypat
     step = next(step for step in agents.STEPS if step.name == "reap")
     result = step.run(Context(_View(state), Deadline.after(10), tools))
     actions = cast(list[str], result.writes[0].value)
-    assert "watched fine-eng" in actions
-    assert any("stale-eng" in action for action in actions)
+    assert actions == ["skipped stale-eng, its execution identity changed mid pass", "watched fine-eng"]
+    err = capsys.readouterr().err
+    assert "reap skipped stale-eng, its execution identity changed mid pass: stale or changed execution identity" in err
