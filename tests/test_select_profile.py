@@ -1,5 +1,5 @@
 import json
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -155,8 +155,10 @@ def test_a_failed_selection_without_a_launch_report_writes_nothing(profile, monk
 
 
 def test_routed_launch_preserves_environment_and_exit_code(profile, monkeypatch):
-    run = Mock(return_value=Mock(returncode=17))
-    monkeypatch.setattr(select_profile.subprocess, "run", run)
+    run = MagicMock()
+    run.return_value.__enter__.return_value.wait.return_value = 17
+    monkeypatch.setattr(select_profile.subprocess, "Popen", run)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.setenv("AH_CC_TOKEN_TEST", "test-only-token")
     assert select_profile.main(["engineer", "--", "-p", "OK"]) == 17
     assert run.call_args.args[0][:2] == ["agentihooks", "claude"]

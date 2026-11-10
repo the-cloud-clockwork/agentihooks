@@ -143,8 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
-    launches.record(dict(os.environ))
-    return subprocess.run(command, env={**os.environ, **env}).returncode
+    with subprocess.Popen(command, env={**os.environ, **env}) as agent:
+        launches.record(dict(os.environ), pid=agent.pid)
+        return agent.wait()
 
 
 def dispatch(argv: list[str]) -> int:

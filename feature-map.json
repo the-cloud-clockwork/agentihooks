@@ -3317,6 +3317,16 @@
         "tests/codex_session/test_attach.py::test_a_viewer_whose_seat_moved_on_is_stopped",
         "tests/codex_session/test_attach.py::test_a_connected_record_whose_server_process_died_stops_the_viewer"
       ]
+    },
+    {
+      "id": "select-profile-records-the-agent-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1779",
+      "behaviour": "A swarm agent launched through select profile has its own agent process, the child select profile starts and waits on, recorded with its start time under the agent's name at launch, before any binding report, and retirement of an agent with no validated process id ends that recorded agent process.",
+      "seam": "scripts.select_profile.main with scripts.swarm.launches.record and HerdrRuntime.retire",
+      "tests": [
+        "tests/swarm/test_launches.py::test_select_profile_records_the_launched_agent_process_and_retire_ends_it"
+      ]
     }
   ],
   "unmapped_rules": [

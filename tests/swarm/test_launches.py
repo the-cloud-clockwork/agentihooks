@@ -6,7 +6,6 @@ import sys
 import time
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -63,15 +62,39 @@ def test_find_returns_nothing_for_a_missing_unreadable_restarted_or_ended_launch
     assert launches.find(NAME, tmp_path) is None
 
 
-def test_select_profile_records_its_own_process_before_launching(monkeypatch, tmp_path):
-    seen = []
+@pytest.mark.feature("select-profile-records-the-agent-process")
+def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(launches, "home", lambda: tmp_path)
     monkeypatch.setattr(select_profile, "prepare", lambda *args: ({}, []))
-    run = Mock(side_effect=lambda *args, **kwargs: seen.append(launches.find(NAME)) or Mock(returncode=0))
-    monkeypatch.setattr(select_profile.subprocess, "run", run)
+    herdr, _ = herdr_runtime(tmp_path, monkeypatch, panes={})
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "crew")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
-    assert select_profile.main(["engineer"]) == 0
-    assert seen[0].pid == os.getpid()
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    launched, seen = [], []
+    real = subprocess.Popen
+
+    def popen(command: list[str], env: dict[str, str]) -> subprocess.Popen:
+        child = real([sys.executable, "-c", "import time; time.sleep(30)"], env=env)
+        launched.append(child)
+        wait = child.wait
+
+        def waited(timeout: float | None = None) -> int:
+            if not seen:
+                seen.append(launches.find(NAME))
+                assert herdr.retire(replace(AgentRecord(NAME, "eng", "t1"), pane_id="", state="finished"))
+                child.kill()
+            return wait(timeout)
+
+        child.wait = waited
+        return child
+
+    monkeypatch.setattr(select_profile.subprocess, "Popen", popen)
+    assert select_profile.main(["engineer"]) == -signal.SIGKILL
+    agent = launched[0]
+    assert agent.pid != os.getpid()
+    assert seen[0] is not None and seen[0].pid == agent.pid
+    assert ended == [(NAME, agent.pid, [], seen[0].start_time)]
 
 
 def test_select_profile_dry_run_records_nothing(monkeypatch):
