@@ -135,4 +135,5 @@ The renderer appends selected overlays after the role chain and existing
 always-on overlays. Different overlay sets get distinct rendered homes. The
 render stamp records the worn overlays and the launch check verifies them;
 the launch record preserves their names and the bundle revision for workers
-on other hives.
+on other hives. A hive agent is checked against the overlays its own host rendered; see
+[Launch check on a hive](pillars/hives.md#launch-check-on-a-hive).

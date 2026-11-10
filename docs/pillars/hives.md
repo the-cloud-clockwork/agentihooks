@@ -1728,6 +1728,56 @@ failed with "hive launch failed: `<cause>`".
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
 
+### Launch check on a hive
+
+A hive agent passes its launch check against the overlays its own host rendered and the time its own session
+started, never the workstation's view of either. A hive without agentibrain installed launches engineers without the
+`brain` overlay, and they pass.
+
+When the hive acknowledges a launch as `live`, the acknowledgement's execution carries:
+
+| Field | Value |
+|---|---|
+| `profile_decision.host_overlays` | The overlays the hive can render for the order's profile: every overlay the profile chain declares that resolves on the hive, then the worn overlays of the launch, without duplicates. |
+| `launched_at` | The session start time the hive recorded, in milliseconds. |
+| `launch_timings` | The launch timings the hive recorded for the session. |
+| `overlays` | The worn overlays of the launch. |
+
+The controller stores these fields on the execution record when it collects the acknowledgement, and the agent
+record the tick reads carries them. A field the acknowledgement omits keeps the value the controller already holds.
+
+The tick's launch check then reads:
+
+- **Expected overlays**: `host_overlays` when the agent's profile decision holds it, else the overlays the
+  workstation declares for the profile and its worn overlays. A workstation agent has no `host_overlays`, so its
+  check is unchanged.
+- **Start time**: the later of `launched_at` (or the spawn time when `launched_at` is zero) and `harness_at`, the
+  time the profile canary validated. The sixty second join deadline and the canary deadline count from it. Before
+  this, a hive agent's `launched_at` read zero and the `late` check misfired.
+
+An agent on another hive is graded by its session join report: every check that report names is required except
+`brain`, which is report only, so a hive without the brain connector reports the miss and keeps its agent running.
+
+The hive image does not install agentibrain for this; brain on a hive comes with the brain connector.
+
+Check a fresh hive launch:
+
+```bash
+agentihooks swarm <slug> status
+# launch  engineer@<code>-<n>  passed  41250ms
+# launch  engineer@<code>-<n>  reported  38800ms
+#   hive_brain  report only  expected available; observed missing
+```
+
+Each `launch` line names the agent, the report state and the time from session start to the join. `passed` means no
+miss, `reported` means only report only misses, `failed` means an enforced miss: the agent is retired and relaunched
+once, then left for the operator. The report is kept per task in `agentihooks:swarm:<slug>:launch-check-reports`.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A hive engineer fails `overlay` sixty seconds after start and is retired with exit 143 | The hive runs a release before [pull request #5319](https://github.com/the-cloud-clockwork/agentihooks/pull/5319), so its acknowledgement carries no `host_overlays` and the check expects the workstation's overlays, `brain` included. | Upgrade the hive to a release carrying the change and roll its pod. |
+| A hive engineer fails `late` although it joined at once | The acknowledgement carried no `launched_at`, so the start time read zero. | The same upgrade. |
+
 ### A worker that finishes before the tick collects its acknowledgement
 
 Until the tick collects a hive launch's `live` acknowledgement, the execution record names only the hive in its
