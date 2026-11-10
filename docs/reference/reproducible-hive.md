@@ -50,7 +50,7 @@ agentihooks hive create
 | settings | `hive setup` into the hive settings record | never; it rewrites the same keys |
 | live | waits for the member's heartbeat | never; a live hive passes at once |
 | registry | records the hive name and its repos in the member's hive registry record, so `hive list` shows `name=<name>`; the repos are `--repos` (comma separated `host/owner/name`, kept across a resumed create), else the repos of every swarm the hive joins. Every heartbeat keeps these repos listed beside the checkouts the hive reports | never; it rewrites the same fields |
-| herdr | trusts the host key in `~/.ssh/known_hosts`, then saves `ssh://worker@<LAN address>:<port>` in herdr with `herdr machine add --label <name>`; the pod keeps the member the invite wrote, so the step mints no second member and delivers no credential | the saved create holds the added member |
+| herdr | trusts the host key in `~/.ssh/known_hosts`, then saves `ssh://worker@<LAN address>:<port>` in herdr with `herdr machine add --label <name> --remote-session default`; the pod keeps the member the invite wrote, so the step mints no second member and delivers no credential | the saved create holds the added member |
 | engineer | waits for a non master agent working on the hive | never |
 
 It needs antoncore `k8s/templates/agentihooks-hive.yaml` on `dev` and at least one running swarm with
@@ -72,7 +72,7 @@ A hive name comes from code, never from the clock: `swarm-hive-001`, `swarm-hive
 - an open antoncore pull request whose branch is that name;
 - another hive create run's reservation, the Redis key `agentihooks-hive:create:name:<name>` set for one hour.
 
-`--name` must be a lowercase DNS label and is refused while anything above holds it, before any write:
+`--name` must be lowercase letters, digits and dashes, starting and ending with a letter or digit, and is refused while anything above holds it, before any write:
 
 ```text
 hive create refused: hive create refuses swarm-hive-001: it is already held by a hive; pass --name with an unused hive name, or leave it out to take the next one
@@ -86,7 +86,7 @@ finished run releases its own reservation.
 ### One machine, one hive
 
 A hive is one physical machine. Anton's two compute nodes are two hives, a cloud machine is one more, and nothing else
-adds one. Grow a hive with larger CPU and memory requests and more max agents in its antoncore values, never with a
+should add one. Grow a hive with larger CPU and memory requests and more max agents in its antoncore values, never with a
 second hive on the same node. To grow `swarm-hive-001`, edit antoncore `k8s/values-overlays/swarm-hive-001/values.yaml`
 by pull request into `dev`:
 
@@ -105,6 +105,10 @@ workers:
 
 The overlay pins the pod to its node with a `kubernetes.io/hostname` node affinity, because its home is that node's
 disk; [Hives](../pillars/hives.md#worker-hives-in-kubernetes) explains `memoryPerAgentMi`.
+
+`hive create` checks names only, never the node: `--node` set to a node that already runs a hive names the next
+hive and renders a second release pinned to that node. Read `agentihooks hive list` and the overlays' hostname
+affinity first, and create a hive only for a node or cloud machine that has none.
 
 `hive add` holds the rule for machines it joins: it names a host from the machine map, reusing the name it gave that
 host before, and refuses a second label on a host herdr already saves
