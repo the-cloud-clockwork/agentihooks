@@ -53,8 +53,8 @@ _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
 
 
 def _handoff(workers: int) -> ThreadPoolExecutor:
-    """Return the workers of a pass's handed off steps: half the pass's step workers, at least one."""
-    return ThreadPoolExecutor(max_workers=max(1, workers // 2), thread_name_prefix="tick-handed")
+    """Return the workers of a pass's handed off steps, as many as the pass's step workers."""
+    return ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-handed")
 
 
 Item = TypeVar("Item")
