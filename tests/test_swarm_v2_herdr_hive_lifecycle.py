@@ -7,14 +7,14 @@ import pytest
 
 from scripts.hive import auth, machine, registry, remove
 from scripts.swarm.store import RedisStore
-from scripts.swarm_v2.herdr import operator_setup
+from scripts.swarm_v2.herdr import hive_lifecycle, operator_setup
 from scripts.swarm_v2.herdr.operator_service import Service
 from scripts.swarm_v2.herdr.upkeep import Upkeep
 from tests import sv2_hdr03_cases as cases
 
 pytestmark = pytest.mark.unit
 NOW = 2_000_000
-LIMIT = 15 * 60 * 1000
+LIMIT = hive_lifecycle.UNREACHABLE_MS
 LABEL = "swarm-hive-003"
 TARGET = "ssh://worker@10.10.30.207:2225"
 
