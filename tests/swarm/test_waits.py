@@ -2152,7 +2152,8 @@ def test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the
     tick_inbox = InboxStore(store.redis, world="")
 
     assert waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 5_000, {}.get) == []
-    assert idle.wait(store.redis, "sw", waiter)["on"] == {"kind": "reply", "target": item.id}
+    held = idle.wait(store.redis, "sw", waiter)
+    assert held is not None and held["on"] == {"kind": "reply", "target": item.id}
 
     seat_inbox.reply(item.id, "master@sw", "left")
     assert waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 6_000, {}.get) == [
