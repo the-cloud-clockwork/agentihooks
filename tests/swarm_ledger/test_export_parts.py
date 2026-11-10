@@ -104,8 +104,8 @@ def test_the_client_reads_changes_of_the_named_parts(live: dict, monkeypatch: py
 
     monkeypatch.setattr(api.ResourceClient, "request", recorded)
     reply = reader.changes(SLUG, 0, ("tasks", "phases"))
-    assert sent == [("export", {"since": 0, "parts": ["tasks", "phases"]})]
-    assert set(reply["data"]) == {"tasks", "phases"}
+    assert sent == [("export", {"since": 0, "parts": ["tasks", "phases"], "closed": False, "frozen": False})]
+    assert set(reply["data"]) == {"tasks", "phases", "frozen_ids"}
 
 
 @pytest.mark.feature("swarm-tick-delta-reads")
