@@ -150,3 +150,25 @@ def test_no_keyword_source_loads_no_keywords(monkeypatch: pytest.MonkeyPatch) ->
 )
 def test_a_passing_match_does_not_hide_a_later_hit_on_the_line(line: str) -> None:
     assert len(docs_sanity.line_rules(line, ())) == 1
+
+
+@pytest.mark.feature("docs-sanity-scan")
+@pytest.mark.parametrize(
+    ("line", "rules"),
+    [
+        ("see 10.0.0.5.", ["private-ipv4"]),
+        ("at 10.0.0.5:8080", ["private-ipv4"]),
+        ("version 10.1.2.3.4 and 1000.1.1.1", []),
+        ("a@b.io", ["email"]),
+        ("mail jane@mailhost.io.", ["email"]),
+        ("@mailhost.io and x@y and x@y.c and x@y.12 and x@.io and x@y..io", []),
+        ("https://user:pw@github.com/org/repo.git", []),
+        ("scp o/r-git@github.com:o/r.git", []),
+        ("git@github.com:org/repo.git", []),
+        ("--flag.local -cache.lan", []),
+        ("swarm.example.internal then buildbox.lan", ["private-host"]),
+        ("BuildBox.LAN", ["private-host"]),
+    ],
+)
+def test_each_edge_of_the_built_in_rules(line: str, rules: list[str]) -> None:
+    assert docs_sanity.line_rules(line, ()) == rules

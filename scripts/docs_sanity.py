@@ -28,10 +28,9 @@ PRIVATE_NETWORKS = tuple(
         ((169, 254, 0, 0), 16),
     )
 )
-NOT_ADDRESS = re.compile(r"[^0-9.]+")
-NOT_HOST = re.compile(r"[^\w.-]+")
-LOCAL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._%+-")
-DOMAIN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
+NOT_ADDRESS = re.compile(r"[^0-9.]+|\.(?![0-9])")
+NOT_HOST = re.compile(r"[^\w.-]+|[.-](?!\w)")
+NOT_EMAIL = re.compile(r"[^\w.%+@:/-]+")
 EXAMPLE_DOMAINS = re.compile(r"(?:^|\.)(?:example\.(?:com|org|net)|example|test|invalid|localhost)$", re.IGNORECASE)
 NOREPLY = re.compile(r"(?:^|[.+-])no-?reply$", re.IGNORECASE)
 HOST_SUFFIXES = ("lan", "local", "internal", "intranet", "corp", "localdomain", "home.arpa", "ts.net")
@@ -59,11 +58,8 @@ class Hit:
 def private_ipv4(text: str) -> bool:
     """Return whether the text holds an IPv4 address in a private, shared or link local range."""
     for token in NOT_ADDRESS.split(text):
-        parts = token.strip(".").split(".")
-        if len(parts) != 4 or not all(part.isdigit() and len(part) <= 3 for part in parts):
-            continue
         try:
-            address = ipaddress.IPv4Address(".".join(parts))
+            address = ipaddress.IPv4Address(token)
         except ValueError:
             continue
         if any(address in network for network in PRIVATE_NETWORKS):
@@ -73,31 +69,27 @@ def private_ipv4(text: str) -> bool:
 
 def real_email(text: str) -> bool:
     """Return whether the text holds an email address outside reserved example domains and no reply mailboxes."""
-    return any(_real_address(text, at) for at, char in enumerate(text) if char == "@")
+    return any(_real_address(token) for token in NOT_EMAIL.split(text))
 
 
-def _real_address(text: str, at: int) -> bool:
-    """Return whether the address around the at sign at this index is a real looking email."""
-    start = at
-    while start > 0 and text[start - 1] in LOCAL_CHARS:
-        start -= 1
-    end = at + 1
-    while end < len(text) and text[end] in DOMAIN_CHARS:
-        end += 1
-    local, domain = text[start:at], text[at + 1 : end].rstrip(".")
-    tld = domain.rpartition(".")[2]
-    if not local or "." not in domain or len(tld) < 2 or not tld.isalpha():
+def _real_address(token: str) -> bool:
+    """Return whether one token is a real looking email; URL user names and scp style remotes are not."""
+    local, at, rest = token.partition("@")
+    domain = NOT_HOST.split(rest, maxsplit=1)[0]
+    labels = domain.split(".")
+    if not at or not local or ":" in local or "/" in local or local == "git":
         return False
-    if start > 0 and text[start - 1] in ":/":
+    if len(labels) < 2 or not all(labels) or len(labels[-1]) < 2 or not labels[-1].isalpha():
         return False
-    exempt = EXAMPLE_DOMAINS.search(domain) or NOREPLY.search(local) or domain.lower().endswith("noreply.github.com")
-    return not exempt and local != "git"
+    return not (
+        EXAMPLE_DOMAINS.search(domain) or NOREPLY.search(local) or domain.lower().endswith("noreply.github.com")
+    )
 
 
 def private_host(text: str) -> bool:
-    """Return whether the text names a host under a private or internal suffix; dot files are not hosts."""
+    """Return whether the text names a host under a private or internal suffix; dot files and flags are not hosts."""
     for token in NOT_HOST.split(text):
-        host = token.rstrip(".-").lower()
+        host = token.lower()
         suffix = next((s for s in HOST_SUFFIXES if host.endswith("." + s)), None)
         if suffix is None or host.startswith((".", "-")):
             continue
