@@ -1023,6 +1023,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
 | `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
 | `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 15; a swarm that stored another value keeps it. The host room guard still refuses a spawn when load or available memory leaves no room, whatever N allows. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
+| `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
@@ -1836,6 +1837,11 @@ Clone the repository under `HIVE_REPO_ROOT` or beside the swarm repository,
 or remove the duplicate clone, then repeat the command. Setting
 `HIVE_REPO_ROOT` replaces the default `~/dev` scan root; the search beside the
 swarm repository always applies. No other flag or setting changes this.
+
+For an agent of the swarm, when `AGENTIHOOKS_SWARM_REPO` is set and
+`AGENTIHOOKS_SWARM` names this swarm, the swarm repository here is the
+checkout its launch named in that variable, the hive's own clone on a hive; see
+[Swarm commands use the launch checkout](hives.md#swarm-commands-use-the-launch-checkout).
 
 The rest of the task record follows the same name match:
 
@@ -3056,6 +3062,90 @@ reads `timed out`, `gave no answer` or `answered with a server error`) and one
 `hive_samples` row per registered hive (`hive`, `name`, `live`,
 `heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
 `hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
+
+### Admission and hive headroom samples
+
+The same metrics collector pass writes two more tables to the outbox. Both
+carry the common outbox columns (`event_id`, `ledger`, `ts_ms`, and empty
+`plan`, `phase`, `slice` and `task`).
+
+**`admission_samples`** copies the swarm's running pending admission totals,
+one row per outcome that has ever counted, with the columns `outcome` and
+`total`. Pending admission increments a counter per outcome as it decides and
+ends reservations:
+
+| Outcome | Counted when |
+|---|---|
+| `admitted` | A task got a pending reservation. |
+| `deferred` | A pending cap or the free provider sessions held the task. |
+| `impossible` | The task's resources exceed every approved template, or are unreadable. |
+| `expired` | A reservation passed its deadline before it was activated or released. Counted when the next admission decision for the swarm prunes it, which may be after the deadline. |
+| `activated` | The launch took up its reservation. |
+| `released` | The reservation was given back without a launch. |
+
+A task that already holds a live reservation is replayed and not counted.
+`total` is a running total, so a rate is the difference between two
+consecutive rows for the same outcome; a smaller total than the previous row
+means the counter was reset and starts a new count. A swarm whose admission
+never ran writes no rows.
+
+**`hive_headroom`** writes up to four rows per registered hive from the
+headroom the hive publishes every heartbeat:
+
+| `scope` | `resource` | `total` | `available` |
+|---|---|---|---|
+| `host` | `cpu` | CPUs on the node | CPUs minus the five minute load average |
+| `host` | `memory` | Node memory in MB | Available memory in MB |
+| `pod` | `cpu` | The pod's CPU limit | The limit minus the average CPUs the pod used over the interval since its previous reading |
+| `pod` | `memory` | The pod's memory limit in MB | The limit minus the pod's used memory, in MB |
+
+Each row also carries `hive`, `name` and `measured_at_ms`, the time the hive
+measured the reading. CPU headroom is not clamped: a host whose load average
+exceeds its CPU count writes a negative `available`, which shows the overload.
+A reading older than 30 seconds, two hive heartbeats, writes no rows for that
+hive. A pod resource the hive could not measure, for example a hive on a bare
+host with no cgroup limit or a first reading with no earlier CPU sample, writes
+no row; the hive's other rows and every later hive are still written.
+
+Check the latest rows for one swarm:
+
+```sql
+SELECT ts_ms, outcome, total
+FROM swarm.admission_samples FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, outcome LIMIT 12;
+
+SELECT ts_ms, name, scope, resource, available, total, measured_at_ms
+FROM swarm.hive_headroom FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, name, scope, resource LIMIT 16;
+```
+
+### Swarm Ledger capacity history panels
+
+The Swarm Ledger Grafana dashboard, defined in the antoncore observability
+stack, groups five panels under **Admission and scaling**. Each is filtered by
+the dashboard's `ledger` variable and the time range.
+
+| Panel | Source | Shows |
+|---|---|---|
+| Admission outcomes per tick | `swarm.admission_samples` | Each outcome's increase between consecutive metrics passes. The first sample is the baseline; a reset starts a new count. |
+| Master scale decisions | `swarm.master_scaling`, metric `master_seat_count` | One row per change to the master seat count, written when the tick recounts the seats. Written only when the swarm has a master-per rule or a masters step and is not stopping or stopped. See [Several master seats](#several-master-seats). |
+| Hive CPU headroom | `swarm.hive_headroom`, resource `cpu` | `available` as a percentage of `total`, one series per hive name and scope. Negative values show overload. |
+| Hive memory headroom | `swarm.hive_headroom`, resource `memory` | `available` as a percentage of `total`, one series per hive name and scope. |
+| Freeze changes over time | `swarm.ledger_events`, kinds `frozen` and `unfrozen` | Each freeze set and clear with its target, actor and reason. Focus sets are excluded; a clear can still emit an `unfrozen` event when the cleared target held a focus. |
+
+The admission and headroom panels draw a point only per metrics pass, so they
+update at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`. The master scale
+panel draws a point each time the master seat count changes, and the freeze
+panel gets one row per freeze set or clear, delivered at the next metrics pass. A gap in a headroom series means the hive
+sent no fresh reading at that pass, or the pod resource was not measured.
+
+| Symptom | Cause and fix |
+|---|---|
+| Admission outcomes per tick is empty. | The swarm never ran pending admission, so it has no totals to copy. Check `admission_samples` with the query above. |
+| A hive is missing from a headroom panel. | Its latest headroom reading was older than 30 seconds at every pass in range. Check the hive's heartbeat in `hive_samples`. |
+| Only the `host` series shows for a hive. | The hive runs without cgroup limits, so it reports no pod scope. |
 
 ### Spawn holds in the stage report
 

@@ -120,6 +120,7 @@ The recording persists: later `agentihooks swarm init` runs without `--adopt` ke
 While `SWARM_ADOPT_LEDGER_DIR` is set:
 
 - Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server under its reload supervisor from the recorded checkout with reload on, so a code reload hands the listening socket to a successor while the container keeps running, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
+- The adopted `swarm` service sets `AGENTIHOOKS_BUS=memory` and `AGENTIHOOKS_SCHEDULER_STATE_BACKEND=redis` as fixed values, so a host shell or `.env` setting cannot change them. The base stack defaults to `AGENTIHOOKS_BUS=nats` at `nats://nats:4222` and keeps scheduler state on that bus, but on the host network with `depends_on` reset no Compose `nats` service is reachable and the name `nats` does not resolve. The memory bus matches the workstation tick and inbox on the host, and scheduler state stays in the recorded Redis instead of a store local to one server process. The adopted server therefore neither relays ledger events to NATS nor consumes them; reach a NATS hub only from a stack without adoption or from a hive.
 - `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `ledger` service of the `agentihooks-ledger` Compose project and the host process server are not started again.
 - A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
 - The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
@@ -132,10 +133,13 @@ To check adoption on a running stack:
 cd "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
 grep '^SWARM_ADOPT_\|^SWARM_PORT' .env
 project="$(sed -n 's/^SWARM_COMPOSE_PROJECT=//p' .env)"
+docker compose --project-name "${project:-agentihooks-swarm}" exec swarm sh -c 'echo "$AGENTIHOOKS_BUS $AGENTIHOOKS_SCHEDULER_STATE_BACKEND"'
 docker compose --project-name "${project:-agentihooks-swarm}" exec redis grep -c 'flushall -flushdb' /data/users.acl
 ```
 
-The count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+The `swarm` service prints `memory redis` and the count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+
+If the adopted `swarm` logs keep repeating NATS connect tracebacks, the stack files predate the overlay's memory bus. Run `agentihooks swarm init` from a current agentihooks install: it copies the bundled overlay over the stack files and recreates the changed `swarm` service. Then run the check above and confirm it prints `memory redis`.
 
 ## Workstation tailnet fronts
 

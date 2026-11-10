@@ -54,6 +54,9 @@ local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[2]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
 """
+_ADMITTED = """
+redis.call('HINCRBY', KEYS[2], 'admitted', 1)
+"""
 
 
 @dataclass(frozen=True)
@@ -205,8 +208,12 @@ def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int =
     return bool(admitted), int(held)
 
 
-def record(redis: "Redis", machine: str, member: str) -> None:
-    redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
+def record(redis: "Redis", machine: str, member: str, totals: str = "") -> None:
+    """Hold a pending workstation launch; with a totals hash, count it admitted in the same call."""
+    if totals:
+        redis.eval(_RECORD + _ADMITTED, 2, key(machine), totals, member, PENDING_MS)
+    else:
+        redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
 
 
 def pending(redis: "Redis", machine: str) -> int:
