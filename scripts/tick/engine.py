@@ -547,7 +547,7 @@ def _earlier(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[s
     return found.handed_of(step.needs - names) | (step.needs & awaited)
 
 
-def _waiting(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[str]) -> bool:
+def _waiting(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[str] = frozenset()) -> bool:
     """Return whether ``step`` still waits, inside its lane, on a step outside ``names`` it waits on.
 
     Such a step is submitted only once that step ended, so it never holds a pass worker while it waits.
