@@ -62,7 +62,11 @@ console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
         "attrs": {"data-tip": "Remote Control: off (fallback auth), phone access unavailable"},
         "kids": [
             {"label": "remote control off", "tone": "off"},
-            {"tag": "span", "attrs": {"class": "sw-sub", "text": "phone access unavailable, fallback auth"}, "kids": []},
+            {
+                "tag": "span",
+                "attrs": {"class": "sw-sub", "text": "phone access unavailable, fallback auth"},
+                "kids": [],
+            },
         ],
     }
 
@@ -73,7 +77,5 @@ const off = {state: 'off', detail: 'subscription token fallback'};
 const raw = {agents: [{name: 'm', lane: 'master', remote_control: off}]};
 console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
 """)
-    assert cell["attrs"] == {
-        "data-tip": "Remote Control: off (subscription token fallback), phone access unavailable"
-    }
+    assert cell["attrs"] == {"data-tip": "Remote Control: off (subscription token fallback), phone access unavailable"}
     assert cell["kids"][1]["attrs"]["text"] == "phone access unavailable, subscription token fallback"
