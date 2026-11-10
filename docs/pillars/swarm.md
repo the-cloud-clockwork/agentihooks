@@ -3057,6 +3057,88 @@ reads `timed out`, `gave no answer` or `answered with a server error`) and one
 `heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
 `hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
 
+### Admission and hive headroom samples
+
+The same metrics collector pass writes two more tables to the outbox. Both
+carry the common outbox columns (`event_id`, `ledger`, `ts_ms`, and empty
+`plan`, `phase`, `slice` and `task`).
+
+**`admission_samples`** copies the swarm's running pending admission totals,
+one row per outcome that has ever counted, with the columns `outcome` and
+`total`. Pending admission increments a counter per outcome as it decides and
+ends reservations:
+
+| Outcome | Counted when |
+|---|---|
+| `admitted` | A task got a pending reservation. |
+| `deferred` | A pending cap or the free provider sessions held the task. |
+| `impossible` | The task's resources exceed every approved template, or are unreadable. |
+| `expired` | A reservation passed its deadline before it was activated or released. |
+| `activated` | The launch took up its reservation. |
+| `released` | The reservation was given back without a launch. |
+
+A task that already holds a live reservation is replayed and not counted.
+`total` is a running total, so a rate is the difference between two
+consecutive rows for the same outcome; a smaller total than the previous row
+means the counter was reset and starts a new count. A swarm whose admission
+never ran writes no rows.
+
+**`hive_headroom`** writes up to four rows per registered hive from the
+headroom the hive publishes every heartbeat:
+
+| `scope` | `resource` | `total` | `available` |
+|---|---|---|---|
+| `host` | `cpu` | CPUs on the node | CPUs minus the five minute load average |
+| `host` | `memory` | Node memory in MB | Available memory in MB |
+| `pod` | `cpu` | The pod's CPU limit | The limit minus the CPUs the pod used since its previous reading |
+| `pod` | `memory` | The pod's memory limit in MB | The limit minus the pod's used memory, in MB |
+
+Each row also carries `hive`, `name` and `measured_at_ms`, the time the hive
+measured the reading. CPU headroom is not clamped: a host whose load average
+exceeds its CPU count writes a negative `available`, which shows the overload.
+A reading older than 30 seconds, two hive heartbeats, writes no rows for that
+hive. A pod resource the hive could not measure, for example a hive on a bare
+host with no cgroup limit or a first reading with no earlier CPU sample, writes
+no row; the hive's other rows and every later hive are still written.
+
+Check the latest rows for one swarm:
+
+```sql
+SELECT ts_ms, outcome, total
+FROM swarm.admission_samples FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, outcome LIMIT 12;
+
+SELECT ts_ms, name, scope, resource, available, total, measured_at_ms
+FROM swarm.hive_headroom FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, name, scope, resource LIMIT 16;
+```
+
+### Swarm Ledger capacity history panels
+
+The Swarm Ledger Grafana dashboard, defined in the antoncore observability
+stack, groups five panels under **Admission and scaling**. Each is filtered by
+the dashboard's `ledger` variable and the time range.
+
+| Panel | Source | Shows |
+|---|---|---|
+| Admission outcomes per tick | `swarm.admission_samples` | Each outcome's increase between consecutive metrics passes. The first sample is the baseline; a reset starts a new count. |
+| Master scale decisions | `swarm.master_scaling`, metric `master_seat_count` | One row per change to the master seat count, written when the tick recounts the seats. See [Several master seats](#several-master-seats). |
+| Hive CPU headroom | `swarm.hive_headroom`, resource `cpu` | `available` as a percentage of `total`, one series per hive name and scope. Negative values show overload. |
+| Hive memory headroom | `swarm.hive_headroom`, resource `memory` | `available` as a percentage of `total`, one series per hive name and scope. |
+| Freeze changes over time | `swarm.ledger_events`, kinds `frozen` and `unfrozen` | Each freeze set and clear with its target, actor and reason. Focus changes are excluded. |
+
+The panels draw a point only per metrics pass, so they update at most once per
+`AGENTIHOOKS_METRICS_EVERY_MINUTES`. A gap in a headroom series means the hive
+sent no fresh reading at that pass, or the pod resource was not measured.
+
+| Symptom | Cause and fix |
+|---|---|
+| Admission outcomes per tick is empty. | The swarm never ran pending admission, so it has no totals to copy. Check `admission_samples` with the query above. |
+| A hive is missing from a headroom panel. | Its last heartbeat reading was older than 30 seconds at every pass in range. Check the hive's heartbeat in `hive_samples`. |
+| Only the `host` series shows for a hive. | The hive runs without cgroup limits, so it reports no pod scope. |
+
 ### Spawn holds in the stage report
 
 A host sample with held spawns records who holds them. The stage report and
