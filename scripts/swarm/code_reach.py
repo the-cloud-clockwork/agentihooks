@@ -26,6 +26,10 @@ PACKAGES = ("scripts", "hooks")
 OWN = ("self", "cls")
 RAW = "execute_command"
 CLIENT_TYPES = frozenset({"Redis", "StrictRedis", "Pipeline"})
+Pairs = list[tuple[str, ast.expr]]
+Shape = tuple[
+    dict[str, bool], list[tuple[str, ast.expr, bool]], Pairs, Pairs, list[ast.expr], list[tuple[str, str, ast.expr]]
+]
 
 
 @dataclass
@@ -387,7 +391,7 @@ class Program:
         chained = isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, local)
 
-    def _shape(self, unit: Unit) -> tuple[dict, list, list, list, list, list]:
+    def _shape(self, unit: Unit) -> Shape:
         """What typing reads from a unit, taken once: annotated parameters, name bindings in source order with
         whether their callee is unknown, attribute and keyword bindings, returned values, and each argument a call
         passes to a parameter of a function here."""
