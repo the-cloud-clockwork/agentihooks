@@ -2159,6 +2159,7 @@ def test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the
         f"ended the wait of {waiter}: message {item.id}, now done"
     ]
     assert idle.wait(store.redis, "sw", waiter) is None
+    assert seat_inbox.get(item.id).state == "done"
 
 
 @pytest.mark.feature("reply-wait-reads-every-inbox-world")
