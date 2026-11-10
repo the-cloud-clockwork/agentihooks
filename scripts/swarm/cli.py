@@ -60,9 +60,9 @@ import sys
 import time
 import urllib.error
 from collections.abc import Callable, Iterable, MutableMapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
-from contextvars import Token
+from contextvars import Token, copy_context
 from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
@@ -391,19 +391,30 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
-def _intent_pass(inbox, store, slug, doc, ledger, config):
-    view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, config: Any) -> tuple[Future, list[str]]:
+    """Start the pass view off the step and judge intent from one batched read of every watched pull request,
+    returning the pending view and the check's actions."""
+    building = ThreadPoolExecutor(max_workers=1)
+    view = building.submit(copy_context().run, timing.call, ledger_events.tick_view, inbox, store, slug, doc)
+    building.shutdown(wait=False)
+    mode = intent.mode_of(config)
+    urls = intent.watched_urls(slug, doc, mode)
+    pulls = intent.Pulls(lambda batch: timing.call(ledger_events.pull_texts, batch), urls)
     check = intent.Check(
         slug,
-        intent.mode_of(config),
+        mode,
         now_ms(),
         ledger,
         ledger_events.Mail(inbox, store, slug),
         intent.pr_view,
         intent.judged,
-        head=lambda url: getattr(view(url), "head", None),
+        head=pulls.head,
         named=intent.named_view,
-        text=intent.pr_text,
+        text=pulls.text,
+        merged=pulls.merged,
+        draft=pulls.draft,
+        limit=intent.JUDGED_PER_PASS,
+        judging=intent.TICK_JUDGING,
     )
     return view, skip_refused(check.run, doc)
 
@@ -530,7 +541,8 @@ class _Wrapper:
         self.ticks.close()
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
-            self.box["view"], self.checked = self.judging["judged"]
+            view, self.checked = self.judging["judged"]
+            self.box["view"] = view.result() if isinstance(view, Future) else view
         return True
 
     def _reread(self) -> bool:
@@ -2361,7 +2373,7 @@ def cmd_wait(store, args):
         rows = waits.named_tasks(
             held["kind"], held["target"], agent.task, lambda task_id: LedgerClient().task(args.slug, task_id)
         )
-        get = InboxStore(store.redis).get
+        get = InboxStore(store.redis).locate
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
         prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms(), args.final)

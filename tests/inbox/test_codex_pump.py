@@ -57,6 +57,7 @@ class AppServer:
         self.dropped = set()
         self.broken = None
         self.early = []
+        self.refusal = None
 
     @property
     def active(self):
@@ -93,7 +94,11 @@ class AppServer:
         if not self.active:
             self.turns.append({"id": f"turn-{len(self.turns) + 1}", "status": codex.IN_PROGRESS, "inputs": []})
         self.turns[-1]["inputs"].append(params["input"][0]["text"])
-        return {"turn": {"id": self.active}}
+        started = self.active
+        if self.refusal is not None:
+            self.turns[-1].update(status="failed", error=self.refusal)
+            self.frames.append({"method": codex.TURN_COMPLETED, "params": {"turn": dict(self.turns[-1])}})
+        return {"turn": {"id": started}}
 
     def turn_steer(self, params):
         if params["expectedTurnId"] != self.active:
@@ -113,6 +118,7 @@ class AppServer:
             {
                 "id": turn["id"],
                 "status": turn["status"],
+                "error": turn.get("error"),
                 "items": [{"type": "userMessage", "content": [{"type": "text", "text": t}]} for t in turn["inputs"]],
             }
             for turn in self.turns
@@ -689,6 +695,101 @@ def test_a_refused_ownership_at_start_degrades_without_a_subscription(rig):
         f"codex pump for {ME} degraded: DispatchError: {ME} is delivered by host:99; take over to replace it"
     ]
     assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "DispatchError")
+
+
+DEACTIVATED = {
+    "message": "unexpected status 402 Payment Required: Payment Required, auth error code: deactivated_workspace",
+    "codexErrorInfo": {"httpConnectionFailed": {"httpStatusCode": 402}},
+    "additionalDetails": None,
+}
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded(rig):
+    rig.server.refusal = DEACTIVATED
+    rig.store.send("alice", ME, "hello")
+    assert rig.run(3) == codex.REFUSED
+    assert [m for m in rig.server.methods() if m.startswith("turn/")] == ["turn/start"]
+    assert rig.logged == [f"codex pump for {ME} degraded: AccountRefused: {DEACTIVATED['message']}"]
+    assert (rig.record().state, rig.record().last_error_class) == (DEGRADED, "AccountRefused")
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delivering(rig):
+    rig.server.turns.append({"id": "turn-1", "status": "failed", "inputs": [], "error": DEACTIVATED})
+    item = rig.store.send("alice", ME, "hello")
+    assert rig.run(2) == codex.STOPPED
+    assert rig.store.get(item.id).state == "delivered"
+    assert rig.record().state == CONNECTED
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+@pytest.mark.parametrize(
+    "turn, expected",
+    [
+        ({"status": "failed", "error": DEACTIVATED}, DEACTIVATED["message"]),
+        (
+            {
+                "status": "failed",
+                "error": {"message": "401", "codexErrorInfo": {"responseStreamFailed": {"httpStatusCode": 401}}},
+            },
+            "401",
+        ),
+        (
+            {"status": "failed", "error": {"message": "forbidden", "codexErrorInfo": {"x": {"httpStatusCode": 403}}}},
+            "forbidden",
+        ),
+        ({"status": "failed", "error": {"message": "login", "codexErrorInfo": "unauthorized"}}, "login"),
+        ({"status": "failed", "error": {"codexErrorInfo": "unauthorized"}}, "unauthorized"),
+        ({"status": "failed", "error": {"message": "busy", "codexErrorInfo": {"x": {"httpStatusCode": 503}}}}, ""),
+        ({"status": "failed", "error": {"message": "other", "codexErrorInfo": "other"}}, ""),
+        ({"status": "failed", "error": {"message": "plain", "codexErrorInfo": {"x": "y"}}}, ""),
+        ({"status": "failed", "error": None}, ""),
+        ({"status": "completed", "error": DEACTIVATED}, ""),
+        ({}, ""),
+    ],
+    ids=[
+        "402",
+        "401",
+        "403",
+        "unauthorized",
+        "unauthorized-unnamed",
+        "503",
+        "other",
+        "no-status",
+        "no-error",
+        "completed",
+        "empty",
+    ],
+)
+def test_only_a_failed_turn_with_an_account_status_reads_as_an_account_refusal(turn, expected):
+    assert codex.account_refusal(turn) == expected
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_a_live_completion_records_the_refusal_and_a_later_clean_completion_keeps_it():
+    state = codex.ThreadState(active_turn="turn-1")
+    state.observe(
+        {"method": codex.TURN_COMPLETED, "params": {"turn": {"id": "turn-1", "status": "failed", "error": DEACTIVATED}}}
+    )
+    state.observe({"method": codex.TURN_COMPLETED, "params": {"turn": {"id": "turn-2", "status": "completed"}}})
+    assert state.refused == DEACTIVATED["message"]
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_a_refreshed_thread_never_records_a_refusal():
+    state = codex.ThreadState()
+    state.refresh({"turns": [{"id": "turn-1", "status": "failed", "error": DEACTIVATED}]})
+    assert state.refused == ""
+
+
+@pytest.mark.feature("codex-pump-account-refusal")
+def test_turn_events_without_a_turn_id_leave_the_turn_ids_empty():
+    state = codex.ThreadState(active_turn="turn-1")
+    state.observe({"method": codex.TURN_COMPLETED, "params": {"turn": {"status": "failed", "error": DEACTIVATED}}})
+    assert (state.ended, state.active_turn, state.refused) == ("", "turn-1", DEACTIVATED["message"])
+    state.observe({"method": codex.TURN_STARTED, "params": {}})
+    assert state.active_turn == ""
 
 
 def test_run_closes_its_subscription(rig):
@@ -1297,7 +1398,7 @@ def test_stderr_writes_one_prefixed_line(capsys):
     assert (captured.out, captured.err) == ("", "[agentihooks codex-pump] degraded\n")
 
 
-@pytest.mark.parametrize(("status", "code"), [(codex.STOPPED, 0), (DEGRADED, 1)])
+@pytest.mark.parametrize(("status", "code"), [(codex.STOPPED, 0), (DEGRADED, 1), (codex.REFUSED, 4)])
 def test_main_loads_the_bound_execution_and_stops_on_termination(rig, monkeypatch, status, code):
     import signal
 
