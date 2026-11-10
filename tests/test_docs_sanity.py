@@ -77,7 +77,7 @@ def test_directories_are_walked_and_excluded_globs_skipped(tmp_path: Path, capsy
     (tmp_path / "nested").mkdir()
     (tmp_path / "nested" / "a.md").write_text("host at 10.9.8.7\n", encoding="utf-8")
     (tmp_path / "skip.md").write_text("host at 10.9.8.7\n", encoding="utf-8")
-    (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00 10.9.8.7")
+    (tmp_path / "blob.bin").write_bytes(b"\x00\x01binary 10.9.8.7")
 
     code = docs_sanity.main(["--exclude", "*/skip.md", str(tmp_path)])
 
@@ -95,9 +95,14 @@ def test_an_example_label_passes_only_right_before_the_private_suffix() -> None:
 def test_a_text_file_that_is_not_utf8_is_still_scanned(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     page = tmp_path / "latin.md"
     page.write_bytes("café at 10.9.8.7\n".encode("latin-1"))
+    wide = tmp_path / "wide.md"
+    wide.write_bytes("title\nhost at 10.9.8.7\n".encode("utf-16"))
 
-    assert docs_sanity.main([str(page)]) == 1
-    assert capsys.readouterr().out.splitlines() == [f"{page.as_posix()}:1: private-ipv4"]
+    assert docs_sanity.main([str(page), str(wide)]) == 1
+    assert capsys.readouterr().out.splitlines() == [
+        f"{page.as_posix()}:1: private-ipv4",
+        f"{wide.as_posix()}:2: private-ipv4",
+    ]
 
 
 @pytest.mark.feature("docs-sanity-scan")

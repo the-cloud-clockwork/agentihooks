@@ -127,11 +127,14 @@ def walk(paths: Iterable[str], excludes: Iterable[str]) -> Iterator[Path]:
 
 
 def scan_file(path: Path, keywords: Iterable[str]) -> list[Hit]:
-    """Return every hit in one file; a file holding a NUL byte is binary and yields none."""
+    """Return every hit in one file; UTF-16 text is read by its byte order mark, other NUL holding files are binary."""
     data = path.read_bytes()
-    if b"\0" in data:
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = data.decode("utf-16", errors="replace")
+    elif b"\0" in data:
         return []
-    text = data.decode("utf-8", errors="replace")
+    else:
+        text = data.decode("utf-8", errors="replace")
     words = tuple(keywords)
     return [
         Hit(path.as_posix(), number, rule)
