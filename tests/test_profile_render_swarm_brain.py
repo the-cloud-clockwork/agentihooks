@@ -63,3 +63,17 @@ def test_a_managed_launch_with_a_refused_binding_still_wears_the_swarm_brain(wor
 
     assert "agentibrain" not in json.loads((out / ".claude.json").read_text())["mcpServers"]
     assert json.loads((out / render.STAMP).read_text())["overlays"] == ["brain", "swarm-brain"]
+
+
+@pytest.mark.feature("managed-swarm-brain-rendering")
+def test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch(world: dict, kernel_brain: dict) -> None:  # noqa: F811
+    from scripts.profiles import render
+
+    base = world["bundle"] / "profiles" / "rb-base" / "profile.yml"
+    base.write_text(base.read_text() + "extends: [swarm-brain]\n")
+
+    out = render.render_claude("rb-role")
+
+    assert out is not None
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["agentibrain"] == kernel_brain
+    assert "SWARM BRAIN MARKER" not in (out / "CLAUDE.md").read_text()

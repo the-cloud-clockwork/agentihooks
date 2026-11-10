@@ -448,8 +448,8 @@ prints each agent's hive in its Hive column, and the ledger page agents table na
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan prefer=master:1
-agentihooks hive set vm  ui=yes excluded=eng,ci,plan prefer=master:2,qa:1,frontend:1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan,dispatch prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,plan,dispatch prefer=master:2,qa:1,frontend:1
 agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
@@ -457,6 +457,60 @@ agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 - QA and frontend work runs on the VM, then on a pod when the VM is gone.
 - Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
   longer excludes that role.
+
+### The dispatcher seat on hives
+
+The dispatcher is one seat per swarm, `dispatcher@<slug>`, in the `dispatch` lane. The tick's dispatch seat step
+starts it while the swarm runs at `autonomy=full` and has an open dispatcher trigger: a Priorities item, an
+uncovered bottleneck share, a red dev run that holds work, or an inbox item for the seat. It ends the seat when the
+triggers close. It spawns through hive placement like the `eng`, `ci` and `plan` lanes: the
+`dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
+`dispatch` or `dispatcher`, ordered as in [Placement](#placement).
+
+Placement does not try headless hives first for the dispatcher: it pools every live hive that takes `dispatch`,
+UI and headless alike, and orders them only by `prefer` rank, room, lasting over ephemeral and hive id. Keeping
+the seat off the workstation takes an exclusion or a rank, as below.
+
+A worker hive pod excludes only `master` by default (`HIVE_EXCLUDED`, chart value `excluded: [master]`), so every
+pod takes the dispatcher. A UI hive excludes nothing by default, so the workstation takes the dispatcher on equal
+terms with the pods. To run the dispatcher only on headless hives, exclude `dispatch` on every UI hive:
+
+```bash
+agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+agentihooks hive show desk          # "excluded": ["eng", "ci", "plan", "dispatch"]
+```
+
+To let the workstation take the dispatcher only when no pod can, leave `dispatch` out of its `excluded` list and
+rank the pods instead:
+
+```bash
+agentihooks hive set anton-1 prefer=dispatch:1
+agentihooks hive set anton-2 prefer=dispatch:2
+```
+
+An unranked hive comes after every ranked one, so the workstation takes the seat only when every ranked pod lacks
+the account slot, room, the repo or the login, or is not live. The agent record's profile decision then carries
+`placement_spill` with `preferred`, the first ranked hive, and `refusal`, why it did not take the seat, and the hive
+launcher prints the same fields on stderr as one `hive_placement_spill` JSON line.
+
+The seat starts only when nothing holds it. The tick checks, in order, the controller's placement refusal for the
+`dispatch` lane, a free account slot and the host room guard, and logs the first refusal as the tick's result for
+the seat. When every hive that takes `dispatch` is full the seat waits with
+`the dispatcher waits: no hive for dispatch has room: <hive> <refusal>` and the tick tries again on its next pass.
+A paused swarm starts no dispatcher.
+
+Check where the dispatcher runs:
+
+```bash
+agentihooks swarm <slug> status     # the dispatcher row's Hive column names its hive
+agentihooks hive list               # each hive's excluded list, prefer ranks and agents
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The dispatcher runs on the workstation while pods have room | The workstation does not exclude `dispatch`, and no pod ranks first in `prefer`. | `agentihooks hive set <workstation> excluded=...,dispatch`, or rank the pods with `prefer=dispatch:1`. |
+| The tick reports `the dispatcher waits: no hive for dispatch has room` | Every hive that takes `dispatch` is at its agent ceiling or measured headroom. | Wait for a pod to free a slot, raise `max-agents` on a pod, or add a pod. |
+| A launch waits with `no live hive takes dispatch` | Every live hive excludes `dispatch`, or no hive has a fresh heartbeat. | Remove `dispatch` from a hive's `excluded` list, or restart the stale hive's `agentihooks-hive` service, or roll its pod. |
 
 ## Comparing hive configuration
 
@@ -476,14 +530,14 @@ any hive differs or published nothing.
 
 ## Placement
 
-Every launch places its agent on one hive. For a worker role, placement keeps the live hives that do not exclude
-its lane, role or profile,
-then drops, in order, those with no room under `max-agents`, those that do not advertise the account slot the
-router picked, those that do not list the task's repo, and, for an interactive login, those that do not hold that
-login. Each step that empties the list names its reason, and the launch waits with it.
+Every launch places its agent on one hive. For a worker role, placement keeps the live hives that are not draining
+and do not exclude its lane, role or profile,
+then drops, in order, those that do not advertise the account slot the router picked, those with no room under
+their agent ceiling, those that do not list the task's repo, and, for an interactive or master login, those that do
+not hold that login. Each step that empties the list names its reason, and the launch waits with it.
 
-Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
-hive over an ephemeral one, then the hive id.
+Among the hives left, placement picks the lowest `prefer` rank for the role, then the smallest share of its agent
+ceiling in use, then a lasting hive over an ephemeral one, then the hive id.
 
 `agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
 this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
@@ -493,19 +547,105 @@ same tick. When every kept hive is full the launch waits rather than use another
 and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
 switches back on the next tick.
 
-`eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
-Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
-room or none is live.
-A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
-agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. The engineer, cicd, planner
-and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
-its UI role.
+### Placement by role
 
-When no live hive takes the role:
+The host kind an agent lands on follows from its placement role. A hive's `ui` setting declares its kind: `ui=yes`
+is a UI hive, such as the workstation that runs the herdr server the operator watches; `ui=no` is a headless hive,
+such as an Anton worker pod.
 
-- Every role waits with "no live hive takes" the role.
-- The master has its own chain, below.
+The role comes from the profile the launch resolves for the task, so a task's `profile` decides it before its lane
+does:
+
+| Profile | Placement role | Host kind |
+|---|---|---|
+| `master` (every master seat) | `master` | UI hive; see [Master placement](#master-placement) and [Workstation fallback](#workstation-fallback) |
+| `frontend`, on any lane | `frontend` | UI hive only |
+| `qa`, on any lane | `qa` | UI hive only |
+| `engineer` | `eng` | Any hive that does not exclude it |
+| `cicd` | `ci` | Any hive that does not exclude it |
+| `planner` | `plan` | Any hive that does not exclude it |
+| `dispatcher` | `dispatch` | Any hive that does not exclude it |
+
+Any other profile places under its own name as a worker role, on any hive that does not exclude it. Placement drops a
+hive whose `excluded` list names the lane, the role or the profile.
+
+UI roles, `master`, `qa` and `frontend`:
+
+- While a live UI hive takes the role, placement chooses only among UI hives, even when a headless hive also takes
+  it.
+- When headless hives take a `qa` or `frontend` role and no live UI hive does, the launch waits with
+  `no live swarm-master takes qa` (or `frontend`). It never runs on the headless hive.
+- These roles never overflow to the local machine, and round robin placement leaves them under `anton-first`.
+
+Worker roles, `eng`, `ci`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
+headless, by the order above. A UI hive's `excluded` default is empty, so the workstation takes worker work on
+equal terms with the pods unless it excludes the worker roles or the pods rank first in `prefer`. With the
+defaults, worker roles are not held to headless hives. Two layouts control when worker roles reach the
+workstation:
+
+```bash
+# Worker work never runs on the workstation; it waits for a pod with room
+agentihooks hive set anton-1 ui=no ephemeral=yes                 # excluded defaults to master
+agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+
+# Worker work runs on the workstation only when no ranked pod takes it, with the reason logged
+agentihooks hive set anton-1 prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive set anton-2 prefer=eng:2,ci:2,plan:2,dispatch:2
+agentihooks hive set desk ui=yes excluded=
+agentihooks hive show desk                                       # "excluded": [], "prefer": {}
+```
+
+With the first layout a worker launch that finds no pod with room waits with the pods' reason, such as
+`no hive for eng has room: anton-1 ...`. The local machine overflow below also reads the local hive's `excluded`
+list, so it never runs the launch on that machine either.
+
+The second layout needs every headless hive ranked for every worker role. The workstation stays unranked, and an
+unranked hive comes after every ranked one, so it takes the launch only once every ranked pod lacks the account slot,
+room, the repo or the login, or is not live, draining or excluding the role. An unranked pod is ordered with the
+workstation by the share of its ceiling in use, and can lose to it while it still has room; with no `prefer` set on
+any hive, nothing records why the workstation took the launch. When a ranked pod is skipped, the agent's profile
+decision carries `placement_spill` with `preferred`, the first ranked hive, and `refusal`, why it did not take the
+launch. The hive launcher prints the same fields on stderr as one JSON line with `event` `hive_placement_spill`,
+`slug`, `task`, `name`, `hive` (the hive that took it), `preferred` and `refusal`.
+
+When no hive at all takes a worker launch, a `hybrid` controller, or a `local` machine with `hive-placement=on`,
+runs it in the machine's own herdr panes while the machine is under `local-max-agents` and its local hive record,
+if any, does not exclude the role, and only while the machine's own herdr server answers; see
+[Hive placement for one swarm on a local machine](#hive-placement-for-one-swarm-on-a-local-machine). A full machine
+waits with `<hive reason>, and the local machine runs <n> of its <max> agents: <room reason>: <detail>`. While
+tasks marked `workstation=yes` wait for the machine, the agent count reads
+`<n> of its <max> agents with <r> kept for waiting workstation tasks`, where `<r>` is the number of seats kept for
+them.
+
+Pinned and gated tasks narrow the hives before the role rule runs:
+
+- A task with `hive` set places only on that hive.
+- A task with `workstation=yes` places on the UI hive, or on the controller's own hive when no UI hive is
+  registered, and waits with `the task needs the workstation, so no remote hive takes it` otherwise.
+- A task with `needs` places only on hives that declare every capability; see
+  [Capabilities and task needs](#capabilities-and-task-needs).
+
+The fallback reasons an agent record carries in its profile decision apply to worker roles and to a master launch
+whose task sets `route_kind`, the account route the launch must use, such as `interactive`. A default master launch
+goes through [Master placement](#master-placement) and records `master_placement` with `hive` and `headless`
+instead of either field. `headless` is always `false`, even for a master on a headless hive; read the hive's `ui`
+setting with `agentihooks hive show <hive>` to tell its kind.
+
+| Field | Written when |
+|---|---|
+| `placement_fallback` | A master whose task sets `route_kind` runs on a headless hive that does not exclude `master`, because no UI hive fits; for a master pinned to a hive it reads `the task is pinned to <hive>`. |
+| `placement_spill` | The hive ranked first for the role in `prefer` refused, or is not live, draining or excluding the role, and another hive took the launch. |
+
+When no live hive of any kind takes the role, every role waits with `no live hive takes <role>`; the master then
+follows [Workstation fallback](#workstation-fallback).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A frontend or qa task waits with `no live swarm-master takes frontend` | No live UI hive takes the role: none is live, or each live one is draining or excludes it, while a headless hive takes it. | Start the UI hive, end its drain, or remove the role from its `excluded` list; `agentihooks hive list` shows heartbeat and exclusions. |
+| An engineer or planner runs on the workstation while pods have room | The workstation does not exclude the role and has the smaller share of its ceiling in use. | `agentihooks hive set <workstation> excluded=eng,ci,plan,dispatch`, or rank the pods first in `prefer`. |
+| A worker task waits with `no live hive takes eng` | No hive is live, or every live hive excludes `eng` or is draining. | Check `agentihooks hive list` for heartbeats, remove `eng` from a hive's `excluded` list, or wait for the drain to end. |
+| A worker launch waits on the hives' reason although the local machine is under `local-max-agents` | The machine's herdr server does not answer, its hive record excludes the role, the task is pinned to a hive, the local hive does not declare every capability in the task's `needs`, or the controller is not `hybrid` and the swarm lacks `hive-placement=on`. | Start herdr on the machine, or check `agentihooks hive show <machine>` and the swarm's `hive-placement` setting. |
+| A master runs on a pod | That pod's `excluded` list does not name `master`, or `master-swarms` lists the swarm, and no UI hive was live with the repo and a slot or login for the harness. | `agentihooks hive set <pod> excluded=master master-swarms=`; the next master launch returns to the UI hive. |
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
 
@@ -1179,11 +1319,9 @@ sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` 
 ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
 the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own
 `credentialSecret`, renders one more hive pod, `<release>-worker-hive-<name>` with component `worker-hive-<name>` and
-its own worktrees ConfigMap. Every other key the entry sets replaces that `workers` key whole, so an entry that sets
-`homeVolume` gives the complete source. The chart refuses an entry without a credential of its own, an entry
-that sets `replicas`, an entry whose hostPath or claim home is the same path or claim as another hive's, a
-repeated name, or a name that is not a lowercase DNS label of at most 20 characters. Add a pod with no installed
-credential with `agentihooks hive add` from the UI hive; the pod name is used only then.
+its own worktrees ConfigMap; [Scaling worker hives](#scaling-worker-hives) gives an example and the scaling
+refusals. Add a pod with no installed credential with `agentihooks hive add` from the UI hive; the pod name is used
+only then.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
@@ -1215,6 +1353,79 @@ lists.
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
+### Scaling worker hives
+
+One hive credential is one hive. The hive id inside a member credential is fixed when the member is minted, and the
+member's Redis user writes only that hive's own keys and the shared worker keys, so every pod that mounts the same
+credential registers as the same hive with the same `max-agents`. Placement would then see one hive and one agent
+limit however many pods run. The chart therefore renders each hive as exactly one pod and refuses two hives in one
+release that share a credential Secret.
+
+To run more hives, mint one member per hive and give each its own Secret:
+
+```bash
+agentihooks hive invite hive-a   # writes the member credential into secret/k8s/agentihooks-hive-hive-a
+agentihooks hive invite hive-b
+agentihooks hive invite hive-c
+```
+
+Each `hive invite` mints a new member with its own hive id. Sync each record into its own Kubernetes Secret through
+ExternalSecrets, then list the extra hives under `workers.hives`:
+
+```yaml
+workers:
+  replicas: 1          # 1 renders the base hive; 0 renders only the workers.hives entries
+  maxAgents: 8
+  credentialSecret:
+    name: hive-a-member
+    key: credential
+  hives:
+    - name: b
+      credentialSecret:
+        name: hive-b-member
+        key: credential
+    - name: c
+      maxAgents: 4
+      credentialSecret:
+        name: hive-c-member
+        key: credential
+```
+
+The example renders three Deployments, each with one replica: `<fullname>-worker-hive` (hive a, 8 agents),
+`<fullname>-worker-hive-b` (8 agents, inherited) and `<fullname>-worker-hive-c` (4 agents), where `<fullname>` is
+`<release>-agentihooks-swarm`, or the release name alone when it already contains `agentihooks-swarm`. Each pod sets
+its own `max-agents` at start and its memory request and limit follow its own `maxAgents`. `agentihooks hive list`
+shows three hives, each with its own max agents, and placement holds each to its own limit. An entry inherits every
+other `workers` key; a key it sets, such as `credentialSecret` or `homeVolume`, replaces the whole value, so write the
+complete map. Entries with a `workers.node` inherit it and get their own host folder, `<release>_<name>`. Installing
+one release per credential, each with `workers.replicas: 1`, also gives one pod per credential; Deployment names and
+host folders then derive from each release name, and no duplicate check runs across releases.
+
+Check a values file before installing it; this command lists the worker hive Deployments the render produces,
+and a refusal from the table below stops the render instead:
+
+```bash
+helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml | grep -E '^  name: .*-worker-hive'
+```
+
+`deploy/worker/chart-proof.sh` renders one replica and asserts that a missing credential and `workers.replicas=2` with
+one credential are both refused.
+
+### Scaling refusals
+
+| Render fails with | Cause | Fix |
+|---|---|---|
+| `workers.replicas above 1 is refused: one hive credential is one hive, so every replica would report the same hive id and agent limit; install one release per hive credential to scale` | `workers.replicas` is 2 or more. | Set `workers.replicas: 1` and add a `workers.hives` entry, or a release, per extra credential. |
+| `workers.hives <name> needs its own credentialSecret: one credential is one hive` | The entry has no `credentialSecret.name`, or its Secret name is already used by the base hive (when `workers.replicas` is 1) or another entry. | Mint another member with `hive invite` and point the entry at its own Secret. Two keys of one Secret count as the same credential. |
+| `workers.hives <name> sets replicas: each entry is one pod; remove the entry to stop it` | The entry sets `replicas`, even `1` or `0`. | Drop the key; remove the entry to stop that hive. |
+| `workers.hives name "<name>" must be a lowercase DNS label of at most 20 characters` | The name has upper case, dots or underscores, starts or ends with a dash, or is longer than 20 characters. | Use lowercase letters, digits and inner dashes. |
+| `workers.hives name <name> appears twice` | Two entries share a name. | Rename one. |
+| `workers.hives <name> shares its home volume with another hive; give it its own homeVolume` | The entry's hostPath or claim home is the same path or claim as another hive's. | Give the entry its own `homeVolume`; `workers.node` alone does not clear this check, which runs on the inherited `homeVolume`. |
+
+If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
+chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
+releases and give each its own member.
 
 ## Ledger Hives panel
 

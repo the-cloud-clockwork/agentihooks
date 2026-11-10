@@ -23,10 +23,10 @@ from scripts.swarm import (
     timing,
     waits,
 )
-from scripts.swarm.health import early_ends
+from scripts.swarm.health import early_ends, step_starvation
 from scripts.swarm.status import findings  # pyright: ignore[reportUnknownVariableType]
 from scripts.tick import registry
-from scripts.tick.engine import SLOW
+from scripts.tick.engine import SLOW, cadence_s, interval_s
 from scripts.tick.pool import CLOSING_LANE
 from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, pass_domains
@@ -332,5 +332,26 @@ registry.register(
         lane=Lane("slow"),
         effects=frozenset({"coordination", "ledger"}),
         feature="tick-doc-items-map",
+    )
+)
+
+
+def _step_starvation(cli: Any, get: Get) -> list[str]:
+    """Record each step's last completed run with its window and alarm the master for each starved step."""
+    windows = {step.name: interval_s(step, cadence_s()) for step in registry.steps()}
+    return step_starvation.step(get("store"), get("slug"), cli.now_ms(), windows)
+
+
+registry.register(
+    CallStep(
+        "step starvation",
+        CLOSING_GROUP,
+        held(_step_starvation),
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=CLOSING,
+        effects=frozenset({"inbox"}),
+        feature="tick-step-starvation",
     )
 )
