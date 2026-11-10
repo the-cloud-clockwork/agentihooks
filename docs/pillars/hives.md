@@ -1164,9 +1164,19 @@ first beat. It tests daemon startup without requiring a manual balance read or a
 ### Master placement
 
 Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
-live hive that does not exclude `master` and lists the repo. UI hives come before headless ones, so a worker pod,
-which excludes `master` by default, runs a master only when its `excluded` list drops it. Within each kind it is
-placed in two tiers, each tried in `prefer` order:
+live hive that is not draining, does not exclude `master` and lists the repo. A headless hive's `excluded` list
+defaults to `master`, so with the default settings a master never lands on a headless hive. When no UI hive fits, the
+master goes to the workstation instead; see [Workstation fallback](#workstation-fallback).
+
+A headless hive takes masters only when the operator opts it in, in one of two ways:
+
+| Opt-in | Scope | Undo |
+|---|---|---|
+| `agentihooks hive set <pod> excluded=` (or any list without `master`) | Masters of every swarm | `agentihooks hive set <pod> excluded=master` |
+| `agentihooks hive set <pod> master-swarms=<slug>` | Masters of the named swarms only; every other swarm still sees `master` excluded | `agentihooks hive set <pod> master-swarms=` |
+
+An opted-in headless hive still comes after every UI hive that fits: placement sorts UI hives before headless ones,
+then within each kind uses two tiers, each tried in `prefer` order:
 
 1. A hive that holds the native interactive login for the master's harness.
 2. A hive with a subscription or api slot for that harness.
@@ -1309,6 +1319,39 @@ login for the master's harness, the hive controller leaves the master to the wor
 same when the hive runtime is disabled on the controller. When the controller's own herdr server answers, the
 controller spawns the master there. Otherwise it refuses the launch with "the workstation hive spawns master work"
 followed by the placement reason, and the tick reports that line in its actions.
+
+The refusal carries the master placement wait reason after the colon:
+
+| Reason after the colon | Cause | Fix |
+|---|---|---|
+| `no live hive takes master` | No hive that takes `master` is live: the UI hive's heartbeat is over ninety seconds old, it is draining, or it excludes `master`, and every headless hive excludes it too. | Start or restart `agentihooks hive run` on the UI hive, end its drain, or remove `master` from its `excluded` list. |
+| `no hive for master lists the repo <repo>` | Hives take `master`, but none lists the swarm's repo, under any checkout path or the same remote origin. | Clone the repo on the UI hive; its next heartbeat lists it. See [Matching a repo across machines](#matching-a-repo-across-machines). |
+| `no hive for master advertises a claude slot` | A hive takes `master` and lists the repo, but holds neither the native Claude interactive login nor a Claude subscription or api slot whose account has a free seat and is not closed. | Log the UI hive in with `claude`, or give it a `AH_CC_TOKEN_<slug>` with quota left; `agentihooks hive show <hive>` lists `interactive` and `slots`. |
+
+For example, a swarm on the workstation `desk` and one Anton pod, where the operator cloned the repo only on the
+pod:
+
+```bash
+agentihooks hive set desk ui=yes excluded=
+agentihooks hive show anton-1      # "ui": "no", "excluded": ["master"]
+```
+
+The master launch skips `anton-1`, which excludes `master`, and finds no repo on `desk`. With the controller's own
+herdr server answering, the master starts there. Without it, the tick's actions read, with the swarm's `repo`
+setting in place of `agentihooks`:
+
+```text
+the workstation hive spawns master work: no hive for master lists the repo agentihooks
+```
+
+A move order follows the same rule: while the pod excludes `master`,
+`agentihooks swarm <id> master move --to anton-1` refuses with
+`the master cannot move to hive anton-1: no live hive takes master`.
+
+The regression test `test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headless_hives_exclude_it`
+holds this rule: a UI hive that lacks the repo or a slot beside a headless hive that excludes `master` leaves the
+master waiting on the UI hive's reason, and the controller refuses it with the workstation line, never placing it on
+the headless hive.
 
 The `master-headless` health finding marks a master record placed on a headless hive before this rule. The
 `master-fallback-auth` finding marks a master that wanted its interactive login and runs on another route, so phone
