@@ -43,7 +43,7 @@ class Ack:
     status: str
     target: dict
     failure: str = ""
-    execution: dict = field(default_factory=dict)
+    execution: dict[str, Any] = field(default_factory=dict)
 
     def encode(self) -> str:
         fields = asdict(self)
