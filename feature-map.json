@@ -1386,6 +1386,18 @@
       ]
     },
     {
+      "id": "ledger-stats-admission-batch",
+      "origin": "inventory",
+      "behaviour": "Computing which pending tasks a focus holds back from the time-left estimate derives the admitted-focus queue once per ledger view and reuses it across every task instead of revalidating it once per task, and the dependency-chain propagation that follows it stops as soon as a pass adds nothing new.",
+      "seam": "ledger_stats.frozen through scripts.swarm.freeze.held, unfocused and admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_calls_admitted_once_regardless_of_pending_count",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_propagates_held_status_through_a_dependency_chain",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_leaves_a_chain_with_no_frozen_ancestor_free"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
