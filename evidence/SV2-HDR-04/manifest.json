@@ -12,7 +12,7 @@
     "tests/sv2_hdr04_cases.py": "ee89ac67d6ae862959865a6de48b4e590d70e2d99e09042cd57139e2e325bb8a",
     "tests/swarm/test_runtime.py": "94339e865b755773363ba2d12c209aeff6a48fca123a3e656c5847554cc92790",
     "tests/fixtures/swarm_v2/herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
-    "tests/fixtures/swarm_v2/herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "tests/fixtures/swarm_v2/herdr-registrations.json": "a5c5e29cfd985e820df102f0cdd0428f887ad397b288436a2d4874a03c56e8c0",
     "tests/fixtures/swarm_v2/herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38113282967",
