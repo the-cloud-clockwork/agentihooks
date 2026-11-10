@@ -284,7 +284,7 @@ that directory from the swarm repo:
 
 | Swarm repo | `--dir` and `AGENTIHOOKS_SWARM_REPO` |
 |---|---|
-| An origin identity, such as `github.com/the-cloud-clockwork/agentihooks` | The first checkout by path under `HIVE_REPO_ROOT` whose `origin` matches, else the identity unchanged |
+| An origin identity, such as `github.com/the-cloud-clockwork/agentihooks` | The first checkout by path under `HIVE_REPO_ROOT` (default `~/dev`, one level of children of a folder that is not a checkout included; see [Repos and checkouts](#repos-and-checkouts)) whose `origin` matches, else the identity unchanged |
 | A local path, such as `/home/me/dev/agentihooks` | The path unchanged |
 
 These swarm commands read their repository from that variable instead of the swarm repo:
@@ -299,7 +299,8 @@ These swarm commands read their repository from that variable instead of the swa
 A command uses `AGENTIHOOKS_SWARM_REPO` only when the variable is set and not empty and `AGENTIHOOKS_SWARM`
 names the slug the command was given. Otherwise it uses the swarm repo from the swarm config, as before. An agent
 of one swarm that runs a command for another swarm therefore reads that swarm's repo, never its own checkout. On
-the workstation the two are the same path, so nothing changes there.
+the workstation, a swarm repo given as a local path resolves to that same path, so those commands read
+what they read before.
 
 With the records in [Matching a repo across machines](#matching-a-repo-across-machines), an engineer on the
 headless worker runs with:
@@ -319,7 +320,8 @@ pane, and only to a checkout of the swarm's repository; a wrong path sends the c
 
 | Symptom | Check | Fix |
 |---|---|---|
-| `swarm block` on a hive fails with `FileNotFoundError` naming a workstation path | `echo "$AGENTIHOOKS_SWARM_REPO"` in the agent's pane | The agent started before this behavior shipped, or outside a swarm launch. Release the task so the swarm relaunches it, or export the hive checkout path and the swarm slug in that pane |
+| `swarm block` on a hive records no pushed branch on the task and reports no error | `echo "$AGENTIHOOKS_SWARM_REPO"` in the agent's pane | The agent started before this behavior shipped, or outside a swarm launch, so the command read the workstation path, which does not exist on the hive. Release the task so the swarm relaunches it, or export the hive checkout path and the swarm slug in that pane |
+| `swarm block --dev-red` on a hive fails with `cannot read the dev Tests runs` naming a missing directory | `echo "$AGENTIHOOKS_SWARM_REPO"` in the agent's pane | Same cause and fix as the row above |
 | A command reads the swarm config repo although the variable is set | `echo "$AGENTIHOOKS_SWARM"` against the slug in the command | Run the command with the agent's own swarm slug |
 | `AGENTIHOOKS_SWARM_REPO` is an origin identity such as `github.com/owner/name` | The hive's checkouts under `HIVE_REPO_ROOT` and their `origin` remotes | No checkout matched at launch, so `init-agent` refused it with `directory does not exist`. See [Launch directory on a hive chosen by origin](#launch-directory-on-a-hive-chosen-by-origin) |
 
