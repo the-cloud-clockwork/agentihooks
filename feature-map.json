@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-label-reserves-identifier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
+      "behaviour": "Machine label reservations retain both the registered hive identifier and its settled name, including interface hives named swarm-master.",
+      "seam": "scripts.hive.machine.held_names with registry interface records",
+      "tests": [
+        "tests/hive/test_machine_names.py::test_an_interface_hive_reserves_its_settled_name_and_identifier"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
@@ -2757,6 +2767,20 @@
       ]
     },
     {
+      "id": "hive-master-closed-account",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
+      "behaviour": "Hive master placement never chooses a Claude account its capacity rows mark closed, whether through the hive master login, the native interactive login or a subscription slot.",
+      "seam": "placement.place_master closed account keys and HiveLaunch master selection",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat",
+        "tests/hive/test_master_placement.py::test_a_master_waits_when_its_only_login_account_is_closed",
+        "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
@@ -2813,6 +2837,19 @@
         "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
         "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
         "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
+      "id": "hive-signer-membership-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2194",
+      "behaviour": "Invite refreshes the mounted signer after adding a member; revoke and remove unlist the member and refresh the signer without waiting for the hourly secret sync.",
+      "seam": "hive invite, revoke and remove signer member listing",
+      "tests": [
+        "tests/hive/test_signer_sync.py::test_an_invited_member_joins_at_once_through_the_mounted_signer",
+        "tests/hive/test_signer_sync.py::test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs",
+        "tests/hive/test_signer_sync.py::test_hive_remove_syncs_the_signer_record_after_it_unlists",
+        "tests/hive/test_signer_sync.py::test_the_invite_command_passes_the_signer_sync_target"
       ]
     },
     {

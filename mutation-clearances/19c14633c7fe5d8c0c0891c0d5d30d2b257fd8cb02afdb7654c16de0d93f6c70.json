@@ -1,0 +1,6 @@
+{
+  "scripts/hive/member_swarms.py:scripts.hive.member_swarms.x_sync:84632ff7799a8677752225a5b89cdbc363ea0a5f76faadf6f8a8dcec31a9c00f": {
+    "reader": "Standards",
+    "reason": "Under the subprocess-compatible runner contract, check=None is false like check=False, preserving return code handling."
+  }
+}
