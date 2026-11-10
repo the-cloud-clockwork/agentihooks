@@ -29,6 +29,29 @@ def test_clear_priority_sends_its_reason_as_the_swarm(sent):
     assert sent[0][1]["id"].startswith("priority_clear-")
 
 
+@pytest.mark.feature("priorities-sweep-budget")
+def test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches(monkeypatch):
+    batches = []
+
+    def call(slug, batch, service):
+        batches.append((slug, batch))
+        return {"rejected": []}
+
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
+    count = ledger_client.CLEAR_BATCH + 1
+    ledger_client.LedgerClient().clear_priorities("demo", [(f"pr-{n}", "its item is done") for n in range(count)])
+    assert [len(batch) for _, batch in batches] == [ledger_client.CLEAR_BATCH, 1]
+    ops = [op for _, batch in batches for op in batch]
+    assert {slug for slug, _ in batches} == {"demo"}
+    assert [op["target"] for op in ops] == [f"pr-{n}" for n in range(count)]
+    assert {(op["op"], op["by"], op["reason"]) for op in ops} == {("priority_clear", "swarm", "its item is done")}
+
+
+def test_clear_priorities_with_nothing_to_clear_writes_nothing(sent):
+    ledger_client.LedgerClient().clear_priorities("demo", [])
+    assert sent == []
+
+
 def test_comment_item_posts_on_the_item_thread(sent):
     ledger_client.LedgerClient().comment_item("demo", "followups/f1", "Cleared.")
     assert without_id(sent) == [

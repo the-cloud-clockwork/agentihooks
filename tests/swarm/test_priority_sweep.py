@@ -1,9 +1,12 @@
+import time
+
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import priority_sweep
+from scripts.swarm import ledger_client, priority_sweep
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.tick.steps import budgets
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 
 SLUG = "prio-sweep"
@@ -543,7 +546,7 @@ def test_the_sweep_leaves_a_derived_row_to_the_ledger():
 
 def test_a_task_in_state_done_is_done_without_its_flag():
     _, calls = dict_pass([row("tasks/t1")], tasks=[{"id": "t1", "state": "done"}])
-    assert calls == [("clear_priority", "d", "p-tasks/t1", "its item is done")]
+    assert calls == [("clear_priorities", "d", [("p-tasks/t1", "its item is done")])]
 
 
 def test_a_claimed_task_with_a_pull_request_is_not_looked_up():
@@ -637,3 +640,44 @@ def test_the_pass_keeps_its_own_cursor(env):
     store, _ = env
     run(env)
     assert store.redis.get(store.key(SLUG, "priority-cursor")) == str(state(SLUG)["_meta"]["rev"])
+
+
+class TimedLedger(ledger_client.LedgerClient):
+    """A ledger client whose every write costs one round trip of ``ROUND_TRIP_S`` and is recorded."""
+
+    ROUND_TRIP_S = 0.01
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes: list[list[dict]] = []
+
+    def _call(self, slug: str, ops: list[dict] | None = None) -> dict:
+        time.sleep(self.ROUND_TRIP_S)
+        self.writes.append(list(ops or []))
+        return {}
+
+
+@pytest.mark.feature("priorities-sweep-budget")
+def test_a_thousand_stale_priorities_clear_inside_the_step_floor():
+    import fakeredis
+
+    count = 1000
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.set(store.key("d", priority_sweep.CURSOR), 0)
+    tasks = [{"id": f"t{n}", "state": "done"} for n in range(count)]
+    doc = {"tasks": tasks, "priorities": [row(f"tasks/t{n}") for n in range(count)], "_meta": {"rev": 1, "events": []}}
+    ledger = TimedLedger()
+    started = time.monotonic()
+    actions = priority_sweep.priority_pass(store, "d", doc, ledger, judge=Judge(), github=no_github)
+    wall = time.monotonic() - started
+    assert len(actions) == count
+    assert sorted(op["target"] for ops in ledger.writes for op in ops) == sorted(f"p-tasks/t{n}" for n in range(count))
+    assert wall < budgets.FLOORS["priorities sweep"].floor_s
+    assert len(ledger.writes) <= -(-count // ledger_client.CLEAR_BATCH)
+
+
+@pytest.mark.feature("priorities-sweep-budget")
+def test_the_sweep_clears_its_stale_priorities_in_one_batch():
+    tasks = [{"id": "t1", "state": "done"}, {"id": "t2", "done": True}]
+    _, calls = dict_pass([row("tasks/t1"), row("tasks/t2")], tasks=tasks)
+    assert calls == [("clear_priorities", "d", [("p-tasks/t1", "its item is done"), ("p-tasks/t2", "its item is done")])]
