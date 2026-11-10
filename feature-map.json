@@ -3322,10 +3322,11 @@
       "id": "select-profile-records-the-agent-process",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1779",
-      "behaviour": "A swarm agent launched through select profile has its own agent process, the child select profile starts and waits on, recorded with its start time under the agent's name at launch, before any binding report, and retirement of an agent with no validated process id ends that recorded agent process.",
+      "behaviour": "A swarm agent launched through select profile has its own agent process, the child select profile starts, recorded with its start time under the agent's name before select profile waits on it, with no binding report involved; retirement of an agent with no validated process id ends that recorded agent process, and a launch whose record cannot be written ends the agent it started.",
       "seam": "scripts.select_profile.main with scripts.swarm.launches.record and HerdrRuntime.retire",
       "tests": [
-        "tests/swarm/test_launches.py::test_select_profile_records_the_launched_agent_process_and_retire_ends_it"
+        "tests/swarm/test_launches.py::test_select_profile_records_the_launched_agent_process_and_retire_ends_it",
+        "tests/swarm/test_launches.py::test_select_profile_ends_the_agent_when_its_launch_cannot_be_recorded"
       ]
     }
   ],

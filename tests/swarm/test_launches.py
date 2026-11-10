@@ -4,8 +4,10 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -62,8 +64,21 @@ def test_find_returns_nothing_for_a_missing_unreadable_restarted_or_ended_launch
     assert launches.find(NAME, tmp_path) is None
 
 
+def _sleeping_popen(launched: list[subprocess.Popen]) -> Callable[..., subprocess.Popen]:
+    real = subprocess.Popen
+
+    def popen(command: list[str], env: dict[str, str]) -> subprocess.Popen:
+        child = real([sys.executable, "-c", "import time; time.sleep(30)"], env=env)
+        launched.append(child)
+        return child
+
+    return popen
+
+
 @pytest.mark.feature("select-profile-records-the-agent-process")
-def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(monkeypatch, tmp_path):
+def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(launches, "home", lambda: tmp_path)
     monkeypatch.setattr(select_profile, "prepare", lambda *args: ({}, []))
     herdr, _ = herdr_runtime(tmp_path, monkeypatch, panes={})
@@ -71,12 +86,12 @@ def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(mo
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     ended = []
     herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
-    launched, seen = [], []
-    real = subprocess.Popen
+    launched: list[subprocess.Popen] = []
+    seen = []
+    start = _sleeping_popen(launched)
 
     def popen(command: list[str], env: dict[str, str]) -> subprocess.Popen:
-        child = real([sys.executable, "-c", "import time; time.sleep(30)"], env=env)
-        launched.append(child)
+        child = start(command, env)
         wait = child.wait
 
         def waited(timeout: float | None = None) -> int:
@@ -90,11 +105,32 @@ def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(mo
         return child
 
     monkeypatch.setattr(select_profile.subprocess, "Popen", popen)
-    assert select_profile.main(["engineer"]) == -signal.SIGKILL
-    agent = launched[0]
-    assert agent.pid != os.getpid()
-    assert seen[0] is not None and seen[0].pid == agent.pid
-    assert ended == [(NAME, agent.pid, [], seen[0].start_time)]
+    try:
+        assert select_profile.main(["engineer"]) == -signal.SIGKILL
+        agent = launched[0]
+        assert agent.pid != os.getpid()
+        assert seen[0] is not None and seen[0].pid == agent.pid
+        assert ended == [(NAME, agent.pid, [], seen[0].start_time)]
+    finally:
+        for child in launched:
+            child.kill()
+
+
+@pytest.mark.feature("select-profile-records-the-agent-process")
+def test_select_profile_ends_the_agent_when_its_launch_cannot_be_recorded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(select_profile, "prepare", lambda *args: ({}, []))
+    monkeypatch.setattr(launches, "record", Mock(side_effect=OSError("disk full")))
+    launched: list[subprocess.Popen] = []
+    monkeypatch.setattr(select_profile.subprocess, "Popen", _sleeping_popen(launched))
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            select_profile.main(["engineer"])
+        assert launched[0].wait(timeout=5) == -signal.SIGKILL
+    finally:
+        for child in launched:
+            child.kill()
 
 
 def test_select_profile_dry_run_records_nothing(monkeypatch):
