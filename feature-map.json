@@ -3095,7 +3095,7 @@
       "id": "swarm-intent-check-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
-      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, rewrites no verdict file for a pull that stays a draft, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read whose batches run at the same time, makes no per task GitHub read for an unchanged or draft pull, rewrites no verdict file for a pull that stays a draft, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
       "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
       "tests": [
         "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
@@ -3108,6 +3108,7 @@
         "tests/gates/test_intent_budget.py::test_a_draft_pull_that_turns_ready_is_marked_running_and_judged",
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_its_batches_at_the_same_time",
         "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
         "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
         "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
