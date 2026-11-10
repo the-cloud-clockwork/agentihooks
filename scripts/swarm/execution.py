@@ -126,11 +126,13 @@ class ExecutionRegistry:
                 for key, row in rows.items()
                 if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
             ]
-            if not old and "archive_ref" in doc:
+            orphans = doc["intents"].keys() - doc["executions"].keys()
+            if not old and not orphans and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
+            for key in doc["intents"].keys() - doc["executions"].keys():
                 doc["intents"].pop(key, None)
             for row in doc["archive"].values():
                 row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
