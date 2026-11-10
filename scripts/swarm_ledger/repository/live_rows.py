@@ -75,7 +75,8 @@ def targets(records: list[dict[str, Any]], verb: str) -> tuple[set[str], list[st
 def nearest(targets: tuple[set[str], list[str]], task: dict[str, Any], chain: list[str]) -> int:
     nodes, selectors = targets
     level = next((index for index, node in enumerate(chain) if node in nodes), sys.maxsize)
-    if level == sys.maxsize and any(covers(target, task, chain) for target in selectors):
+    pairs = (target.partition(":") for target in selectors)
+    if level == sys.maxsize and any(SELECTORS[selector](task) == value for selector, _, value in pairs):
         return len(chain)
     return level
 

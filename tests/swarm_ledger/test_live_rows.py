@@ -247,7 +247,14 @@ def test_an_empty_or_unrelated_path_never_reshapes_the_rows() -> None:
 @pytest.mark.feature("swarm-tick-live-rows")
 @pytest.mark.parametrize(
     ("target", "frozen"),
-    [("lane:eng", {"a"}), ("kind:code", {"a"}), ("kind:ops", {"o"}), ("lane:", set()), ("tasks/a", {"a"})],
+    [
+        ("lane:eng", {"a"}),
+        ("kind:code", {"a"}),
+        ("kind:ops", {"o"}),
+        ("lane:", set()),
+        ("tasks/a", {"a"}),
+        ("other:x", set()),
+    ],
 )
 def test_a_selector_freeze_holds_the_tasks_its_lane_or_kind_names(target: str, frozen: set[str]) -> None:
     doc = {
