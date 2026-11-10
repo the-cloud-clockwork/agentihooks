@@ -8,7 +8,8 @@ nav_order: 50
 
 A hive member's NATS credential reaches the event, work queue, dead letter and state resources of the swarms it
 belongs to and nothing of any other swarm. Every subject a scoped member publishes or reads sits under
-`swarm.<swarm>.`. The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
+`swarm.<swarm>.`, except its account slot request subject `slots.<swarm>.<hive>`; see
+[Hub slot requests and the hive binding](#hub-slot-requests-and-the-hive-binding). The JetStream API subjects that cannot carry that prefix are granted only for stream and consumer
 names that carry the swarm id. A member credential of one swarm is refused by the NATS server on another swarm's
 queue, dead letter, state and stream subjects, even when those resources exist.
 
@@ -126,6 +127,100 @@ scoped state`.
 
 Nothing grants stream or consumer creation, the legacy `AGENTIHOOKS_EVENTS` and `AGENTIHOOKS_DEAD` streams, or any
 other swarm's stream names.
+
+## Hub slot requests and the hive binding
+
+The hub owns account slot admission for every hive, so one account's session cap holds across all swarms. A member
+never writes the slot buckets; it sends a NATS request to the hub and reads the answer. Each request is bound to one
+hive twice: by the subject the member's credential may publish, and by the `hive` field in the body, which the hub
+compares with that subject.
+
+### Subjects and grants
+
+| Who | Subject | Granted by |
+|---|---|---|
+| Scoped member minted for hive `<hive>` | `slots.<swarm>.<hive>` for each swarm in its `member_swarms` entry | `member_claims` in `scripts/hive/nats_grant.py`, called by `mint` with the member id |
+| Unscoped member minted for hive `<hive>` | `slots.*.<hive>` | The same function, with no swarm list |
+| Hub | Serves `slots.*.*` in queue group `hub-slots` | `scripts.hub.slots.serve`, started by the hub runner; the controller grant subscribes to `slots.*.*` |
+
+The hive is the member id the credential was minted for. A member credential carries no slot subject of any other
+hive, so the NATS server drops a request from hive `m1` on `slots.rig.m2` before the hub sees it.
+
+The member side builds the subject with `scripts.events.subjects.slot_request(swarm, hive)`. The swarm is the first
+entry of `AGENTIHOOKS_BUS_SWARMS`, or `hive` when that variable is empty; the hive is `AGENTIHOOKS_SLOT_HIVE`, which
+the launch path sets for each agent it starts. A scoped bus view accepts a request on `slots.<swarm>.` for its own
+swarm as it does on `swarm.<swarm>.`, and refuses any other swarm with
+`ValueError: a scoped bus cannot request outside swarm '<swarm>'`.
+
+### Request and answer
+
+The body is JSON with an `op` and the `hive` it acts for. The hub accepts these operations:
+
+| `op` | Further fields | Effect |
+|---|---|---|
+| `take` | `execution`, `harness`, `report`, optional `preferred` and `master` | Reserves an account slot for the execution; the answer's result is the account, or `null` when none has room |
+| `heartbeat` | `report`, `executions` | Renews the hive's live holds, drops those whose execution exited or died, and records the hive's cap per account |
+| `release` | `execution`, `harness`, `account` | Returns the execution's slot |
+| `admit`, `reopen`, `failed` | See [Hives](../pillars/hives.md) | Launch admission on the same subject |
+
+A member from hive `one` in swarm `rig` taking a slot sends, on `slots.rig.one`:
+
+```json
+{"op": "take", "hive": "one", "execution": "e1", "harness": "claude", "preferred": "", "report": {"slots": [], "sessions": {}}}
+```
+
+The hub answers `{"ok": true, "result": "<account>"}` on success and `{"ok": false, "error": "<text>"}` on any
+refusal. `scripts.hive.account_slots.Remote` raises `Unavailable` with that error text.
+
+From Python, with a bus opened from the member's own credential and `report` the hive's sessions report:
+
+```python
+from scripts.hive import account_slots
+
+slots = account_slots.Remote(account_slots.asker(bus.for_swarm("rig"), "rig", "one"), "one", lambda: report)
+account = slots.take("e1", "claude")
+slots.release("e1", "claude", account)
+```
+
+`asker(bus, swarm, hive)` fixes the subject once; `Remote(ask, hive)` writes `hive` into every body. The launch path
+passes the same hive to both, so its requests always match.
+
+### What the hub checks
+
+The hub reads the subject and body in this order:
+
+1. The subject has exactly three tokens and starts with `slots`, else `not a slot request subject: '<subject>'`.
+2. The `op` is a known operation, else `unknown slot operation '<op>'`.
+3. The body's `hive` equals the subject's third token. A missing field answers `slot request is missing 'hive'`.
+4. The operation runs against the hub's slot buckets.
+
+A body that names another hive than its subject is refused before any bucket is read or written, for every
+operation: the error is
+
+```text
+slot request names hive 'two' but the sending credential is bound to hive 'one'
+```
+
+and the hub prints one line to its standard error, which is the hub container log:
+
+```text
+hub: refused a release in swarm rig: slot request names hive 'two' but the sending credential is bound to hive 'one'
+```
+
+A member can therefore neither take a slot in another hive's name nor release or renew another hive's hold. Holds
+already in the buckets are unchanged by a refused request.
+
+### Limits
+
+- The binding rests on the NATS publish grant. Any credential allowed `slots.*.*`, such as the hub or controller
+  credential, can still ask as any hive. The shared `swarm-hive` password user, which once held that grant, is
+  retired; see [No shared hive user](#no-shared-hive-user).
+- A hive name must be one NATS subject token: no `.`, `*`, `>` or whitespace. `asker` raises
+  `Unavailable: hive '<name>' cannot ask for account slots (invalid event subject token '<name>')` for any other
+  name, and `member_claims` refuses to render a scoped grant without a member id.
+- Older members asked on `swarm.<swarm>.slots`. The hub no longer serves it and member grants no longer carry it,
+  so a member running code from before the change gets no responders until it updates and runs
+  `agentihooks hive refresh`.
 
 ## Existing swarms through the subject change
 
@@ -252,6 +347,10 @@ missing hive user is accepted only in operator mode, where the values file has n
 | Member gets `permissions violation` on every subject | `member_swarms` lists this member with no swarms | Add its swarms, then `agentihooks hive refresh` on the member |
 | `hive refresh` or `hive join` answers 403 `the hub record lists no member swarms for hive member <id>` | `member_swarms` exists but omits this member id | `agentihooks hive scope` on the hub, or add the member id with its swarms |
 | `the hive offered an unscoped bus credential; ask its hub to list this member's swarms` | The invite is marked scoped but the hub record has no `member_swarms` field | Run `agentihooks hive scope` on the hub, then join again |
+| A launch fails with `slot request names hive '<a>' but the sending credential is bound to hive '<b>'`, and the hub log shows `hub: refused a <op> in swarm <swarm>: ...` | The request body names a hive other than the one in its subject: a caller built `asker` and `Remote` with different hives | Pass the member's own hive to both; the launch path does this from `AGENTIHOOKS_SLOT_HIVE` |
+| `TimeoutError: no responders for 'slots.<swarm>.<hive>'` on a member | The member's credential does not grant that subject, because the hive is not the one it was minted for or the swarm is not in its `member_swarms` entry; or no hub is serving | Ask as the member's own hive and swarm; check the hub is running and `agentihooks hive refresh` the member |
+| `no responders for 'swarm.<swarm>.slots'` | The member runs code from before the slot subject moved to `slots.<swarm>.<hive>` | Update the member to current code and run `agentihooks hive refresh` |
+| `Unavailable: hive '<name>' cannot ask for account slots (invalid event subject token '<name>')` | The hive name holds `.`, `*`, `>` or whitespace | Use a hive name that is one subject token |
 | `scoped queue migration is incomplete` | The hub has not finished `migrate_queue` for that lane | Finish the migration on the hub, then restart the member |
 | The grant check fails with `the SWARM account has no swarm-hive user` | The antoncore values file still defines the `SWARM` account, so the check expects the shared user | Finish the antoncore operator mode change, which removes the `accounts` block, or restore the user |
 | The grant check fails with `the SWARM account has no swarm-controller user` | The controller user is missing from antoncore `users.yaml` | Restore `swarm-controller` there; only the hive user may be retired |
