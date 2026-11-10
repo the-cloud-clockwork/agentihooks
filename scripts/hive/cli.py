@@ -175,7 +175,7 @@ def _create(args: argparse.Namespace) -> str:
     tools = create.Tools(
         redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
     )
-    given = {
+    given: dict[str, Any] = {
         "repo": args.repo,
         "base": args.base,
         "like": args.like,
