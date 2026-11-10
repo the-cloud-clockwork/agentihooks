@@ -282,7 +282,20 @@ def _scheduled(
         found.track(awaited)
         opened = partial(_opened, rest, gate)
         found.detach(partial(_run_later, later, awaited, ctx, found, apply or {}, finished, opened))
-    return _eager(first, ctx, found, apply or {}, rest, gate)
+    records = _eager(first, ctx, found, apply or {}, rest, gate)
+    for each in _gone(later, frozenset(record.name for record in records if record.lost)):
+        found.end(each, True)
+    return records
+
+
+def _gone(later: tuple[Step, ...], dropped: frozenset[str]) -> frozenset[str]:
+    """Return the steps of ``later`` that need one of ``dropped``, directly or through another, so a later group sees
+    them ended and dropped as soon as their group returns."""
+    gone = set(dropped)
+    for step in later:
+        if step.needs & gone:
+            gone.add(step.name)
+    return frozenset(gone - dropped)
 
 
 def _in_turn(
