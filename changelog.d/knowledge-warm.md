@@ -1,0 +1,1 @@
+- The tick's knowledge warm step embeds new and changed ledger items into each running swarm's knowledge index every minute, so the first knowledge ask on a large ledger no longer embeds the whole ledger.

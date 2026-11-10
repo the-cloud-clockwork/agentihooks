@@ -3317,6 +3317,20 @@
         "tests/codex_session/test_attach.py::test_a_viewer_whose_seat_moved_on_is_stopped",
         "tests/codex_session/test_attach.py::test_a_connected_record_whose_server_process_died_stops_the_viewer"
       ]
+    },
+    {
+      "id": "tick-knowledge-warm",
+      "origin": "inventory",
+      "behaviour": "The tick step knowledge warm embeds the new and changed items of each running swarm's ledger export into its knowledge index every minute on the slow lane, skips while an earlier refresh of the same index still runs, so an ask right after it answers without refreshing.",
+      "seam": "scripts.tick.steps.knowledge._knowledge_warm registered as tick step knowledge warm",
+      "tests": [
+        "tests/tick/steps/test_knowledge_warm.py::test_knowledge_warm",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_task_added_to_the_ledger_is_in_the_index_after_one_run",
+        "tests/tick/steps/test_knowledge_warm.py::test_the_step_reads_the_ledger_export_under_its_deadline",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_run_while_an_earlier_refresh_still_runs_skips_without_reading_the_ledger",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_failed_refresh_releases_the_index_for_the_next_run",
+        "tests/tick/steps/test_knowledge_warm.py::test_an_ask_right_after_the_step_ran_answers_without_reading_the_ledger"
+      ]
     }
   ],
   "unmapped_rules": [
