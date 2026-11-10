@@ -5322,7 +5322,7 @@ journalctl --user -u agentihooks-tick-watch --since "1 hour ago" --no-pager
 
 | Symptom | Cause and action |
 |---|---|
-| The tick stopped and no seat got an alert | Fewer than 10 minutes have passed, the watcher is not running, or the swarm is stopped. Read `systemctl --user status agentihooks-tick-watch`; a workstation whose swarms are all served in Anton or stopped has no watcher unit. Only running, paused, stopping and drained swarms are judged. |
+| The tick stopped and no seat got an alert | Fewer than 10 minutes have passed since the last completed pass, the watcher is not running, or the swarm is stopped. Read `systemctl --user status agentihooks-tick-watch`; a workstation whose swarms are all served in Anton or stopped has no watcher unit. Only running, paused, stopping and drained swarms are judged. |
 | `left the scheduler alone: a swarm tick is still running` | A tick pass holds the tick lock, which proves the scheduler delivers. The watcher tries the restart again once 10 minutes have passed since that attempt and respawns or places the master on every check meanwhile; a pass that never ends is stopped at its 450 second deadline. |
 | `restarted the scheduler, but the tick did not register` | The supervisor stopped but the tick did not register again. Read the scheduler journal (`journalctl --user -u agentihooks-scheduler`), then run `agentihooks swarm <id> start` to enable the swarm services again. |
 | Alerts continue and no repair line appears | The swarm's ledger is gone, binned or in an open ledger outage. Restore the ledger; the next pass that reads it clears the gone and binned marks, and an outage closes when its observer finds no more evidence. |
