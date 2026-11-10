@@ -241,6 +241,41 @@ starting its daemon, and allow its next heartbeat to publish them; listing a rep
 repository entry is not a directory on this host, such as a path recorded on another host; see
 [Repositories recorded on another host](swarm.md#repositories-recorded-on-another-host).
 
+### Launch directory on a hive chosen by origin
+
+A hive chosen by origin launches the agent in its own checkout with that origin, never in the swarm's
+workstation path. Worker and master launches follow the same rule:
+
+1. Selection marks a hive that qualifies only through the origin identity and carries that identity with the
+   launch as the `hive_origin` field of the launch order.
+2. The hive's order consumer launches with `hive_origin` as the repo.
+3. The hive resolves the repo to the first checkout under `HIVE_REPO_ROOT`, by path, whose `origin` matches,
+   and passes it to `init-agent --dir`.
+
+A hive that lists the swarm path itself gets no `hive_origin` field and launches in that path unchanged.
+
+With the records in [Matching a repo across machines](#matching-a-repo-across-machines), an engineer placed on
+the headless worker launches with `--dir /home/worker/dev/agentihooks`, never `/home/me/dev/agentihooks`. No
+setting selects the launch directory; it follows from `HIVE_REPO_ROOT` and the checkouts' `origin` remotes on
+the hive.
+
+```bash
+# On the hive: each direct child checkout and its origin remote
+for d in "${HIVE_REPO_ROOT:-$HOME/dev}"/*/; do
+  [[ -e "$d/.git" ]] || continue
+  printf '%s %s\n' "$d" "$(git -C "$d" remote get-url origin 2>/dev/null)"
+done
+```
+
+The loop lists the direct children of `HIVE_REPO_ROOT`. The hive also scans one level into each child that is
+not a checkout, and compares each remote after normalizing it to lowercase `host/owner/name`, so
+`https://github.com/the-cloud-clockwork/agentihooks.git` matches `github.com/the-cloud-clockwork/agentihooks`.
+
+When the hive has no checkout with the carried origin, it passes the origin identity itself to
+`init-agent --dir`, which refuses the launch with `directory does not exist: <path>`. `<path>` is the identity
+joined to the `init-agent` base directory (`RUN_CLAUDE_BASE_DIR`, else `~/dev` when it exists, else `$HOME`),
+such as `/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`.
+
 ## Hive endpoint limits
 
 `agentihooks hive serve` answers `POST /hive/refresh` (a ledger credential for a new Redis password) on one thread
@@ -707,6 +742,7 @@ are already filled has no new placement decision in that pass.
 | Wait or symptom | Check | Resolution |
 |---|---|---|
 | `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| Launch on a hive refused with `directory does not exist` | The hive's checkouts under `HIVE_REPO_ROOT` and their `origin` remotes | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the advertised identity, or restart `hive run` with `HIVE_REPO_ROOT` at the clones' parent. See [Launch directory on a hive chosen by origin](#launch-directory-on-a-hive-chosen-by-origin). |
 | `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
 | `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
 | `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
@@ -1243,6 +1279,81 @@ newer hive. Deploy the controller first, then the hives.
 | Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
 | A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
+## Redis restarts
+
+`agentihooks hive run` keeps running when the swarm Redis restarts, rolls out or drops the hive's connection. The
+daemon reconnects with a bounded backoff and resumes its heartbeat, registration and launch watch in the same
+process, so a Redis rollout no longer leaves a joined hive down until someone restarts its service or pod.
+
+### What counts as a lost connection
+
+The beat loop treats two redis-py errors as a lost connection:
+
+- `ConnectionError`, which includes `AuthenticationError`;
+- `TimeoutError`.
+
+Either one counts wherever the loop meets it: while connecting, during a beat (heartbeat, registry record, launch
+orders, reports) or during the scheduler process timer wait between beats. Any other error, such as a `NOPERM`
+answer to a member credential or a `ResponseError`, ends `hive run` with a traceback as before. The
+`agentihooks-hive` user service then restarts it after 5 seconds (`Restart=always`), and a worker pod restarts its
+container.
+
+### Reconnect and backoff
+
+On a lost connection the daemon:
+
+1. Stops the connection's helper threads, the headroom publisher and the herdr stats publisher.
+2. Prints `hive Redis connection lost (<error>: <detail>); reconnecting in <n>s` to stderr.
+3. Sleeps the delay for that attempt.
+4. Opens a new pair of clients through the same factory the service started with, then beats at once.
+
+The delays run 1, 2, 4, 8, 16 and 30 seconds, then stay at 30 seconds for as long as Redis stays down. The sequence
+starts again at 1 second only after a reconnected loop completes a full beat and the wait that follows it, so a Redis
+that accepts a connection and drops it during the beat keeps the longer delay.
+
+Each reconnect goes through the same Redis connection code as the first start. When the member's saved Redis
+password is refused, it first tries the password saved in `hive.env` by another process on the host, then refreshes
+the member through the hive endpoint, one refresh per host at a time. A refused refresh surfaces as an
+`AuthenticationError`, so the daemon backs off and tries again instead of exiting.
+
+### What resumes
+
+After a reconnect the first beat runs at once on the new connection:
+
+- the heartbeat and the hive's registry record, so the hive reads `live` again in `hive list`;
+- the order consumer marker and the launch watch, so a launch order queued while Redis was down, or after it came
+  back, is consumed on that beat;
+- the quota, sessions and execution reports, and the headroom reading;
+- both helper threads, started fresh on the new connection.
+
+The process keeps its quota refresh worker, GitHub App token renewal and bundle refresh clocks across the
+reconnect. Lane spokes started by `hive run` talk to NATS, not Redis, and are not restarted by it.
+
+While the daemon backs off, the hive writes nothing to Redis. Its reports expire after 45 seconds and it turns stale
+after the 90 second live window, so placement stops sending it new launches until the first beat after the
+reconnect. What happens to agents already running there follows the hive's lost and fencing rules; see
+[When a hive is lost](#when-a-hive-is-lost) and [Fencing](#fencing).
+
+### Client timeouts
+
+The two clients the daemon opens disable redis-py's own retry, so a lost connection reaches the loop at once
+instead of being retried inside one command:
+
+| Client | Connect timeout | Read timeout | Used for |
+|---|---|---|---|
+| Command client | 3 seconds | 5 seconds | Beats, reports and the helper threads' writes. |
+| Wait client | 3 seconds | 15 seconds | The scheduler process timer waits between beats and in both helper threads. |
+
+Both send TCP keepalives and run a connection health check every 15 seconds.
+
+### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `hive list` shows a joined hive stale after a Redis rollout | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive Redis connection lost` | Repeated lines with a 30 second delay mean Redis or the network is still unreachable from the hive; fix that and the hive returns on its next beat. No lines and an exited service mean the hive runs code from before [#5168](https://github.com/the-cloud-clockwork/agentihooks/pull/5168); upgrade it and restart the service or roll its pod. |
+| Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | Whether the hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
+| `hive run` exits with a traceback right after Redis returns | The error in the traceback | The error is not a lost connection, so the daemon does not retry it; fix the error it names, such as a Redis user missing a permission. The service restarts the process after 5 seconds. |
+
 ## Failover timing
 
 | Clock | Value | Effect |
@@ -1250,6 +1361,7 @@ newer hive. Deploy the controller first, then the hives.
 | Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
+| Redis reconnect backoff | 1, 2, 4, 8, 16, then 30 seconds | A hive that lost its Redis connection retries at these delays and beats at once when it reconnects; see [Redis restarts](#redis-restarts). |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
 | Controller lease | three ticks, 180 seconds by default | Another controller takes over at a higher epoch once it lapses. |
@@ -1461,8 +1573,10 @@ Masters, qa and frontend keep the UI host rule, and a task pinned to a hive neve
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
 
-1. Points git at `GITHUB_PERSONAL_ACCESS_TOKEN` for github.com through a credential helper that reads the variable
-   when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
+1. Points git at `python3 -m scripts.github_app_cli credential` for github.com, which answers with a GitHub
+   App installation token when `GITHUB_APP_PRIVATE_KEY` is set, else with `GITHUB_TOKEN`. In App mode
+   the start script caches that token in `github-token` under the agentihooks home, private to the worker user. The
+   token never reaches a remote URL or the log.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
 3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
@@ -1510,13 +1624,8 @@ agentihooks hive bundle-origin --path <record> # another record under the secret
 ```
 
 It needs `OPENBAO_URL` and `OPENBAO_TOKEN`, keeps the record's other keys, and writes an empty origin when no bundle
-is linked. A linked bundle with no `origin` remote naming a host and repository is refused. An empty `HIVE_BUNDLE_URL`
-clones nothing, unlinks any bundle a persistent home kept, and init runs on the package roles alone. A failed clone
-logs `worker-hive: bundle clone failed` and the pod still serves without the bundle, which `agentihooks hive compare`
-shows as a difference. A failed init with the bundle logs `worker-hive: agentihooks init with the bundle failed` and
-init runs again on the package roles alone, with the bundle unlinked; a failed init on the package roles stops the
-pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
-global installs and uv tools land in `~/.local` under the worker home.
+is linked. A linked bundle with no `origin` remote naming a host and repository is refused. [Bundle on a worker
+pod](#bundle-on-a-worker-pod) covers what the pod does with the origin.
 
 `agentihooks hive join /path/to/invite` enrolls a machine from one private invite
 file. It reads the file without executing it, refreshes the member through the
@@ -1582,7 +1691,185 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 `mount.path` is an `fsType` filesystem holding `mount.marker`, so an unmounted data disk never gets hive folders on the
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
-lists.
+lists. [Worker hive home volume](#worker-hive-home-volume) gives examples, checks and refusals.
+
+### Worker hive home volume
+
+`/home/worker` holds every repo clone, worktree and scratchpad the hive's agents use, so its disk decides how many
+worktrees fit. `wt.sh new` refuses below `WT_MIN_FREE_GB` free on that disk, and a node root disk with less free space
+than the floor stops every engineer on the hive at its first worktree. Put the home on a data disk with room above the
+floor. Choose one of three forms:
+
+| Form | Set | Home and `/tmp` | Rollout |
+|---|---|---|---|
+| Default | nothing | emptyDir on the node root disk, lost with the pod | RollingUpdate |
+| Hand set source | `workers.homeVolume` | the hostPath or claim you give; `/tmp` stays an emptyDir | Recreate |
+| Per node storage | `workers.node` and `hiveStorage` | `<homes>/<folder>` and `<tmp>/<folder>`, made by a Job before the pod starts | Recreate |
+
+**Hand set hostPath.** Pin the hive to the node that carries the data disk and mount a folder on that disk. Type
+`Directory` makes the kubelet refuse the mount when the folder is missing, so the pod never starts on the root disk of a
+node whose data disk did not mount. Create the folder, owned by uid 10001, on the mounted disk before the rollout:
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null                 # one source only; the chart refuses two
+    hostPath:
+      path: /mnt/data/agentihooks-hive
+      type: Directory
+  nodeSelector:
+    kubernetes.io/hostname: worker-001
+  worktreeMinFreeGb: 50
+```
+
+**Hand set claim.** A `persistentVolumeClaim` keeps the home on whatever disk its storage class provides. It gains
+nothing when the only storage class provisions on the node root disk.
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null
+    persistentVolumeClaim:
+      claimName: swarm-hive-001-home
+```
+
+**Per node storage.** `workers.node` names the node; its `hiveStorage.nodes` entry, else `hiveStorage.default`, gives
+the host folders. The chart pins the pod to that node, mounts `<homes>/<release>` as `/home/worker` and
+`<tmp>/<release>` as `/tmp`, and runs a pre-install and pre-upgrade Job (`<fullname>-storage`, an ArgoCD PreSync hook
+when `workers.rollout.enabled`) on that node that makes both folders for uid 10001 with mode 0750. With `mount` set,
+the Job first checks that `mount.path` is an `fsType` filesystem holding `mount.marker` and fails otherwise, so the sync
+stops before any folder lands on the system drive. Both `homes` and `tmp` must sit under `mount.path`.
+
+```yaml
+workers:
+  node: worker-001
+  hives:
+    - name: b
+      credentialSecret:
+        name: swarm-hive-001-b-join
+        key: credential
+hiveStorage:
+  nodes:
+    worker-001:
+      homes: /mnt/data/agentihooks-hive/homes
+      tmp: /mnt/data/agentihooks-hive/tmp
+      mount:
+        path: /mnt/data
+        fsType: xfs
+        marker: .data-disk          # a file that exists only on the data disk
+```
+
+With release `swarm-hive-001`, the base hive mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001` and entry `b`
+mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001_b`; each `workers.hives` entry gets its own `-storage-<name>`
+Job and inherits `workers.node` unless it sets its own.
+
+**Folders for hand set hives on many nodes.** When several hives set `homeVolume` by hand to folders under one root,
+`hiveStorage.homeFolders` makes those folders on every node it selects, outside the nodes `hiveStorage.nodes` lists,
+with a DaemonSet that keeps running:
+
+```yaml
+hiveStorage:
+  default:
+    homes: /mnt/data/agentihooks-hive
+  homeFolders:
+    hives: [swarm-hive-002, swarm-hive-003]
+    nodeSelector:
+      agentihooks/hive-disk: "true"
+```
+
+**Check before a sync.** Render the release and read the home volume, its strategy and placement:
+
+```bash
+helm template swarm-hive-001 deploy/helm/agentihooks-swarm -f values-hive.yaml \
+  | grep -nE 'type: Recreate|name: home$|hostPath:|path: |kubernetes.io/hostname'
+```
+
+**Check after the rollout.** Read the free space the agents see and the floor they get. `<fullname>` is the release
+name when it contains `agentihooks-swarm`, else `<release>-agentihooks-swarm`:
+
+```bash
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- df -h /home/worker
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- printenv WT_MIN_FREE_GB
+kubectl -n <namespace> logs job/<fullname>-storage
+```
+
+`df` must show the data disk size, not the node root disk, and free space well above `WT_MIN_FREE_GB`. The storage Job
+is deleted once it succeeds, so its log exists only while it fails or runs. One engineer on the hive passing
+`wt.sh new` proves the floor holds.
+
+### Worker hive home volume refusals
+
+The chart refuses these values at render time; the storage Job and the kubelet report the rest on the cluster.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim` | The default `emptyDir: {}` merged with the source you added. | Set `emptyDir: null` beside the hostPath or claim. |
+| `workers.node <node> has no homes: set hiveStorage.nodes.<node>.homes, or hiveStorage.default.homes when the node has no entry` | `workers.node` names a node with no homes folder. | Add `homes` to that node's entry or to `hiveStorage.default`. |
+| `hiveStorage for node <node> names a mount without its fsType and marker` | `mount.path` is set alone. | Give `mount.fsType` and `mount.marker`. |
+| `hiveStorage folder <folder> for node <node> is not under its mount <path>` | `homes` or `tmp` lies outside `mount.path`. | Move the folder under the mount, or fix `mount.path`. |
+| Storage Job log: `<path> on <node> is not the <fsType> disk holding <marker>, so its data disk is not mounted` | The data disk is unmounted, has another filesystem, or lacks the marker. | Mount the disk on the node, or create the marker on it, then sync again. |
+| Pod stays in `ContainerCreating` with a `FailedMount` event naming the home hostPath | A hand set `Directory` hostPath does not exist on the node. | Create the folder on the mounted data disk, owned by uid 10001, or use `hiveStorage` so the Job makes it. |
+| `hiveStorage.homeFolders.hives needs hiveStorage.default.homes` | The DaemonSet has no root to make folders under. | Set `hiveStorage.default.homes`. |
+| `hiveStorage.homeFolders.hives entry "<name>" must be a folder name: lowercase letters, digits and dashes` | An entry holds another character, such as `_`. | Name the hive's home folder, and the entry, without that character. |
+| `wt.sh new` refuses below the free space floor inside the pod | The home disk has less free space than `WT_MIN_FREE_GB`. | Move the home to a larger disk or run `agentihooks gc`; never lower `workers.worktreeMinFreeGb` to pass. |
+
+### Bundle on a worker pod
+
+A worker pod installs the same bundle, profiles, rules, skills and MCP servers as the workstation. The workstation
+knows its bundle only as a host path, which the settings record never carries, so the record names it as an origin:
+
+| Key | Value | Written from |
+|---|---|---|
+| `HIVE_BUNDLE_URL` | `https://<host>/<owner>/<name>.git`, or empty | the `origin` remote of the linked bundle, else of `AGENTIHOOKS_BUNDLE_PATH` |
+| `HIVE_BUNDLE_REF` | a branch name, or empty | the bundle checkout's current branch |
+
+`agentihooks hive setup` and `agentihooks hive bundle-origin` write both keys. An `ssh` or `https` remote is written
+as the same `https` address, so the pod clones it with the GitHub token. A bundle checkout on a detached head is
+refused with `the linked bundle at <path> is not on a branch`. The pod reads the keys through
+`workers.envFromSecrets`; chart values never set them.
+
+The pod uses them in steps 2 and 4 of [Worker hives in Kubernetes](#worker-hives-in-kubernetes). `HIVE_BUNDLE_REF`
+defaults to `dev`. A clone a persistent home kept is fast forwarded from the origin instead of cloned again; a failed
+fast forward logs `worker-hive: bundle fast forward failed; init runs on the kept clone`. `agentihooks init --bundle
+<clone>` links the bundle and renders its rules, skills, MCP servers and the `agenti` alias.
+
+| Situation | Log line | Result |
+|---|---|---|
+| `HIVE_BUNDLE_URL` empty | none | No clone. Any bundle a persistent home kept is unlinked and init runs on the package roles alone, so a hive without a private bundle keeps working. |
+| Clone fails | `worker-hive: bundle clone failed; init runs on the package roles alone` | The pod serves on the package roles; `hive compare` shows `bundle missing <origin>`. |
+| Init with the bundle fails | `worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone` | The bundle is unlinked and init runs again on the package roles alone. |
+| Init on the package roles fails | the init error | The pod stops. |
+| `deps ensure` fails | `worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies` | The pod serves; each launch retries the missing dependencies. |
+
+The image carries node, npm, uv and gh; npm global installs and uv tools land in `~/.local` under the worker home.
+
+`agentihooks hive compare` reads each hive's linked bundle as a lowercase `<host>/<owner>/<name>` in its `bundle`
+section. A pod with no bundle shows `bundle missing <origin>` against the workstation, and a pod linked to another
+bundle shows both `bundle missing <workstation origin>` and `bundle extra <pod origin>`. The branch is not compared.
+Profiles shipped by the bundle, rules, skills, MCP servers and dependencies follow in their own sections, so a
+missing bundle also shows as missing entries there.
+
+To bring a pod to the workstation's bundle and check it:
+
+```bash
+# On the workstation, with OPENBAO_URL and OPENBAO_TOKEN set
+agentihooks hive bundle-origin
+# OpenBao secret/<record>: wrote HIVE_BUNDLE_REF, HIVE_BUNDLE_URL (<n> keys total); bundle https://github.com/<owner>/<bundle>.git at dev
+
+# Roll the pod so its start script reads the record
+kubectl rollout restart deployment/<release>-worker-hive -n <namespace>
+
+# In a shell on the pod
+agentihooks bundle list                 # the linked bundle is agentihooks-bundle under the repo root
+ls ~/.claude/rules ~/.claude/skills     # the bundle's rules and skills
+grep 'alias agenti' ~/.bashrc
+
+# On the workstation, once the pod's next beat has published its configuration
+agentihooks hive compare
+```
+
+`hive compare` then lists the pod as `equal`. Host paths are never part of the snapshot, so a different repo root or
+home folder is not a difference.
 
 ### Accounts on a worker pod
 
@@ -2077,3 +2364,5 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 - [Swarm](swarm.md): the master, seats, the minute tick and the swarm commands.
 - [Claude account load balancing](load-balancing.md): subscription and api slots.
 - [Hosted ledger auth](../reference/hosted-ledger-auth.md): hive tokens and edge mode.
+- [Hive enablement record](../reference/hive-enablement-record.md): the first Anton worker hive join, where its
+  time went, and the proposals that shaped this page.

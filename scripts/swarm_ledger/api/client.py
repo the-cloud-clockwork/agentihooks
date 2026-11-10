@@ -17,6 +17,7 @@ from urllib.parse import quote, urlencode
 import orjson
 
 from .. import ledger_link
+from ..repository import live_rows
 from ..repository.entry import thawed
 from ..repository.rows import children, encode
 from . import resources, schemas
@@ -158,10 +159,14 @@ class ResourceClient:
         kept[key] = (reply["generation"], state)
         return thawed(state)
 
-    def changes(self, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+    def changes(
+        self, slug: str, since: int, parts: tuple[str, ...], scope: live_rows.Scope | None = None
+    ) -> dict[str, Any]:
         """The export of the named parts as the changes since generation since, or in full when the server no
         longer holds every change after it."""
-        return self.request(slug, "export", {"since": since, "parts": list(parts)})
+        scope = live_rows.Scope() if scope is None else scope
+        payload = {"since": since, "parts": list(parts), "closed": scope.closed, "frozen": scope.frozen}
+        return self.request(slug, "export", payload)
 
     def stored_export(self, slug: str) -> dict:
         """The full export, read as the changes since the one the last command on this host stored for it."""
