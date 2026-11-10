@@ -124,6 +124,8 @@ def test_order_ack_and_live_execution(setup):
 
 
 def test_a_hive_ack_carries_the_remote_control_its_launch_recorded(setup):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
     off = {"state": "off", "detail": "subscription token fallback"}
     placed = replace(setup.runtime.spawn.return_value.value, remote_control=off)
     setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
