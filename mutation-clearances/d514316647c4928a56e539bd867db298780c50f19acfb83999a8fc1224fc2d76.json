@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/seen.py:scripts.inbox.seen.x\u01c1SeenMarks\u01c1mark:e905d5f6a22053fe755d455ecb9e354bf212472bce1963807f408287ccf98522": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: `added` is only read by `if added:` and `added == 1`, and `None` and `0` are both falsy and both unequal to `1`, so every output is unchanged."
+  }
+}
