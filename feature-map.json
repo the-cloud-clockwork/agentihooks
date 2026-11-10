@@ -2921,6 +2921,7 @@
     {
       "id": "priorities-sweep-budget",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-priorities-sweep-budget",
       "behaviour": "The priorities sweep tick step clears every stale priority of a pass in bounded batched ledger writes, so a thousand stale priorities finish under the step floor budget.",
       "seam": "scripts.swarm.priority_sweep.priority_pass and LedgerClient.clear_priorities",
       "tests": [

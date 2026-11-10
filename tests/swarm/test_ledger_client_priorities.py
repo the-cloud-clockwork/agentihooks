@@ -30,10 +30,10 @@ def test_clear_priority_sends_its_reason_as_the_swarm(sent):
 
 
 @pytest.mark.feature("priorities-sweep-budget")
-def test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches(monkeypatch):
-    batches = []
+def test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    batches: list[tuple[str, list[dict[str, object]]]] = []
 
-    def call(slug, batch, service):
+    def call(slug: str, batch: list[dict[str, object]], service: bool) -> dict[str, list[object]]:
         batches.append((slug, batch))
         return {"rejected": []}
 
@@ -47,7 +47,7 @@ def test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches(monk
     assert {(op["op"], op["by"], op["reason"]) for op in ops} == {("priority_clear", "swarm", "its item is done")}
 
 
-def test_clear_priorities_with_nothing_to_clear_writes_nothing(sent):
+def test_clear_priorities_with_nothing_to_clear_writes_nothing(sent: list[tuple[str, dict[str, object]]]) -> None:
     ledger_client.LedgerClient().clear_priorities("demo", [])
     assert sent == []
 

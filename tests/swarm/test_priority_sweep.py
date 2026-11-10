@@ -658,7 +658,7 @@ class TimedLedger(ledger_client.LedgerClient):
 
 
 @pytest.mark.feature("priorities-sweep-budget")
-def test_a_thousand_stale_priorities_clear_inside_the_step_floor():
+def test_a_thousand_stale_priorities_clear_inside_the_step_floor() -> None:
     import fakeredis
 
     count = 1000
@@ -677,7 +677,7 @@ def test_a_thousand_stale_priorities_clear_inside_the_step_floor():
 
 
 @pytest.mark.feature("priorities-sweep-budget")
-def test_the_sweep_clears_its_stale_priorities_in_one_batch():
+def test_the_sweep_clears_its_stale_priorities_in_one_batch() -> None:
     tasks = [{"id": "t1", "state": "done"}, {"id": "t2", "done": True}]
     _, calls = dict_pass([row("tasks/t1"), row("tasks/t2")], tasks=tasks)
     assert calls == [

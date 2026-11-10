@@ -10,7 +10,9 @@ never judged.
 """
 
 import re
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 from hooks.classifier import ClassifierError, code_rules, decide, runner
 from scripts.swarm import ledger_events, naming
@@ -44,14 +46,22 @@ class Write:
         return "the operator" if self.by == OPERATOR else "an agent"
 
 
-def priority_pass(store, slug, doc, ledger, judge=None, github=None):
+def priority_pass(
+    store: Any,
+    slug: str,
+    doc: dict[str, Any],
+    ledger: Any,
+    judge: Callable[..., Any] | None = None,
+    github: Callable[[str], Any] | None = None,
+) -> list[str]:
+    """Clear the stale priorities of ``doc`` in one batched write, then those a new write resolves; return what it did."""
     judge, github = judge or decide, github or ledger_events.view
     rows = doc.get("priorities", [])
-    actions, gone = [], set()
-    for row, reason in sweep(doc, rows, github):
-        ledger.clear_priority(slug, row["id"], reason)
-        actions.append(_cleared(row, reason))
-        gone.add(row["id"])
+    stale = list(sweep(doc, rows, github))
+    if stale:
+        ledger.clear_priorities(slug, [(row["id"], reason) for row, reason in stale])
+    actions = [_cleared(row, reason) for row, reason in stale]
+    gone = {row["id"] for row, _ in stale}
     judged = set()
     for row, write in _writes(doc, rows, ledger_events.new_events(store, slug, doc, CURSOR, JUDGED)):
         if row["id"] in gone or (row["id"], write.text) in judged:
@@ -68,10 +78,17 @@ def priority_pass(store, slug, doc, ledger, judge=None, github=None):
     return actions
 
 
-def sweep(doc, rows, github):
+def sweep(
+    doc: dict[str, Any], rows: list[dict[str, Any]], github: Callable[[str], Any]
+) -> Iterator[tuple[dict[str, Any], str]]:
+    """Yield each row of ``rows`` the ledger did not derive whose item is gone, out of scope, done or merged, with why."""
+    found: dict[str, dict[str, dict[str, Any]]] = {}
     for row in rows:
         if not row.get("derived"):
-            reason = _stale(_item(doc, row["item"]), github)
+            name, item_id = _split(row["item"])
+            if name not in found:
+                found[name] = {item["id"]: item for item in reversed(doc.get(name, []))}
+            reason = _stale(found[name].get(item_id, {}), github)
             if reason:
                 yield row, reason
 
