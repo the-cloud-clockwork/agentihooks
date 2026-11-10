@@ -1119,12 +1119,12 @@ alone; the controller's launch cap does not bound it. A row whose reading is mis
 reported as a provider error or without a week value counts as unobserved: it stays `OPEN` at the launch cap with no
 quota left shown, as before.
 
-A closed row holds no free seat, so hive placement skips it. When a task's planned account is closed, the launch
-takes another open Claude account; when every Claude account is closed or full, the task waits with the reason
-`no Claude account has room after hive sessions: <account> <n> sessions of <cap>, ...`; an unobserved account reads
-`<account> <n> sessions, no fresh quota reading`, and a task pinned to one account ends with `; pinned to <account>`. A quota successor is chosen
-from the same rows, so it never lands on a closed account either. The account opens again on the first reading
-above both thresholds, typically after its week or five hour window resets.
+A closed row holds no free seat, so hive placement skips it. When a task's planned account is closed, the launch takes
+another open Claude account; when every Claude account is closed or full, the task waits with the reason `no Claude
+account has room after hive sessions: <account> <n> sessions of <cap>, ...`; an unobserved account reads `<account>
+<n> sessions, no fresh quota reading`, and a task pinned to one account ends with `; pinned to <account>`. A quota
+successor is chosen from the same rows, so it never lands on a closed account either. The account opens again on the
+first reading above both thresholds, typically after its week or five hour window resets.
 
 Worked example. Two approved keys, `lab-one` and `lab-two`. A hive publishes `claude:lab_one` with 97% of the week
 used and no five hour reading; `lab-two` has no reading yet:
