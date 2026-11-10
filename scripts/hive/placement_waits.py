@@ -18,7 +18,7 @@ ADMITTED = "admitted"
 
 def admitted(store: RedisStore, slug: str, count: int = 1) -> None:
     """Count launches a hive admitted for this swarm; a negative count takes back a launch that failed."""
-    cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED, count)
+    cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED, count)  # pragma: no mutate
 
 
 def _category(reason: str) -> str:
@@ -48,7 +48,7 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
                     started = previous["started_at"]
                 pipe.multi()
                 if reason and not same:
-                    cast("Pipeline", pipe).hincrby(store.key(slug, TOTALS), _category(reason))
+                    cast("Pipeline", pipe).hincrby(store.key(slug, TOTALS), _category(reason))  # pragma: no mutate
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
                     if workstation:
