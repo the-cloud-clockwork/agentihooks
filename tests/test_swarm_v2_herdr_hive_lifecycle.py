@@ -206,7 +206,7 @@ def test_an_unreadable_catalog_reports_failure_without_removing_machines(tmp_pat
     report = service.run_pass()
 
     assert report is not None
-    assert "hives" in report.refused
+    assert "not JSON" in report.refused["hives"]
     assert len(client.machines) == 2
     assert not client.mutating()
 
@@ -329,3 +329,48 @@ def test_the_status_probe_is_bounded_by_the_herdr_timeout() -> None:
 
     assert hive_lifecycle.reachable(LABEL, run)
     assert seen == [machine.HERDR_TIMEOUT_S]
+
+
+@pytest.mark.feature("herdr-hive-lifecycle")
+def test_an_unreachable_removal_drops_its_outage_state(tmp_path: Path) -> None:
+    service, client, _ = setup(tmp_path, 0)
+    service.run_pass()
+    advance(service, LIMIT)
+
+    service.run_pass()
+
+    assert [entry["label"] for entry in client.machines] == ["devbox"]
+    assert service.saved()["hive_outages"] == {}
+
+
+@pytest.mark.feature("herdr-hive-lifecycle")
+def test_an_unregistered_custom_label_drops_its_outage_state(tmp_path: Path) -> None:
+    service, client, store = setup(tmp_path, 0)
+    client.machines[0]["label"] = "custom-hive"
+    registry.update(store.redis, "hive-three", ["name=custom-hive"])
+    service.run_pass()
+    assert "custom-hive" in service.saved()["hive_outages"]
+    registry.forget(store.redis, "hive-three")
+
+    service.run_pass()
+
+    assert service.saved()["hive_outages"] == {}
+    assert [entry["label"] for entry in client.machines] == ["custom-hive", "devbox"]
+
+
+@pytest.mark.feature("herdr-hive-lifecycle")
+def test_adding_a_member_name_again_clears_its_removal_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, _, store = setup(tmp_path, NOW)
+    remove.unregister(store.redis, remove.Plan("hive-three", LABEL, ""), tmp_path)
+    auth.mint(store.redis, LABEL, "redis://localhost")
+
+    def ui(*args: Any) -> None:
+        return None
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+    monkeypatch.setattr(machine, "_ui", ui)
+    machine.add(store.redis, "operator", TARGET, LABEL, machine.Delivery("https://ledger", "redis://localhost"), run)
+
+    assert LABEL not in machine.removed(store.redis)
