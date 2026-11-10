@@ -2967,7 +2967,9 @@
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_outage_deadlines_survive_scheduled_service_recreation",
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_successful_connection_resets_the_outage_deadline",
         "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_replacing_a_saved_target_starts_a_new_outage_grace",
-        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_manually_forgotten_machine_loses_its_outage_state"
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_manually_forgotten_machine_loses_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_records_the_hive_removed_reason",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_the_status_probe_is_bounded_by_the_herdr_timeout"
       ]
     }
   ],

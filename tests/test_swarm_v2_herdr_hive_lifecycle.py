@@ -308,3 +308,24 @@ def test_a_manually_forgotten_machine_loses_its_outage_state(tmp_path: Path) -> 
     service.run_pass()
 
     assert service.saved()["hive_outages"] == {}
+
+
+@pytest.mark.feature("herdr-hive-lifecycle")
+def test_explicit_removal_records_the_hive_removed_reason(tmp_path: Path) -> None:
+    _, _, store = setup(tmp_path, NOW)
+
+    remove.unregister(store.redis, remove.Plan("hive-three", LABEL, ""), tmp_path)
+
+    assert machine.removed(store.redis) == {LABEL: "hive removed"}
+
+
+@pytest.mark.feature("herdr-hive-lifecycle")
+def test_the_status_probe_is_bounded_by_the_herdr_timeout() -> None:
+    seen: list[Any] = []
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    assert hive_lifecycle.reachable(LABEL, run)
+    assert seen == [machine.HERDR_TIMEOUT_S]
