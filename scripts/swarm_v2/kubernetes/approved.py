@@ -4,7 +4,7 @@ from collections.abc import Callable, Collection, Mapping
 from scripts import quota_state, session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
 from scripts.swarm import quota_handoff
-from scripts.swarm.capacity import Account, offered
+from scripts.swarm.capacity import Account, offered, reserved_accounts
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
@@ -87,7 +87,7 @@ class AccountRoute:
         return [self._row(key, cap, held.get(key, 0), now, None) for key in sorted(self.keys())]
 
     def seats(self, cap: int, predecessor: tuple[str, str] | None = None) -> list[session_bands.Seat]:
-        rows = self.rows(cap, self.quota.clock() / 1000)
+        rows = reserved_accounts(self.rows(cap, self.quota.clock() / 1000), os.environ)
         if predecessor is not None:
             thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
             rows = [row for row in rows if not quota_handoff.exclusion(row, thresholds, predecessor)]
@@ -129,4 +129,4 @@ class FleetAccounts:
 
     def __call__(self, environ: Mapping[str, str], now: float, refresh: bool) -> list[Account]:
         """An observed account offers its quota band alone; the launch cap bounds only Kubernetes workers."""
-        return self.route.banded_rows(self.cap, now)
+        return reserved_accounts(self.route.banded_rows(self.cap, now), environ)
