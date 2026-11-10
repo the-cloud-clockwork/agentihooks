@@ -144,7 +144,12 @@ def _invite(args: argparse.Namespace) -> str:
     )
     redis = redis_client()
     if signer_path := member_swarms.signer_path(os.environ):
-        request = replace(request, signer_path=signer_path, swarms=member_swarms.swarms(redis, args.swarm))
+        request = replace(
+            request,
+            signer_path=signer_path,
+            swarms=member_swarms.swarms(redis, args.swarm),
+            sync=member_swarms.sync_target(os.environ),
+        )
     return invite.invite(redis, bao, request, redis_url(os.environ))
 
 
@@ -175,13 +180,14 @@ def _create(args: argparse.Namespace) -> str:
     tools = create.Tools(
         redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
     )
-    given = {
+    given: dict[str, Any] = {
         "repo": args.repo,
         "base": args.base,
         "like": args.like,
         "node": args.node,
         "timeout_s": args.timeout,
         "name": args.name,
+        "repos": create.parse_repos(args.repos) if args.repos else None,
     }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
@@ -210,20 +216,36 @@ def _remove(args: argparse.Namespace) -> list[str]:
         signer=_signer(),
         dry_run=args.dry_run,
         signer_path=member_swarms.signer_path(os.environ),
+        sync=member_swarms.sync_target(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
+
+
+def _unlist(member: str) -> list[str]:
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms, remove
+
+    path = member_swarms.signer_path(os.environ)
+    if path is None:
+        return []
+    bao = openbao_kv.from_env(os.environ)  # pyright: ignore[reportUnknownMemberType]
+    plan = remove.Plan(member, "", "", signer_path=path, sync=member_swarms.sync_target(os.environ))
+    return remove.unlist(None, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
         from scripts.hive import nats_grant
 
+        unlisted = _unlist(args.id)
         redis, signer = redis_client(), _signer()
         bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
         auth.revoke(redis, args.id)
-        return "\n".join([*bus, f"revoked {args.id}"])
+        return "\n".join([*unlisted, *bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
+    if args.command == "holders":
+        return auth.backfill_holders(redis_client())
     return "\n".join(_remove(args))
 
 
@@ -311,6 +333,9 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
     created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
+    created.add_argument(
+        "--repos", help="comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
@@ -324,6 +349,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    sub.add_parser("holders", help="Write the holder record of every member minted before holder records")
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
@@ -552,7 +578,7 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command in ("revoke", "remove", "drain"):
+        elif args.command in ("revoke", "remove", "drain", "holders"):
             print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)

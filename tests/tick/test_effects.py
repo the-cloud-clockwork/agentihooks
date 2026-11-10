@@ -114,6 +114,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
         "hive sweep": frozenset({"coordination"}),
         "workflow runner": frozenset({"host"}),
         "doc items map": frozenset({"ledger", "coordination"}),
+        "step starvation": frozenset({"inbox"}),
     }
 
 

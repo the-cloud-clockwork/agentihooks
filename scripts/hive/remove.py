@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, create_render, machine, member_swarms, nats_grant, registry
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    join_report,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from scripts.hive.purge import FINISHED, forget, hosted, on_hive
 from scripts.hive.purge import keys as _keys
 from scripts.hive.purge import recorded as _recorded
@@ -29,8 +39,8 @@ ORDER = (
     "successor on another hive."
 )
 ROLL = (
-    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, then "
-    "hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
+    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, commit "
+    "and push your branch so no work is lost with the pod, then hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
     "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
     "another hive."
 )
@@ -42,7 +52,7 @@ Continue task {task}; hive {hive} stopped for a release while {name} still worke
 unknown: {name} left no handoff document within {wait} seconds of its handoff order; its task folder records its steps and evidence.
 
 ## Stopped at
-Hive {hive} stopped with {name} still running.
+Hive {hive} stopped with {name} still running.{pushed}
 
 ## Decisions and promises
 unknown: none recorded outside the task folder and the ledger.
@@ -78,6 +88,7 @@ class Plan:
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
     signer_path: str | None = None
+    sync: str | None = None
 
 
 class TaskLedger(Protocol):
@@ -102,9 +113,16 @@ def process_namespace() -> str:
     return local_namespace()
 
 
+def wip_push(path: Path) -> str:
+    """Pushes the worktree's committed and uncommitted work to a wip branch on origin and names that branch."""
+    from hooks.lifecycle import act
+
+    return act.snapshot(path)
+
+
 @dataclass(frozen=True)
 class Host:
-    run: Callable[..., subprocess.CompletedProcess] = subprocess.run
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], float] = time.time
@@ -112,6 +130,8 @@ class Host:
     home: Path = field(default_factory=registry.home)
     ledger: Callable[[], TaskLedger] = ledger_client
     namespace: Callable[[], str] = process_namespace
+    worktrees: Path = field(default_factory=lambda: Path.home() / "dev" / "worktrees")
+    rescue: Callable[[Path], str] = wip_push
 
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
@@ -232,7 +252,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
         registry.update(client, hive, ["draining=yes"], drain=drain)
     inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive, own if shared else ""):
+    while remaining := _unhanded(store, client, hive, own if shared else "", int(host.wall() * 1000)):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -251,15 +271,28 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str, own: str) -> list[tuple[str, "AgentRecord"]]:
-    """The hive's agents still to hand off; with own, only those whose process runs in that namespace."""
+def _unhanded(store: "RedisStore", client: Any, hive: str, own: str, now_ms: int) -> list[tuple[str, "AgentRecord"]]:
+    """The hive's running agents still to hand off; with own, only those whose process runs in that namespace."""
     return [
         (slug, agent)
         for slug, agent in hosted(store, hive)
         if agent.task
+        and _running(client, agent, now_ms)
         and not _handed(store, slug, agent)
         and (not own or agent.runtime_target.get("process_namespace") == own)
     ]
+
+
+def _running(client: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """Whether ``agent`` still runs on its hive: its join report for this generation has not ended, it launched under
+    one heartbeat ago or at no recorded time and has not reported yet, or it has no execution id and so never reports
+    joins."""
+    if not agent.execution_id:
+        return True
+    if report := join_report.read(client, agent):
+        return "ended_at" not in report
+    launched = max(agent.launched_at, agent.started_at)
+    return not launched or now_ms - launched < join_report.HEARTBEAT_MS
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
@@ -275,7 +308,12 @@ def _recover(
     at = int(host.wall() * 1000)
     for slug, agent in remaining:
         text = RECOVERY.format(
-            name=agent.name, task=agent.task, hive=hive, wait=wait_s, folder=folder(slug, agent.task)
+            name=agent.name,
+            task=agent.task,
+            hive=hive,
+            wait=wait_s,
+            folder=folder(slug, agent.task),
+            pushed=_pushed(agent, host),
         )
         built = envelope.build(store, slug, agent, "exit", None, at, run=host.run)
         store.put_handoff(slug, agent.task, text, seat=agent.seat, envelope=built)
@@ -285,6 +323,31 @@ def _recover(
         f"hive {hive} stops after {wait_s} seconds; {names} did not hand off, "
         "so each got a recovery handoff and its task reopens once the swarm retires it"
     )
+
+
+def _pushed(agent: "AgentRecord", host: Host) -> str:
+    """Pushes each worktree of agent holding unpushed work to a wip branch and names those branches."""
+    from hooks.lifecycle import gitstate
+
+    own = re.compile(rf"{re.escape(agent.name.replace('@', '-'))}(?:-\d+)?")
+    refs = [
+        _rescued(path, host)
+        for path in sorted(host.worktrees.glob("*/*"))
+        if own.fullmatch(path.name)
+        and (state := gitstate.inspect(path, host.wall())) is not None
+        and (state.dirty or state.unpushed)
+    ]
+    return f"\nIts unpushed work: {', '.join(refs)}; continue from there." if refs else ""
+
+
+def _rescued(path: Path, host: Host) -> str:
+    """The wip branch now holding the worktree's work, or why its push failed, so one failure spares the rest."""
+    from hooks.lifecycle.act import ActionError
+
+    try:
+        return f"pushed to {host.rescue(path)}"
+    except (ActionError, OSError, subprocess.TimeoutExpired) as error:
+        return f"left in worktree {path} because its push failed ({error})"
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
@@ -298,7 +361,7 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
-def unlist(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
+def unlist(store: "RedisStore | None", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
     """Drop the plan's hive from the hub signer record's member swarms, naming what it found."""
     if plan.signer_path is None:
         return [NO_SIGNER]
@@ -307,7 +370,10 @@ def unlist(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host
     if bao is None:
         raise auth.HiveError(f"no OpenBao client to unlist {plan.hive} from {plan.signer_path}")
     if member_swarms.unassign(bao, plan.signer_path, plan.hive):
-        return [f"unlisted {plan.hive} from the hub signer record {plan.signer_path}"]
+        return [
+            f"unlisted {plan.hive} from the hub signer record {plan.signer_path}",
+            *member_swarms.sync(plan.sync, host.run),
+        ]
     return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
 
 
