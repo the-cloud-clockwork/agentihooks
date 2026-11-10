@@ -1071,6 +1071,35 @@ A hive in a pod with a cgroup memory limit shows `available-mb` as the tighter o
 `pod-limit-mb` names the pod limit; admission counts the pod memory room as one more limit and launches by the
 tightest of them.
 
+`hive list` picks the memory figure from the stored reading alone:
+
+| Reading carries | `available-mb` | `pod-limit-mb` |
+|---|---|---|
+| `pod_total_mb` and `pod_available_mb` | The smaller of `available_mb` (node) and `pod_available_mb` | `pod_total_mb` |
+| Anything else; the publisher writes both fields or neither | `available_mb` (node) | Not printed |
+
+The pod fields appear only when `/sys/fs/cgroup/memory.max` exists and holds a number. A bare host, a cgroup v1
+mount, or a pod with no memory limit (`memory.max` reads `max`) publishes the node figure only. A value that is
+neither a number nor `max` publishes no reading at all, so `hive list` shows `headroom=missing`. The workstation
+formats each line when `hive list` runs, so the pod figure needs no hive image change: an older hive that already
+publishes the pod fields shows its pod figure once the workstation runs a release with this formatter. Admission
+uses `pod_available_mb` whenever the reading carries it, whatever `hive list` prints.
+
+Compare the printed line with the stored reading and the pod's own cgroup:
+
+```bash
+agentihooks hive list | grep anton-2
+# anton-2  live  ...  available-mb=2576  pod-limit-mb=4200  pending=0
+redis-cli GET <root>:hive:anton-2:headroom
+# {"available_mb": 10356, "pod_total_mb": 4200, "pod_available_mb": 2576, ...}
+kubectl exec -n <namespace> deploy/<hive deployment> -- cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current
+# 4404019200
+# 2300563456
+```
+
+`memory.max` in bytes divided by 1048576 is `pod_total_mb`; `pod_available_mb` is that limit minus `memory.current`
+plus the `inactive_file` line of `memory.stat`, in MiB.
+
 Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
 after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
 or roll its pod, to pick up the publisher.
@@ -1081,6 +1110,7 @@ or roll its pod, to pick up the publisher.
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
 | `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread on the first failed wait until the beat loop reconnects | Upgrade and restart the hive service, or roll its pod. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
+| A pod hive shows `available-mb` above the pod's `memory.max` in MiB, with no `pod-limit-mb` | `redis-cli GET <root>:hive:<id>:headroom` for `pod_total_mb` and `pod_available_mb`; the workstation's agentihooks version | Both fields present: upgrade the workstation, whose older `hive list` printed the node figure only. Fields missing: read `/sys/fs/cgroup/memory.max` in the pod. Absent or `max` means no limit or a cgroup v1 node: the chart sets the container memory limit to `maxAgents` times `memoryPerAgentMi.limit` (see [Worker hives in Kubernetes](#worker-hives-in-kubernetes)), so check the pod's own spec. A number means the hive runs a publisher from before the pod fields: upgrade and restart its hive service, or roll its pod. |
 
 ### Account caps on every hive
 
