@@ -71,7 +71,7 @@ migration's `__main__`, do not wire. Run through `agentihooks ledger` they are w
 ports through the fallback above and get the real adapters.
 
 Some API modules under `scripts.swarm_ledger.api` copy port members into module constants when they are imported:
-`api.hives` keeps `registry`, `HiveError` and `SwarmError`, `api.proofs` keeps `naming` and `templates`. A module
+`api.hives` keeps `registry`, `HiveError` and `SwarmError`, `api.proofs` keeps `naming`, `templates` and `CODEX_TRANSPORTS`. A module
 imported before a `bind()` keeps the members it copied, and the later binding does not replace them. A test that binds
 a fake for those members binds it before the API module is first imported.
 
@@ -162,4 +162,4 @@ request.
 | `AttributeError` on a member of a bound fake in a test | The stand-in lacks an attribute the code path reads | Add that attribute to the stand-in, or leave the port unbound to use the real adapter |
 | A test sees the real adapter after `bind` | `BOUND` was not reset, or the value was read through another port | Use the `unbound` fixture and bind the port the code path reads |
 | `isinstance(adapter, ports.Swarm)` is false | The adapter lacks a member listed in the protocol | Add the property to the adapter class |
-| A test's fake is ignored by an API route | The API module copied the port member into a constant when it was first imported, before the test bound the fake | Bind the fake before the API module is first imported, or patch the module constant |
+| A test's fake is ignored by an API module constant such as `api.hives.SwarmError` | The API module copied the port member into a constant when it was first imported, before the test bound the fake | Bind the fake before the API module is first imported, or patch the module constant |
