@@ -4,7 +4,7 @@
 Moved code reaches swarm tick module names through ``tick`` so patched tick seams apply.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Any, Protocol
@@ -113,6 +113,22 @@ def ready_in_order(
     return tick._launch_order(
         slug, store, tick._claimable(slug, store, rows, doc, lane, dispatched, claims), dispatched
     )
+
+
+def ready_by_lane(
+    slug: str,
+    store: RedisStore,
+    rows: dict[str, dict[str, Any]],
+    doc: dict[str, Any],
+    lanes: Iterable[str],
+    dispatched: Callable[[dict[str, Any]], tuple[Any, ...]] | None = None,
+    claims: "Claims | None" = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Each lane's claimable tasks in launch order, from one claim view and one launch order for the pass."""
+    claims = claims or tick.claim_view(slug, store, rows, doc, dispatched)
+    found = {lane: tick._claimable(slug, store, rows, doc, lane, dispatched, claims) for lane in lanes}
+    ordered = tick._launch_order(slug, store, [task for tasks in found.values() for task in tasks], dispatched)
+    return {lane: [task for task in ordered if task.get("lane") == lane] for lane in found}
 
 
 def _owned_tasks(slug: Any, store: Any) -> Any:
