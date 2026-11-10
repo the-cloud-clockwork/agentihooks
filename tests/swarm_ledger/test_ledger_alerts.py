@@ -865,7 +865,6 @@ def test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_rai
     for op in (claim, close):
         state, rejected = sync([op])
         assert rejected == []
-        ledger.refused({**state, "rejected": rejected}, [op])
     assert [(a["state"], a["closed_by"]) for a in state["alerts"]] == [("done", BACKEND_MASTER)]
 
 
@@ -886,8 +885,13 @@ def test_a_refused_alert_claim_or_close_carries_the_server_reason(before: str, k
     if before:
         first = {"op": before, "id": "first", "target": target, "by": "boss"}
         sync([{**first, "outcome": "Trimmed"} if before == "alert_close" else first])
-    op = {"op": kind, "id": "second", "target": target, "by": "other"}
-    op = {**op, "outcome": "Fixed"} if kind == "alert_close" else op
+    op = {
+        "op": kind,
+        "id": "second",
+        "target": target,
+        "by": "other",
+        **({"outcome": "Fixed"} if "close" in kind else {}),
+    }
     state, rejected = sync([op])
     assert rejected == ["second"]
     with pytest.raises(SystemExit) as refusal:

@@ -39,7 +39,8 @@ def apply(
         else:
             rejected.append(op["id"])
         doc.setdefault("alerts", [])
-        for text in ctx.refused[start:] if op["op"] not in ledger_alerts.OPS else ():
+        alerting = ctx.refused[start:] if op["op"] not in ledger_alerts.SETTLING else []
+        for text in alerting:
             warning = (ledger_alerts.SYNC, text, ledger_alerts.writer(op, ctx), ledger_alerts.item(op))
             raised.append(warning)
             ledger_alerts.raise_warning(doc, ctx, warning, [])

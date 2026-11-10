@@ -5,7 +5,8 @@ from typing import Any
 
 from scripts.inbox import outbox
 
-OPS = ("alert_claim", "alert_close", "alert_raise")
+SETTLING = ("alert_claim", "alert_close")
+OPS = (*SETTLING, "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 INBOX, SETUP = "inbox", "setup"
@@ -109,10 +110,8 @@ def settled(alert: dict[str, Any] | None, op: dict[str, Any], ctx: Any, who: str
         return refuse(ctx, f"{op['op']} refused: alert {op['target']} does not exist on this ledger")
     if who in (alert.get("writer"), alert.get("closed_by")):
         return True
-    return refuse(
-        ctx,
-        f"{op['op']} refused: alert {alert['id']} is already closed by {alert.get('closed_by')}: {alert.get('outcome')}",
-    )
+    closer, outcome = alert.get("closed_by"), alert.get("outcome")
+    return refuse(ctx, f"{op['op']} refused: alert {alert['id']} is already closed by {closer}: {outcome}")
 
 
 def refuse(ctx: Any, reason: str) -> bool:
