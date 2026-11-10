@@ -21,7 +21,6 @@ ORDER = [
     "trace-plan",
     "window",
     "stall",
-    "lane-split",
     "nightwatch",
     "reset",
     "feature",
