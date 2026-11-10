@@ -3,11 +3,9 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A tick module builds the controller's fenced runtime itself. Plan slice tc-d2 closed on the condition that the
-      pass fences its runtime only through its ports, yet the masters step kept building FencedRuntime in its master
-      placement and respawn paths, so those spawns ran outside the Tools ports and their recorded deadlines. Take the
-      lease through the coordination port and fence through the runtime port: tools.runtime.fence(held, deployment,
-      deadline=...).
+      A tick module builds the controller's fenced runtime itself, so the runtime it spawns through escapes the
+      Tools ports and their deadlines. Take the lease through the coordination port and fence through the runtime
+      port: tools.runtime.fence(held, deployment, deadline=...).
     paths:
       include:
         - /scripts/tick/

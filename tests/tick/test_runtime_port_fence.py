@@ -95,7 +95,9 @@ def test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm(monkeyp
     made: list[tuple[Any, ...]] = []
     monkeypatch.setattr(controller, "FencedRuntime", lambda *args: made.append(args) or "fenced")
 
-    assert cli._fencing(cast(Any, "store"), "sw")("held", "hybrid", "raw") == "fenced"  # pyright: ignore[reportPrivateUsage]
+    fencing = cli._fencing  # pyright: ignore[reportPrivateUsage]
+
+    assert fencing(cast(Any, "store"), "sw")("held", "hybrid", "raw") == "fenced"
 
     assert made == [("store", "sw", "held", "raw", "hybrid")]
 

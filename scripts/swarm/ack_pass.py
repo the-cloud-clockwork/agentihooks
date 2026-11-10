@@ -90,7 +90,8 @@ def _collect(store: Any, slug: str, ledger: Any, runtime: Any) -> list[str]:
             return []
         ledger = ledger or ledger_client.LedgerClient()
         doc = ledger_client.pass_state(ledger, slug)
-        fenced = tools.runtime.fence(held, controller.deployment_for(config, os.environ), deadline=deadline)
+        deployment = controller.deployment_for(config, os.environ)
+        fenced = tools.runtime.fence(held, deployment, deadline=Deadline.after(lease.ttl_ms() / 1000))
         lease.require(store, slug, held)
         with timing.tick(slug):
             return timing.call(  # pyright: ignore[reportUnknownMemberType]
