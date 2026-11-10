@@ -1656,12 +1656,13 @@ A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks
 makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
-(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
-tick. On a machine in any other mode the setting changes nothing.
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a
+hive to land on. `hive-placement=off` rolls back on the next tick. On a machine in any other mode the setting changes nothing.
 
 Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
 panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 15),
-counted across every swarm on the machine, and only while the host room guard finds load and memory room. At the cap the spawn waits with the hive's reason and the local count.
+counted across every swarm on the machine, and only while the host room guard finds load and memory room. At the cap
+the spawn waits with the hive's reason and the local count.
 Masters, qa and frontend keep the UI host rule, and a task pinned to a hive never runs locally.
 
 ### Placement order for a worker spawn
@@ -1672,15 +1673,16 @@ For each eng, ci, plan or dispatch spawn the tick decides in this order:
    [Placement](#placement). When one does, the agent launches there. When the chosen hive is the machine itself, the
    spawn takes a local slot under the cap below.
 2. When no hive takes it, the spawn falls back to the local machine only when all of these hold:
+   - the controller is `hybrid`, or the swarm sets `hive-placement=on`;
    - the role is not `master`, `qa` or `frontend`;
    - the task does not set `hive`;
    - the machine's own herdr server answers;
    - the machine's hive record, if one exists, does not exclude the role or lane, and declares every capability in
      the task's `needs`.
 3. The local machine takes the spawn while its local count plus the seats kept for waiting `workstation=yes` tasks
-   is under the local cap. The tick claims a local slot for the agent, logs
-   `the local machine takes <lane> work`, and clears the task's placement wait.
-4. Otherwise the spawn waits. The tick records the wait, not a launch failure, and tries again on the next pass.
+   is under the local cap. The tick claims a local slot for the agent, clears the task's placement wait and
+   launches the agent in a local herdr pane.
+4. Otherwise the spawn waits with the reason below, and a later pass tries it again.
 
 A fallback that fails a condition in step 2 waits with the hives' reason alone, such as
 `no hive for eng has room: anton-1 ...`. A fallback at the cap waits with the hives' reason followed by the local
@@ -1708,12 +1710,17 @@ The local count is the union of:
 - local slot claims made in the last five minutes whose agent has not appeared yet.
 
 Agents on remote hives and in Kubernetes never count. The count leaves out agents on the spawning task in the same
-swarm, so a successor does not count its predecessor. Slot claims are atomic in Redis, so launches in one pass, or
-in two swarms on the same machine, cannot take more slots than the cap between them.
+swarm, so a successor does not count its predecessor. A slot claim is a Redis transaction on the machine's claim
+hash, retried when another claim lands first, so launches in one pass, or in two swarms on the same machine, see
+each other's claims. The agent records and running sessions behind the count are read once per claim, so a session
+started by hand during the claim is counted on the next one.
 
-### Set up the workstation light, agents on hives layout
+A slot frees once its agent's record reads finished or ended and its session no longer runs, when a failed spawn
+releases its claim, or when a claim whose agent never appeared turns five minutes old.
 
-The operator order of 20 October: at most eight agents on the workstation, the rest on remote hives.
+### Workstation with eight local agents
+
+This layout runs at most eight worker agents on the workstation and the rest on remote hives.
 
 ```bash
 agentihooks hive install
@@ -1725,16 +1732,16 @@ agentihooks swarm <id> autoscale --json | jq .local_slots
 
 `local_slots` reads `8`, the smaller of `local-max-agents` and the hive `max-agents`. Remote hives fill to their own
 `max-agents` first; up to eight more workers run on the workstation; anything beyond waits. To keep every worker
-off the machine, exclude the worker roles on its hive record (`agentihooks hive set desk excluded=eng,ci,plan,dispatch`). `hive-placement=off` returns
-the swarm to local spawning on the next tick.
+off the machine, exclude the worker roles on its hive record
+(`agentihooks hive set desk excluded=eng,ci,plan,dispatch`). `hive-placement=off` returns the swarm to local
+spawning on the next tick.
 
 ### Verify placement
 
 ```bash
 agentihooks swarm <id> status
 agentihooks hive list
-journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm \
-  --since "1 hour ago" -g "local slot claim" --no-pager
+journalctl --user -t agentihooks-swarm --since "1 hour ago" -g "local slot claim" --no-pager
 ```
 
 An agent placed on a hive shows that hive in `status`; an agent that fell back runs in a local herdr pane. Each
@@ -1751,7 +1758,7 @@ clear; see [The local agent cap hold](swarm.md#the-local-agent-cap-hold).
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Hive slots are full and the workstation sits idle while eng and ci work waits on `no hive for eng has room` | The fallback is off for this spawn: the controller is not `hybrid` and the swarm lacks `hive-placement=on`, herdr on the machine does not answer, the task sets `hive`, or the machine's hive record excludes the role or lacks a `needs` capability. | Check `agentihooks hive show <machine>`, the swarm's `hive-placement` setting and the task's `hive` and `needs`; start herdr on the machine. |
+| Hive slots are full and the workstation sits idle while eng and ci work waits on `no hive for eng has room` | A condition in step 2 of the placement order fails for this spawn. | Follow the row for this symptom in [Placement by role](#placement-by-role). |
 | Waits read `the local machine runs 8 of its 8 agents` with fewer swarm agents than that | The count includes every swarm on the machine, named non master sessions started by hand, and claims under five minutes old. | Read the names in the `local slot claim` journal line; end the stray session or wait five minutes for a stale claim to lapse. |
 | The cap reads below `local-max-agents` | The machine's hive `max-agents` or the host room is smaller. | `agentihooks hive show <machine>`; `agentihooks swarm <id> autoscale` shows the host room and reason. |
 | Waits read `with <r> kept for waiting workstation tasks` | Tasks marked `workstation=yes` wait for the machine, and their seats are kept from fallback spawns. | Expected; those tasks take the seats first. |
