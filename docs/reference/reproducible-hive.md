@@ -10,7 +10,7 @@ Two workstation commands add and remove a Kubernetes hive: `agentihooks hive cre
 with an engineer working on it, and `agentihooks hive remove` drains a hive and deletes everything it owns. Every
 other step, the antoncore pull request, the OpenBao record, the member credential and the herdr entry, runs inside
 them. [Invite a member by hand](#invite-a-member-by-hand) runs the credential step alone, and
-[Time a run from zero to a healthy engineer](#time-a-run-from-zero-to-a-healthy-engineer) times the path with
+[Time a run from namespace to a healthy engineer](#time-a-run-from-namespace-to-a-healthy-engineer) times the path with
 `scripts/packaging/hive-reproduce.sh`.
 
 1. TOC
@@ -112,8 +112,8 @@ It needs `OPENBAO_URL` and `OPENBAO_TOKEN` and reaches the swarm Redis this work
 | `--url` | from `--like` | the hive endpoint the new hive reaches for `hive refresh`; required without `--like` |
 | `--redis-url` | from `--like`, else this workstation's | the Redis URL the new hive connects to |
 | `--swarm-url` | from `--like` | the ledger address the new hive reaches |
-| `--bus-url` | from `--like`, else the hub signer record | the NATS address the new hive reaches |
-| `--swarm` | every swarm | a swarm the member's bus credential reaches; repeat for several. Applies only when `AGENTIHOOKS_NATS_SIGNER` names the hub signer record |
+| `--bus-url` | from `--like`, else the hub signer record when `AGENTIHOOKS_NATS_SIGNER` is set | the NATS address the new hive reaches |
+| `--swarm` | every swarm | a swarm the member's bus credential reaches; repeat for several. Applies only when the signer record already holds its member swarm listing (below) |
 
 With `AGENTIHOOKS_NATS_SIGNER` set and that signer record already holding its member swarm listing (`agentihooks hive
 scope` writes it), the new member is listed there with its swarms, the credential carries `AGENTIHOOKS_BUS_SCOPED=1`,
@@ -134,7 +134,7 @@ kubectl -n <namespace> annotate externalsecret --all force-sync=$(date +%s) --ov
 kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/component=worker-hive
 ```
 
-## Time a run from zero to a healthy engineer
+## Time a run from namespace to a healthy engineer
 
 `scripts/packaging/hive-reproduce.sh` runs the invite path against a namespace ArgoCD already synced and records the
 wall time of every step up to the first healthy engineer: an engineer working on the new hive whose join report grades
@@ -159,10 +159,9 @@ is its name. It refuses at once unless a swarm has `hive-placement=on`, and fail
 | `join report` | a join report on the hive grades `complete` or `partial` |
 
 Each step prints `hive-reproduce: <step> after <seconds>s: <detail>`. At the end it prints a table of every step with
-its UTC time, the seconds it took and the seconds since the start; the elapsed seconds of the `join report` row are
-the wall time. A step past its limit prints `hive-reproduce: <step> after <seconds>s: timed out: <reason>` and the
-table so far, and exits 1. The outcome line, `healthy engineer after <seconds>s` or `failed at <step>`, is written only
-to `HIVE_TIMING_FILE`.
+its UTC time, the seconds it took and the seconds since the start. A step past its limit prints `hive-reproduce:
+<step> after <seconds>s: timed out: <reason>` and the table so far, and exits 1. The outcome line, `healthy engineer
+after <seconds>s` or `failed at <step>`, is written only to `HIVE_TIMING_FILE`.
 
 A failure outside a timed wait exits at once with no table: a missing namespace (the `kubectl get namespace` error),
 an invite that refuses or prints no member id (`hive-reproduce: hive invite printed no member: <output>`), and a
@@ -182,17 +181,20 @@ failed forced sync or rollout restart (the `kubectl` error).
 
 When the script exits after its invite, on success or failure, it runs `hive remove <member> --label <label> --path
 <record> --wait <HIVE_REMOVE_WAIT_S>` on the member it invited, unless `HIVE_KEEP=yes`. That is the full
-[remove](#remove-a-hive): it drains the hive's agents, then deletes the member, the herdr entry, the registry records,
-the OpenBao record, and opens a pull request into antoncore `dev` deleting the hive's manifests. A failed remove prints
+[remove](#remove-a-hive): it drains the hive's agents, then deletes the member, the herdr entry and its `known_hosts`
+line, the registry records and the OpenBao record, and opens a pull request into antoncore `dev` deleting the hive's manifests. Where
+the repository refuses auto merge, the remove also waits for that pull request's checks and merge, each up to 1800
+seconds, so the exit can take longer than `HIVE_REMOVE_WAIT_S`. A failed remove prints
 `hive-reproduce: hive remove <member> failed; run agentihooks hive remove <member> --label <label>`; add `--path
-<record>` when `HIVE_RECORD` was set. Set `HIVE_KEEP=yes` to keep the hive after a timing run:
+<record>` when `HIVE_RECORD` is not the default. Set `HIVE_KEEP=yes` to keep the hive after a timing run:
 
 ```bash
 HIVE_KEEP=yes HIVE_TIMING_FILE=~/hive-timing.log scripts/packaging/hive-reproduce.sh swarm-hive-002 swarm-hive-002
 ```
 
 Record the `healthy engineer after <seconds>s` line and the step table from the timing file as the wall time of the
-run.
+run. The timer starts when the script starts, with the namespace already created by ArgoCD from the hive's GitOps
+values.
 
 ## Check by hand
 
