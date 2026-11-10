@@ -184,7 +184,7 @@ def test_a_held_first_login_passes_to_the_next_ordered_login_under_the_master_li
     _stored(2, TWO)
     _stored(3, {"emailAddress": "three@example.com"})
     _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=90.0, threeatexample_com=10.0)
-    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=97.0, threeatexample_com=30.0)
+    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=99.0, threeatexample_com=30.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com,threeatexample_com")
     environ = _environ(rendered)
     _held(1, environ["AGENTIHOOKS_AGENT_NAME"])

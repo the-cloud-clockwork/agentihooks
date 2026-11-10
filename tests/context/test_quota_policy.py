@@ -971,7 +971,8 @@ def test_primary_reserve_handoff_applies_only_to_claude_masters(
     from scripts.routing import reservation
 
     monkeypatch.setenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "main")
-    assert _master_at(monkeypatch, 98.0, held=None) is not None
+    monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "5")
+    assert _master_at(monkeypatch, 95.0, held=None) is not None
     monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
     with (
         patch.object(qp, "_master", return_value=master),

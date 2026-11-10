@@ -347,8 +347,8 @@ def test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left(monkeyp
 
 def test_primary_reserved_matches_account_names_across_separators_and_ignores_others(monkeypatch):
     monkeypatch.setattr(reservation, "primary_login", lambda: "nestor_coltatgmail_com")
-    assert reservation.primary_reserved("nestor-coltatgmail-com", 10.0, {}) is True
-    assert reservation.primary_reserved("other_account", 10.0, {}) is False
+    assert reservation.primary_reserved("nestor-coltatgmail-com", 2.0, {}) is True
+    assert reservation.primary_reserved("other_account", 2.0, {}) is False
     assert reservation.primary_reserved("nestor_coltatgmail_com", None, {}) is False
 
 
