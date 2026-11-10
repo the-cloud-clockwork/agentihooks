@@ -18,6 +18,7 @@ NAME = "swarm-hive-001"
 RECORD = f"k8s/agentihooks-hive-{NAME}"
 REPO = "the-cloud-clockwork/antoncore"
 PR = "https://github.com/the-cloud-clockwork/antoncore/pull/2000"
+SWARM_REPO = "github.com/the-cloud-clockwork/antoncore"
 TEMPLATE = (
     "#@ file: k8s/manifests/${name}/ssh-lan.yaml\nport: ${ssh_port}\nnode: ${node}\nkey: ${record}\nip: ${lan_ip}\n"
 )
@@ -137,8 +138,8 @@ class Store:
     def slugs(self):
         return ["demo"]
 
-    def config(self, slug):
-        return SimpleNamespace(hive_placement=Store.placing, state=Store.swarm_state)
+    def config(self, slug: str) -> SimpleNamespace:
+        return SimpleNamespace(hive_placement=Store.placing, state=Store.swarm_state, repo=SWARM_REPO)
 
     def agents(self, slug):
         hives = [
@@ -1255,3 +1256,150 @@ def test_a_create_killed_before_the_record_names_its_member_revokes_it_on_resume
     assert sorted(auth.members(world.tools.redis)) == [
         invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     ]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_create_records_the_hive_name_and_the_swarm_repos_and_hive_list_prints_the_name(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    assert (record["name"], record["repos"], record["registered_repos"]) == (NAME, [SWARM_REPO], [SWARM_REPO])
+    assert f"hive create {NAME}: registry: recorded hive {member} as {NAME} with {SWARM_REPO} in the hive registry" in (
+        world.lines
+    )
+    monkeypatch.setattr(cli, "redis_client", lambda: world.tools.redis)
+    monkeypatch.setattr(cli, "_local_agents", lambda redis, reported: {})
+    capsys.readouterr()
+    cli._list()
+    rows = [line for line in capsys.readouterr().out.splitlines() if line.startswith(member)]
+    assert [row.split("\t")[1] for row in rows] == [f"name={NAME}"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_create_records_the_repos_it_was_given_over_the_swarm_repos(world: SimpleNamespace) -> None:
+    given = ("github.com/o/b", "github.com/o/a", "github.com/o/b")
+    create.create(world.tools, create.Options(timeout_s=60, repos=given))
+
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    expected = ["github.com/o/a", "github.com/o/b"]
+    assert (record["repos"], record["registered_repos"]) == (expected, expected)
+    recorded = f"recorded hive {member} as {NAME} with github.com/o/a, github.com/o/b in the hive registry"
+    assert f"hive create {NAME}: registry: {recorded}" in world.lines
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_a_resumed_create_records_the_repos_its_first_run_was_given(world: SimpleNamespace) -> None:
+    world.run.on_merge = lambda: None
+    with pytest.raises(auth.HiveError, match="waiting for hive .* to send a heartbeat; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0, repos=("github.com/o/given",)))
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    world.tools.redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
+
+    create.create(world.tools, create.Options(timeout_s=0))
+
+    record = registry.show(world.tools.redis, member)
+    assert record is not None
+    assert (record["name"], record["registered_repos"]) == (NAME, ["github.com/o/given"])
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin(
+    world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configs = {
+        "hosted": SimpleNamespace(repo="x/hosted"),
+        "path": SimpleNamespace(repo="/srv/checkout"),
+        "unknown": SimpleNamespace(repo="/srv/none"),
+        "off": SimpleNamespace(repo="x/off"),
+        "stopped": SimpleNamespace(repo="x/stopped"),
+    }
+
+    class Configured(Store):
+        def slugs(self) -> list[str]:
+            return list(configs)
+
+        def config(self, slug: str) -> SimpleNamespace:
+            return configs[slug]
+
+    def origin(path: Path) -> str:
+        return {"/srv/checkout": "github.com/o/checkout"}.get(str(path), "")
+
+    monkeypatch.setattr(swarm_store, "RedisStore", Configured)
+    monkeypatch.setattr("scripts.hive.daemon.origin", origin)
+    assert create._swarm_repos(world.tools) == ["github.com/o/checkout", "x/hosted", "x/off", "x/stopped"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_no_swarm_gives_no_default_repo(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Empty(Store):
+        def slugs(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr(swarm_store, "RedisStore", Empty)
+    assert create._swarm_repos(world.tools) == []
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_the_dry_run_names_the_registry_record_and_writes_none(world: SimpleNamespace) -> None:
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert f"hive create {NAME}: registry: would record {NAME} with {SWARM_REPO} in the hive registry" in world.lines
+    assert [record["id"] for record in registry.hives(world.tools.redis)] == ["root"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_no_repo_is_named_as_no_repos(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(create, "_swarm_repos", lambda tools: [])
+    world.tools.state = {"name": NAME}
+    assert create._registered(world.tools, create.Options(dry_run=True)) == (
+        f"would record {NAME} with no repos in the hive registry"
+    )
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_cli_create_passes_its_repos(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, create.Options] = {}
+
+    def created(tools: create.Tools, options: create.Options) -> str:
+        seen["options"] = options
+        return "created"
+
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    monkeypatch.setattr(create, "create", created)
+    assert cli.main(["create", "--repos", " GitHub.com/o/a, ,github.com/o/b,github.com/o/a "]) == 0
+    assert seen["options"] == create.Options(repos=("github.com/o/a", "github.com/o/b"))
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_cli_create_names_its_repos_option() -> None:
+    parser = cli._parser()
+    (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    (option,) = [action for action in commands.choices["create"]._actions if action.dest == "repos"]
+    assert option.option_strings == ["--repos"]
+    assert option.help == (
+        "comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+@pytest.mark.parametrize("given", ["o/a", "/home/worker/dev/a", "github.com/o/a/b", "github.com/o a/b"])
+def test_cli_create_refuses_a_repo_that_is_not_host_owner_name(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], given: str
+) -> None:
+    monkeypatch.setenv("OPENBAO_URL", "https://bao.test")
+    monkeypatch.setenv("OPENBAO_TOKEN", "token")
+    monkeypatch.setattr(cli, "redis_client", lambda: None)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    assert cli.main(["create", "--repos", f"github.com/o/ok,{given}"]) == 1
+    assert capsys.readouterr().err == (
+        f"hive create refused: hive create takes repos as host/owner/name, such as github.com/o/r, not {given!r}\n"
+    )
