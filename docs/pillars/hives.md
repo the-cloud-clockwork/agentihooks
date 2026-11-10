@@ -339,8 +339,11 @@ writes, described in [Worker keys](#worker-keys). With the default root `agentih
 ~agentihooks:hive:lab-vm:*                        write everything below it
 ~agentihooks:swarm:state:hive-lab-vm:*            write the member's hive state record
 ~agentihooks:swarm:state:scheduler-lab-vm:*       write the member's scheduler state record
-~agentihooks:swarm:*:claim:*  ...                 write the worker keys, one pattern each
+~agentihooks:swarm:*:claim:*                      write task claims, the first worker key
+~agentihooks:swarm:*:findings                     write finding verdicts, another worker key
 ```
+
+The worker key list holds one such pattern per key; [Worker keys](#worker-keys) lists them all.
 
 Every other write, including another member's keys, the controller's inbox and the launch slot rows, is refused
 by Redis with `NOPERM`. Apart from the worker keys, every piece of state a member process writes lives below its
@@ -377,15 +380,16 @@ granting each key Redis refused until all five passed gave the list.
 |---|---|
 | `agentihooks swarm <slug> done` | The task claim `swarm:<slug>:claim:<task>`, released when the task closes. |
 | `done`, `ready`, and `park` when it retires the agent | Agent and execution records `swarm:<slug>:agents`, `executions` and `hosts`, the agent's `desired-routes` and `state-since`, and the seat exit mark `seat-of:<agent>:exit`. |
-| `ready`, and `park` when it hands off | `swarm:<slug>:ready`, `restart-causes`, `transfers`, the handoff text, seat and envelope `handoff:*`, `handoff-seat:*` and `handoff-envelope:*`, and the seat recaps `seat:<seat>:recaps`. |
+| `ready` and `park` when it hands off | `swarm:<slug>:ready`, `restart-causes`, `transfers`, the handoff text, seat and envelope `handoff:*`, `handoff-seat:*` and `handoff-envelope:*`, and the seat recaps `seat:<seat>:recaps`. |
 | `agentihooks swarm <slug> status` | Finding verdicts `swarm:<slug>:findings`, check state `checks:*`, merge stall state `merge-stall` and `merge-stall-notice`, and `hive-placement-waits`. |
-| `agentihooks swarm <slug> wait` | Nothing extra: wait readings live below the member's own hive key. |
-| `swarm <slug> block` and `swarm <slug> learned` | `swarm:<slug>:dev-red` and the seat's learned notes `seat:<seat>:learned`. |
-| A refused execution record write | The identity conflict counter `swarm:<slug>:identity-conflicts`. |
+| `agentihooks swarm <slug> wait --on ...` | The prerequisite wait record `swarm:<slug>:prerequisite-waits`, which it clears and writes. A wait without `--on` writes only below the member's own hive key. |
+| `agentihooks swarm <slug> block` | The same claim release, agent records and seat exit mark as `done`, plus `swarm:<slug>:dev-red` and, for a stacked prerequisite, `prerequisite-waits`. |
+| `agentihooks swarm <slug> learned` | The seat's learned notes `seat:<seat>:learned`. |
+| A refused execution record write | The identity conflict counter, kept in `swarm:state:counters:*`. |
 
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
-`lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `swarm:state:counters:*`, `execution-publishing`, the
-Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`, `prerequisite-waits`,
+`lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `identity-conflicts`, `execution-publishing`, the
+Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`,
 `stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
 
 The member user stays refused on every other swarm key. Writes that fail with `NOPERM` include:
@@ -1068,13 +1072,15 @@ full".
 
 The controller and the ledger server place agents; add, refresh and revoke keep the hive index. A member's Redis user
 also writes the agent and execution records, claims and seat records its own engineers change when they run
-`swarm done`, `ready`, `park` and `status`; see [Worker keys](#worker-keys).
+`swarm done`, `ready`, `park`, `block` and `learned`, and the finding and placement wait state `swarm status` writes; see
+[Worker keys](#worker-keys).
 
 | Keys under the swarm root | Member Redis user | Written by |
 |---|---|---|
-| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read and write | The controller and the ledger server; a member's engineers on `done`, `ready` and `park`. |
-| Task claims `swarm:<slug>:claim:*` and placement waits `swarm:<slug>:hive-placement-waits` | read and write | The controller and the ledger server; a member's engineers on `done` and `status`. |
-| Claim journals, task authority, swarm settings and names | read only | The controller and the ledger server. |
+| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read and write | The controller and the ledger server; a member's engineers on `done`, `ready`, `park` and `block`. |
+| Task claims `swarm:<slug>:claim:*` and placement waits `swarm:<slug>:hive-placement-waits` | read and write | The controller and the ledger server; a member's engineers on `done`, `block` and `status`. |
+| Seat records: the exit mark `seat-of:<agent>:exit`, recaps `seat:<seat>:recaps` and learned notes `seat:<seat>:learned` | read and write | The controller and the ledger server; a member's engineers on `done`, `ready`, `park`, `block` and `learned`. |
+| Claim journals, task authority, swarm settings, seat culture and names | read only | The controller and the ledger server. |
 | Launch slot rows `launch-slot:*` | read only | The controller, which reserves, acknowledges and refreshes them. |
 | Hive index `hives` | read only | `hive add` and `hive refresh` add the member; `hive revoke` and a failed add remove it. |
 | The member's own hive record and every key below it | read and write | The member's `hive run` beat and the agents it runs. |
