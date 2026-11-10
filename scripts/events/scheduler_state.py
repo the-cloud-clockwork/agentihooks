@@ -3,6 +3,7 @@ import json
 import os
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from functools import lru_cache
 from threading import Lock
 from typing import TYPE_CHECKING, Any
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 BACKEND_ENV = "AGENTIHOOKS_SCHEDULER_STATE_BACKEND"
 MAX_DOCUMENT = 8 * 1024 * 1024
 _lock = Lock()
-_recovery = Lock()
+RECOVERY = Lock()
 
 
 @lru_cache
@@ -60,23 +61,22 @@ def live(document: dict[str, Any], now: float) -> dict[str, Any]:
 
 
 def shrink(state: "RedisStateStore", key: str) -> None:
-    """Rewrites an oversized scheduler document once, under a process lock, so concurrent waiters never each decode it."""
+    """Rewrites an oversized scheduler document once under a process lock so waiters never each decode it."""
     from .redis_state import WRITE_TRIES
 
-    with _recovery:
+    with RECOVERY:
         for _ in range(WRITE_TRIES):
             if state.redis.hstrlen(state.watch_key, key) <= MAX_DOCUMENT:
                 return
             stored = state.get(key)
             if stored is None:
                 return
-            document = live(json.loads(stored.value), time.time())
-            try:
+            parsed = json.loads(stored.value)
+            document = live(parsed, time.time())
+            if document == parsed:
+                return
+            with suppress(StateConflict):
                 state.update(key, json.dumps(document).encode(), stored.revision)
-            except StateConflict:
-                continue
-            return
-    raise StateConflict(f"scheduler recovery {key!r} kept changing")
 
 
 def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:

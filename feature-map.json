@@ -2770,7 +2770,10 @@
         "tests/events/test_scheduler_recovery.py::test_shrink_skips_a_missing_document",
         "tests/events/test_scheduler_recovery.py::test_shrink_retries_a_concurrent_write_and_keeps_its_live_timer",
         "tests/events/test_scheduler_recovery.py::test_shrink_gives_up_on_a_document_that_keeps_changing",
-        "tests/events/test_scheduler_recovery.py::test_legacy_migration_skips_abandoned_process_timers"
+        "tests/events/test_scheduler_recovery.py::test_legacy_migration_skips_abandoned_process_timers",
+        "tests/events/test_scheduler_recovery.py::test_an_oversized_document_of_only_live_timers_is_never_rewritten",
+        "tests/events/test_scheduler_recovery.py::test_shrink_waits_for_a_rewrite_already_running_in_the_process",
+        "tests/events/test_scheduler_recovery.py::test_legacy_rows_of_only_abandoned_timers_or_only_retired_ids"
       ],
       "rules": [
         "scheduler-legacy-history-materialization"

@@ -272,7 +272,7 @@ class Scheduler:
             "signal": "limit_reached" if schedule.kind == "stopwatch" else "timeout",
             "slots": [],
         }
-        now = schedule.due - schedule.delay if schedule.delay is not None else time.time()
+        now = time.time()
 
         def insert(document: dict[str, Any]) -> None:
             for old_id in [key for key, row in document["entries"].items() if abandoned(row, now)]:

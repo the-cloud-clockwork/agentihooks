@@ -164,10 +164,40 @@ def test_shrink_gives_up_on_a_document_that_keeps_changing(monkeypatch: pytest.M
         raise StateConflict("changed")
 
     monkeypatch.setattr(state, "update", conflict)
-    with pytest.raises(StateConflict) as raised:
-        scheduler_state.shrink(state, KEY)
-    assert str(raised.value) == "scheduler recovery 'headed.entries' kept changing"
-    assert len(calls) == 16
+    assert revision(state) == 1
+    assert calls == [1] * 16
+    assert stored(state) == history(50)
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_shrink_waits_for_a_rewrite_already_running_in_the_process(
+    monkeypatch: pytest.MonkeyPatch, clock: None
+) -> None:
+    import threading
+
+    state = store()
+    state.create(KEY, json.dumps(history(50)).encode())
+    monkeypatch.setattr(scheduler_state, "MAX_DOCUMENT", 1_024)
+    done = threading.Event()
+    with scheduler_state.RECOVERY:
+        worker = threading.Thread(target=lambda: (scheduler_state.shrink(state, KEY), done.set()))
+        worker.start()
+        assert not done.wait(0.2)
+        assert stored(state) == history(50)
+    worker.join(5)
+    assert done.is_set()
+    assert set(stored(state)["entries"]) == {"active", "pending", "operator", "recent"}
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_legacy_rows_of_only_abandoned_timers_or_only_retired_ids(clock: None) -> None:
+    state = store()
+    state.redis.hset("headed:entries", mapping={"old": json.dumps(timer("old"))})
+    assert scheduler_state.read(state, KEY, "headed:entries") is None
+    state.redis.hset("other:retired", mapping={"gone": "1"})
+    entry = scheduler_state.read(state, "other.entries", "other:entries")
+    assert entry is not None
+    assert json.loads(entry.value) == {"entries": {}, "retired": {"gone": True}}
 
 
 @pytest.mark.feature("scheduler-bounded-history")
@@ -181,3 +211,15 @@ def test_legacy_migration_skips_abandoned_process_timers(clock: None) -> None:
         "entries": {name: legacy[name] for name in ("active", "pending", "operator", "recent", "retired")},
         "retired": {"retired": True},
     }
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_an_oversized_document_of_only_live_timers_is_never_rewritten(
+    monkeypatch: pytest.MonkeyPatch, clock: None
+) -> None:
+    state = store()
+    live = {"entries": {str(i): timer(str(i), "active") for i in range(50)}, "retired": {}}
+    state.create(KEY, json.dumps(live).encode())
+    monkeypatch.setattr(scheduler_state, "MAX_DOCUMENT", 1_024)
+    assert [revision(state), revision(state)] == [1, 1]
+    assert stored(state) == live
