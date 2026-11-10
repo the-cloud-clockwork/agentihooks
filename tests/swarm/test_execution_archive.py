@@ -59,6 +59,22 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
     assert registry.archive("fixture") == 0
 
 
+@pytest.mark.feature("swarm-archive-prunes-intents")
+def test_archive_prunes_intents_for_the_rows_it_archives(store):
+    first, second, third, other = history(store)
+
+    assert first.execution_id in section(store, "intents")
+    assert second.execution_id in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 2
+
+    intents = section(store, "intents")
+    assert first.execution_id not in intents
+    assert second.execution_id not in intents
+    assert third.execution_id in intents
+    assert other.execution_id in intents
+
+
 @pytest.mark.parametrize("external", [False, True])
 def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
     from scripts.swarm import lease
@@ -274,6 +290,7 @@ def test_archive_keeps_rows_without_a_seat_or_generation(store):
     assert {"legacy", "nameless"} <= set(section(store, "executions"))
 
 
+@pytest.mark.feature("swarm-archive-prunes-intents")
 def test_reconcile_archives_dead_rows(store):
     first, second, *_ = history(store)
     runtime = MagicMock()
@@ -282,6 +299,8 @@ def test_reconcile_archives_dead_rows(store):
     ExecutionRegistry(store).reconcile("fixture", runtime, 0)
 
     assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+    assert first.execution_id not in section(store, "intents")
+    assert second.execution_id not in section(store, "intents")
 
 
 def test_a_first_read_imports_the_legacy_execution_hashes(store):
