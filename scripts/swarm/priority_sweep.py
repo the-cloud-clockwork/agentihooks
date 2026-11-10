@@ -88,7 +88,7 @@ def sweep(
             name, item_id = _split(row["item"])
             if name not in found:
                 found[name] = {item["id"]: item for item in reversed(doc.get(name, []))}
-            reason = _stale(found[name].get(item_id, {}), github)
+            reason = _stale(found[name].get(item_id), github)
             if reason:
                 yield row, reason
 
