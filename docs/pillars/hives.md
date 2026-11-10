@@ -119,10 +119,37 @@ HIVE_REPO_ROOT=/srv/repos agentihooks hive run
 agentihooks hive show lab-vm        # the "repos" list
 ```
 
-Placement drops a hive whose list lacks the task's repo, with "no hive for `<role>` lists the repo `<repo>`"
-("no headless hive for ..." when only headless hives were tried).
-When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
-the first by path when it holds several. A repo given as a path launches in that path.
+### Matching a repo across machines
+
+A swarm may name its repo by a local checkout path even though a worker keeps its clone elsewhere. Launch
+selection reads the local checkout's `origin` and matches that identity against the hive's advertised `repos`.
+This applies to worker and master launch selection. The two machines do not need matching home directories.
+
+For example, these records describe the same repository:
+
+| Machine | Checkout or advertised repo |
+|---|---|
+| Workstation, swarm repo | `/home/me/dev/agentihooks` |
+| Headless worker, checkout | `/home/worker/dev/agentihooks` |
+| Headless worker, advertised origin | `github.com/the-cloud-clockwork/agentihooks` |
+
+If the workstation checkout's origin is `https://github.com/the-cloud-clockwork/agentihooks.git`, the worker
+qualifies through `github.com/the-cloud-clockwork/agentihooks`. Selection sends the matched origin with the launch,
+so the worker resolves its own checkout. When several checkouts share that origin, it uses the first by path.
+A directly matched path needs no origin translation.
+
+```bash
+git -C /home/me/dev/agentihooks remote get-url origin
+agentihooks hive list
+agentihooks hive show <worker-hive-id>
+```
+
+Compare the normalized origin with the worker's `repos` list. An origin match needs a readable local checkout
+and a worker heartbeat advertising that identity. A missing or unreadable origin cannot establish that match;
+check the advertised path as well. A different owner or host is a different origin, even when the repo folder
+has the same name. Placement refuses when no eligible hive lists a matching repo, with
+`no hive for <role> lists the repo <repo>`. Set `HIVE_REPO_ROOT` to the parent of the worker checkouts before
+starting its daemon, and allow its next heartbeat to publish them; listing a repo does not clone it.
 
 `swarm prepare` and `swarm publish` search the same `HIVE_REPO_ROOT` checkouts by repository name when a task
 repository entry is not a directory on this host, such as a path recorded on another host; see
@@ -477,13 +504,12 @@ any hive differs or published nothing.
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that do not exclude
-its lane, role or profile,
-then drops, in order, those with no room under `max-agents`, those that do not advertise the account slot the
-router picked, those that do not list the task's repo, and, for an interactive login, those that do not hold that
-login. Each step that empties the list names its reason, and the launch waits with it.
+its lane, role or profile. It checks the selected account slot, admission room, the
+[repository match](#matching-a-repo-across-machines), and any required interactive or master login.
+Each check that empties the candidate list names its reason, and the launch waits with it.
 
-Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
-hive over an ephemeral one, then the hive id.
+Among eligible worker hives, placement picks the lowest `prefer` rank for the role, then the lowest fraction of
+agent capacity in use, then a lasting hive over an ephemeral one, then the hive id.
 
 `agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
 this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
@@ -493,14 +519,58 @@ same tick. When every kept hive is full the launch waits rather than use another
 and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
 switches back on the next tick.
 
-`eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
-Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
-room or none is live.
-A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
-agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. The engineer, cicd, planner
-and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
-its UI role.
+### Workstation fallback for workers
+
+A headless hive refusing an `eng`, `ci`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
+such as the workstation, from taking it. This covers a missing account slot, a repo mismatch, a missing login,
+no admission room, or no live headless hive. The workstation must pass the same account, repo, role and room
+checks. A fallback never bypasses a task's hive pin or workstation requirement.
+
+Worker selection now ranks eligible headed and headless hives together using `prefer` and utilization. Set a
+lower `prefer` rank for a worker to favor it; being headless alone does not force that worker to win. The engineer,
+cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; frontend and qa profiles keep
+their UI role on any lane.
+
+For a workstation reporting five accounts and a headless worker reporting one, a launch can use the worker's
+account there even though an earlier account candidate could run only on the workstation. The account loop
+prefers a choice without a fallback reason over an earlier choice carrying one. If the worker cannot accept the
+selected account or repo, an eligible workstation remains available.
+
+```bash
+agentihooks hive list
+agentihooks hive set <workstation-hive-id> ui=yes max-agents=5
+agentihooks hive set <worker-hive-id> ui=no prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive show <worker-hive-id>
+agentihooks hive show <workstation-hive-id>
+```
+
+These commands configure role preference and the workstation ceiling; account slots and repos come from each
+hive's heartbeat. An account count is not an agent ceiling: quota caps and measured headroom still apply.
+For one swarm in local mode, also enable [hive placement](#hive-placement-for-one-swarm-on-a-local-machine).
+
+Where selection records a fallback reason, the agent's profile decision carries it as `placement_fallback`;
+a task pinned to a UI hive records the pin as its reason. Ranked worker spill also records the preferred hive's
+refusal; see [Headroom](#headroom). Masters keep their separate [placement chain](#master-placement).
+
+### Placement waits
+
+A ready task refused during placement appears in tick output as `task <id> waits: <reason>`. For example:
+
+```text
+task example waits: no hive for eng advertises the claude slot worker-account
+task example waits: no hive for eng lists the repo /home/me/dev/agentihooks
+```
+
+The tick reports the tasks it evaluates while filling free launch slots. A task not reached because those slots
+are already filled has no new placement decision in that pass.
+
+| Wait or symptom | Check | Resolution |
+|---|---|---|
+| `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
+| `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
+| `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
+| Headless worker refuses and workstation still receives no launch | Workstation heartbeat, role exclusions, repo, account, headroom and task pin | A fallback needs an eligible workstation; a pin does not spill to another hive. |
 
 When no live hive takes the role:
 
