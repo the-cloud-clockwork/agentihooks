@@ -119,3 +119,12 @@ def test_a_document_swarm_still_reads_its_lease_from_the_cache(store: Any, clock
     assert fencing.read_lease(store, "sw") == {"lease": asdict(held)}
     store.redis.delete(store.key("sw", fencing.LEASE_CACHE))
     assert fencing.read_lease(store, "sw") is None
+
+
+def test_a_fence_key_matches_the_records_port_key_without_registering_its_script(store: Any) -> None:
+    from scripts.swarm.store import PREFIX
+    from scripts.tick.adapters import records_redis
+
+    assert records_redis.fence_key("sw", "meta") == f"{PREFIX}:{{sw}}:fence:meta"
+    assert records_redis.fence_key("sw", "meta", "root") == "root:{sw}:fence:meta"
+    assert records_redis.fence_key("sw", "meta") == records_redis.RedisRecords(store.redis).key("sw", "meta")
