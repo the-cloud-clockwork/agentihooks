@@ -177,6 +177,13 @@ def test_an_open_pull_request_carrying_a_merge_time_is_not_merged(store: RedisSt
     assert blockers.active(store, SLUG, now) == {}
 
 
+def test_a_task_merged_exactly_twenty_minutes_ago_starts_the_category_now(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": _done(now - stall_blockers.MERGED_MS)}), now)
+    assert blockers.active(store, SLUG, now)[stall_blockers.MERGED_IN_PR].first_seen == now
+
+
 def test_a_done_task_with_a_merged_pull_request_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
