@@ -1,14 +1,13 @@
 {
   "features": [
     {
-      "id": "hive-release-drain-live-agents",
+      "id": "hive-label-reserves-identifier",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
-      "behaviour": "A hive release drain orders and waits only for agents still running on the hive; an agent whose join report ended gets no hand off order.",
-      "seam": "hive release roll drain settle",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
+      "behaviour": "Machine label reservations retain both the registered hive identifier and its settled name, including interface hives named swarm-master.",
+      "seam": "scripts.hive.machine.held_names with registry interface records",
       "tests": [
-        "tests/hive/test_remove.py::test_a_release_roll_orders_no_seat_whose_agent_ended_or_never_reported_past_a_heartbeat",
-        "tests/hive/test_remove.py::test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_heartbeat_ago_or_at_no_time"
+        "tests/hive/test_machine_names.py::test_an_interface_hive_reserves_its_settled_name_and_identifier"
       ]
     },
     {
@@ -2887,6 +2886,17 @@
       "tests": [
         "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
         "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
+      ]
+    },
+    {
+      "id": "hive-release-drain-live-agents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2283",
+      "behaviour": "A hive release drain orders and waits only for agents still running on the hive; an agent whose join report ended gets no hand off order.",
+      "seam": "hive release roll drain settle",
+      "tests": [
+        "tests/hive/test_remove.py::test_a_release_roll_orders_no_seat_whose_agent_ended_or_never_reported_past_a_heartbeat",
+        "tests/hive/test_remove.py::test_a_release_roll_still_orders_a_reporting_agent_and_one_launched_under_a_heartbeat_ago_or_at_no_time"
       ]
     }
   ],
