@@ -1,0 +1,84 @@
+name: Docs sanity
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: Space separated files and directories of the calling repository to scan
+        type: string
+        required: true
+      keywords_from:
+        description: Name of the caller's repository secret holding private keywords, one per line or comma separated; the caller passes its secrets with inherit
+        type: string
+        required: false
+        default: DOCS_SANITY_KEYWORDS
+      exclude:
+        description: Space separated globs of files to skip
+        type: string
+        required: false
+        default: ""
+      tool_repository:
+        description: Repository that carries the scanner script
+        type: string
+        required: false
+        default: the-cloud-clockwork/agentihooks
+      tool_ref:
+        description: Revision of the scanner repository to run
+        type: string
+        required: false
+        default: main
+      bootstrap_ref:
+        description: Revision to take the scanner from only when tool_ref does not carry it yet
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    concurrency:
+      group: ${{ github.workflow == 'Docs sanity' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('docs-sanity-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Docs sanity' && 'max' || 'single' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool_repository }}
+          ref: ${{ inputs.tool_ref }}
+          path: .docs-sanity-tool
+          sparse-checkout: scripts/docs_sanity.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        if: ${{ hashFiles('.docs-sanity-tool/scripts/docs_sanity.py') == '' && inputs.bootstrap_ref != '' }}
+        with:
+          repository: ${{ inputs.tool_repository }}
+          ref: ${{ inputs.bootstrap_ref }}
+          path: .docs-sanity-tool
+          sparse-checkout: scripts/docs_sanity.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Scan for internal addresses, identifiers and private keywords
+        env:
+          DOCS_SANITY_KEYWORDS: ${{ secrets[inputs.keywords_from] }}
+          PATHS: ${{ inputs.paths }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCS_SANITY_KEYWORDS:-}" ]]; then
+            echo "::notice::No private keywords are set; only the built in rules run."
+          fi
+          read -r -a paths <<< "$PATHS"
+          args=(--keywords-env DOCS_SANITY_KEYWORDS)
+          read -r -a excludes <<< "$EXCLUDE"
+          for glob in "${excludes[@]}"; do args+=(--exclude "$glob"); done
+          python3 -I .docs-sanity-tool/scripts/docs_sanity.py "${args[@]}" "${paths[@]}"
