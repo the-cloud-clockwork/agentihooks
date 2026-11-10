@@ -39,7 +39,7 @@ def off_reason(route_kind: str, login: bool) -> str:
     return "" if route_kind == "interactive" else FALLBACK
 
 
-def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -> dict:
+def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -> dict[str, str]:
     if lane != MASTER or harness != "claude":
         return {}
     reason = off_reason(route_kind, login)
@@ -50,7 +50,7 @@ def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -
     return {"state": "on", "detail": masters.title(slug, front_door.seat(slug))}
 
 
-def landed(decided: dict, placement: str) -> dict:
+def landed(decided: dict[str, str], placement: str) -> dict[str, str]:
     return {"state": "off", "detail": TOKEN} if decided.get("state") == "on" and placement == "fallback" else decided
 
 
