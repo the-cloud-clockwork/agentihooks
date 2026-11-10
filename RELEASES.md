@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.779 · 2026-11-10
+
+### 2026-11-09 · b26469f58586 · #10363 · @agenticore-app
+
+**Keep the tick intent check inside its eight second budget**
+
+This change fixes the intent check step blowing past its eight second tick budget under load. Per-task GitHub reads for every pending pull are replaced with one batched GraphQL read per pass; drafts are recorded without a view; and only two changed pulls per pass get judged, with their view build and model call moved to background workers that outlive the pass and are picked up by a later pass once done. Guarded by new budget tests, a Semgrep rule against per-task reads, and three rounds of review; stale judgment keys are now cancelled and unwatched tasks dropped.
+
 ## v2.17.778 · 2026-11-10
 
 ### 2026-11-09 · 7e1d7f59a4c2 · #10371 · @nestorcolt
