@@ -28,22 +28,28 @@ class SeenMarks:
 
         return f"{prefix(scope.member())}:seen:{name}"
 
-    def mark(self, name, ref):
+    def mark(self, name: str, ref: str) -> bool:
         """True when this call is the first to show the write to name; False while a delivery owner holds name."""
         from redis.exceptions import WatchError
 
+        names = NameRegistry(self.redis)
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
-                    pipe.watch(*NameRegistry(self.redis).watched("alias", name))
+                    before = names.revisions(("alias", name))
+                    pipe.watch(*names.watched("alias", name))
                     resolved = NameRegistry(pipe).resolve(name)
                     pipe.watch(owner_key(resolved))
-                    if pipe.get(owner_key(resolved)) is not None:
-                        return False
-                    pipe.multi()
-                    pipe.sadd(self.key(resolved), ref)
-                    pipe.expire(self.key(resolved), TTL_S)
-                    added, _ = pipe.execute()
+                    added = 0
+                    if pipe.get(owner_key(resolved)) is None:
+                        pipe.multi()
+                        pipe.sadd(self.key(resolved), ref)
+                        pipe.expire(self.key(resolved), TTL_S)
+                        added, _ = pipe.execute()
+                    if names.revisions(("alias", name)) != before:
+                        if added:
+                            self.redis.srem(self.key(resolved), ref)
+                        continue
                     return added == 1
                 except WatchError:
                     continue

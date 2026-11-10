@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
@@ -250,8 +251,17 @@ class InboxStore:
             bus.publish(item, self.names)
         return item
 
-    def get(self, item_id):
+    def get(self, item_id: str) -> Item:
         return _item(self.redis.hgetall(self.key("item", item_id)), item_id)
+
+    def locate(self, item_id: str) -> Item:
+        """The item with this id from the first of worlds() that holds it; Gone when none does."""
+        for world in self.worlds():
+            try:
+                return world.get(item_id)
+            except Gone:
+                continue
+        raise Gone(f"no message {item_id}")
 
     def find(self, item_id, by):
         """The item a tick pass stored the id of, or None once its record is gone; by names the pass in the log."""
@@ -445,18 +455,22 @@ class InboxStore:
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
 
-    def _with_seat(self, me, read):
+    def _with_seat(self, me: str, read: Callable[[str], list["Item"]]) -> list["Item"]:
         from redis.exceptions import WatchError
 
         original = me
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
+                    before = self.names.revisions(("alias", original))
                     pipe.watch(*self.names.watched("alias", original))
                     me = self.names.resolve(original, pipe)
+                    before += self.names.revisions(("aliases-of", me))
                     pipe.watch(*self.names.watched("aliases-of", me))
                     addresses = [me, *self.names.aliases(me, pipe)]
                     seat = self.seats.seat_of(me, pipe)
+                    if self.names.revisions(("alias", original), ("aliases-of", me)) != before:
+                        continue
                     pipe.multi()
                     pipe.ping()
                     pipe.execute()

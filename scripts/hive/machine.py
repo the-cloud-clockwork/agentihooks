@@ -67,7 +67,7 @@ def name(redis: "Redis", machine: str) -> str:
 
 def held_names(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
     members = {found["name"] for found in auth.members(redis).values()}
-    hives = {record["name"] for record in registry.hives(redis)}
+    hives = {record[field] for record in registry.hives(redis) for field in ("name", "id")}
     herdr = {saved.get("label") for saved in _listed(run)}
     return {label for label in members | hives | herdr if label}
 

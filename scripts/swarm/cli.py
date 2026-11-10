@@ -2387,7 +2387,7 @@ def cmd_wait(store, args):
         rows = waits.named_tasks(
             held["kind"], held["target"], agent.task, lambda task_id: LedgerClient().task(args.slug, task_id)
         )
-        get = InboxStore(store.redis).get
+        get = InboxStore(store.redis).locate
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
         prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms(), args.final)
