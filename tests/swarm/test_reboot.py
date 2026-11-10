@@ -260,7 +260,8 @@ def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_success
     actions, _ = _booted(store, ledger, runtime)
 
     action = f"{eng.name} handed off before the restart, so a successor takes its seat, task {eng.task} reopened"
-    assert action in actions
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    assert actions == [action, f"resumed {master.name} after the workstation rebooted"]
     assert f"{action}; no restore decision is needed." in ledger.notes
     assert eng.name not in _local(store)
     assert eng.name not in {a.name for a in runtime.resumed}
