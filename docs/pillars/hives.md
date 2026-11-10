@@ -1362,10 +1362,11 @@ next command.
 ### A dead connection never stalls the beat
 
 A Redis connection can die without closing: the TCP socket stays established, the peer stops answering and the
-bytes the hive sent sit unacknowledged in the socket's send queue. The fix in pull request
-[#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475) records the case: on 21 October 2026, after a
+bytes the hive sent sit unacknowledged in the socket's send queue. Issue
+[#5472](https://github.com/the-cloud-clockwork/agentihooks/issues/5472) records the case: on 21 October 2026, after a
 workstation reboot, the local hive service published no beat for 13 minutes while its single beat thread waited on
-such a socket with 153 bytes in the send queue. Before that pull request the wait between beats used a client with
+such a socket with 153 bytes in the send queue. Before pull request
+[#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475) the wait between beats used a client with
 no read timeout, so that wait never ended. The service stayed active and logged nothing, every hive read stale and the
 tick spawned nothing until the service was restarted.
 
