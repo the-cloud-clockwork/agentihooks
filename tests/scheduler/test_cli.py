@@ -214,6 +214,7 @@ def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path)
         capsys, cli.timer, ["add", "--in", "1h", "--workflow", "nightly", "--case", str(case), "run", "it"]
     )
     assert (code, err) == (0, "")
+    assert view is not None
     assert view["targets"] == [{"kind": "workflow", "name": "nightly", "case": str(case)}]
     assert (view["payload"], view["due"]) == ("run it", NOW + 3600)
 

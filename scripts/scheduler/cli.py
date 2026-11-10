@@ -38,8 +38,8 @@ def _owner() -> str:
     return identity()
 
 
-def _slot(args) -> commands.Slot:
-    return commands.target_slot(*args.target, args.case)
+def _slot(args: argparse.Namespace) -> commands.Slot:
+    return commands.target_slot(*args.target, case=args.case)
 
 
 def _timer_add(scheduler, args):
