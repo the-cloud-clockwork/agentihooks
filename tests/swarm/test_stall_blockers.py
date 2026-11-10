@@ -153,6 +153,30 @@ def test_the_oldest_merged_task_starts_the_category(store: RedisStore) -> None:
     assert found.detail == "2 tasks still in pr after their pull request merged, oldest task b"
 
 
+def test_a_phase_focus_counts_only_the_pull_requests_of_its_phase(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    _merged(store, now - 2 * HOUR)
+    tasks = [{**_task("a", "pr-a"), "phase": "p1"}, {**_task("b", "pr-b"), "phase": "p2"}]
+    doc = {
+        "phases": [{"id": "p1"}, {"id": "p2"}],
+        "tasks": tasks,
+        "freezes": [{"verb": "focus", "target": "phases/p1"}],
+    }
+    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-b": _open()}), now, _never)
+    assert blockers.active(store, SLUG, now) == {}
+    stall_blockers.observe(store, SLUG, doc, tasks, _pulls(**{"pr-a": _open()}), now, _never)
+    assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
+
+
+def test_an_open_pull_request_carrying_a_merge_time_is_not_merged(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    reopened = PullRequest("OPEN", now - 2 * HOUR, None, False)
+    _observe(store, [_task("a", "pr-a")], _pulls(**{"pr-a": reopened}), now)
+    assert blockers.active(store, SLUG, now) == {}
+
+
 def test_a_done_task_with_a_merged_pull_request_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)

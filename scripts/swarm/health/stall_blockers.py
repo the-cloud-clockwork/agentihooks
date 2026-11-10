@@ -99,8 +99,6 @@ def _apply(
 ) -> list[str]:
     if mode != "enforce":
         if found is None or logged.get(category) == found.since:
-            if found is None:
-                logged.pop(category, None)
             return []
         logged[category] = found.since
         reason = f"{category}: {found.detail}"
