@@ -108,10 +108,15 @@ def settled(alert: dict[str, Any] | None, op: dict[str, Any], ctx: Any, who: str
     """A claim or close of a missing or closed alert: its own writer's succeeds unchanged, any other is refused."""
     if alert is None:
         return refuse(ctx, f"{op['op']} refused: alert {op['target']} does not exist on this ledger")
-    if who in (alert.get("writer"), alert.get("closed_by")):
+    if who == alert.get("writer"):
         return True
     closer, outcome = alert.get("closed_by"), alert.get("outcome")
     return refuse(ctx, f"{op['op']} refused: alert {alert['id']} is already closed by {closer}: {outcome}")
+
+
+def settling_refusal(text: str) -> bool:
+    """Whether a refusal is an alert claim's or close's own reason, which raises no new alert."""
+    return text.startswith(tuple(f"{kind} refused: " for kind in SETTLING))
 
 
 def refuse(ctx: Any, reason: str) -> bool:
