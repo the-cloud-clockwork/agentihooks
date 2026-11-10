@@ -203,6 +203,29 @@ def test_a_held_category_keeps_counting_while_its_start_holds(store: RedisStore)
     assert (found.first_seen, found.last_seen, found.count) == (now - 2 * HOUR + stall_blockers.MERGED_MS, now, 2)
 
 
+def test_the_ledger_event_pass_records_the_merge_stall(store: RedisStore) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    _enforce(store)
+    now = _now(store)
+    _merged(store, now - 2 * HOUR)
+    doc = {"tasks": [_task("a", "pr-a")], "_meta": {"events": []}}
+    ledger_events.event_pass(InboxStore(store.redis), store, SLUG, doc, None, now, _pulls(**{"pr-a": _open()}))
+    assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
+
+
+def test_log_only_logs_a_merged_task_left_in_pr_once_and_keeps_state_expiring(store: RedisStore) -> None:
+    now = _now(store)
+    github = _pulls(**{"pr-a": _done(now - 2 * HOUR)})
+    _observe(store, [_task("a", "pr-a")], github, now)
+    _observe(store, [_task("a", "pr-a")], github, now + MINUTE)
+    rows = [json.loads(line) for line in gate_log.gate_log_path(SLUG).read_text().splitlines()]
+    reason = f"{stall_blockers.MERGED_IN_PR}: 1 tasks still in pr after their pull request merged, oldest task a"
+    assert [row["reason"] for row in rows] == [reason]
+    assert 0 < store.redis.pttl(store.key(SLUG, stall_blockers.KEY)) <= blockers.TTL_MS
+
+
 def test_a_done_task_with_a_merged_pull_request_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)

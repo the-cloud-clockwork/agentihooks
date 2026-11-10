@@ -24,6 +24,7 @@ CATEGORIES = (MERGE_STALL, MERGED_IN_PR)
 MERGED_MS = 20 * 60_000
 MERGE_KEY = "merge-stall"
 KEY = "stall-blockers"
+LOGGED = "logged"
 STALE_MS = 2 * merge_stall_observation.CACHE_MS
 KEEP_MS = blockers.TTL_MS // 2
 SENDER = "swarm"
@@ -144,7 +145,7 @@ def observe(
     if stall:
         stall = replace(stall, since=max(stall.since, opened))
     left = merged_in_pr(rows, github, held, now_ms)
-    logged = state.setdefault("logged", {})
+    logged = state.setdefault(LOGGED, {})
     lines = _apply(store, slug, MERGE_STALL, stall, mode, now_ms, logged)
     lines += _apply(store, slug, MERGED_IN_PR, left, mode, now_ms, logged)
     store.redis.set(key, json.dumps(state), px=blockers.TTL_MS)
