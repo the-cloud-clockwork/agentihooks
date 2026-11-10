@@ -2678,6 +2678,22 @@
       ]
     },
     {
+      "id": "controller-busy-node-probes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
+      "behaviour": "The controller uses shallow kubelet HTTP startup and liveness probes, Redis bounded readiness, a loopback Host header and a schedulable 250m CPU reservation.",
+      "seam": "Controller Helm probes and the open health readiness route",
+      "tests": [
+        "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
+        "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
+        "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
+        "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
+        "tests/test_swarm_v2_readiness.py::test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks"
+      ]
+    },
+    {
       "id": "hive-join-heartbeat-keeps-passed-grade",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
