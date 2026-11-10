@@ -99,6 +99,63 @@ A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver it
 `agentihooks hive invite <label>` writes into OpenBao, which brings a new hive up from an empty namespace; see
 [Reproducible hive](../reference/reproducible-hive.md).
 
+### Checking an added machine
+
+`hive add` is done when herdr lists the machine, a pane on it runs a command, and its `hive.env` holds the member
+the add printed. On the UI hive, with the label from the `added <target> to herdr as <label>` line:
+
+```bash
+herdr machine list                                    # swarm-hive-001 is listed and enabled
+herdr --machine swarm-hive-001 pane list              # panes on the machine; pick one pane id
+herdr --machine swarm-hive-001 pane run <pane id> hostname
+ssh <target> 'stat -c %a "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env"'   # 600
+ssh <target> 'grep -c "^AGENTIHOOKS_HIVE_" "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env"'   # 4
+agentihooks hive list                                 # the hive shows live once hive run beats
+```
+
+- `herdr machine add` prepares the remote herdr server over SSH before it saves the machine, so a listed machine
+  has been reached once. herdr has no `machine status` command; `machine list` and a `pane run` that answers are
+  the check.
+- A pane on a worker pod runs as the worker user, so `pane run` prints the pod hostname.
+- The `hive.env` that `hive add` delivers holds exactly the four `AGENTIHOOKS_HIVE_` keys and no `AGENTIHOOKS_BUS_`
+  lines; bus credentials arrive only through a later `hive refresh` against a hub that signs them. The
+  `AGENTIHOOKS_HIVE_ID` value is the member id `hive add` printed.
+- The hive appears in `hive list` only after `agentihooks hive run` (or the worker pod's start script) beats with
+  the delivered credential.
+
+### Retired join path
+
+The join by code ceremony is gone. Adding a machine never asks the operator to copy a code or run a command on the
+new machine to fetch its credential; the UI hive mints the member and writes it over SSH.
+
+| Retired | Replaced by |
+|---|---|
+| A join code printed on the UI hive and typed on the new machine | `agentihooks hive add <ssh target> --url <url>` on the UI hive |
+| `POST /hive/join` on `agentihooks hive serve` | `hive serve` answers only `POST /hive/refresh`; any other path is 404 |
+| The antoncore hive join service, a separate join path in Anton | `hive add`; the hive endpoint, wherever it runs, answers only refresh |
+| The worker hive chart's join code mode | `workers.credentialSecret`, or a `hive.env` that `hive add` delivers to the pod |
+
+The data plane stays: a hive endpoint answers `POST /hive/refresh`, each member keeps its ledger credential and Redis
+user, and `hive refresh` mints a new Redis credential through it. The endpoint is `hive serve` on a UI hive or the
+hosted endpoint a worker pod names with the chart's `workers.hiveUrl`; neither mints a member.
+
+`agentihooks hive invite` and `agentihooks hive join` today are a different path that came later: `hive invite`
+writes a member credential into an OpenBao record for a hive brought up from an empty namespace, and `hive join`
+reads that invite file and posts to `/hive/refresh`. Neither restores a join endpoint. See
+[Reproducible hive](../reference/reproducible-hive.md) and the
+[add a hive quick start](../getting-started/add-hive-quick-start.md).
+
+### Hive add troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `hive add refused: hive <id> is headless; only a UI hive adds machines` | `agentihooks hive show <id>`, the `ui` field | Run `hive add` on the UI hive. |
+| `<host> already runs hive <label>; one machine runs one hive` | `herdr machine list --json` for another label on the same host | Raise that hive's max agents with `agentihooks hive set`, or `hive remove` it first. |
+| `herdr exited 1: <stderr>` while `ssh <target>` works | Whether `HOME` differs from the passwd home | Put the host in the passwd home's `~/.ssh/config`; herdr's health check calls ssh without `-F`. |
+| `ssh exited 255: <stderr>` | `ssh -o BatchMode=yes <target> true` | Fix the key or host key so ssh logs in with no prompt. The minted member was revoked; rerun `hive add`. |
+| `added ... to herdr` but the machine has no `hive.env` | Whether a member already carried the label | The add kept that member and delivered nothing; `hive remove <id>`, then `hive add`. |
+| A worker pod exits with `no member credential was delivered within <n>s` | The pod log for sshd start, and that `hive add` ran against its ssh address | Run `hive add` within `HIVE_DELIVERY_WAIT_S`, or mount `workers.credentialSecret`. |
+
 ## Ledger CA on a hive
 
 A hosted ledger signed by a private certificate authority is reachable only by clients that trust that CA. A hive
