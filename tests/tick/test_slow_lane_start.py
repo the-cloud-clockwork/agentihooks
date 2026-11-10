@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from threading import Event, current_thread
+from threading import Event
 from time import sleep
 
 import pytest
@@ -137,21 +137,24 @@ def test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker() -> No
     }
 
 
-@pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
-    names: list[str] = []
+    kept_ran = Event()
 
-    def kept(ctx: Context) -> Result:
-        names.append(current_thread().name)
+    def critical(ctx: Context) -> Result:
+        assert kept_ran.wait(BUSY_S), "the kept handed step waited for the critical step's worker"
         return Result()
 
-    steps = (Step("critical first", "a"), Step("kept handed", "a", kept, lane=engine.SLOW, kept=True))
+    def kept(ctx: Context) -> Result:
+        kept_ran.set()
+        return Result()
+
+    steps = (Step("critical holding", "a", critical), Step("kept handed", "a", kept, lane=engine.SLOW, kept=True))
     ctx = Context(View(), Deadline.after(10.0))
-    with pool.running(workers=2, critical_s=CRITICAL_S, slow_s=CRITICAL_S):
-        engine.run_graph(steps, ctx, finished=later.append)
+    with pool.running(workers=1, critical_s=2 * BUSY_S, slow_s=2 * BUSY_S):
+        records = engine.run_graph(steps, ctx, finished=later.append)
+    assert [(record.name, record.outcome) for record in records] == [("critical holding", engine.OK)]
     assert [record.outcome for record in later[0]] == [engine.OK]
-    assert [name.split("_")[0] for name in names] == ["tick-handed"]
 
 
 @pytest.mark.feature("swarm-tick-slow-lane-start")
