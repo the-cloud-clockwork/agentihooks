@@ -267,8 +267,8 @@ for d in "${HIVE_REPO_ROOT:-$HOME/dev}"/*/; do
 done
 ```
 
-The loop covers direct children only; the hive also scans one level into a child that is not a checkout. The hive
-compares each remote after normalizing it to lowercase `host/owner/name`, so
+The loop lists the direct children of `HIVE_REPO_ROOT`. The hive also scans one level into each child that is
+not a checkout, and compares each remote after normalizing it to lowercase `host/owner/name`, so
 `https://github.com/the-cloud-clockwork/agentihooks.git` matches `github.com/the-cloud-clockwork/agentihooks`.
 
 When the hive has no checkout with the carried origin, it passes the origin identity itself to
