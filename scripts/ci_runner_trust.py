@@ -9,6 +9,7 @@ LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev
 POOLS = ("anton-oss", "anton-oss-light", "anton-oss-batch")
 # The only org shared workflow known to place its job on the runner named by its runs_on input.
 SHARED = "the-cloud-clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
+HOSTED_SHARED = frozenset({"the-cloud-clockwork/agentihooks/.github/workflows/docs-sanity.yml@main"})
 QUEUE_POOLS = {"anton-oss": "anton-oss-queue"}
 GUARD = (
     "github.event_name != 'pull_request_target' && "
@@ -159,6 +160,8 @@ def _selector(runner: object, policy: object) -> bool:
 
 def _trusted_runner(job: dict[Any, Any], actors: object) -> bool:
     uses = job.get("uses")
+    if isinstance(uses, str) and uses.lower() in HOSTED_SHARED:
+        return True
     if uses and uses.lower() != SHARED:
         return False
     runner = (job.get("with") or cast(dict[Any, Any], {})).get("runs_on") if uses else job.get("runs-on")
