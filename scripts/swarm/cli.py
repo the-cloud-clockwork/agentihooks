@@ -470,8 +470,9 @@ class _Wrapper:
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
-        later site's step may spawn before its hook runs."""
-        return {
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site."""
+        found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
@@ -480,6 +481,7 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
+        return {site: found[site] for site in WRAPPER_HOOK_KEYS}
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the

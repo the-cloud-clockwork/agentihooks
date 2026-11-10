@@ -39,14 +39,14 @@ def _reading(key: str) -> Any:
 
 @pytest.mark.feature("swarm-tick-declared-reads")
 def test_a_step_reading_a_box_value_it_does_not_declare_is_refused() -> None:
-    step = CallStep("reader", "observe", _reading("rows"))
-    with pytest.raises(UndeclaredRead, match="step reader reads pass value rows it does not declare"):
+    step = CallStep("verify", "observe", _reading("rows"))
+    with pytest.raises(UndeclaredRead, match="step verify reads pass value rows it does not declare"):
         step.run(_ctx(PassBox({"rows": {"t1": {}}})))
 
 
 @pytest.mark.feature("swarm-tick-declared-reads")
 def test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name() -> None:
-    step = CallStep("reader", "observe", _reading("doc"))
+    step = CallStep("verify", "observe", _reading("doc"))
     with pytest.raises(UndeclaredRead, match="pass value doc"):
         step.run(_ctx(PassBox()))
 
@@ -54,9 +54,9 @@ def test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name() -> N
 @pytest.mark.feature("swarm-tick-declared-reads")
 def test_declared_step_and_hook_values_and_pass_state_read_through() -> None:
     box = PassBox({"rows": 1, "doc": 2})
-    rows = CallStep("rows reader", "observe", _reading("rows"), reads=pass_domains("rows"))
-    doc = CallStep("doc reader", "observe", _reading("doc"), reads=hook_domains("doc"))
-    slug = CallStep("slug reader", "observe", _reading("slug"))
+    rows = CallStep("verify", "observe", _reading("rows"), reads=pass_domains("rows"))
+    doc = CallStep("track outages", "observe", _reading("doc"), reads=hook_domains("doc"))
+    slug = CallStep("launch checks", "observe", _reading("slug"))
     found = [step.run(_ctx(box)).writes[0].value for step in (rows, doc, slug)]
     assert found == [["rows=1"], ["doc=2"], ["slug=sw"]]
 
