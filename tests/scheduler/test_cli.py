@@ -202,7 +202,27 @@ def test_help_names_the_command_and_every_target(capsys, command, prog):
         command(["--help"])
     out = capsys.readouterr().out
     assert out.startswith(f"usage: agentihooks {prog} ")
-    assert "TARGET is --fleet, --swarm SLUG, --seat SEAT@SLUG or --session NAME." in out
+    assert " TARGET is --fleet, --swarm SLUG, --seat SEAT@SLUG, --session NAME or --workflow NAME --case FILE. " in (
+        " ".join(out.split()) + " "
+    )
+
+
+def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path):
+    case = tmp_path / "case.json"
+    case.write_text("{}")
+    code, view, err = run(
+        capsys, cli.timer, ["add", "--in", "1h", "--workflow", "nightly", "--case", str(case), "run", "it"]
+    )
+    assert (code, err) == (0, "")
+    assert view["targets"] == [{"kind": "workflow", "name": "nightly", "case": str(case)}]
+    assert (view["payload"], view["due"]) == ("run it", NOW + 3600)
+
+
+def test_a_case_on_another_target_is_refused(capsys, scheduler, tmp_path):
+    case = tmp_path / "case.json"
+    case.write_text("{}")
+    argv = ["add", "--expr", "0 9 * * *", "--swarm", "sw", "--case", str(case), "x"]
+    assert run(capsys, cli.cron, argv) == (1, None, "agentihooks cron: only the workflow target takes a case\n")
 
 
 @pytest.mark.parametrize("command", [cli.timer, cli.stopwatch, cli.cron])
