@@ -174,7 +174,8 @@ controller:
     periodSeconds: 10
     timeoutSeconds: 8
     failureThreshold: 3
-  terminationGracePeriodSeconds: 30
+  # Above the tick pass p95 of about 123 s, so a stop signal lets the running pass finish.
+  terminationGracePeriodSeconds: 300
   env:
     LANGFUSE_MCP_URL: ""
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.

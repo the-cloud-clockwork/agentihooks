@@ -18,7 +18,6 @@ pytestmark = pytest.mark.unit
 
 CHART = Path(__file__).resolve().parents[2] / "deploy/helm/agentihooks-swarm"
 GOLDEN_PASS_S = 100
-FEATURE = "controller-drains-pass-on-stop-signal"
 
 
 class Service:
@@ -79,7 +78,7 @@ def rig(monkeypatch: pytest.MonkeyPatch) -> Rig:
     return Rig(monkeypatch)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_exit(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -99,7 +98,7 @@ def test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_
 
 
 @pytest.mark.parametrize("number", [signal.SIGINT, signal.SIGTERM])
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_a_stop_signal_during_a_pass_lets_the_pass_finish_then_exits(
     rig: Rig, monkeypatch: pytest.MonkeyPatch, number: int
 ) -> None:
@@ -123,7 +122,7 @@ def test_a_stop_signal_during_a_pass_lets_the_pass_finish_then_exits(
     assert tick_stop._HELD == {}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_a_stop_signal_between_passes_exits_at_once(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
     released: list[str] = []
     ticks: list[str] = []
@@ -141,7 +140,7 @@ def test_a_stop_signal_between_passes_exits_at_once(rig: Rig, monkeypatch: pytes
     assert tick_stop.STOP.is_set()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another(
     rig: Rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -159,7 +158,7 @@ def test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another
     assert "wait" not in rig.events
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_a_second_stop_signal_during_a_pass_exits_at_once(rig: Rig, monkeypatch: pytest.MonkeyPatch) -> None:
     def tick_once(store: str, service: Service) -> dict:
         rig.deliver(signal.SIGINT)
@@ -174,7 +173,7 @@ def test_a_second_stop_signal_during_a_pass_exits_at_once(rig: Rig, monkeypatch:
     assert tick_stop.STOP.is_set()
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_the_controller_grace_period_outlasts_the_golden_pass_with_margin() -> None:
     values = yaml.safe_load((CHART / "values.yaml").read_text())["controller"]
     template = (CHART / "templates/controller.yaml").read_text()
