@@ -2419,6 +2419,30 @@
       ]
     },
     {
+      "id": "hive-credential-compaction",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2297",
+      "behaviour": "Member compaction preserves independent agent token authentication and removes legacy member maps after reader verification.",
+      "seam": "Hive credential compaction and agent authentication",
+      "tests": [
+        "tests/hive/test_credential_compaction.py::test_compaction_preserves_legacy_tokens_and_removes_member_maps",
+        "tests/hive/test_credential_compaction.py::test_ended_agent_tokens_are_removed_and_active_peers_keep_access",
+        "tests/hive/test_credential_compaction.py::test_minted_members_omit_the_obsolete_agents_map",
+        "tests/hive/test_credential_compaction.py::test_compaction_requires_explicit_members_and_verified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_defaults_to_unverified_readers",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_other_backends",
+        "tests/hive/test_credential_compaction.py::test_compaction_refuses_unknown_members",
+        "tests/hive/test_credential_compaction.py::test_cli_compacts_only_the_selected_members",
+        "tests/hive/test_credential_compaction.py::test_compaction_replaces_large_history_and_preserves_existing_independent_records",
+        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition",
+        "tests/hive/test_credential_compaction.py::test_recording_an_ended_execution_removes_its_token",
+        "tests/hive/test_credential_compaction.py::test_compacted_independent_tokens_are_removed_when_the_agent_ends",
+        "tests/hive/test_credential_compaction.py::test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers",
+        "tests/hive/test_credential_compaction.py::test_compaction_and_retirement_share_a_fence",
+        "tests/hive/test_credential_compaction.py::test_scoped_credential_keys_preserve_existing_record_addresses"
+      ]
+    },
+    {
       "id": "swarm-workflow-runner",
       "origin": "inventory",
       "behaviour": "The tick step workflow runner runs in group wrapper phases on the slow lane every 60 seconds.",
@@ -2678,6 +2702,22 @@
       ]
     },
     {
+      "id": "controller-busy-node-probes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
+      "behaviour": "The controller uses shallow kubelet HTTP startup and liveness probes, Redis bounded readiness, a loopback Host header and a schedulable 250m CPU reservation.",
+      "seam": "Controller Helm probes and the open health readiness route",
+      "tests": [
+        "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
+        "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
+        "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
+        "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
+        "tests/test_swarm_v2_readiness.py::test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks"
+      ]
+    },
+    {
       "id": "hive-join-heartbeat-keeps-passed-grade",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
@@ -2776,27 +2816,37 @@
       ]
     },
     {
-      "id": "hive-credential-compaction",
+      "id": "ledger-workflow-task-fields",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2297",
-      "behaviour": "Member compaction preserves independent agent token authentication and removes legacy member maps after reader verification.",
-      "seam": "Hive credential compaction and agent authentication",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2428",
+      "behaviour": "Ledger task add accepts workflow and case strings through the API for a master identity, and initial ledger content preserves workflow task kind and inputs.",
+      "seam": "task_add API schema and HTTP mutation; new_ledger.build_doc seed tasks",
       "tests": [
-        "tests/hive/test_credential_compaction.py::test_compaction_preserves_legacy_tokens_and_removes_member_maps",
-        "tests/hive/test_credential_compaction.py::test_ended_agent_tokens_are_removed_and_active_peers_keep_access",
-        "tests/hive/test_credential_compaction.py::test_minted_members_omit_the_obsolete_agents_map",
-        "tests/hive/test_credential_compaction.py::test_compaction_requires_explicit_members_and_verified_readers",
-        "tests/hive/test_credential_compaction.py::test_compaction_defaults_to_unverified_readers",
-        "tests/hive/test_credential_compaction.py::test_compaction_refuses_other_backends",
-        "tests/hive/test_credential_compaction.py::test_compaction_refuses_unknown_members",
-        "tests/hive/test_credential_compaction.py::test_cli_compacts_only_the_selected_members",
-        "tests/hive/test_credential_compaction.py::test_compaction_replaces_large_history_and_preserves_existing_independent_records",
-        "tests/hive/test_credential_compaction.py::test_cli_explains_the_reader_precondition",
-        "tests/hive/test_credential_compaction.py::test_recording_an_ended_execution_removes_its_token",
-        "tests/hive/test_credential_compaction.py::test_compacted_independent_tokens_are_removed_when_the_agent_ends",
-        "tests/hive/test_credential_compaction.py::test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers",
-        "tests/hive/test_credential_compaction.py::test_compaction_and_retirement_share_a_fence",
-        "tests/hive/test_credential_compaction.py::test_scoped_credential_keys_preserve_existing_record_addresses"
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_task_add_schema_accepts_workflow_and_case_as_strings",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_a_master_adds_a_workflow_task_through_the_api",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_initial_content_preserves_workflow_task_fields"
+      ]
+    },
+    {
+      "id": "controller-quota-read-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "The controller scans the hive quota reports once per tick pass and every later quota or reservation read in that pass reuses the scan; outside a pass each read scans.",
+      "seam": "aggregate.read under the tick pass, reached by capacity.accounts, capacity.hive_accounts and reservation.current",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_one_pass_makes_one_hive_quota_read_for_every_account",
+        "tests/swarm/test_quota_pass_read.py::test_reads_outside_a_pass_stay_fresh"
+      ]
+    },
+    {
+      "id": "controller-hive-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "A hive publishes a provider refusal with its Claude quota reading and the controller closes that account.",
+      "seam": "hive daemon subscription quota report and capacity.accounts over hive reports",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
       ]
     }
   ],
