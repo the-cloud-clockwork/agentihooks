@@ -314,6 +314,71 @@ that many live workers. With one approved account and `cap: 1`, as on Anton, one
 own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take
 `eng`, `ci`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
 
+### The hive endpoint on Anton and its render checks
+
+Machines join Anton's hives from the UI hive with `agentihooks hive add`, which delivers each member's `hive.env`
+over SSH; see [Adding a machine to a hive](../pillars/hives.md#adding-a-machine-to-a-hive). The hive endpoint those
+members post `hive refresh` to is the chart's `hive-join` Deployment. The antoncore overlay
+`k8s/values-overlays/agentihooks-swarm/values.yaml` enables it:
+
+```yaml
+hive:
+  join:
+    enabled: true
+    memberRedisUrl: rediss://swarm-internal.homeofanton.com:6379/0
+    tlsSecretName: agentihooks-swarm-redis-tls
+    serveLedgerCa: false        # hives keep trusting the workstation ledger's CA
+    natsSigner:
+      secretName: agentihooks-swarm-nats-signer
+```
+
+The antoncore manifest `k8s/manifests/agentihooks-swarm/services.yaml` publishes it on the LAN as the
+LoadBalancer `agentihooks-swarm-hive-join-lan`, port `join` 8770, on the shared MetalLB address `10.10.30.207`
+that [Swarm LAN services](swarm-lan-services.md) describes. That address and port form the `--url` given to
+`hive add`.
+
+The antoncore `ci-validate` workflow has no check that renders the `hive-join` Deployment.
+[Antoncore pull request 988](https://github.com/the-cloud-clockwork/antoncore/pull/988) removed its
+`Render the hive join service` step, and
+[antoncore pull request 1002](https://github.com/the-cloud-clockwork/antoncore/pull/1002), merged into antoncore
+`dev` on 20 October 2026, deleted the checker that step ran,
+`tests/unit/agentihooks_swarm/hive_join_render.py`. The checker had no tests of its own, and no file referenced it
+after the step was removed. The pull request recorded this call site evidence at antoncore `dev` `f8727f48c`:
+
+```bash
+git grep -n "hive_join_render\|hive-join-render" origin/dev
+# no output, exit 1
+```
+
+The workflow's `Swarm checkpoint storage` job renders the agentihooks chart and grades the output with the
+render checkers that remain:
+
+| Step | Checker in `tests/unit/agentihooks_swarm/` | What it reads |
+|---|---|---|
+| `Render controller credential isolation` | `checkpoint_render.py` | The checkpoint bucket, prefix and storage credential variables in the rendered pods |
+| `Render controller credential isolation` | `controller_github_render.py` | The controller container's GitHub App token path |
+| `Render the ledger over TLS` | `ledger_tls_render.py` | The ledger's TLS certificate, key and CA from `agentihooks-swarm-ledger-tls` and its `https` address |
+
+Each step also renders a planted fault and fails when its checker accepts it. The `hive-join` template is graded
+inside agentihooks: the helm kind smoke `deploy/helm/agentihooks-swarm/ci/kind-smoke.sh` renders it from
+`ci/kind-hive-join.yaml` through `tests/chart_hive_join.py`, and fails when that check accepts a planted fault such
+as a hive join serving its ledger CA while `serveLedgerCa` is `false`, or a render with no hive join Deployment.
+
+Read the live endpoint without credentials:
+
+```bash
+kubectl -n agentihooks-swarm get deploy -l app.kubernetes.io/component=hive-join
+kubectl -n agentihooks-swarm get service agentihooks-swarm-hive-join-lan \
+  -o jsonpath='{.status.loadBalancer.ingress[*].ip}{" "}{.spec.ports[?(@.name=="join")].port}{"\n"}'
+# 10.10.30.207 8770
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive refresh refused: the hive at <url> is unreachable` from an Anton hive | The `hive-join` Deployment is not running, or the LAN Service holds no `10.10.30.207` ingress | Run the two commands above; for the address, follow [Inspect service ownership](swarm-lan-services.md#inspect-service-ownership). Change the endpoint through the antoncore overlay and its GitOps delivery |
+| A change to `hive.join` values in antoncore passes `ci-validate` and still breaks refresh | No antoncore check renders the `hive-join` Deployment | Read the rendered Deployment with `helm template` against the overlay before merging, and run the agentihooks helm kind smoke for template changes |
+| A search for the hive join render checker in antoncore finds nothing | It was deleted in antoncore pull request 1002 | Use the checkers in the table above; none replaces it |
+
 ### Verify
 
 ```bash
