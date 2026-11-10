@@ -869,7 +869,7 @@
       "tests": [
         "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_tick_site_hook_logs_in_observe_mode_and_the_hook_still_answers",
         "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_wrapper_site_hook_raises_in_enforce_mode",
-        "tests/tick/test_hook_reads.py::test_the_declared_hook_reads_pass_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode",
         "tests/tick/test_hook_reads.py::test_each_site_hook_declares_exactly_the_box_keys_it_reads",
         "tests/tick/test_hook_reads.py::test_off_mode_hands_back_the_hooks_unguarded",
         "tests/tick/test_hook_reads.py::test_an_unknown_or_missing_mode_observes",

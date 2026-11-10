@@ -15,6 +15,11 @@ pytestmark = pytest.mark.unit
 LOGGER = "scripts.tick.hook_reads"
 
 
+class _Store:
+    def config(self, slug: str) -> str:
+        return f"config of {slug}"
+
+
 def _lines(caplog: pytest.LogCaptureFixture) -> list[tuple[str, int, str]]:
     return [(r.name, r.levelno, r.getMessage()) for r in caplog.records if r.name == LOGGER]
 
@@ -53,20 +58,29 @@ def test_an_undeclared_read_by_a_wrapper_site_hook_raises_in_enforce_mode(monkey
 
 
 @pytest.mark.feature("swarm-tick-hook-reads")
-def test_the_declared_hook_reads_pass_in_enforce_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ENV, "ENFORCE ")
     box = PassBox({"config": 1, "doc": 2, "rows": 3})
-    ticks = _tick_sites(box).hooks()
-    assert ticks["agents"]() is True
-    assert ticks["tasks"]() is True
-    wrapper = _wrapper(PassBox({"agents": []}), PassBox())
-    monkeypatch.setattr(cli._Wrapper, "_reread", lambda self: "agents" in self.box)
-    monkeypatch.setattr(
-        cli._Wrapper, "_judged", lambda self: "raised" not in self.judging and "judged" not in self.judging
-    )
-    hooks = wrapper.hooks()
-    assert hooks["wrapper view"]() is True
-    assert hooks["wrapper relay"]() is True
+    ticks = _tick_sites(box)
+    hooks = ticks.hooks()
+    assert hooks["agents"]() is True
+    assert hooks["tasks"]() is True
+    doc = {"tasks": [{"id": "t1"}]}
+    monkeypatch.setattr(cli.ledger_client, "pass_state", lambda ledger, slug: doc)
+    wrapper = _wrapper(PassBox({"agents": ["a"]}), PassBox({"judged": ("view", ["checked"])}))
+    wrapper.ticks = ticks
+    wrapper.state = {"store": _Store(), "slug": "sw", "ledger": "ledger"}
+    found = wrapper.hooks()
+    assert found["wrapper relay"]() is True
+    assert found["wrapper view"]() is True
+    assert wrapper.checked == ["checked"]
+    assert dict(wrapper.box) == {
+        "agents": ["a"],
+        "view": "view",
+        "doc": doc,
+        "config": "config of sw",
+        "rows": {"t1": {"id": "t1"}},
+    }
 
 
 @pytest.mark.feature("swarm-tick-hook-reads")
