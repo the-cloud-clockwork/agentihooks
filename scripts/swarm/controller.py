@@ -266,20 +266,30 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        from scripts.hive import placement_waits
+
+        runtime = self.runtime
+        hive = getattr(runtime, "hive_launch", None) is not None
+        counted = workstation or (self.deployment == LOCAL and not hive)
+        totals = self.store.key(self.slug, placement_waits.TOTALS) if counted else ""
         if workstation or self.deployment == LOCAL:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
-            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
-        runtime = self.runtime
+            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}", totals)
         if workstation:
             runtime = runtime.herdr_runtime
-        elif not _hive_lane(lane, task, self.kubernetes_proof) and getattr(runtime, "hive_launch", None) is not None:
+        elif not _hive_lane(lane, task, self.kubernetes_proof) and hive:
             runtime = runtime.original_runtime
         else:
             task = self._hive_task(config, lane, task)
         with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
-            return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+            try:
+                return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+            except BaseException:
+                if totals:
+                    placement_waits.admitted(self.store, self.slug, -1)
+                raise
 
     def _hive_task(self, config: SwarmConfig, lane: str, task: dict[str, Any]) -> dict[str, Any]:
         """A workstation task placed on a workstation hive other than this machine launches there, pinned to it."""
