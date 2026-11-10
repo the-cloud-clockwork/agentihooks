@@ -110,6 +110,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.admit.__name__,
                 Runtime.release_admission.__name__,
                 Runtime.activate_admission.__name__,
+                Runtime.fence.__name__,
             ]
         ),
     ),

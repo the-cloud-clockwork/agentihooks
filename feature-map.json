@@ -1657,6 +1657,24 @@
       ]
     },
     {
+      "id": "swarm-reopened-claim-loss",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
+      "behaviour": "A hive worker whose claim is emptied, reopened or reassigned ends through hook exit and tick retirement; a workstation worker ends through the hook and exit command when its claim names another agent and keeps its emptied claim restorable.",
+      "seam": "hooks.context.claim_watch.check and scripts.tick.steps.common._current_owner, _ended with scripts.tick.steps.agents._reap_agent",
+      "tests": [
+        "tests/tick/steps/test_claim_loss.py::test_reopened_or_reassigned_claims_end_the_previous_worker",
+        "tests/tick/steps/test_claim_loss.py::test_tick_retires_a_lost_claim_before_restore_or_watch",
+        "tests/tick/steps/test_claim_loss.py::test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state",
+        "tests/tick/steps/test_claim_loss.py::test_retirement_preserves_other_claims_and_fences_its_own_reopen",
+        "tests/test_claim_watch.py::test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner",
+        "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner",
+        "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
+        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
+        "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
+      ]
+    },
+    {
       "id": "inbox-wake",
       "origin": "inventory",
       "behaviour": "An idle Codex pane with a pending item gets exactly one typed wake; a busy pane, a Claude pane with its inbox channel and the master pane are never typed into.",
@@ -2670,6 +2688,7 @@
         "tests/swarm/test_workflow_job.py::test_failed_spawn_releases_workspace_lock",
         "tests/swarm/test_workflow_job.py::test_worker_advances_once_and_releases_lock_on_success_or_failure",
         "tests/swarm/test_workflow_runner.py::test_bad_task_does_not_prevent_the_next_task",
+        "tests/tick/steps/test_workflow_runner.py::test_wrapper_phases_pass_box_without_config_still_starts_the_claimed_workflow",
         "tests/swarm/test_workflow_runner.py::test_definition_errors_preserve_every_message_and_empty_documents_are_idle",
         "tests/swarm/test_workflow_runner.py::test_existing_state_and_case_survive_definition_changes",
         "tests/swarm/test_workflow_runner.py::test_filtered_stages_use_judge_including_the_head",
@@ -3191,7 +3210,8 @@
         "tests/tick/steps/test_step_starvation.py::test_a_step_already_alarmed_never_hides_the_next_starved_step",
         "tests/tick/steps/test_step_starvation.py::test_reading_again_with_no_new_records_counts_nothing_twice",
         "tests/tick/steps/test_step_starvation.py::test_one_read_takes_only_the_newest_records_up_to_its_limit",
-        "tests/tick/steps/test_step_starvation.py::test_a_stream_entry_id_reads_as_its_millisecond_and_sequence"
+        "tests/tick/steps/test_step_starvation.py::test_a_stream_entry_id_reads_as_its_millisecond_and_sequence",
+        "tests/tick/steps/test_step_starvation.py::test_a_configured_cadence_floors_every_windows_lane_not_only_the_slow_one"
       ]
     },
     {
@@ -3248,6 +3268,23 @@
       "tests": [
         "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
         "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
+      ]
+    },
+    {
+      "id": "tick-runtime-port-fence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-fenced-runtime-out",
+      "behaviour": "The tick reaches its fenced runtime only through the Tools runtime port: the port fences the pass runtime to the held lease in a deployment and acts through the fenced runtime after, refuses without a fence or past its deadline, counts as a runtime write, and the ack pass and the master placement take their lease through the coordination port and their fence through the runtime port.",
+      "seam": "scripts.tick.ports.contracts.Runtime.fence, implemented by scripts.tick.adapters.runtime.RouterRuntime",
+      "tests": [
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_fences_its_pass_runtime_and_acts_through_the_fenced_one_after",
+        "tests/tick/test_runtime_port_fence.py::test_a_runtime_port_without_a_fence_refuses_to_fence",
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_refuses_to_fence_past_its_deadline",
+        "tests/tick/test_runtime_port_fence.py::test_fencing_is_a_runtime_write_a_step_must_declare",
+        "tests/tick/test_runtime_port_fence.py::test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease",
+        "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
       ]
     }
   ],

@@ -306,6 +306,9 @@ class FakeRuntime:
     def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
         return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
 
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any:
+        return _record(self, "fence", (held, deployment), deadline)
+
 
 @dataclass
 class FakeProcesses:

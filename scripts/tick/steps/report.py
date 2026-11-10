@@ -337,8 +337,14 @@ registry.register(
 
 
 def _step_starvation(cli: Any, get: Get) -> list[str]:
-    """Record each step's last completed run with its window and alarm the master for each starved step."""
-    windows = {step.name: interval_s(step, cadence_s()) for step in registry.steps()}
+    """Record each step's last completed run with its window and alarm the master for each starved step.
+
+    Every step's window floors to the configured cadence, critical and wide lanes included, not only the slow lane
+    `interval_s` stretches: a cadence raised above a step's declared interval must raise its starvation alarm too,
+    so three windows at the production cadence always clears the golden pass duration (`engine.GOLDEN_PASS_S`).
+    """
+    cadence = cadence_s()
+    windows = {step.name: max(interval_s(step, cadence), cadence) for step in registry.steps()}
     return step_starvation.step(get("store"), get("slug"), cli.now_ms(), windows)
 
 

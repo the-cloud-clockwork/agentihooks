@@ -4,11 +4,12 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 import scripts.swarm.cli as cli
-from scripts.swarm import metrics_outbox
+from scripts.swarm import controller, metrics_outbox
 from scripts.tick import engine, pool, registry
 from scripts.tick.adapters import fakes
 from scripts.tick.deadline import Deadline
@@ -194,6 +195,12 @@ def test_the_pass_tools_wire_every_real_adapter_for_the_swarm(monkeypatch: pytes
     assert tools.host == ("local_host", (store, "sw", os.environ), ())
     runtime: tuple[str, tuple[object, Callable[[str], object]], tuple[()]] = tools.runtime  # pyright: ignore[reportAssignmentType]
     assert runtime[1][0] == ("router", os.environ)
-    assert runtime[2] == (("legacy", None),)
+    keywords: dict[str, Any] = dict(cast(Any, runtime[2]))
+    assert sorted(keywords) == ["fencing", "legacy"]
+    assert keywords["legacy"] is None
+    made: list[tuple[object, ...]] = []
+    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: made.append(args) or "fenced")
+    assert keywords["fencing"]("held", "local", "raw") == "fenced"
+    assert made == [(store, "sw", "held", "raw", "local")]
     agent = runtime[1][1]
     assert (agent("eng-2"), agent("eng-1"), agent("eng-9")) == (records[1], records[0], None)
