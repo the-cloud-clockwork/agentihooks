@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "fleet-worker-reserved-master-ceiling",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
+      "behaviour": "Hosted fleet worker rows apply the same live master reservation ceilings as the quota hook so dispatcher and worker lane choices fall through to Codex or name the refused account.",
+      "seam": "FleetAccounts through HerdrRuntime worker account selection and Reservation ceiling",
+      "tests": [
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_rows_match_the_quota_hooks_reserved_ceiling",
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_choice_falls_through_reserved_claude_to_codex_or_names_its_refusal",
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_launch_picker_cannot_restore_a_reserved_account_as_a_fallback",
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane",
+        "tests/hive/test_master_swarms.py::test_hive_launch_offers_the_reserved_account_to_the_master_lane_only"
+      ]
+    },
+    {
       "id": "bus-state-batch",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2186",
@@ -3179,6 +3193,17 @@
         "tests/tick/test_handed_lane_guards.py::test_a_site_whose_hook_says_no_rests_its_steps",
         "tests/tick/test_handed_lane_guards.py::test_the_gate_rests_a_handed_step_it_shuts",
         "tests/tick/test_handed_lane_guards.py::test_a_handed_step_needing_a_step_an_earlier_group_ran_starts_at_once"
+      ]
+    },
+    {
+      "id": "mutation-shard-probe-kills-own-clock",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-steps-lazy-import",
+      "behaviour": "A mutation shard answers mutmut's forced fail control from a kill its probe recorded instead of rerunning every selected test, and measures its budget and wall time from its own start, never charging the probe job's seconds.",
+      "seam": "scripts.ci_mutation.probe.reuse_kills and scripts.ci_mutation.runner.run_gate",
+      "tests": [
+        "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
+        "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
       ]
     }
   ],

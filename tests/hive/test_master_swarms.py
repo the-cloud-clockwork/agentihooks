@@ -82,6 +82,25 @@ def test_hive_launch_places_a_master_of_a_named_swarm_on_a_headless_hive(setup):
     assert (selected.hive, selected.route_kind) == ("remote", "subscription")
 
 
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+@pytest.mark.parametrize(("lane", "placed"), [("master", True), ("eng", False)])
+def test_hive_launch_offers_the_reserved_account_to_the_master_lane_only(setup, lane: str, placed: bool) -> None:
+    from scripts.hive.launch import Selection
+    from scripts.swarm.capacity import Account
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    profile = "master" if lane == "master" else "engineer"
+    setup.herdr._profile_decision.return_value = ProfileDecision(profile, "lane", profile)
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "CLOSED", 0, 80, 30, 0, reserved="reserved for 1 live master", unreserved_cap=6)
+    ]
+    write_hive(setup, excluded=[], master_swarms=[setup.config.slug])
+
+    selected = setup.launcher.select(setup.config, lane, {"id": lane})
+
+    assert isinstance(selected, Selection) is placed
+
+
 def test_hive_launch_keeps_masters_of_an_unnamed_swarm_off_a_headless_hive(setup):
     from scripts.swarm.profile_choice import ProfileDecision
 
