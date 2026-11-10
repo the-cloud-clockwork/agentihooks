@@ -3237,6 +3237,23 @@
         "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
         "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
       ]
+    },
+    {
+      "id": "swarm-tick-declared-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2466",
+      "behaviour": "A tick step reads a pass box value only when its reads or writes declare it, as a step domain or a site hook domain; reading any other box value, stored yet or not, raises UndeclaredRead naming the step and the key, and every site hook declares the box values it reads and writes.",
+      "seam": "scripts.tick.steps.declared_read and DeclaredBox behind CallStep and WriteStep, with scripts.swarm.cli.WRAPPER_HOOK_KEYS and scripts.tick.sites.TICK_HOOK_KEYS",
+      "tests": [
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_it_does_not_declare_is_refused",
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name",
+        "tests/tick/test_declared_reads.py::test_declared_step_and_hook_values_and_pass_state_read_through",
+        "tests/tick/test_declared_reads.py::test_the_box_view_refuses_undeclared_keys_and_writes_through",
+        "tests/tick/test_declared_reads.py::test_every_site_hook_declares_its_keys",
+        "tests/tick/test_declared_reads.py::test_every_hook_value_a_step_reads_is_written_by_a_hook_at_or_before_its_site",
+        "tests/tick/test_declared_reads.py::test_the_box_keys_are_the_values_steps_and_hooks_declare_writing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_recorded_passes_read_only_declared_values"
+      ]
     }
   ],
   "unmapped_rules": [

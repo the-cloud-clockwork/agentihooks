@@ -210,7 +210,8 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets
+from scripts.tick.step import Domain
+from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -255,6 +256,16 @@ WRAPPER_PREFIX = (
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
 INTENT_JOINS = {"wrapper intent": "wrapper relay"}
+NONE: frozenset[Domain] = frozenset()
+WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    "wrapper probes": (NONE, NONE),
+    "wrapper commands": (NONE, NONE),
+    "wrapper phases": (NONE, hook_domains("doc")),
+    "wrapper intent": (NONE, NONE),
+    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper metrics": (NONE, hook_domains("count")),
+}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
 CONFIG_KEYS = {
     **SCALING_KEYS,

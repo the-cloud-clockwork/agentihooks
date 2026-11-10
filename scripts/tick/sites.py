@@ -46,6 +46,11 @@ BOX = "box"
 SLEEPING = "sleeping"
 FINISHED = "finished"
 CONFIG = "config"
+TICK_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    START: (frozenset(), frozenset()),
+    "agents": (steps.pass_domains(*TICK_KEYS), frozenset()),
+    "tasks": (steps.pass_domains(CONFIG), frozenset()),
+}
 
 
 class _GraphView:

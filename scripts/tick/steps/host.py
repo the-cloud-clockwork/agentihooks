@@ -23,7 +23,7 @@ from scripts.tick import registry
 from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, Left, pass_domains
+from scripts.tick.steps import CallStep, Left, hook_domains, pass_domains
 from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
@@ -221,19 +221,25 @@ STEPS = (
     CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
-    CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
+    CallStep("urgent hold", "wrapper phases", held(_urgent_hold), reads=hook_domains("doc")),
     CallStep(
         "dependency audit",
         "wrapper phases",
         held(_dependency_audit),
         needs=frozenset(),
-        reads=frozenset(),
+        reads=hook_domains("doc"),
         writes=frozenset(),
         lane=CallStep.lane,
         effects=frozenset(),
         feature="swarm-ordering-dependency-audit",
     ),
-    WriteStep("planning and phase pass", "wrapper phases", held(_phase_passes), writes=frozenset({PHASES})),
+    WriteStep(
+        "planning and phase pass",
+        "wrapper phases",
+        held(_phase_passes),
+        reads=hook_domains("doc"),
+        writes=frozenset({PHASES}),
+    ),
     CallStep(
         "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
     ),
@@ -242,7 +248,9 @@ STEPS = (
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
-    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view"), kept=True),
+    CallStep(
+        "tick view", "wrapper view", held(_tick_view), reads=hook_domains("doc"), writes=pass_domains("view"), kept=True
+    ),
 )
 
 for _step in STEPS:
