@@ -579,3 +579,24 @@ def test_an_answer_already_cancelled_is_recorded_without_failing_the_sweep(world
     assert record["idle_answers"] == 1
     assert record["request"] == ""
     assert inbox.get(reply.id).reason == reason
+
+
+def test_a_first_import_under_a_patched_inbox_store_sweeps_with_the_real_store(
+    world: tuple[RedisStore, InboxStore, AgentRecord, Mock, Mock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+    import sys
+    from unittest.mock import patch
+
+    import scripts.swarm
+    from scripts.swarm import automated_gc
+
+    store, inbox, agent, runtime, ledger = world
+    monkeypatch.setattr(scripts.swarm, "automated_gc", automated_gc)
+    monkeypatch.delitem(sys.modules, automated_gc.__name__)
+    with patch("scripts.inbox.store.InboxStore"):
+        fresh = importlib.import_module(automated_gc.__name__)
+    asked = [f"asked automated agent {agent.name} what it is doing"]
+    assert fresh.run(SLUG, store, ledger, runtime, START + LIMIT) == asked
+    assert fresh.state(store, SLUG, agent)["request"] == question(world).id
+    assert len(inbox.inbox(agent.name)) == 1

@@ -3,10 +3,12 @@
 import argparse
 import ast
 import datetime
+import hashlib
 import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -14,6 +16,25 @@ from scripts import locked_tests
 
 ORIGINS = ("operator", "regression", "inventory")
 LEDGER_ITEM = r"ledger:[\w-]+/(tasks|phases|comments|chat)/[\w-]+"
+
+
+def entry_path(map_path: Path, feature: str) -> Path:
+    """Return the independently owned record path for a feature id."""
+    return map_path.with_suffix(".d") / (hashlib.sha256(feature.encode()).hexdigest() + ".json")
+
+
+def load(map_path: Path) -> dict[str, Any]:
+    """Combine legacy entries and discovered records without a shared entry index."""
+    data = json.loads(map_path.read_text())
+    if data.get("fragments"):
+        entries = list(data["features"])
+        for path in sorted(map_path.with_suffix(".d").glob("*.json")):
+            entry = json.loads(path.read_text())
+            if path != entry_path(map_path, entry["id"]):
+                raise ValueError(f"feature record filename does not match id: {path}")
+            entries.append(entry)
+        data["features"] = entries
+    return data
 
 
 def _tests(root: Path) -> dict[str, str | None]:
@@ -191,7 +212,7 @@ def _retired(data: dict, ids: set[str]) -> set[str]:
 def _against_base(base: Path, ids: set[str], retired: set[str]) -> None:
     if not base.is_file():
         return
-    data = json.loads(base.read_text())
+    data = load(base)
     base_ids = {entry["id"] for entry in data["features"]}
     if removed := sorted(base_ids - ids - retired):
         raise ValueError(f"removed feature needs a retired record: {removed}")
@@ -200,7 +221,7 @@ def _against_base(base: Path, ids: set[str], retired: set[str]) -> None:
 
 
 def validate(root: Path, map_path: Path, base: Path | None = None) -> int:
-    data = json.loads(map_path.read_text())
+    data = load(map_path)
     entries = data["features"]
     if not isinstance(entries, list) or not entries:
         raise ValueError("features must be a nonempty list")

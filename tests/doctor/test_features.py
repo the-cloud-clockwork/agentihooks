@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -170,3 +171,16 @@ def test_a_regression_names_its_incident_ledger_item(tmp_path, monkeypatch):
     path.write_text(json.dumps({"features": [entry]}))
     [found] = features.findings(path)
     assert found.evidence == ("from ledger:rig-grade-swarm/tasks/rpin1", "live check check exited 2")
+
+
+def test_doctor_reads_live_checks_from_feature_fragments(tmp_path: Path) -> None:
+    import hashlib
+
+    path = _map(tmp_path / "feature-map.json", _exits(1))
+    data = json.loads(path.read_text())
+    entry = data["features"][0]
+    directory = tmp_path / "feature-map.d"
+    directory.mkdir()
+    (directory / (hashlib.sha256(entry["id"].encode()).hexdigest() + ".json")).write_text(json.dumps(entry))
+    path.write_text(json.dumps({"features": [], "fragments": True}))
+    assert len(features.findings(path)) == 1

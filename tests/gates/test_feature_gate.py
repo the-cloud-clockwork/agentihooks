@@ -231,3 +231,73 @@ def test_a_task_without_a_pull_request_reads_only_the_dev_map(ops):
     assert run("sw", "done", *PROOF, "--feature", "f1") == 0
     assert read == ["dev"]
     assert ledger.rows["t1"]["state"] == "done"
+
+
+def test_done_reads_the_named_feature_at_dev_and_the_merged_head(ops, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, ledger, _, _ = ops
+    enforce(store)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(feature, "read_feature", lambda ref, wanted: calls.append((ref, wanted)) or MAPPED)
+    assert run("sw", "done", *PROOF, "--feature", "f1") == 0
+    assert calls == [("dev", "f1"), ("h1", "f1")]
+    assert ledger.rows["t1"]["state"] == "done"
+
+
+def test_completion_fetches_only_the_requested_feature_fragment(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    calls: list[tuple[str, str]] = []
+    entry = {"id": "chosen", "tests": ["tests/test_chosen.py::test_it"]}
+    expected = "feature-map.d/" + hashlib.sha256(b"chosen").hexdigest() + ".json"
+
+    def read(ref: str, path: str = feature.MAP) -> dict:
+        calls.append((ref, path))
+        return {"features": [], "fragments": True} if path == feature.MAP else entry
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") == {"features": [entry]}
+    assert calls == [("dev", feature.MAP), ("dev", expected)]
+
+
+def test_completion_refuses_a_fragment_with_the_wrong_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    def read(ref: str, path: str = feature.MAP) -> dict:
+        return {"features": [], "fragments": True} if path == feature.MAP else {"id": "other", "tests": ["x"]}
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") is None
+
+
+def test_completion_preserves_inline_features_in_a_mixed_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = {"features": [{"id": "chosen", "tests": ["tests/test_chosen.py::test_it"]}], "fragments": True}
+    calls: list[str] = []
+
+    def read(ref: str) -> dict:
+        calls.append(ref)
+        return data
+
+    monkeypatch.setattr(feature, "read_map", read)
+    assert feature.read_feature("dev", "chosen") == data
+    assert calls == ["dev"]
+
+
+def test_a_missing_fragment_reads_as_unmapped_and_a_failed_fragment_read_as_unread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = json.dumps({"features": [], "fragments": True})
+    original = feature.read_map
+
+    def gh(stderr: str) -> object:
+        def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if f"contents/{feature.MAP}?" in argv[-1]:
+                return subprocess.CompletedProcess(argv, 0, root, "")
+            return subprocess.CompletedProcess(argv, 1, "", stderr)
+
+        def read(ref: str, path: str = feature.MAP) -> dict | None:
+            return original(ref, run, path)
+
+        return read
+
+    monkeypatch.setattr(feature, "read_map", gh("gh: Not Found (HTTP 404)"))
+    assert feature.refusal({"kind": "ops"}, "nope", lambda: [feature.read_feature("dev", "nope")]) == UNKNOWN
+    monkeypatch.setattr(feature, "read_map", gh("gh: Bad Gateway (HTTP 502)"))
+    assert feature.refusal({"kind": "ops"}, "nope", lambda: [feature.read_feature("dev", "nope")]) == UNREAD

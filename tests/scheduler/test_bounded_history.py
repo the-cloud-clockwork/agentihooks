@@ -1,0 +1,58 @@
+from collections.abc import Iterator
+from unittest.mock import patch
+
+import pytest
+
+from scripts.events.config import BusConfig
+from scripts.events.memory import open_bus
+from scripts.scheduler.core import Scheduler
+
+pytestmark = pytest.mark.feature("scheduler-bounded-history")
+
+
+@pytest.fixture
+def scheduler() -> Iterator[Scheduler]:
+    bus = open_bus(BusConfig())
+    try:
+        yield Scheduler(bus.state("scheduler"), machine="headed")
+    finally:
+        bus.close()
+
+
+def finished(scheduler: Scheduler, count: int) -> None:
+    for _ in range(count):
+        timer = scheduler.timer(owner="process", payload="old wait", delay=1, now=0)
+        scheduler.update(timer.id, lambda row: row.update(state="fired"))
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_abandoned_only_history_is_reaped_without_new_work(scheduler: Scheduler) -> None:
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 32)
+    assert len(scheduler.records()) == 32
+    scheduler.run_due(now=10_000)
+    assert scheduler.records() == []
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_new_timer_prunes_abandoned_history_and_preserves_live_work(scheduler: Scheduler) -> None:
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 32)
+        active = scheduler.interval(owner="operator", payload="keep", every=60, now=0)
+        active.start(now=0)
+    with patch("scripts.scheduler.core.time.time", return_value=10_000):
+        current = scheduler.timer(owner="process", payload="new wait", delay=1)
+    assert {row["id"] for row in scheduler.records()} == {active.id, current.id}
+    assert active.state == "active"
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_stopwatch_and_cron_prune_against_the_creation_time_they_are_given(scheduler: Scheduler) -> None:
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 4)
+    stopwatch = scheduler.stopwatch(owner="operator", payload="lap", limit=60, now=10_000)
+    assert [row["id"] for row in scheduler.records()] == [stopwatch.id]
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 4)
+    cron = scheduler.cron(owner="operator", payload="tick", expression="* * * * *", now=10_000)
+    assert {row["id"] for row in scheduler.records()} == {stopwatch.id, cron.id}

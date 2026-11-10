@@ -46,6 +46,7 @@ SLOW: ContextVar[bool] = ContextVar("tick_ledger_slow", default=False)
 OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
 SNAPSHOT_TIMEOUT_S = 3.0
 EXPORT_TIMEOUT_S = 30.0
+CLEAR_BATCH = 200
 
 
 def offline() -> bool:
@@ -359,6 +360,14 @@ class LedgerClient:
 
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
+
+    def clear_priorities(self, slug: str, cleared: list[tuple[str, str]]) -> None:
+        """Clear each ``(priority id, reason)`` of ``cleared`` as the swarm, ``CLEAR_BATCH`` clears per ledger write."""
+        ops: list[dict[str, Any]] = [
+            _op("priority_clear", "swarm", target=priority_id, reason=reason) for priority_id, reason in cleared
+        ]
+        for start in range(0, len(ops), CLEAR_BATCH):
+            self._call(slug, ops[start : start + CLEAR_BATCH])
 
     def comment_item(self, slug, item, text):
         self._write(slug, _op("add", "swarm", thread=f"{item}/comments", text=text))

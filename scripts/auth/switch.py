@@ -3,6 +3,13 @@
 from collections.abc import Mapping
 
 LEGACY_ENV = "AGENTIHOOKS_AUTH_LEGACY"
+HOLDERS_ENV = "AGENTIHOOKS_HIVE_HOLDERS"
+ENFORCE = "enforce"
+
+
+def holders_enforced(environ: Mapping[str, str]) -> bool:
+    """Whether hive agent token issue refuses a member with no holder record instead of backfilling and logging it."""
+    return environ.get(HOLDERS_ENV) == ENFORCE
 
 
 def legacy(environ: Mapping[str, str]) -> bool:

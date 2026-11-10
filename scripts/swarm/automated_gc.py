@@ -1,6 +1,6 @@
 import json
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox import store as inbox_store
 from scripts.swarm import idle, outage
 
 LIMIT_MS = 30 * 60 * 1000
@@ -109,7 +109,7 @@ def _probe(inbox, store, slug, runtime, agent, record, now_ms):
 
 
 def run(slug: str, store, ledger, runtime, now_ms: int, release=None) -> list[str]:
-    inbox, actions = InboxStore(store.redis), []
+    inbox, actions = inbox_store.InboxStore(store.redis), []
     for agent in store.agents(slug):
         if not owned(slug, agent):
             continue

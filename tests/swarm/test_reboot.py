@@ -211,9 +211,8 @@ def test_a_new_boot_resumes_each_local_agent_in_its_own_conversation_seat_and_ac
 @pytest.mark.feature("swarm-reboot-recovery")
 def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, rebooted):
     ledger, runtime = rebooted
-    eng = next(a for a in _local(store).values() if a.lane == "eng")
-    store.put_agent("sw", replace(eng, account="spent"))
-    store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
+    eng = replace(next(a for a in _local(store).values() if a.lane == "eng"), account="spent", conversation_id="")
+    store.put_agent("sw", eng)
     other = {"name": "engineer@ffffff-0001", "outcome": "resumed"}
     store.put_restored("sw", [other, {"name": eng.name, "outcome": "stale"}])
 
@@ -242,10 +241,50 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
     )
     assert other in store.restored("sw")
     transfer = transfers.get(store, "sw", outcome["transfer"])
-    assert (transfer["handoff"], transfer["reason"], transfer["at"]) == ("carry on from the parser", "restore", 900)
+    assert (transfer["handoff"], transfer["reason"], transfer["at"]) == ("", "restore", 900)
     assert ledger.rows[eng.task]["claimed_by"] == eng.name
     assert f"{action}; nothing was started in its place." in ledger.notes
     assert not any(note.startswith("Starting a fresh agent") for note in ledger.notes)
+
+
+@pytest.mark.feature("hive-drain-push-resume")
+def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision(
+    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, runtime = rebooted
+    read = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task_id: read(slug, task_id) if slug == "sw" else None)
+    eng = next(a for a in _local(store).values() if a.lane == "eng")
+    store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    action = f"{eng.name} handed off before the restart, so a successor takes its seat, task {eng.task} reopened"
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    assert actions == [action, f"resumed {master.name} after the workstation rebooted"]
+    assert f"{action}; no restore decision is needed." in ledger.notes
+    assert eng.name not in _local(store)
+    assert eng.name not in {a.name for a in runtime.resumed}
+    assert (ledger.rows[eng.task]["state"], ledger.rows[eng.task]["claimed_by"]) == ("open", "")
+    assert not [r for r in store.restored("sw") if r["outcome"] == resume.AWAITING]
+    assert store.handoff("sw", eng.task) == "carry on from the parser"
+    assert store.handoff_seat("sw", eng.task) == eng.seat
+    assert store.claim("sw", eng.task, "engineer@next", tick_module.LEASE_MS)
+
+
+@pytest.mark.feature("hive-drain-push-resume")
+def test_a_master_with_a_submitted_handoff_keeps_its_seat_and_awaits_its_decision(
+    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime]
+) -> None:
+    ledger, runtime = rebooted
+    master = next(a for a in _local(store).values() if a.lane == MASTER)
+    store.put_handoff("sw", master.task, "keep the swarm running", seat=master.seat)
+
+    actions, _ = _booted(store, ledger, runtime)
+
+    assert f"resumed {master.name} after the workstation rebooted" not in actions
+    assert not [action for action in actions if action.startswith(f"{master.name} handed off")]
+    assert _local(store)[master.name].state == resume.AWAITING
 
 
 def test_a_resume_that_fails_to_start_awaits_a_decision_without_a_fresh_start_notice(store, rebooted):
