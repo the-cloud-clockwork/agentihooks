@@ -12,7 +12,7 @@ from scripts.swarm import cli, reboot, tick_heartbeat
 from scripts.tick import engine, pool, registry
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
-from scripts.tick.steps import host, report
+from scripts.tick.steps import host, masters, report
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
@@ -83,6 +83,22 @@ def test_the_closing_steps_sit_in_the_closing_group_and_lane() -> None:
     named = {step.name: step for step in registry.steps() if step.group == report.CLOSING_GROUP}
     assert sorted(named) == ["heartbeat", "last tick", "status publish", "step starvation"]
     assert {step.lane for step in named.values()} == {pool.CLOSING_LANE}
+
+
+@pytest.mark.feature("tick-status-publish-survives-dropped-findings")
+def test_status_publish_runs_when_the_health_findings_it_needs_were_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(cli, "_publish_tick_status", lambda *args: calls.append(args))
+    step = next(step for step in report.STEPS if step.name == "status publish")
+    state: dict[str, object] = {"store": None, "slug": "sw", "doc": {}, "view": None, "box": {}, "failure": None}
+    with pool.running(critical_s=0.01) as current:
+        current.hand({"health findings"})
+        current.end("health findings", True)
+        sleep(0.05)
+        current.close()
+        records = engine.run_group("closing", Context(masters._PassView(state), Deadline.after(5.0)), (step,))
+    assert [(record.name, record.outcome) for record in records] == [("status publish", engine.OK)]
+    assert len(calls) == 1
 
 
 def test_a_planted_300_second_step_under_a_1_second_critical_lane_still_stamps_and_publishes(

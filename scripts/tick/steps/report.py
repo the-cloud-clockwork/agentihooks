@@ -337,6 +337,7 @@ STEPS = (
         FOUND,
         pass_domains("found", "view") | DOC,
         lane=CLOSING,
+        kept=True,
     ),
 )
 

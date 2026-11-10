@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "local-enforcements-store-ignored",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
+      "behaviour": "The repository ignore rules cover the project local enforcements store and its write temp file, so a checkout holding only that store reads clean to the push stop gate and to the dev sync after wt.sh done.",
+      "seam": "push_stop.inspect and git status on a checkout carrying the repository .gitignore after add_enforcement with local",
+      "tests": [
+        "tests/gates/test_local_enforcements_ignored.py::test_the_repo_ignore_rules_cover_the_local_enforcements_store",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_stop_gate_reads_a_checkout_holding_only_the_store_as_clean",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_dev_sync_after_wt_done_reads_a_checkout_holding_only_the_store_as_clean"
+      ]
+    },
+    {
       "id": "fleet-worker-reserved-master-ceiling",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
@@ -3372,6 +3384,16 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "tick-status-publish-survives-dropped-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-status-publish-drop",
+      "behaviour": "The closing group runs status publish even when the health findings step it needs was dropped or cut, waiting at most its own budget, so the swarm status is published every pass.",
+      "seam": "engine.run_group on the closing group with the registered status publish step",
+      "tests": [
+        "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
       ]
     }
   ],
