@@ -498,6 +498,13 @@ def test_hosted_only_docs_sanity_call_passes_without_a_runner_input() -> None:
     assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
 
 
+def test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event() -> None:
+    candidate = {"on": {"pull_request_target": {}}, "jobs": {"docs-sanity": {"uses": DOCS_SANITY}}}
+    hosted = {"on": {"pull_request_target": {}}, "jobs": {"plain": {"runs-on": "ubuntu-latest"}}}
+    assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
+    assert ci_runner_trust.check({"ci.yml": hosted}, POLICY) == []
+
+
 @pytest.mark.parametrize(
     "uses",
     [
