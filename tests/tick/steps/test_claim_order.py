@@ -21,6 +21,7 @@ CLAIMED = (
     "Runtime",
     "agent_status",
     "ready_in_order",
+    "ready_by_lane",
     "_owned_tasks",
     "_claimable",
     "Claims",
@@ -71,6 +72,39 @@ def test_moved_claim_code_reaches_tick_seams_through_the_tick_module(monkeypatch
         ("claimable", "sw", "store", "rows", "doc", "ci", "dispatch", "claims"),
         ("order", "sw", "store", ["t1"], "dispatch"),
     ]
+
+
+@pytest.mark.feature("swarm-spawn-order-once-per-pass")
+@pytest.mark.parametrize("given", [None, "claims"])
+def test_ready_by_lane_orders_every_lane_from_one_claim_view(monkeypatch: pytest.MonkeyPatch, given: Any) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    def view(*args: Any) -> str:
+        calls.append(("view", *args))
+        return "built"
+
+    def claimable(*args: Any) -> list[dict[str, str]]:
+        calls.append(("claimable", *args))
+        return [{"id": f"{args[4]}1", "lane": args[4]}]
+
+    def launch_order(*args: Any) -> list[dict[str, str]]:
+        calls.append(("order", *args))
+        return list(reversed(args[2]))
+
+    monkeypatch.setattr(tick, "claim_view", view)
+    monkeypatch.setattr(tick, "_claimable", claimable)
+    monkeypatch.setattr(tick, "_launch_order", launch_order)
+    found = claims.ready_by_lane(
+        "sw", cast(Any, "store"), cast(Any, "rows"), cast(Any, "doc"), ["eng", "ci"], cast(Any, "key"), given
+    )
+    used = given or "built"
+    assert calls == [
+        *([] if given else [("view", "sw", "store", "rows", "doc", "key")]),
+        ("claimable", "sw", "store", "rows", "doc", "eng", "key", used),
+        ("claimable", "sw", "store", "rows", "doc", "ci", "key", used),
+        ("order", "sw", "store", [{"id": "eng1", "lane": "eng"}, {"id": "ci1", "lane": "ci"}], "key"),
+    ]
+    assert found == {"eng": [{"id": "eng1", "lane": "eng"}], "ci": [{"id": "ci1", "lane": "ci"}]}
 
 
 @pytest.mark.feature("swarm-tick-claim-order")

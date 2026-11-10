@@ -193,7 +193,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (row["harness"], account_key(f"{row['account']}")) in refused:
+        if (quota and quota.get("refused")) or (row["harness"], account_key(f"{row['account']}")) in refused:
             cap = 0
         rows.append(
             Account(
@@ -215,7 +215,7 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
 
 
 def _refused(environ: dict) -> set[tuple[str, str]]:
-    """Claude accounts whose latest local probe the provider refused; hive quota reports carry no probe status."""
+    """Claude accounts whose latest local probe the provider refused; a hive reading carries its own refusal."""
     latest = {
         result.account: result
         for _, result in sorted(balancer.cached_observations(environ=environ), key=lambda seen: seen[0])
@@ -523,11 +523,11 @@ def ready_work(
     slug: str, store: RedisStore, doc: dict[str, Any]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from scripts.swarm import dispatcher
-    from scripts.swarm.tick import ready_in_order
+    from scripts.swarm.tick import ready_by_lane
 
     rows = {task["id"]: task for task in doc["tasks"]}
     dispatched = dispatcher.claim_key(store.config(slug), doc)
-    return rows, {lane: ready_in_order(slug, store, rows, doc, lane, dispatched) for lane in LANES}
+    return rows, ready_by_lane(slug, store, rows, doc, LANES, dispatched)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def live_inputs(slug: str, store: RedisStore, ledger: Any, environ: dict[str, str], now_ms: int) -> ScaleInputs:

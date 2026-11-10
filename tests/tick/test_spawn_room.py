@@ -73,8 +73,8 @@ def test_spawn_still_runs_with_its_reserve_when_the_steps_it_needs_are_slow() ->
     finally:
         release.set()
     assert records["spawn"].outcome == engine.OK
-    assert records["reap"].abandoned and not records["reap"].skipped
-    assert records["quota notice"].abandoned
+    assert records["reap"].cut and not records["reap"].abandoned
+    assert records["quota notice"].cut
     assert len(seen) == 1 and 0.0 < seen[0] <= 0.6
 
 
@@ -121,7 +121,7 @@ def test_a_need_through_another_step_is_held_back_by_the_reserve_too() -> None:
             records = {record.name: record for record in engine.run_graph(steps, _ctx())}
     finally:
         release.set()
-    assert records["collect"].abandoned
+    assert records["collect"].cut
     assert records["reap"].skipped and not seen
     assert records["spawn"].outcome == engine.OK
 
@@ -154,7 +154,7 @@ def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier(
             records = {record.name: record for record in engine.run_graph(edged, _ctx())}
     finally:
         release.set()
-    assert records["collect"].abandoned
+    assert records["collect"].cut
     assert records["spawn"].outcome == engine.OK
     assert len(seen) == 1 and seen[0] <= 0.6
 
