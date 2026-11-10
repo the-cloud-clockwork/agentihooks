@@ -304,11 +304,11 @@ def _top_functions(profiler: cProfile.Profile, sort_key: str) -> list[str]:
     """Return up to ``PROFILE_TOP_N`` compact lines describing ``profiler``'s functions sorted by ``sort_key``."""
     stats = pstats.Stats(profiler)
     stats.sort_stats(sort_key)
-    lines = []
-    for func in stats.fcn_list[:PROFILE_TOP_N]:
-        _calls, ncalls, own_s, cumulative_s, _callers = stats.stats[func]
-        where = pstats.func_std_string(func)
-        lines.append(f"{where} calls={ncalls} own_s={own_s:.4f} cumulative_s={cumulative_s:.4f}")
+    profile = stats.get_stats_profile()
+    lines: list[str] = []
+    for function_name, entry in list(profile.func_profiles.items())[:PROFILE_TOP_N]:
+        where = f"{entry.file_name}:{entry.line_number}({function_name})"
+        lines.append(f"{where} calls={entry.ncalls} own_s={entry.tottime:.4f} cumulative_s={entry.cumtime:.4f}")
     return lines
 
 
