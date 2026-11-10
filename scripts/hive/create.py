@@ -2,6 +2,7 @@
 
 import json
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,8 @@ COMMAND_TIMEOUT_S = 60
 NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
+RESERVED = f"{auth.PREFIX}:create:name"
+RESERVE_S = 3600
 SAVED_MEMBERS = ("member", "resynced", "added")
 
 
@@ -76,6 +79,13 @@ def create(tools: Tools, options: Options) -> str:
     _placing(tools)
     _signer_path(tools.environ)
     tools.state = _start(tools, options)
+    try:
+        return _steps(tools, options)
+    finally:
+        _release(tools)
+
+
+def _steps(tools: Tools, options: Options) -> str:
     name = tools.state["name"]
     if not options.dry_run:
         _save(tools)
@@ -107,9 +117,9 @@ def _state_path(tools: Tools) -> Path:
     return registry.home(tools.environ) / STATE_FILE
 
 
-def _start(tools: Tools, options: Options) -> dict:
+def _start(tools: Tools, options: Options) -> dict[str, Any]:
     try:
-        saved = json.loads(_state_path(tools).read_text())
+        saved: dict[str, Any] = json.loads(_state_path(tools).read_text())
     except (OSError, ValueError):
         saved = {}
     if saved.get("name") and not saved.get("finished"):
@@ -118,15 +128,66 @@ def _start(tools: Tools, options: Options) -> dict:
                 f"an unfinished hive create of {saved['name']} is saved; rerun hive create without --name to finish it"
             )
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
-        return saved
-    name = _named(tools, options)
-    services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
-    lan_ip = create_render.lan_address(services)
-    port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
-    return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
+        return _reclaimed(tools, options, saved)
+    token = _token(tools)
+    name = _named(tools, options, token)
+    reserved: dict[str, str] = {} if options.dry_run else {"reservation": token}
+    try:
+        services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
+        lan_ip = create_render.lan_address(services)
+        port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
+    except BaseException:
+        _release(tools, {"name": name, **reserved})
+        raise
+    found = {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip}
+    return {**found, "node": options.node, **reserved}
 
 
-def _named(tools: Tools, options: Options) -> str:
+def _token(tools: Tools) -> str:
+    return f"{tools.local_id}:{secrets.token_hex(8)}"
+
+
+def _reclaimed(tools: Tools, options: Options, saved: dict[str, Any]) -> dict[str, Any]:
+    """Take the saved run's name reservation back until its pull request exists, refusing one another run holds."""
+    if options.dry_run or saved.get("pr"):
+        return {key: value for key, value in saved.items() if key != "reservation"}
+    name, token = str(saved["name"]), str(saved.get("reservation") or _token(tools))
+    if not _reserve(tools, name, token):
+        raise auth.HiveError(
+            f"hive create cannot resume {name}: another hive create run reserved it; "
+            f"remove {STATE_FILE} under the agentihooks home to name a new hive"
+        )
+    return {**saved, "reservation": token}
+
+
+def _reserve(tools: Tools, name: str, token: str) -> bool:
+    """Reserve a hive name for this run in Redis, true when it is now this run's."""
+    redis: Any = tools.redis
+    key = f"{RESERVED}:{name}"
+    return bool(redis.set(key, token, nx=True, ex=RESERVE_S)) or redis.get(key) == token
+
+
+def _release(tools: Tools, state: Mapping[str, Any] | None = None) -> None:
+    """Delete this run's name reservation, leaving one another run holds."""
+    from redis.exceptions import WatchError
+
+    held: Mapping[str, Any] = tools.state if state is None else state
+    if not held.get("reservation"):
+        return
+    redis: Any = tools.redis
+    key = f"{RESERVED}:{held['name']}"
+    with redis.pipeline() as pipe:
+        try:
+            pipe.watch(key)
+            if pipe.get(key) == held["reservation"]:
+                pipe.multi()
+                pipe.delete(key)
+                pipe.execute()
+        except WatchError:
+            pass
+
+
+def _named(tools: Tools, options: Options, token: str) -> str:
     if options.name is not None and not NAME_SHAPE.fullmatch(options.name):
         raise auth.HiveError(
             f"hive create refuses the name {options.name!r}: a hive name is lowercase letters, digits and dashes"
@@ -140,19 +201,24 @@ def _named(tools: Tools, options: Options) -> str:
         found = ["a hive"] if name in held else []
         found += [f"the {options.repo} file {path}" for path in sorted(create_render.paths(template, name) & present)]
         found += [f"an open {options.repo} pull request"] if name in opened else []
+        found += ["another hive create run"] if tools.redis.exists(f"{RESERVED}:{name}") else []
         return found
 
-    unused = (name for name in map(machine.hive_name, range(1, NAME_LIMIT)) if not holders(name))
-    name = options.name or next(unused, None)
-    if name is None:
+    def taken(name: str) -> bool:
+        return not holders(name) and (options.dry_run or _reserve(tools, name, token))
+
+    given = options.name
+    candidates = [given] if given else map(machine.hive_name, range(1, NAME_LIMIT))
+    name = next((name for name in candidates if taken(name)), None)
+    if name is not None:
+        return name
+    if given is None:
         raise auth.HiveError(f"hive create found no unused hive name below {machine.hive_name(NAME_LIMIT)}")
-    found = holders(name)
-    if found:
-        raise auth.HiveError(
-            f"hive create refuses {name}: it is already held by {' and '.join(found)}; "
-            "pass --name with an unused hive name, or leave it out to take the next one"
-        )
-    return name
+    found = holders(given) or ["another hive create run"]
+    raise auth.HiveError(
+        f"hive create refuses {given}: it is already held by {' and '.join(found)}; "
+        "pass --name with an unused hive name, or leave it out to take the next one"
+    )
 
 
 def _save(tools: Tools) -> None:

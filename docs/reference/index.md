@@ -18,6 +18,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 
 | Page | What it covers |
 |------|---------------|
+| [Ledger watchdog signal records](ledger-watchdog.md) | Attribute server exits using retained signal reasons, target and caller process ids, log location, inspection examples, reload records and failed restart diagnostics |
 | [Swarm elapsed thresholds](swarm-thresholds.md) | Idle and input timing, retirement, dispatch and autoscale windows, cadence examples, legacy settings, holds and ledger probe limits |
 | [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Feature map](feature-map.md) | Feature map origins and keys, the test marker, live check targets and the pull request validation |

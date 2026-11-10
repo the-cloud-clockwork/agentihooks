@@ -206,7 +206,7 @@ controller:
         ephemeral-storage: 64Mi
   resources:
     requests:
-      cpu: 50m
+      cpu: 250m
       memory: 128Mi
       ephemeral-storage: 64Mi
     limits:
