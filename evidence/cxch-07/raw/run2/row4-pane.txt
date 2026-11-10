@@ -55,7 +55,7 @@
   {"item_id": "17367728cd94", "delivery_id": "28f30d374200", "sender": "swarm", "recipient": "master@3ddefe-0001",
   "task": "", "kind": "message"}
 
-  QUOTA HANDOFF WARNING: codex account nestorcolt_gmail_business has used 90% of its week window, 10% left; it resets
+  QUOTA HANDOFF WARNING: codex account operator_example_business has used 90% of its week window, 10% left; it resets
   Thu 08:13 CEST (in 134h34m). Finish your current step and write your Handoff v2 with the handoff skill while quota
   remains. Submit it with agentihooks swarm proof-323133-cxc8-1 handoff DOC --reason quota, then stop. The tick keeps
   your seat and task and routes the successor to an account with room. This warning does not block tools or terminate

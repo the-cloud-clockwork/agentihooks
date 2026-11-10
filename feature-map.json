@@ -3319,6 +3319,28 @@
       ]
     },
     {
+      "id": "docs-sanity-scan",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
+      "behaviour": "The docs sanity scanner flags private IPv4 addresses, real looking emails, private host name suffixes, token and key shapes and caller supplied private keywords in public files, prints each hit as file, line and rule without the matched text, and exits 1 on any hit.",
+      "seam": "scripts.docs_sanity.main",
+      "tests": [
+        "tests/test_docs_sanity.py::test_the_red_fixture_fails_with_every_hit_as_file_line_rule",
+        "tests/test_docs_sanity.py::test_the_clean_fixture_passes_with_documentation_values",
+        "tests/test_docs_sanity.py::test_each_token_shape_is_flagged_by_its_own_rule",
+        "tests/test_docs_sanity.py::test_a_vendor_sample_key_marked_example_is_not_a_token",
+        "tests/test_docs_sanity.py::test_keywords_from_the_environment_and_a_file_hit_without_printing_the_keyword",
+        "tests/test_docs_sanity.py::test_directories_are_walked_and_excluded_globs_skipped",
+        "tests/test_docs_sanity.py::test_a_missing_path_is_a_usage_error",
+        "tests/test_docs_sanity.py::test_an_example_label_passes_only_right_before_the_private_suffix",
+        "tests/test_docs_sanity.py::test_a_text_file_that_is_not_utf8_is_still_scanned",
+        "tests/test_docs_sanity.py::test_every_missing_path_is_named_on_standard_error",
+        "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
+        "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
+        "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
       "id": "hive-headed-member-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2473",
