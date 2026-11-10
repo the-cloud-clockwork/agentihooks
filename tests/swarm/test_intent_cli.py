@@ -176,7 +176,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     monkeypatch.setattr(ledger_events, "pull_texts", pull_texts)
     batches, heads = [], []
 
-    def batch(urls, cache=None):
+    def batch(urls, cache=None, ttl=None):
         assert cache is store.redis
         batches.append(set(urls))
         head = "h1" if len(batches) == 1 else "h2"

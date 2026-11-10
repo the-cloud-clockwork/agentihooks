@@ -388,7 +388,9 @@ def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypat
     inbox.close(item.id, "swarm", "done", "settled")
     store.redis.hset(store.key("sw", "red-notices"), item.id, "closed-notice")
     batched, fallback = [], []
-    monkeypatch.setattr(ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: None for url in urls})
+    monkeypatch.setattr(
+        ledger_events, "views", lambda urls, cache=None, ttl=None: batched.append(urls) or {url: None for url in urls}
+    )
     monkeypatch.setattr(ledger_events, "view", lambda url: fallback.append(url))
     lookup = ledger_events.tick_view(inbox, store, "sw", doc)
     assert batched == [["active"]] if doc else batched == [[]]
@@ -411,7 +413,9 @@ def test_a_later_tick_snapshot_fetches_only_pull_requests_the_earlier_one_did_no
     inbox = InboxStore(store.redis)
     batched, fallback = [], []
     monkeypatch.setattr(
-        ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: f"fresh {url}" for url in urls}
+        ledger_events,
+        "views",
+        lambda urls, cache=None, ttl=None: batched.append(urls) or {url: f"fresh {url}" for url in urls},
     )
     monkeypatch.setattr(ledger_events, "view", lambda url: fallback.append(url))
     first = ledger_events.tick_view(inbox, store, "sw", {"tasks": [{"state": "pr", "pr_url": "a"}]})
@@ -432,11 +436,13 @@ def test_a_later_tick_snapshot_retries_a_pull_request_the_earlier_one_failed_to_
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     inbox = InboxStore(store.redis)
     doc = {"tasks": [{"state": "pr", "pr_url": "a"}]}
-    monkeypatch.setattr(ledger_events, "views", lambda urls, cache: dict.fromkeys(urls))
+    monkeypatch.setattr(ledger_events, "views", lambda urls, cache=None, ttl=None: dict.fromkeys(urls))
     first = ledger_events.tick_view(inbox, store, "sw", doc)
     batched = []
     monkeypatch.setattr(
-        ledger_events, "views", lambda urls, cache: batched.append(urls) or {url: f"fresh {url}" for url in urls}
+        ledger_events,
+        "views",
+        lambda urls, cache=None, ttl=None: batched.append(urls) or {url: f"fresh {url}" for url in urls},
     )
     later = ledger_events.tick_view(inbox, store, "sw", doc, first)
     assert batched == [["a"]]
@@ -463,7 +469,7 @@ def test_metrics_completed_and_split_pulls_are_prefetched_without_late_slow_read
     elapsed = [0.0]
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
-    def batch(found, cache):
+    def batch(found, cache=None, ttl=None):
         elapsed[0] += 20
         return dict.fromkeys(found)
 
@@ -538,7 +544,9 @@ def test_tick_prefetch_skips_recorded_completed_metrics_but_keeps_unrecorded_bac
     finally:
         box.close()
     batches = []
-    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    monkeypatch.setattr(
+        ledger_events, "views", lambda found, cache=None, ttl=None: batches.append(found) or dict.fromkeys(found)
+    )
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
 
     ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
@@ -591,7 +599,9 @@ def test_expired_metric_rows_do_not_hide_recent_completion_backfill(monkeypatch,
         "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": now}]},
     }
     batches = []
-    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    monkeypatch.setattr(
+        ledger_events, "views", lambda found, cache=None, ttl=None: batches.append(found) or dict.fromkeys(found)
+    )
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
     assert batches == [[url]]

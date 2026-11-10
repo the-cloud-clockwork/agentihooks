@@ -1416,6 +1416,7 @@
   "tests/swarm/test_promotion_watch.py": 12,
   "tests/swarm/test_provider_probe.py": 1,
   "tests/swarm/test_publish.py": 10,
+  "tests/swarm/test_pull_views.py": 2,
   "tests/swarm/test_push_master.py": 1,
   "tests/swarm/test_queue_exit.py": 10,
   "tests/swarm/test_queue_record.py": 1,
