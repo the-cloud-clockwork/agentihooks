@@ -96,6 +96,22 @@
       ]
     },
     {
+      "id": "inbox-alias-store-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
+      "behaviour": "On the bus state backend a mailbox read compares the names store revisions of the aliases it resolved before committing its snapshot, and a seen mark compares them after its write, retrying when an alias moved meanwhile and refusing when it never settles.",
+      "seam": "InboxStore.mailbox and SeenMarks.mark on the bus state backend",
+      "tests": [
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
@@ -2616,6 +2632,26 @@
       ]
     },
     {
+      "id": "hive-create-registers-name-and-repos",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1750",
+      "behaviour": "Hive create records the new hive's name and the repos it was given, defaulting to the repos of every swarm it joins, in the hive registry; every heartbeat keeps those repos listed and hive list prints the name.",
+      "seam": "scripts.hive.create.create",
+      "tests": [
+        "tests/hive/test_create.py::test_create_records_the_hive_name_and_the_swarm_repos_and_hive_list_prints_the_name",
+        "tests/hive/test_create.py::test_create_records_the_repos_it_was_given_over_the_swarm_repos",
+        "tests/hive/test_create.py::test_a_resumed_create_records_the_repos_its_first_run_was_given",
+        "tests/hive/test_create.py::test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin",
+        "tests/hive/test_create.py::test_no_swarm_gives_no_default_repo",
+        "tests/hive/test_create.py::test_the_dry_run_names_the_registry_record_and_writes_none",
+        "tests/hive/test_create.py::test_no_repo_is_named_as_no_repos",
+        "tests/hive/test_create.py::test_cli_create_passes_its_repos",
+        "tests/hive/test_create.py::test_cli_create_names_its_repos_option",
+        "tests/hive/test_create.py::test_cli_create_refuses_a_repo_that_is_not_host_owner_name",
+        "tests/hive/test_registry.py::test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones"
+      ]
+    },
+    {
       "id": "hive-create-resume-revoke",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1805",
@@ -2780,6 +2816,18 @@
       ]
     },
     {
+      "id": "independent-ci-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",
+      "behaviour": "Independent source changes retain independently owned type counts and feature entries when their branches merge in either order.",
+      "seam": "Type baseline loader and writer, feature map loaders and Git merge of disjoint source records",
+      "tests": [
+        "tests/test_type_gate.py::test_type_records_load_and_refresh_without_rewriting_the_shared_baseline",
+        "tests/test_type_gate.py::test_independent_source_branches_merge_their_records_in_either_order",
+        "tests/test_feature_map.py::test_feature_fragments_preserve_validation_and_retirement"
+      ]
+    },
+    {
       "id": "hive-master-closed-account",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
@@ -2925,6 +2973,32 @@
       "tests": [
         "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
         "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
+      ]
+    },
+    {
+      "id": "tick-step-starvation",
+      "origin": "inventory",
+      "behaviour": "The closing step step starvation records each tick step's last completed run from the pass records; a step that ran without completing for three windows of its budgets.FLOORS interval sends the master seat one urgent inbox item and swarm status lists a step starvation finding naming the step, its last completion and the passes since.",
+      "seam": "scripts.swarm.health.step_starvation.step and findings, registered as tick step step starvation",
+      "tests": [
+        "tests/tick/steps/test_step_starvation.py::test_step_starvation",
+        "tests/tick/steps/test_step_starvation.py::test_a_pass_history_where_waits_end_never_completes_alarms_the_master_once",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_lists_the_starved_step_with_its_last_completion_and_passes_since",
+        "tests/tick/steps/test_step_starvation.py::test_a_step_one_millisecond_short_of_three_windows_is_not_starved",
+        "tests/tick/steps/test_step_starvation.py::test_a_completed_run_clears_the_starvation_and_rested_rows_never_start_it",
+        "tests/tick/steps/test_step_starvation.py::test_failed_held_cut_and_dropped_runs_are_misses",
+        "tests/tick/steps/test_step_starvation.py::test_the_registered_step_records_runs_and_alarms_with_each_step_window",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_reads_the_starvation_state_once_per_tick_pass",
+        "tests/tick/steps/test_step_starvation.py::test_inside_one_reap_the_ledger_probe_alert_is_read_once_per_swarm",
+        "tests/tick/steps/test_step_starvation.py::test_finding_times_read_in_utc_whatever_the_host_zone",
+        "tests/tick/steps/test_step_starvation.py::test_one_tick_pass_keeps_the_read_of_every_swarm_it_asked",
+        "tests/tick/steps/test_step_starvation.py::test_a_swarm_with_nothing_saved_has_no_starvation",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_findings_list_the_starved_step_at_the_status_clock",
+        "tests/tick/steps/test_step_starvation.py::test_the_alarm_item_carries_its_id_ref_and_every_evidence_line",
+        "tests/tick/steps/test_step_starvation.py::test_a_step_already_alarmed_never_hides_the_next_starved_step",
+        "tests/tick/steps/test_step_starvation.py::test_reading_again_with_no_new_records_counts_nothing_twice",
+        "tests/tick/steps/test_step_starvation.py::test_one_read_takes_only_the_newest_records_up_to_its_limit",
+        "tests/tick/steps/test_step_starvation.py::test_a_stream_entry_id_reads_as_its_millisecond_and_sequence"
       ]
     }
   ],
