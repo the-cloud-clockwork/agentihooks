@@ -1,6 +1,8 @@
 """Alerts: the server raises one from each new ledger warning and sends it to its target's inbox; anyone claims it
 and closes it done with an outcome."""
 
+from typing import Any
+
 from scripts.inbox import outbox
 
 OPS = ("alert_claim", "alert_close", "alert_raise")
@@ -78,18 +80,20 @@ def check(op):
             raise ValueError(f"alert_close needs an outcome of up to {MAX_OUTCOME} characters")
 
 
-def apply(doc, op, ctx):
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
     if op["op"] == "alert_raise":
         return raise_source(doc, ctx, op["source"], op["text"].strip(), op.get("item"))
     if "item" in op:
         return close_item(doc, op, ctx)
     alert = next((a for a in doc.setdefault("alerts", []) if a["id"] == op["target"]), None)
+    who = op.get("by", OPERATOR)
     if alert is None or alert["state"] == DONE:
-        return False
-    who, target = op.get("by", OPERATOR), f"alerts/{alert['id']}"
+        return settled(alert, op, ctx, who)
+    target = f"alerts/{alert['id']}"
     if op["op"] == "alert_claim":
         if alert["state"] == CLAIMED:
-            return alert["claimed_by"] == who
+            claimant = alert["claimed_by"]
+            return claimant == who or refuse(ctx, f"alert_claim refused: alert {alert['id']} is claimed by {claimant}")
         alert.update(state=CLAIMED, claimed_by=who, claimed_at=ctx.at)
         ctx.record(who, "alert claimed", target, text=alert["text"])
         return True
@@ -97,6 +101,24 @@ def apply(doc, op, ctx):
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", target, text=outcome)
     return True
+
+
+def settled(alert: dict[str, Any] | None, op: dict[str, Any], ctx: Any, who: str) -> bool:
+    """A claim or close of a missing or closed alert: its own writer's succeeds unchanged, any other is refused."""
+    if alert is None:
+        return refuse(ctx, f"{op['op']} refused: alert {op['target']} does not exist on this ledger")
+    if who in (alert.get("writer"), alert.get("closed_by")):
+        return True
+    return refuse(
+        ctx,
+        f"{op['op']} refused: alert {alert['id']} is already closed by {alert.get('closed_by')}: {alert.get('outcome')}",
+    )
+
+
+def refuse(ctx: Any, reason: str) -> bool:
+    """Record the server's reason for a refused alert op and refuse it."""
+    ctx.refused.append(reason)
+    return False
 
 
 def close_item(doc, op, ctx):
