@@ -63,16 +63,16 @@ def test_tick_holds_spawning_until_pass_budget_recovers(store: object, monkeypat
     cast(Any, monkeypatch).setenv("AGENTIHOOKS_TICK_STAGE", "S4")
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     for _ in range(10):
-        memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 61.0})})
+        memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 101.0})})
     with patch("scripts.inbox.store.InboxStore") as inbox:
         tick("sw", memory, ledger, runtime, now_ms=1_000)
         assert runtime.spawned == []
-        assert spawn_holds(memory, "sw") == ["holding spawns: pass p95 61s exceeds S4 target 60s"]
+        assert spawn_holds(memory, "sw") == ["holding spawns: pass p95 101s exceeds S4 target 100s"]
         tick("sw", memory, ledger, runtime, now_ms=2_000)
         assert runtime.spawned == []
         inbox.return_value.send.assert_called_once()
         for _ in range(10):
-            memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 60.0})})
+            memory.redis.xadd(memory.key("sw", "tick:passes"), {"record": json.dumps({"wall_s": 100.0})})
         tick("sw", memory, ledger, runtime, now_ms=3_000)
         assert [task for _, _, task in runtime.spawned] == ["t1"]
         assert spawn_holds(memory, "sw") == []
