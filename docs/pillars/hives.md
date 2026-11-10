@@ -1508,13 +1508,8 @@ agentihooks hive bundle-origin --path <record> # another record under the secret
 ```
 
 It needs `OPENBAO_URL` and `OPENBAO_TOKEN`, keeps the record's other keys, and writes an empty origin when no bundle
-is linked. A linked bundle with no `origin` remote naming a host and repository is refused. An empty `HIVE_BUNDLE_URL`
-clones nothing, unlinks any bundle a persistent home kept, and init runs on the package roles alone. A failed clone
-logs `worker-hive: bundle clone failed` and the pod still serves without the bundle, which `agentihooks hive compare`
-shows as a difference. A failed init with the bundle logs `worker-hive: agentihooks init with the bundle failed` and
-init runs again on the package roles alone, with the bundle unlinked; a failed init on the package roles stops the
-pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
-global installs and uv tools land in `~/.local` under the worker home.
+is linked. A linked bundle with no `origin` remote naming a host and repository is refused. [Bundle on a worker
+pod](#bundle-on-a-worker-pod) covers what the pod does with the origin.
 
 `agentihooks hive join /path/to/invite` enrolls a machine from one private invite
 file. It reads the file without executing it, refreshes the member through the
@@ -1581,6 +1576,71 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
 lists.
+
+### Bundle on a worker pod
+
+A worker pod installs the same bundle, profiles, rules, skills and MCP servers as the workstation. The workstation
+knows its bundle only as a host path, which the settings record never carries, so the record names it as an origin:
+
+| Key | Value | Written from |
+|---|---|---|
+| `HIVE_BUNDLE_URL` | `https://<host>/<owner>/<name>.git`, or empty | the `origin` remote of the linked bundle, else of `AGENTIHOOKS_BUNDLE_PATH` |
+| `HIVE_BUNDLE_REF` | a branch name, or empty | the bundle checkout's current branch |
+
+`agentihooks hive setup` and `agentihooks hive bundle-origin` write both keys. An `ssh` or `https` remote is written
+as the same `https` address, so the pod clones it with the GitHub token. A bundle checkout on a detached head is
+refused with `the linked bundle at <path> is not on a branch`. The pod reads the keys through
+`workers.envFromSecrets`; chart values never set them.
+
+At each start the pod's start script:
+
+1. Clones `HIVE_BUNDLE_URL` at `HIVE_BUNDLE_REF` (default `dev`) to `agentihooks-bundle` under its repo root, beside
+   the agentihooks checkout. A clone a persistent home kept is fast forwarded from the origin instead; a failed fast
+   forward logs `worker-hive: bundle fast forward failed; init runs on the kept clone`.
+2. Runs `agentihooks init --bundle <clone>`, which links the bundle and renders its rules, skills, MCP servers and
+   the `agenti` alias. Init takes no `--profile`: each agent's role renders when the agent is spawned.
+3. Runs `agentihooks deps ensure`, which installs the bundle's declared tools as the workstation does.
+
+git reads the token from `GITHUB_PERSONAL_ACCESS_TOKEN` through a credential helper only when it asks, so the token is
+never written to a file, a remote URL or the log.
+
+| Situation | Log line | Result |
+|---|---|---|
+| `HIVE_BUNDLE_URL` empty | none | No clone. Any bundle a persistent home kept is unlinked and init runs on the package roles alone, so a hive without a private bundle keeps working. |
+| Clone fails | `worker-hive: bundle clone failed; init runs on the package roles alone` | The pod serves on the package roles; `hive compare` shows `bundle missing <origin>`. |
+| Init with the bundle fails | `worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone` | The bundle is unlinked and init runs again on the package roles alone. |
+| Init on the package roles fails | the init error | The pod stops. |
+| `deps ensure` fails | `worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies` | The pod serves; each launch retries the missing dependencies. |
+
+The image carries node, npm, uv and gh; npm global installs and uv tools land in `~/.local` under the worker home.
+
+`agentihooks hive compare` reads each hive's linked bundle as a lowercase `<host>/<owner>/<name>` in its `bundle`
+section. A pod with no bundle shows `bundle missing <origin>` against the workstation, and a pod linked to another
+bundle shows both `bundle missing <workstation origin>` and `bundle extra <pod origin>`. The branch is not compared.
+Profiles shipped by the bundle, rules, skills, MCP servers and dependencies follow in their own sections, so a
+missing bundle also shows as missing entries there.
+
+To bring a pod to the workstation's bundle and check it:
+
+```bash
+# On the workstation, with OPENBAO_URL and OPENBAO_TOKEN set
+agentihooks hive bundle-origin
+# OpenBao secret/<record>: wrote HIVE_BUNDLE_REF, HIVE_BUNDLE_URL (<n> keys total); bundle https://github.com/<owner>/<bundle>.git at dev
+
+# Roll the pod so its start script reads the record
+kubectl rollout restart deployment/<release>-worker-hive -n <namespace>
+
+# In a shell on the pod
+agentihooks bundle list                 # the linked bundle is agentihooks-bundle under the repo root
+ls ~/.claude/rules ~/.claude/skills     # the bundle's rules and skills
+grep 'alias agenti' ~/.bashrc
+
+# On the workstation, once the pod's next beat has published its configuration
+agentihooks hive compare
+```
+
+`hive compare` then lists the pod as `equal`. Host paths are never part of the snapshot, so a different repo root or
+home folder is not a difference.
 
 ### Accounts on a worker pod
 
