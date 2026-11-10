@@ -79,6 +79,45 @@ def test_archive_prunes_intents_for_the_rows_it_archives(store):
     assert other.execution_id in intents
 
 
+@pytest.mark.feature("swarm-archive-sweeps-orphaned-intents")
+def test_archive_sweeps_intents_left_behind_before_the_original_fix(store):
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        live = started(store, "eng-1@fixture")
+        assert live.execution_id in section(store, "intents")
+
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update({"exe-backlog": {"execution_id": "exe-backlog"}}))
+    assert "exe-backlog" in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 0
+
+    intents = section(store, "intents")
+    assert "exe-backlog" not in intents
+    assert live.execution_id in intents
+
+
+@pytest.mark.feature("swarm-archive-sweeps-orphaned-intents")
+def test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission(store):
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        live = started(store, "eng-1@fixture")
+
+    fencing.write(store, "fixture", lambda doc: doc["intents"].update(i={"epoch": held.epoch}))
+    assert "i" in section(store, "intents")
+
+    assert store.execution_registry.archive("fixture") == 0
+
+    intents = section(store, "intents")
+    assert intents["i"] == {"epoch": held.epoch}
+    assert live.execution_id in intents
+
+
 @pytest.mark.parametrize("external", [False, True])
 def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(store: RedisStore, external: bool) -> None:
     from scripts.swarm import lease
