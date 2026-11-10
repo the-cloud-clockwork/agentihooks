@@ -40,7 +40,8 @@ def test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_w
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The probe ran in another job, so its seconds never shorten the shard's budget or its reported wall time."""
-    plan = probe.merge_probes(_plan(), _records(_plan()))
+    base = {**_plan(), "costs": {"scripts.a.x_g__mutmut_1": 1}}
+    plan = probe.merge_probes(base, _records(base))
     folder = tmp_path / "stats"
     folder.mkdir()
     (folder / "plan.json").write_text(json.dumps(plan))
