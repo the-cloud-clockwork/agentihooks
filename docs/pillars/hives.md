@@ -815,13 +815,93 @@ Each check that empties the candidate list names its reason, and the launch wait
 Among eligible worker hives, placement picks the lowest `prefer` rank for the role, then the lowest fraction of
 agent capacity in use, then a lasting hive over an ephemeral one, then the hive id.
 
-`agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
-this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
-that list the swarm's repo, local or cloud (`placement-nodes=0`, the default, keeps every such hive), ignores
-`prefer`, and gives each agent to the kept hive running the fewest agents, counting launches already placed in the
-same tick. When every kept hive is full the launch waits rather than use another hive. The UI roles, `master`, `qa`
-and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
-switches back on the next tick.
+This order is the swarm's default placement mode, `anton-first`. A swarm can switch its worker launches to
+[round robin placement](#round-robin-placement-for-load-runs) for load runs.
+
+### Round robin placement for load runs
+
+Round robin placement spreads a swarm's worker agents evenly over at most a set number of hives, local or cloud,
+so a large volume of work can be loaded onto a known set of machines to prove the swarm holds. Two swarm settings
+select it:
+
+| Setting | Values | Default | Meaning |
+|---|---|---|---|
+| `placement-mode` | `anton-first`, `round-robin` | `anton-first` | `anton-first` places by `prefer` rank, then the share of capacity in use, as in [Placement](#placement). `round-robin` spreads worker launches over the kept hives. |
+| `placement-nodes` | whole number, 0 or more | `0` | How many hives round robin keeps. `0` keeps every eligible hive. A number above the eligible count keeps them all. `anton-first` ignores it. |
+
+```bash
+agentihooks swarm <slug> set placement-mode=round-robin placement-nodes=3
+# {"swarm": "<slug>", "applies": "next tick", ..., "placement_mode": "round-robin", "placement_nodes": 3, ...}
+agentihooks swarm <slug> set placement-nodes=0         # spread over every eligible hive
+agentihooks swarm <slug> set placement-mode=anton-first
+```
+
+Both settings can be set while the swarm runs. The tick reads them on its next pass. A swarm saved before these
+settings existed reads `anton-first` with no node limit. `swarm set` refuses any other mode with
+`placement mode must be one of anton-first, round-robin`, and a node limit that is not a whole number with
+`placement-nodes takes a whole number of hives, 0 for no limit`. A refused value leaves the stored settings
+unchanged.
+
+#### How round robin picks a hive
+
+For each `eng`, `ci`, `plan` or `dispatch` launch, and any other worker profile, placement:
+
+1. Keeps the live hives that are not draining, do not exclude the launch's lane, role or profile, and host its
+   profile, as under `anton-first`.
+2. Keeps the hives among those that [list the swarm's repo](#matching-a-repo-across-machines), sorts them by hive
+   id and keeps the first `placement-nodes`. A hive that excludes the role, lacks the repo or has gone stale
+   takes no place in the set, so the next hive by id joins instead.
+3. Orders the kept hives by the agents each runs plus the launches already placed on it in the same tick pass,
+   fewest first. Ties go to the lower share of capacity in use, then a lasting hive over an ephemeral one, then the
+   hive id. `prefer` ranks play no part.
+4. Runs the usual account slot, room, login and repo checks on that order and takes the first hive that passes.
+
+The kept set is computed again on every launch, so a hive that stops beating leaves the set and a new hive with a
+lower id enters it. When every kept hive refuses, the launch waits with the refusal reasons of the kept hives only
+and never uses a hive outside the set. A `hybrid` controller, or a `local` machine with `hive-placement=on`, still
+runs such a launch in the machine's own herdr panes while the machine is under `local-max-agents`, as described
+under [Placement by role](#placement-by-role); set `local-max-agents=0` on the swarm to keep the load run on the
+kept hives alone.
+
+Example. Three headless hives list the swarm's repo:
+
+| Hive | Agents running | `max-agents` | `prefer` |
+|---|---|---|---|
+| `anton-1` | 3 | 28 | `eng:1` |
+| `anton-2` | 2 | 4 | none |
+| `anton-3` | 0 | 4 | none |
+
+With `anton-first`, every `eng` launch goes to `anton-1` while it has room, because it ranks first for `eng`.
+With `placement-mode=round-robin placement-nodes=2`, placement keeps `anton-1` and `anton-2`, the first two by id,
+and never uses `anton-3`. The first launch goes to `anton-2`, which runs fewer agents. Both then run three, and the
+second launch goes to `anton-1`, whose share in use, 3 of 28, is lower than `anton-2`'s 2 of 4. Later launches
+keep alternating by count until `anton-2` has no room left, after which every launch goes to `anton-1`.
+
+#### What keeps anton-first
+
+- Masters, and the `qa` and `frontend` roles on any lane, place by `anton-first` on their UI hives; see
+  [Placement by role](#placement-by-role) and [Master placement](#master-placement).
+- A task whose `hive` field pins it to one hive, or a task marked `workstation=yes`, places only on that hive, even
+  when it lies outside the node limit.
+
+#### Checking a load run
+
+```bash
+agentihooks hive list                    # each hive's workers=N of M: the kept hives should differ by at most one
+agentihooks swarm <slug> status          # the Hive column names each agent's hive; placement waits list refused tasks
+agentihooks swarm <slug> set placement-mode=anton-first   # back to the default when the run ends
+```
+
+A spread can differ by more than one when a kept hive reached its ceiling, its headroom or its account slots, or
+when agents placed before the switch still run where `anton-first` put them. Round robin moves no running agent.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Agents still gather on the `prefer` ranked hive | The swarm is on `anton-first`, or the launches are masters, `qa` or `frontend`. | `agentihooks swarm <slug> set placement-mode=round-robin`, and check the task profiles. |
+| A hive meant for the run takes no agents | It sorts past the first `placement-nodes` ids, does not list the repo, excludes the role, is draining or has no fresh heartbeat. | Raise `placement-nodes`, or check `agentihooks hive show <id>` for `repos`, `excluded` and `draining`. |
+| Launches wait while hives outside the set have room | Every kept hive is at its ceiling, headroom or account slots. | Raise `placement-nodes`, raise `max-agents` on a kept hive, or wait for a kept hive to free a slot. |
+| Load run agents land on the local machine | A `hybrid` controller overflowed launches the kept hives refused. | `agentihooks swarm <slug> set local-max-agents=0` for the run. |
+| `swarm set` answers `placement-nodes takes a whole number of hives, 0 for no limit` | The value is negative or not a whole number. | Pass `placement-nodes=0` or a positive whole number. |
 
 ### Workstation fallback for workers
 
