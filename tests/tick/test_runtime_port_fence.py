@@ -134,10 +134,15 @@ def test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools(
     monkeypatch.setattr(ledger_client, "pass_state", lambda ledger, slug: {"tasks": []})
     monkeypatch.setattr(engine, "_collect_acks", lambda *args: collected.append(args[4]) or ["collected"])
 
+    monkeypatch.setattr(lease, "ttl_ms", lambda: 30_000_000)
+
     assert ack_pass.run(store, "sw", ledger="ledger", runtime="runtime") == ["collected"]
 
     assert built == [(store, "sw", commands.hive_id(), "ledger", "runtime")]
-    assert [c.operation for c in cast(FakeCoordination, tools.coordination).calls] == ["lease"]
+    leased = cast(FakeCoordination, tools.coordination).calls
+    assert [c.operation for c in leased] == ["lease"]
+    assert 29_990 < leased[0].deadline.remaining <= 30_000
+    assert port.calls[0].deadline is leased[0].deadline
     deployment = controller.deployment_for(store.config("sw"), os.environ)
     assert [(c.operation, c.args) for c in port.calls] == [("fence", (held, deployment))]
     assert collected == ["fenced"]
