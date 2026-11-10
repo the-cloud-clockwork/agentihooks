@@ -322,7 +322,7 @@ def test_a_resumed_state_without_a_jump_keeps_the_client_jump(tmp_path):
 
     assert (running.upkeep.due, running.upkeep.seen, running.synced) == (False, {"x": 2}, 5.0)
     assert running.upkeep.terminal.home == client
-    assert bare.saved() == {"due": True, "seen": {}, "synced": None, "jump": None}
+    assert bare.saved() == {"due": True, "seen": {}, "synced": None, "jump": None, "hive_outages": {}}
 
 
 def test_the_service_runs_herdr_as_the_client_home_by_default(tmp_path, monkeypatch):
