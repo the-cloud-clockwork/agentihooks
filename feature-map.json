@@ -2090,7 +2090,8 @@
         "tests/swarm/test_tick_report.py::test_report_names_the_most_task_rows_a_pass_read",
         "tests/swarm_ledger/test_live_rows.py::test_a_scoped_full_export_names_frozen_ids_only_when_it_carries_the_tasks",
         "tests/tick/test_live_rows_replay.py::test_a_pass_keeps_the_most_rows_any_of_its_reads_held",
-        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector"
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon"
       ]
     },
     {

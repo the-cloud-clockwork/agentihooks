@@ -277,6 +277,15 @@ def test_a_selector_value_keeps_every_colon_after_the_selector() -> None:
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
+def test_a_selector_value_may_end_in_a_colon() -> None:
+    doc = {
+        "tasks": [{"id": "a", "state": "open", "lane": "eng:"}, {"id": "b", "state": "open", "lane": "eng"}],
+        "freezes": [{"id": "f", "verb": "freeze", "target": "lane:eng:"}],
+    }
+    assert live_rows.marks(doc) == {"a": (True, None), "b": (False, None)}
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_frozen_ids_ride_a_scoped_delta_only_when_it_names_the_tasks() -> None:
     doc = _doc()
     answer = live_rows.answer(doc, live_rows.Scope())
