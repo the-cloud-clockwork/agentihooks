@@ -1,5 +1,6 @@
 """The docs sanity scanner flags internal addresses, host names, personal emails, token shapes and private keywords."""
 
+import codecs
 from pathlib import Path
 
 import pytest
@@ -93,15 +94,20 @@ def test_an_example_label_passes_only_right_before_the_private_suffix() -> None:
 
 @pytest.mark.feature("docs-sanity-scan")
 def test_a_text_file_that_is_not_utf8_is_still_scanned(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    page = tmp_path / "latin.md"
+    page = tmp_path / "a-latin.md"
     page.write_bytes("café at 10.9.8.7\n".encode("latin-1"))
-    wide = tmp_path / "wide.md"
-    wide.write_bytes("title\nhost at 10.9.8.7\n".encode("utf-16"))
+    little = tmp_path / "b-little.md"
+    little.write_bytes(
+        codecs.BOM_UTF16_LE + "x".encode("utf-16-le") + b"\x00\xd8" + "\nhost at 10.9.8.7\n".encode("utf-16-le")
+    )
+    big = tmp_path / "c-big.md"
+    big.write_bytes(codecs.BOM_UTF16_BE + "title\nhost at 10.9.8.7\n".encode("utf-16-be"))
 
-    assert docs_sanity.main([str(page), str(wide)]) == 1
+    assert docs_sanity.main([str(page), str(little), str(big)]) == 1
     assert capsys.readouterr().out.splitlines() == [
         f"{page.as_posix()}:1: private-ipv4",
-        f"{wide.as_posix()}:2: private-ipv4",
+        f"{little.as_posix()}:2: private-ipv4",
+        f"{big.as_posix()}:2: private-ipv4",
     ]
 
 
@@ -109,3 +115,35 @@ def test_a_text_file_that_is_not_utf8_is_still_scanned(tmp_path: Path, capsys: p
 def test_a_missing_path_is_a_usage_error(tmp_path: Path) -> None:
     assert docs_sanity.main([str(tmp_path / "absent")]) == 2
     assert docs_sanity.main(["--keywords-file", str(tmp_path / "absent.txt"), str(tmp_path)]) == 2
+
+
+@pytest.mark.feature("docs-sanity-scan")
+def test_every_missing_path_is_named_on_standard_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    first, second = tmp_path / "one", tmp_path / "two"
+
+    assert docs_sanity.main([str(first), str(second)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"docs sanity: no such path: {first}, {second}\n"
+
+
+@pytest.mark.feature("docs-sanity-scan")
+def test_no_keyword_source_loads_no_keywords(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DOCS_SANITY_UNSET", raising=False)
+
+    assert docs_sanity.load_keywords(None, None) == []
+    assert docs_sanity.load_keywords("DOCS_SANITY_UNSET", None) == []
+
+
+@pytest.mark.feature("docs-sanity-scan")
+@pytest.mark.parametrize(
+    "line",
+    [
+        "bad 999.1.1.1 then 10.1.1.1",
+        "ask team@example.com or jane.doe@mailhost.io",
+        "clone git@github.com:o/r.git and mail jane.doe@mailhost.io",
+    ],
+)
+def test_a_passing_match_does_not_hide_a_later_hit_on_the_line(line: str) -> None:
+    assert len(docs_sanity.line_rules(line, ())) == 1

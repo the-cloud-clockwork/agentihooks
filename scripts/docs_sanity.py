@@ -8,6 +8,7 @@ the matched text, and any hit exits 1.
 """
 
 import argparse
+import codecs
 import fnmatch
 import ipaddress
 import os
@@ -106,11 +107,20 @@ def line_rules(text: str, keywords: Iterable[str]) -> list[str]:
     return rules
 
 
+def decode(data: bytes) -> str | None:
+    """Return the text of UTF-16 data by its byte order mark or of UTF-8 data, or None for binary data."""
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return codecs.utf_16_decode(data, "replace")[0]
+    if b"\0" in data:
+        return None
+    return data.decode(errors="replace")
+
+
 def load_keywords(env_name: str | None, file_path: str | None) -> list[str]:
     """Read the private keyword list from an environment variable and a file, lower cased and deduplicated."""
     raw = os.environ.get(env_name, "") if env_name else ""
     if file_path:
-        raw += "\n" + Path(file_path).read_text(encoding="utf-8")
+        raw += "\n" + Path(file_path).read_bytes().decode()
     words = (word.strip().lower() for word in re.split(r"[\n,]", raw))
     return sorted({word for word in words if word and not word.startswith("#")})
 
@@ -127,14 +137,10 @@ def walk(paths: Iterable[str], excludes: Iterable[str]) -> Iterator[Path]:
 
 
 def scan_file(path: Path, keywords: Iterable[str]) -> list[Hit]:
-    """Return every hit in one file; UTF-16 text is read by its byte order mark, other NUL holding files are binary."""
-    data = path.read_bytes()
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        text = data.decode("utf-16", errors="replace")
-    elif b"\0" in data:
+    """Return every hit in one file; a binary file yields none."""
+    text = decode(path.read_bytes())
+    if text is None:
         return []
-    else:
-        text = data.decode("utf-8", errors="replace")
     words = tuple(keywords)
     return [
         Hit(path.as_posix(), number, rule)
@@ -151,11 +157,11 @@ def scan(paths: Iterable[str], keywords: Iterable[str], excludes: Iterable[str] 
 
 def main(argv: list[str] | None = None) -> int:
     """Scan the given paths, print each hit as file:line: rule and return 1 on any hit."""
-    parser = argparse.ArgumentParser(description="Flag internal addresses and identifiers in public files.")
+    parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="+")
-    parser.add_argument("--keywords-env", help="Environment variable holding private keywords")
-    parser.add_argument("--keywords-file", help="File holding private keywords, one per line")
-    parser.add_argument("--exclude", action="append", default=[], help="Glob of files to skip")
+    parser.add_argument("--keywords-env")
+    parser.add_argument("--keywords-file")
+    parser.add_argument("--exclude", action="append", default=[])
     args = parser.parse_args(argv)
     missing = [path for path in [*args.paths, args.keywords_file] if path and not Path(path).exists()]
     if missing:
