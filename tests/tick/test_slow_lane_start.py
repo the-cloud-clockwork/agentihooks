@@ -137,6 +137,7 @@ def test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker() -> No
     }
 
 
+@pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     critical_started, kept_ran = Event(), Event()
