@@ -269,10 +269,7 @@ def test_a_master_without_a_slot_is_recorded_as_waiting(monkeypatch: pytest.Monk
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
-@pytest.mark.parametrize(("past_host", "said"), [(False, ["host held"]), (True, ["the master waits: no room"])])
-def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
-    monkeypatch: pytest.MonkeyPatch, past_host: bool, said: list[str]
-) -> None:
+def test_a_host_hold_never_stops_the_master(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     _starts(monkeypatch, {})
     record = _master_record()
@@ -283,9 +280,7 @@ def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
 
     _seats(monkeypatch, host="host held", place=place, room=True)
     config = SimpleNamespace(state="running")
-    store, runtime = _store(calls), _runtime(calls)
-    started = masters._master("sw", config, store, runtime, NOW, past_host=True) if past_host else None
-    assert (started or masters._master("sw", config, store, runtime, NOW)) == said
+    assert masters._master("sw", config, _store(calls), _runtime(calls), NOW) == ["the master waits: no room"]
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
