@@ -513,6 +513,7 @@ def test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event
         "someone/agentihooks/.github/workflows/docs-sanity.yml@main",
         "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@MAIN",
         "The-Cloud-Clockwork/agentihooks/.github/workflows/Docs-Sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks/.GitHub/workflows/docs-sanity.yml@main",
         "The-Cloud-Clockwork/agentihooks",
     ],
 )
