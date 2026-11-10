@@ -9,7 +9,12 @@ nav_order: 63
 `feature-map.json` at the repository root gives every user visible behaviour of
 the swarm a stable id, the seam its tests observe, the suite tests that cover it
 and, where one exists, a live check the Doctor runs against the running swarms.
-Its `features` list holds one entry per behaviour.
+Its `features` list supports legacy maps. With `"fragments": true`, the loader also
+discovers one entry per file under `feature-map.d/`. The filename is the SHA256
+of the feature id followed by `.json`; `scripts.feature_map.entry_path` computes
+it. New or changed behaviours edit only their own record, leaving unrelated
+entries and the root metadata untouched. The root keeps retired records and
+the unmapped rule list. Duplicate ids and mismatched filenames fail validation.
 
 ## Origins
 
@@ -109,3 +114,14 @@ in the pull request tier and prints
 map is valid. Any failure exits nonzero with the reason. When changing the gate,
 plant a marked test no entry lists and record a red CI run, remove it and record
 green. Tests run in CI only.
+
+## Independent type counts
+
+The type gate also supports one count per source in `tests/type-baseline/`.
+For example, the count for `hooks/example.py` lives in
+`tests/type-baseline/hooks/example.py.json`. The file contains one nonnegative
+integer. An empty `tests/TYPE_BASELINE.json` preserves the baseline marker.
+`python -m scripts.type_gate --write` refreshes individual records and removes
+records whose measured count becomes zero. Legacy aggregate baselines remain
+readable; the same source cannot appear in both layouts. Counts still cannot
+grow against the base. Lowering a count changes only that source record.

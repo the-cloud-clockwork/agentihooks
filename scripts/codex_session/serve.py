@@ -157,6 +157,8 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
 def main(
     argv: list[str] | None = None, environ: dict[str, str] | None = None, deps: supervisor.Deps | None = None
 ) -> int:
+    from scripts.inbox.codex import REFUSED_EXIT
+
     arguments = list(sys.argv[1:] if argv is None else argv)
     split = arguments.index("--") if "--" in arguments else len(arguments)
     args = _parser().parse_args(arguments[:split])
@@ -173,6 +175,8 @@ def main(
     try:
         started = supervisor.launch(store, spec, deps or supervisor.Deps())
     except (supervisor.LaunchFailure, SwarmError, BindingError) as exc:
+        if isinstance(exc, supervisor.LaunchFailure) and exc.error_class == "account_refused":
+            close_refused(spec.agent.account, REFUSED_EXIT)
         print(f"agentihooks codex-session: launch refused: {exc}", file=sys.stderr)
         if spec.environ.get(binding.REPORT):
             binding.refuse(Path(spec.environ[binding.REPORT]), f"codex-session launch refused: {exc}")
@@ -199,6 +203,8 @@ def main(
                 pass
         else:
             print(PUMP_EXITED.format(pump.returncode), file=sys.stderr)
+            if pump.returncode == REFUSED_EXIT and spec.environ.get(binding.REPORT):
+                binding.refuse(Path(spec.environ[binding.REPORT]), "Codex provider refused the routed account")
             close_refused(spec.agent.account, pump.returncode)
             return pump.returncode or 3
     finally:

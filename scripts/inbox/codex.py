@@ -333,7 +333,7 @@ class Pump:
 
     def start(self) -> None:
         binding = self.binding
-        binding.transport.require()
+        record = binding.transport.require()
         binding.connection.listener = self.state.observe
         self.dispatcher.own(binding.recipient, binding.owner, ttl_s=self._lease_s())
         self.leased = True
@@ -344,7 +344,11 @@ class Pump:
             self.subscription = self.store.redis.pubsub()
             self.subscription.subscribe(NOTIFY)
         protocol.resume_thread(binding.connection, binding.thread_id)
-        self._settle(recovered, self._refresh())
+        thread = self._refresh()
+        for turn in thread.get("turns") or []:
+            if turn.get("id") == record.active_turn_id and (reason := account_refusal(turn)):
+                raise AccountRefused(reason)
+        self._settle(recovered, thread)
         self.next_reconcile = self.timing.clock()
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
@@ -400,7 +404,7 @@ class Pump:
         binding.transport.mark(last_reconcile_at=self.timing.now_ms(), active_turn_id=self.state.active_turn)
         self.next_reconcile = self.timing.clock() + self.timing.reconcile_s
 
-    def _refresh(self) -> dict:
+    def _refresh(self) -> dict[str, Any]:
         thread = protocol.read_thread(self.binding.connection, self.binding.thread_id)
         self.state.refresh(thread)
         return thread
