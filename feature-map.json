@@ -1386,6 +1386,18 @@
       ]
     },
     {
+      "id": "ledger-stats-admission-batch",
+      "origin": "inventory",
+      "behaviour": "Computing which pending tasks a focus holds back from the time-left estimate derives the admitted-focus queue once per ledger view and reuses it across every task instead of revalidating it once per task, and the dependency-chain propagation that follows it stops as soon as a pass adds nothing new.",
+      "seam": "ledger_stats.frozen through scripts.swarm.freeze.held, unfocused and admitted",
+      "tests": [
+        "tests/swarm/test_freeze.py::test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_calls_admitted_once_regardless_of_pending_count",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_propagates_held_status_through_a_dependency_chain",
+        "tests/swarm_ledger/test_ledger_stats.py::TestFrozenAdmission::test_frozen_leaves_a_chain_with_no_frozen_ancestor_free"
+      ]
+    },
+    {
       "id": "swarm-focus",
       "origin": "inventory",
       "behaviour": "A focus holds every other unfrozen task until the focus queue is empty, only Doctor fixes pass it, and focused work takes the whole lane before free work.",
@@ -2173,6 +2185,52 @@
         "tests/tick/test_view.py::test_document_serves_the_held_view_and_reads_again_only_after_a_write",
         "tests/swarm/tick_scenarios/test_characterisation.py::test_a_running_pass_reads_the_ledger_once_plus_once_per_write",
         "tests/swarm/tick_scenarios/test_characterisation.py::test_a_planted_second_read_without_a_write_is_counted"
+      ]
+    },
+    {
+      "id": "swarm-tick-live-rows",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-live-rows-only",
+      "behaviour": "The ledger read path a tick pass uses answers only tasks in a live state that are focused or free, each carrying its resolved freeze flag and focus rank, and answers closed or frozen tasks only when the reader passes the closed or frozen flag.",
+      "seam": "The live rows resolver, the export closed and frozen flags of the ledger API and the tick ledger view",
+      "tests": [
+        "tests/swarm_ledger/test_live_rows.py::test_marks_resolve_freeze_and_focus_per_task",
+        "tests/swarm_ledger/test_live_rows.py::test_marks_agree_with_the_claim_gate_freeze",
+        "tests/swarm_ledger/test_live_rows.py::test_the_claim_gate_reads_the_resolved_flag_as_its_own_walk_in_every_state",
+        "tests/swarm_ledger/test_live_rows.py::test_a_claimed_task_under_a_freeze_stays_in_the_default_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_a_blocked_task_under_a_freeze_leaves_the_default_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_rows_answer_closed_and_frozen_tasks_only_on_request",
+        "tests/swarm_ledger/test_live_rows.py::test_the_default_scope_holds_neither_closed_nor_frozen_tasks",
+        "tests/swarm_ledger/test_live_rows.py::test_the_scoped_full_export_carries_only_the_scoped_task_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_the_unscoped_full_export_keeps_every_task",
+        "tests/swarm_ledger/test_live_rows.py::test_scoped_changes_patch_the_held_rows_to_the_new_scoped_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_a_freeze_or_hierarchy_change_answers_the_scoped_rows_in_full",
+        "tests/swarm_ledger/test_live_rows.py::test_a_phase_change_outside_its_plan_link_stays_a_delta",
+        "tests/swarm_ledger/test_live_rows.py::test_unscoped_changes_still_carry_closed_task_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_the_export_schema_takes_boolean_closed_and_frozen_flags",
+        "tests/swarm_ledger/test_live_rows.py::test_a_read_names_its_scope_only_through_the_flags_it_sends",
+        "tests/swarm_ledger/test_live_rows.py::test_marks_cover_every_task_of_a_ledger_without_freezes",
+        "tests/swarm_ledger/test_live_rows.py::test_an_empty_or_unrelated_path_never_reshapes_the_rows",
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_freeze_holds_the_tasks_its_lane_or_kind_names",
+        "tests/swarm_ledger/test_live_rows.py::test_frozen_ids_ride_a_scoped_delta_only_when_it_names_the_tasks",
+        "tests/swarm_ledger/test_live_rows.py::test_each_scope_keeps_its_own_answer_for_a_generation",
+        "tests/swarm_ledger/test_live_rows.py::test_a_scoped_delta_hands_the_scope_answer_to_the_changes",
+        "tests/swarm_ledger/test_live_rows.py::test_a_scoped_full_read_builds_the_export_from_the_scope_answer",
+        "tests/swarm_ledger/test_live_rows.py::test_focus_holds_back_work_waiting_on_a_frozen_task_the_view_left_out",
+        "tests/tick/test_live_rows_replay.py::test_the_replayed_ledger_holds_far_more_tasks_than_a_pass_may_read",
+        "tests/tick/test_live_rows_replay.py::test_a_default_scope_read_holds_only_the_live_unfrozen_tasks_of_the_replayed_ledger",
+        "tests/tick/test_live_rows_replay.py::test_a_delta_pass_after_a_task_closes_reads_one_row_fewer",
+        "tests/tick/test_live_rows_replay.py::test_the_held_view_names_the_frozen_tasks_it_left_out",
+        "tests/tick/test_live_rows_replay.py::test_the_tick_scope_pass_still_reads_every_task_until_its_readers_move",
+        "tests/tick/test_live_rows_replay.py::test_the_resolved_flag_matches_the_freeze_walk_for_every_replayed_task",
+        "tests/tick/test_live_rows_replay.py::test_a_pass_that_reads_an_empty_view_counts_no_rows",
+        "tests/tick/test_live_rows_replay.py::test_the_pass_view_reads_the_ledger_with_the_tick_scope",
+        "tests/swarm/test_tick_report.py::test_report_names_the_most_task_rows_a_pass_read",
+        "tests/swarm_ledger/test_live_rows.py::test_a_scoped_full_export_names_frozen_ids_only_when_it_carries_the_tasks",
+        "tests/tick/test_live_rows_replay.py::test_a_pass_keeps_the_most_rows_any_of_its_reads_held",
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon",
+        "tests/tick/test_live_rows_replay.py::test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick"
       ]
     },
     {
@@ -3085,6 +3143,39 @@
         "tests/swarm/test_priority_sweep.py::test_a_thousand_stale_priorities_clear_inside_the_step_floor",
         "tests/swarm/test_priority_sweep.py::test_the_sweep_clears_its_stale_priorities_in_one_batch",
         "tests/swarm/test_ledger_client_priorities.py::test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches"
+      ]
+    },
+    {
+      "id": "swarm-archive-prunes-intents",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
+      "behaviour": "ExecutionRegistry.archive prunes the controller-intents row of every execution it moves into the archive, so the intents section stops growing without bound and every fenced registry write stops paying for the whole admission history.",
+      "seam": "ExecutionRegistry.archive prunes intents for executions it archives",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
+        "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
+      ]
+    },
+    {
+      "id": "swarm-tick-slow-lane-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-slow-lane-runs",
+      "behaviour": "The handed slow lane starts with the pass graph, each handed step once the critical steps it needs end, so a critical step overrunning its lane leaves every other handed step running inside the slow lane on its own workers, and a reserved step such as spawn holds no later site behind it.",
+      "seam": "scripts.tick.engine run_graph with scripts.tick.pool.Pass tracking, and scripts.tick.registry.site_edges over the pass sites of scripts.swarm.cli",
+      "tests": [
+        "tests/tick/test_slow_lane_start.py::test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_needing_a_lost_critical_step_is_still_dropped",
+        "tests/tick/test_slow_lane_start.py::test_a_busy_handed_lane_leaves_the_critical_steps_their_workers",
+        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker",
+        "tests/tick/test_slow_lane_start.py::test_a_kept_handed_step_runs_on_the_handed_workers",
+        "tests/tick/test_handed_lane_guards.py::test_the_handed_workers_are_named_and_bounded_by_the_pass_workers",
+        "tests/tick/test_handed_lane_guards.py::test_a_pass_ends_without_waiting_on_its_handed_workers_and_cancels_their_queue",
+        "tests/tick/test_handed_lane_guards.py::test_a_handed_step_waits_for_a_site_hook_running_on_the_critical_thread_past_the_critical_lane",
+        "tests/tick/test_handed_lane_guards.py::test_a_step_waits_for_its_site_hook_no_longer_than_its_own_budget",
+        "tests/tick/test_handed_lane_guards.py::test_a_site_whose_hook_says_no_rests_its_steps",
+        "tests/tick/test_handed_lane_guards.py::test_the_gate_rests_a_handed_step_it_shuts",
+        "tests/tick/test_handed_lane_guards.py::test_a_handed_step_needing_a_step_an_earlier_group_ran_starts_at_once"
       ]
     },
     {

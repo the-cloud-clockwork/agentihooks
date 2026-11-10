@@ -468,7 +468,7 @@ def test_the_wait_pass_resolves_waits_beside_an_open_red_check_notice(tick, monk
     tick.hold("task", "t2")
     notice = tick.inbox.send("swarm", "eng-1@sw", "A previous pull request has failed checks")
     tick.store.redis.hset(tick.store.key("sw", "red-notices"), notice.id, URL)
-    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache: {})
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None, ttl=None: {})
     documents = {"sw": {"tasks": [{"id": "t2", "state": "done"}]}}
     assert cli.run_waits(tick.store, "sw", SimpleNamespace(state=documents.__getitem__)) == [
         f"ended the wait of {ME}: task t2, now done"

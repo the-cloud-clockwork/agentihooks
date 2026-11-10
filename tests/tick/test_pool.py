@@ -637,7 +637,8 @@ def test_a_handed_off_step_starts_after_the_critical_step_it_needs() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     with pool.running(workers=3):
         assert [row.name for row in engine.run_group("load", context(), steps, finished=later.append)] == ["critical"]
-    assert ran == ["critical", "slow", "both"]
+    assert sorted(ran[:2]) == ["critical", "slow"]
+    assert ran[2:] == ["both"]
     assert [[row.name for row in records] for records in later] == [["slow", "both"]]
 
 

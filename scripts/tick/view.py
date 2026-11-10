@@ -20,6 +20,7 @@ from typing import Any, NoReturn, cast
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.api.client import ResourceClient, patched, read_export_file, write_export_file
 from scripts.swarm_ledger.api.schemas import LEDGER_PARTS
+from scripts.swarm_ledger.repository import live_rows
 
 __all__ = [
     "CURRENT",
@@ -32,6 +33,7 @@ __all__ = [
     "REFRESH",
     "LedgerView",
     "Reader",
+    "counted",
     "current",
     "document",
     "freeze",
@@ -98,6 +100,8 @@ def frozen_views() -> bool:
 
 PARTS = LEDGER_PARTS
 FRESH_VIEW_S = 300.0
+ROWS_READ = "rows_read"
+TICK_SCOPE = live_rows.Scope(closed=True, frozen=True)
 
 Reader = Callable[[int, tuple[str, ...]], dict[str, Any]]
 
@@ -113,6 +117,7 @@ class LedgerView:
         self.tasks: list[dict[str, Any]] = state.get("tasks", [])
         self.meta: dict[str, Any] = state.get("_meta", {})
         self.phases: list[dict[str, Any]] = state.get("phases", [])
+        self.frozen_ids: frozenset[str] = frozenset(state.get(live_rows.FROZEN_IDS) or ())
         self.document = state
 
     def read(self, domain: str, key: str) -> object | None:
@@ -169,9 +174,11 @@ def current() -> LedgerView | None:
     return held.view
 
 
-def view_file(base: str, slug: str, directory: Path) -> Path:
-    """The file holding the view of ledger ``slug`` on the server at ``base``."""
-    return directory / "ledger-views" / f"{hashlib.sha256(f'{base} {slug}'.encode()).hexdigest()[:32]}.json"
+def view_file(base: str, slug: str, directory: Path, scope: live_rows.Scope | None = None) -> Path:
+    """The file holding the view of ledger ``slug`` on the server at ``base`` read with ``scope``."""
+    scope = TICK_SCOPE if scope is None else scope
+    key = f"{base} {slug} live closed={scope.closed} frozen={scope.frozen}"
+    return directory / "ledger-views" / f"{hashlib.sha256(key.encode()).hexdigest()[:32]}.json"
 
 
 def refreshed(path: Path, reader: Reader) -> LedgerView:
@@ -187,7 +194,17 @@ def refreshed(path: Path, reader: Reader) -> LedgerView:
         state = reply["data"]
     if exported is None or reply["generation"] != generation:
         write_export_file(path, reply["generation"], state)
-    return LedgerView(reply["generation"], state)
+    return counted(LedgerView(reply["generation"], state))
+
+
+def counted(view: LedgerView) -> LedgerView:
+    """``view``, its task rows counted on the running pass's record as the most rows one read of the pass held."""
+    from scripts.swarm import timing
+
+    record = timing.PASS.get()
+    if record is not None:
+        record[ROWS_READ] = max(int(record.get(ROWS_READ, 0)), len(view.tasks))
+    return view
 
 
 def reads(ledger: object) -> bool:
@@ -208,7 +225,7 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
 
     def refresh() -> LedgerView:
         """The held view patched with one delta read."""
-        return refreshed(path, lambda since, parts: client.changes(slug, since, parts))
+        return refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
 
     try:
         view = refresh()
