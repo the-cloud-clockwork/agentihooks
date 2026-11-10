@@ -16,13 +16,22 @@ DRAINED = "The swarm has no task left to start"
 WATCHED = "watched_focus"
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
-    """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task."""
+UNCACHED = object()
+
+
+def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any = UNCACHED) -> bool:
+    """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task.
+
+    admitted_queue carries a result of ``admitted(doc, graph)`` a caller already computed for this doc and
+    graph, such as one checking every task in one pass, so repeated calls do not each pay to revalidate it.
+    """
     if task.get("state") != "open":
         return False
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
     return (
-        frozen(task, records, chain) or unfocused(task, doc, graph, fix_phase) or outside_watched(task, doc, fix_phase)
+        frozen(task, records, chain)
+        or unfocused(task, doc, graph, fix_phase, admitted_queue)
+        or outside_watched(task, doc, fix_phase)
     )
 
 
@@ -82,8 +91,10 @@ def _selects(target: str) -> bool:
     return selector in SELECTORS and bool(value)
 
 
-def unfocused(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str) -> bool:
-    queue = admitted(doc, graph)
+def unfocused(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str, admitted_queue: Any = UNCACHED
+) -> bool:
+    queue = admitted(doc, graph) if admitted_queue is UNCACHED else admitted_queue
     return queue is not None and task["id"] not in queue and not _fix(task, fix_phase)
 
 

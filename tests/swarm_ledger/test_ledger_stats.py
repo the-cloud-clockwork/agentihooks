@@ -1,8 +1,11 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
+from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import ledger_core, ledger_stats  # noqa: E402
 
 HOUR = 3_600_000
@@ -101,6 +104,37 @@ class TestRate:
     def test_a_close_exactly_one_hour_ago_counts(self):
         d = doc(tasks=[task("a", "done")])
         assert ledger_stats.closed_last_hour(d, [event("task done", "a", NOW - HOUR)], NOW) == ["a"]
+
+
+class TestFrozenAdmission:
+    @pytest.mark.feature("ledger-stats-admission-batch")
+    def test_frozen_calls_admitted_once_regardless_of_pending_count(self, monkeypatch):
+        pending = {tid: task(tid, "open") for tid in ("a", "b", "c", "d", "e")}
+        d = doc(tasks=list(pending.values()), freezes=[])
+        calls: list[int] = []
+        original = freeze.admitted
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(freeze, "admitted", counting)
+        ledger_stats.frozen(d, pending, {})
+        assert calls == [1]
+
+    @pytest.mark.feature("ledger-stats-admission-batch")
+    def test_frozen_propagates_held_status_through_a_dependency_chain(self):
+        x, y, z = task("x", "open"), task("y", "open", depends_on=["x"]), task("z", "open", depends_on=["y"])
+        pending = {"x": x, "y": y, "z": z}
+        d = doc(tasks=[x, y, z], freezes=[{"verb": "freeze", "target": "tasks/x"}])
+        assert ledger_stats.frozen(d, pending, {}) == {"x", "y", "z"}
+
+    @pytest.mark.feature("ledger-stats-admission-batch")
+    def test_frozen_leaves_a_chain_with_no_frozen_ancestor_free(self):
+        x, y, w = task("x", "open"), task("y", "open", depends_on=["x"]), task("w", "open")
+        pending = {"x": x, "y": y, "w": w}
+        d = doc(tasks=[x, y, w], freezes=[{"verb": "freeze", "target": "tasks/x"}])
+        assert ledger_stats.frozen(d, pending, {}) == {"x", "y"}
 
 
 class TestTimeLeft:
