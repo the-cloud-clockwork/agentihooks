@@ -297,6 +297,9 @@ class NameRegistry:
     def watched(self, *parts: str) -> list[str]:
         return self.names_state.watched(self.key(*parts))
 
+    def revisions(self, *pairs: tuple[str, str]) -> tuple[int, ...]:
+        return self.names_state.revisions(*pairs)
+
     def _legacy_alias(self, name):
         return lambda client: client.get(self.key("alias", name))
 

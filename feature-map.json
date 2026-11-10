@@ -96,6 +96,22 @@
       ]
     },
     {
+      "id": "inbox-alias-store-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
+      "behaviour": "On the bus state backend a mailbox read compares the names store revisions of the aliases it resolved before committing its snapshot, and a seen mark compares them after its write, retrying when an alias moved meanwhile and refusing when it never settles.",
+      "seam": "InboxStore.mailbox and SeenMarks.mark on the bus state backend",
+      "tests": [
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
@@ -2752,6 +2768,20 @@
       "tests": [
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_after_the_session_closed_keeps_the_passed_launch_grade",
         "tests/hive/test_join_report_finished.py::test_a_heartbeat_still_recovers_a_check_missing_at_join"
+      ]
+    },
+    {
+      "id": "hive-master-closed-account",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
+      "behaviour": "Hive master placement never chooses a Claude account its capacity rows mark closed, whether through the hive master login, the native interactive login or a subscription slot.",
+      "seam": "placement.place_master closed account keys and HiveLaunch master selection",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat",
+        "tests/hive/test_master_placement.py::test_a_master_waits_when_its_only_login_account_is_closed",
+        "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
       ]
     },
     {
