@@ -535,10 +535,10 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
-Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
-role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded`
-follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
-stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role
+or profile is in its `excluded` list, and never past its max agents. `prefer` refuses a role the hive excludes. An
+unset `excluded` follows the hive's current `ui`. A hive still on a legacy record with the old `roles` setting drops
+it, with its stored `max-agents`, on its next heartbeat, join or `hive set`, and reads under the defaults until then.
 
 ```bash
 agentihooks hive set pod-a excluded=master,frontend,qa max-agents=12
@@ -549,9 +549,8 @@ agentihooks hive set pod-a max-agents=auto
 ```
 
 With the defaults, a `ui=no` hive takes `ci`, `plan` and every other worker role or profile and refuses `master`;
-a `ui=yes` hive takes every agent type, masters included. A hive whose record still carries `roles` keeps working
-under these defaults; run `agentihooks hive set <id> excluded=<list>` to write its own list at once rather than
-wait for its next heartbeat.
+a `ui=yes` hive takes every agent type, masters included. A hive still on a legacy `roles` record reads under these
+defaults until its next heartbeat; `agentihooks hive set <id> excluded=<list>` writes its own list at once.
 
 ### Capabilities and task needs
 
@@ -2004,10 +2003,10 @@ credential answers `403 forbidden` with `swarm controls need the operator`.
 | `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
 
 Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
-`ui`, `ephemeral`, `excluded`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
-`heartbeat_at`, `version`) and three computed fields:
+`ui`, `ephemeral`, `draining`, `excluded`, `master_swarms`, `prefer`, `max_agents`, `capabilities`, `harnesses`,
+`slots`, `interactive`, `repos`, `heartbeat_at`, `version`) and three computed fields:
 
-- `live`: `true` while the heartbeat is under ninety seconds old.
+- `live`: `true` while the heartbeat is under ninety seconds old and the last finished beat under five minutes old.
 - `agents`: the placement load described under [Panel](#panel).
 - `master`: `{"slug", "name"}` of the live master on the hive, or `null`.
 
@@ -2036,14 +2035,15 @@ The PATCH body takes one or more of these fields and nothing else:
 |---|---|
 | `name` | string, 1 to 200 characters |
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
-| `excluded` | array of lane role or profile names, each starting with a letter or digit followed by letters, digits, `.`, `_` or `-`; `[]` excludes nothing |
+| `excluded` | array of lane role or profile names, each starting with a letter or digit followed by letters, digits, `.`, `_` or `-`; the server joins the array with commas before parsing, so an entry holding a comma becomes two names and padding spaces are dropped; `[]` excludes nothing |
 | `prefer` | object of role to whole number rank |
 | `max_agents` | integer, 0 or more, or `"auto"` to clear the cap |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
 malformed `excluded` name, a `prefer` role the hive excludes, a rank below 1 or a negative max agents is refused.
 The retired `roles` field is an unknown field and is refused. `master-swarms` and `capabilities` are set only with
-`agentihooks hive set`. The credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
+`agentihooks hive set`. The credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in
+`X-Ledger-Slug`.
 
 ```bash
 curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
@@ -2072,7 +2072,7 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | `Could not read hives.` | The server answered an error, usually 503 with Redis down. | `curl` the list to read the error, then restore Redis. |
 | An edit shows `Hive settings need the operator` | The page was opened with an agent's credential. | Open the ledger with the operator's credential. |
-| An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
+| An edit shows `prefer names qa, a role this hive excludes` | `prefer` named a role in the hive's `excluded` list. | Remove the role from `excluded`, or drop it from `prefer`. |
 | move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
 | A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
 
