@@ -828,6 +828,24 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
 
 
+def test_a_plan_the_probe_killed_whole_passes_even_when_the_probe_left_less_budget_than_setup() -> None:
+    from scripts.ci_mutation.measured import budget_overrun
+
+    killed = {
+        "costs": {"scripts.sample.x__mutmut_1": 0.0, "scripts.sample.x__mutmut_2": 0.0},
+        "estimated_worker_seconds": 0.0,
+        "shard_worker_seconds": [0.0],
+        "workers": 4,
+    }
+    assert budget_overrun(killed, 138) == ""
+    survivor = {**killed, "costs": {"scripts.sample.x__mutmut_1": 1.0}, "shard_worker_seconds": [1.0]}
+    assert budget_overrun(survivor, 138) == (
+        "Mutant scripts.sample.x__mutmut_1 alone needs 1 worker seconds on one shard, against the 138 second shard"
+        " budget less 180 seconds of setup, so no shard count or pull request split can grade it; shorten or split"
+        " the tests that cover it."
+    )
+
+
 @pytest.mark.parametrize(
     ("loads", "budget", "status"), [([2700.0, 10.0], None, 0), ([2701.0, 10.0], None, 1), ([2700.0, 10.0], 1079, 1)]
 )
