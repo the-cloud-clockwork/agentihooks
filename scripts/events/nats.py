@@ -16,7 +16,7 @@ from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 from nats.js.kv import KeyValue
 
-from . import nats_payload, nkey
+from . import nats_batch, nats_payload, nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -427,6 +427,19 @@ class NatsStateStore:
             return None
         value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value or b""))
         return StateEntry(key=key, value=value, revision=entry.revision)
+
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        read = nats_batch.read_entries(
+            self._js, f"KV_{self._bucket}", keys, self._kv_subject, self._read_chunk, self._last_revision
+        )
+        return self._loop.run(read)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+    def _kv_subject(self, key: str) -> str:
+        return f"$KV.{self._bucket}.{key}"
+
+    @staticmethod
+    def _last_revision(last: nats_batch.Last) -> int:
+        return last.seq
 
     def create(self, key: str, value: bytes) -> int:
         return self._loop.run(self._write(key, value, 0, f"state key {key!r} exists"))

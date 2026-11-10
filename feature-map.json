@@ -1,6 +1,25 @@
 {
   "features": [
     {
+      "id": "bus-state-batch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2186",
+      "behaviour": "A swarm name lookup over several aliases reads every key from the bus state store with one JetStream request, keeping order, duplicates and missing keys.",
+      "seam": "NameRegistry.resolve_many through NameState.get_many to StateStore.get_many",
+      "tests": [
+        "tests/events/test_state_batch.py::test_memory_batch_preserves_order_missing_keys_and_duplicates",
+        "tests/events/test_state_batch.py::test_name_lookup_uses_one_bus_request",
+        "tests/events/test_nats_batch.py::test_last_per_subject_answers_the_newest_message_of_each_held_subject",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_creates_one_last_per_subject_consumer_and_reads_what_it_counts",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_sends_nothing_for_no_subjects",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_raises_the_create_error_and_unsubscribes",
+        "tests/events/test_nats_batch_units.py::test_last_per_subject_refuses_a_create_over_the_payload_limit",
+        "tests/events/test_nats_batch_units.py::test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none",
+        "tests/events/test_nats_batch_units.py::test_the_key_value_store_reads_many_keys_through_its_bucket_stream",
+        "tests/events/test_nats_batch_units.py::test_the_scoped_store_reads_many_keys_through_its_swarm_stream"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",

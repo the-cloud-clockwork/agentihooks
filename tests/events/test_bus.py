@@ -52,6 +52,9 @@ class _StateStore:
     def get(self, key: str) -> StateEntry | None:
         return None
 
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        return [None for _ in keys]
+
     def create(self, key: str, value: bytes) -> int:
         return 1
 
