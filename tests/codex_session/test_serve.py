@@ -11,6 +11,8 @@ from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
 
+from pathlib import Path
+
 SWARM_ENV = {
     "AGENTIHOOKS_SWARM": "sw",
     "AGENTIHOOKS_SWARM_LANE": "eng",
@@ -573,3 +575,31 @@ def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_o
     with pytest.raises(ValueError) as failure:
         init_agent._binding_result(env, 90.0, {})
     assert str(failure.value) == "codex-session launch refused: replacement does not match the current execution"
+
+
+@pytest.mark.feature("codex-opening-account-refusal")
+@pytest.mark.parametrize("error_class", ["account_refused", "capacity"])
+def test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_class: str
+) -> None:
+    from scripts import codex_usage, init_agent
+    from scripts.codex_quota import CodexQuota
+    from scripts.profiles import binding
+
+    supervised(monkeypatch, lambda: pytest.fail("a refused opening must not start a pump"))
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+    spec = SimpleNamespace(slug="sw", environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha"))
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+
+    def refused(store: object, launch: object, deps: object) -> None:
+        raise supervisor.LaunchFailure(error_class, "opening refused")
+
+    monkeypatch.setattr(supervisor, "launch", refused)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 3
+    assert codex_usage.cached().get("alpha") == (
+        CodexQuota(1.5, "?", expired=True) if error_class == "account_refused" else None
+    )
+    with pytest.raises(ValueError, match="codex-session launch refused: opening refused"):
+        init_agent._binding_result({binding.REPORT: str(report)}, 0.1, {})

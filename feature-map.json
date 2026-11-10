@@ -2796,6 +2796,17 @@
       ]
     },
     {
+      "id": "codex-opening-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-canary-regress",
+      "behaviour": "A provider account refusal in the opening Codex turn fails the launch and its profile binding immediately, before the inbox pump starts. The routed account becomes expired so later hive launches select an eligible account instead of exhausting the canary deadline.",
+      "seam": "scripts.codex_session.supervisor.launch opening turn and scripts.codex_session.serve.main binding refusal and account exclusion",
+      "tests": [
+        "tests/codex_session/test_supervisor.py::test_a_refused_opening_fails_the_canary_before_the_pump_starts",
+        "tests/codex_session/test_serve.py::test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary"
+      ]
+    },
+    {
       "id": "codex-pump-account-refusal",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
