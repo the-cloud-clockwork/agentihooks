@@ -261,8 +261,15 @@ def _private_master(hive: dict, harness: str, front: bool) -> bool:
 
 
 def place_master(
-    harness: str, login: str, repo: str, hives: list[dict[str, Any]], now: int, front: bool = False
+    harness: str,
+    login: str,
+    repo: str,
+    hives: list[dict[str, Any]],
+    now: int,
+    front: bool = False,
+    closed: frozenset[str] = frozenset(),
 ) -> MasterPlacement | Wait:
+    """Place a master on a hive, never on an account whose key is in ``closed``."""
     hosting = [hive for hive in hives if live(hive, now) and hosts(MASTER, hive)]
     if not hosting:
         return Wait(f"no live hive takes {MASTER}")
@@ -275,12 +282,12 @@ def place_master(
         account = hive["master_login"].get(harness, "")
         forced = _private_master(hive, harness, front)
         if forced:
-            if login in ("", account):
+            if login in ("", account) and account_key(account) not in closed:
                 placed = MasterPlacement(hive["id"], account, MASTER_LOGIN, False)
                 candidates.append((headless, not bool(account), _order(MASTER)(hive), account, placed))
             continue
         native = hive["interactive"].get(harness)
-        if native and login in ("", native):
+        if native and login in ("", native) and account_key(native) not in closed:
             candidates.append(
                 (
                     headless,
@@ -292,6 +299,8 @@ def place_master(
             )
         for slot in hive["slots"]:
             if slot["harness"] != harness or slot["kind"] not in ("subscription", "api"):
+                continue
+            if account_key(slot["account"]) in closed:
                 continue
             candidates.append(
                 (

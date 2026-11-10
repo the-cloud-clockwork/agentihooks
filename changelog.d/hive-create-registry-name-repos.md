@@ -1,0 +1,1 @@
+- `agentihooks hive create` records the new hive's name and repos in the hive registry, so `hive list` shows its name and placement finds its repos; `--repos` names them, else the repos of every swarm it joins.
