@@ -9,7 +9,7 @@ nav_order: 49
 
 The swarm tick, ledger writes and remote workers depend on the LAN services in
 `agentihooks-swarm`. On Anton, MetalLB supplies their shared address
-`10.10.30.207`. MetalLB must be the only load balancer controller managing these
+`192.0.2.207`. MetalLB must be the only load balancer controller managing these
 services. A running Postgres pod does not guarantee that clients can keep their
 connections through that address.
 
@@ -107,7 +107,7 @@ kubectl -n metallb-system get deployments
 kubectl -n kube-system logs daemonset/k3s-server-config --tail=20
 ```
 
-The intended address is `10.10.30.207`; a node address list in its place warrants
+The intended address is `192.0.2.207`; a node address list in its place warrants
 checking for competing controllers. The intended current status writer is
 MetalLB's `controller`. Managed fields show recorded ownership and its update
 time, not a complete history. Kubernetes events also expire: an old count or

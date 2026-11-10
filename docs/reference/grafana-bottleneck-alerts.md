@@ -27,7 +27,7 @@ webhook posts from any private address. That command, its service and its
 
 With either unset the tick reads nothing and leaves every finding as it is.
 There is no separate token, secret path or listener to configure. Each request
-carries `Host: llm.homeofanton.com` and `x-mcp-servers: grafana`, and TLS names
+carries `Host: llm.example.com` and `x-mcp-servers: grafana`, and TLS names
 that host, as the Langfuse reads do.
 
 Check both are set without printing them:
