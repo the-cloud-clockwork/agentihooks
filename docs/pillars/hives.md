@@ -2326,8 +2326,8 @@ For each stage:
 2. Check node room for the new or raised pod's request, as in
    [Worker hive memory and placement](#worker-hive-memory-and-placement).
 3. Deliver the values change through the values repository's pull request, as every other chart change. Adding an
-   entry creates one new Deployment; raising an entry's `maxAgents` rolls only that hive's pod. Raising `workers.maxAgents`
-   also raises and rolls every entry that inherits it. A hive with a hostPath or claim home rolls by Recreate: the old
+   entry creates one new Deployment; raising an entry's `maxAgents` rolls only that hive's pod.
+   Raising `workers.maxAgents` also raises and rolls every entry that inherits it. A hive with a hostPath or claim home rolls by Recreate: the old
    pod's preStop drains its agents before the new pod starts. A hive on the default `emptyDir` home rolls by
    RollingUpdate, so the new pod starts while the old one still drains.
 4. Confirm the stage: every worker hive pod is `Running`, and `agentihooks hive list` shows each hive live with its
