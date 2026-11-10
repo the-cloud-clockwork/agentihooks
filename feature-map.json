@@ -10,7 +10,8 @@
         "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_rows_match_the_quota_hooks_reserved_ceiling",
         "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_choice_falls_through_reserved_claude_to_codex_or_names_its_refusal",
         "tests/test_swarm_v2_approved_accounts.py::test_fleet_launch_picker_cannot_restore_a_reserved_account_as_a_fallback",
-        "tests/test_swarm_v2_approved_accounts.py::test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane"
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane",
+        "tests/hive/test_master_swarms.py::test_hive_launch_offers_the_reserved_account_to_the_master_lane_only"
       ]
     },
     {

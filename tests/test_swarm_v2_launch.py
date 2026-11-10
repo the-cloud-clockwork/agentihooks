@@ -1264,8 +1264,10 @@ def test_registration_reports_a_missing_global_reservation(world, monkeypatch):
 
 
 def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a_codex_agent(world: World) -> None:
-    asked: list[tuple[str | None, str]] = []
-    world.launcher.accounts = lambda cap, planned, left, harness, lane: asked.append((planned, harness)) or "codex-key"
+    asked: list[tuple[str | None, str, str]] = []
+    world.launcher.accounts = lambda cap, planned, left, harness, lane: (
+        asked.append((planned, harness, lane)) or "codex-key"
+    )
     world.launcher.planned = lambda task, harness: f"{task}-{harness}"
     world.launcher.planned_harness = {"task": "codex"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
@@ -1273,7 +1275,7 @@ def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a
 
     world.launcher.from_tick(request, world.terms, pod_target)
 
-    assert asked == [("task-codex", "codex")]
+    assert asked == [("task-codex", "codex", "eng")]
     [sent] = world.runtime.requests
     assert sent.task["harness"] == "codex"
     agent = world.store.execution(SLUG, sent.task["execution_id"])
