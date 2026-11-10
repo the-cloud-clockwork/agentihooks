@@ -86,8 +86,10 @@ class TickSites:
     scan: Token[PassProcesses | None] | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the start, agents and tasks sites."""
-        return {START: self._start, "agents": self._listed, "tasks": self._configured}
+        """Return the checks run before the start, agents and tasks sites, each reading and writing the keys
+        ``TICK_HOOK_KEYS`` declares for its site."""
+        found = {START: self._start, "agents": self._listed, "tasks": self._configured}
+        return {site: found[site] for site in TICK_HOOK_KEYS}
 
     def shut(self, step: Step) -> bool:
         """Return whether ``step`` stays shut: every step once a step held an exception; a tick site past the start
