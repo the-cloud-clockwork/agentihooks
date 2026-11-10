@@ -1,6 +1,33 @@
 {
   "features": [
     {
+      "id": "hive-label-reserves-identifier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
+      "behaviour": "Machine label reservations retain both the registered hive identifier and its settled name, including interface hives named swarm-master.",
+      "seam": "scripts.hive.machine.held_names with registry interface records",
+      "tests": [
+        "tests/hive/test_machine_names.py::test_an_interface_hive_reserves_its_settled_name_and_identifier"
+      ]
+    },
+    {
+      "id": "hive-agent-token-holder-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2263",
+      "behaviour": "Once AGENTIHOOKS_HIVE_HOLDERS=enforce, hive agent token issue reads only the member's holder record and never the member map, even with legacy credentials on. Until then, with legacy credentials on or off, a member with no holder record gets one written from its member record, with a logged line, before it is issued or refused. The auth service and the hive holders command backfill the holder record of every member minted before it whose ledger credential still maps to it.",
+      "seam": "scripts.hive.auth.issue_agent",
+      "tests": [
+        "tests/hive/test_holder_backfill.py::test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_on",
+        "tests/hive/test_holder_backfill.py::test_until_enforced_issue_backfills_and_logs_a_legacy_member_once_even_with_legacy_credentials_off",
+        "tests/hive/test_holder_backfill.py::test_until_enforced_an_unmapped_member_is_logged_and_refused",
+        "tests/hive/test_holder_backfill.py::test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map",
+        "tests/hive/test_holder_backfill.py::test_the_backfill_leaves_held_and_unmapped_members_alone",
+        "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
+        "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
+        "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
@@ -2804,20 +2831,16 @@
       ]
     },
     {
-      "id": "hive-agent-token-holder-only",
+      "id": "hive-signer-membership-sync",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2263",
-      "behaviour": "Once AGENTIHOOKS_HIVE_HOLDERS=enforce, hive agent token issue reads only the member's holder record and never the member map, even with legacy credentials on. Until then, with legacy credentials on or off, a member with no holder record gets one written from its member record, with a logged line, before it is issued or refused. The auth service and the hive holders command backfill the holder record of every member minted before it whose ledger credential still maps to it.",
-      "seam": "scripts.hive.auth.issue_agent",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2194",
+      "behaviour": "Invite refreshes the mounted signer after adding a member; revoke and remove unlist the member and refresh the signer without waiting for the hourly secret sync.",
+      "seam": "hive invite, revoke and remove signer member listing",
       "tests": [
-        "tests/hive/test_holder_backfill.py::test_issue_for_a_legacy_member_reads_no_member_map_with_legacy_credentials_on",
-        "tests/hive/test_holder_backfill.py::test_until_enforced_issue_backfills_and_logs_a_legacy_member_once_even_with_legacy_credentials_off",
-        "tests/hive/test_holder_backfill.py::test_until_enforced_an_unmapped_member_is_logged_and_refused",
-        "tests/hive/test_holder_backfill.py::test_the_backfill_lets_a_legacy_member_issue_without_reading_the_member_map",
-        "tests/hive/test_holder_backfill.py::test_the_backfill_leaves_held_and_unmapped_members_alone",
-        "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
-        "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
-        "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
+        "tests/hive/test_signer_sync.py::test_an_invited_member_joins_at_once_through_the_mounted_signer",
+        "tests/hive/test_signer_sync.py::test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs",
+        "tests/hive/test_signer_sync.py::test_hive_remove_syncs_the_signer_record_after_it_unlists",
+        "tests/hive/test_signer_sync.py::test_the_invite_command_passes_the_signer_sync_target"
       ]
     },
     {
