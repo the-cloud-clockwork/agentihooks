@@ -193,7 +193,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import engine, pool
+from scripts.tick import engine, hook_reads, pool
 from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
@@ -256,6 +256,7 @@ WRAPPER_PREFIX = (
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
 INTENT_JOINS = {"wrapper intent": "wrapper relay"}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -460,7 +461,7 @@ class _Wrapper:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
         later site's step may spawn before its hook runs."""
-        return {
+        found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
@@ -469,6 +470,7 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
+        return hook_reads.guarded(found, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
