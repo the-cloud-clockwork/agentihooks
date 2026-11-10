@@ -3325,6 +3325,7 @@
       "seam": "scripts.tick.steps.knowledge._knowledge_warm registered as tick step knowledge warm",
       "tests": [
         "tests/tick/steps/test_knowledge_warm.py::test_knowledge_warm",
+        "tests/tick/steps/test_knowledge_warm.py::test_the_step_runs_inside_the_window_an_ask_treats_as_fresh",
         "tests/tick/steps/test_knowledge_warm.py::test_a_task_added_to_the_ledger_is_in_the_index_after_one_run",
         "tests/tick/steps/test_knowledge_warm.py::test_the_step_reads_the_ledger_export_under_its_deadline",
         "tests/tick/steps/test_knowledge_warm.py::test_a_run_while_an_earlier_refresh_still_runs_skips_without_reading_the_ledger",
