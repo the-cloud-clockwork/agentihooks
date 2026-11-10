@@ -478,12 +478,12 @@ any hive differs or published nothing.
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that do not exclude
 its lane, role or profile,
-then drops, in order, those with no room under `max-agents`, those that do not advertise the account slot the
-router picked, those that do not list the task's repo, and, for an interactive login, those that do not hold that
-login. Each step that empties the list names its reason, and the launch waits with it.
+then drops, in order, those that do not advertise the account slot the router picked, those with no room under
+their agent ceiling, those that do not list the task's repo, and, for an interactive or master login, those that do
+not hold that login. Each step that empties the list names its reason, and the launch waits with it.
 
-Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
-hive over an ephemeral one, then the hive id.
+Among the hives left, placement picks the lowest `prefer` rank for the role, then the smallest share of its agent
+ceiling in use, then a lasting hive over an ephemeral one, then the hive id.
 
 `agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
 this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
@@ -493,19 +493,91 @@ same tick. When every kept hive is full the launch waits rather than use another
 and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
 switches back on the next tick.
 
-`eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
-Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
-room or none is live.
-A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
-agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. The engineer, cicd, planner
-and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
-its UI role.
+### Placement by role
 
-When no live hive takes the role:
+The host kind an agent lands on follows from its placement role. A hive's `ui` setting declares its kind: `ui=yes`
+is a UI hive, such as the workstation that runs the herdr server the operator watches; `ui=no` is a headless hive,
+such as an Anton worker pod.
 
-- Every role waits with "no live hive takes" the role.
-- The master has its own chain, below.
+The role comes from the profile the launch resolves for the task, so a task's `profile` decides it before its lane
+does:
+
+| Profile | Placement role | Host kind |
+|---|---|---|
+| `master` (every master seat) | `master` | UI hive; see [Master placement](#master-placement) and [Workstation fallback](#workstation-fallback) |
+| `frontend`, on any lane | `frontend` | UI hive only |
+| `qa`, on any lane | `qa` | UI hive only |
+| `engineer` | `eng` | Any hive that does not exclude it |
+| `cicd` | `ci` | Any hive that does not exclude it |
+| `planner` | `plan` | Any hive that does not exclude it |
+| `dispatcher` | `dispatch` | Any hive that does not exclude it |
+
+Any other profile places under its own name. Placement drops a hive whose `excluded` list names the lane, the role
+or the profile.
+
+UI roles, `master`, `qa` and `frontend`:
+
+- While a live UI hive takes the role, placement chooses only among UI hives, even when a headless hive also takes
+  it.
+- When headless hives take a `qa` or `frontend` role and no live UI hive does, the launch waits with
+  `no live swarm-master takes qa` (or `frontend`). It never runs on the headless hive.
+- These roles never overflow to the local machine, and round robin placement leaves them under `anton-first`.
+
+Worker roles, `eng`, `ci`, `plan` and `dispatch`, place on every live hive that does not exclude them, UI or
+headless, by the order above. A UI hive's `excluded` default is empty, so the workstation takes worker work on
+equal terms with the pods unless it excludes the worker roles or the pods rank first in `prefer`. Two layouts keep
+worker roles on headless hives:
+
+```bash
+# Worker work never runs on the workstation; it waits for a pod with room
+agentihooks hive set anton-1 ui=no ephemeral=yes                 # excluded defaults to master
+agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+
+# Worker work runs on the workstation only when no ranked pod has room, with the reason logged
+agentihooks hive set anton-1 prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive set desk ui=yes excluded=
+agentihooks hive show desk                                       # "excluded": [], "prefer": {}
+```
+
+With the first layout a worker launch that finds no pod with room waits with the pods' reason, such as
+`no hive for eng has room: anton-1 ...`. The local machine overflow below also reads the local hive's `excluded`
+list, so it never runs the launch on that machine either.
+
+With the second layout the workstation hive takes the launch once every ranked pod lacks room or the account slot,
+or is not live, draining or excluding the role. The agent's profile decision then carries `placement_spill` with
+`preferred`, the ranked hive it skipped, and `refusal`, that hive's reason; the controller prints the same fields as
+a `hive_placement_spill` JSON line on stderr with the swarm, task, agent name and chosen hive.
+
+When no hive at all takes a worker launch, a `hybrid` controller, or a `local` machine with `hive-placement=on`,
+runs it in the machine's own herdr panes while the machine is under `local-max-agents` and its local hive record,
+if any, does not exclude the role; see
+[Hive placement for one swarm on a local machine](#hive-placement-for-one-swarm-on-a-local-machine). A full machine
+waits with the hive's reason followed by `, and the local machine runs <n> of its <max> agents`.
+
+Pinned and gated tasks narrow the hives before the role rule runs:
+
+- A task with `hive` set places only on that hive.
+- A task with `workstation=yes` places on the UI hive, or on the controller's own hive when no UI hive is
+  registered, and waits with `the task needs the workstation, so no remote hive takes it` otherwise.
+- A task with `needs` places only on hives that declare every capability; see
+  [Capabilities and task needs](#capabilities-and-task-needs).
+
+The fallback reasons an agent record carries in its profile decision:
+
+| Field | Written when |
+|---|---|
+| `placement_fallback` | A master runs on a headless hive because no UI hive fits; for a master pinned to a hive it reads `the task is pinned to <hive>`. |
+| `placement_spill` | The hive ranked first for the role in `prefer` refused, or is not live, draining or excluding the role, and another hive took the launch. |
+
+When no live hive takes the role, every role waits with `no live hive takes <role>`; the master then follows
+[Workstation fallback](#workstation-fallback).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A frontend or qa task waits with `no live swarm-master takes frontend` | Only headless hives are live for the role. | Start the UI hive, or check `agentihooks hive list` for its heartbeat. |
+| An engineer or planner runs on the workstation while pods have room | The workstation does not exclude the role and has the smaller share of its ceiling in use. | `agentihooks hive set <workstation> excluded=eng,ci,plan,dispatch`, or rank the pods first in `prefer`. |
+| A worker task waits with `no live hive takes eng` | Every live hive excludes `eng`, or is draining. | Remove `eng` from a hive's `excluded` list, or wait for the drain to end. |
+| A master runs on a pod | That pod's `excluded` list does not name `master`, or `master-swarms` lists the swarm. | `agentihooks hive set <pod> excluded=master`; the next master launch returns to the UI hive. |
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
 
