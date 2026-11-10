@@ -61,10 +61,14 @@ def test_archive_moves_only_rows_no_live_reader_returns(store):
 
 @pytest.mark.feature("swarm-archive-prunes-intents")
 def test_archive_prunes_intents_for_the_rows_it_archives(store):
-    first, second, third, other = history(store)
+    from scripts.swarm import lease
 
-    assert first.execution_id in section(store, "intents")
-    assert second.execution_id in section(store, "intents")
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        first, second, third, other = history(store)
+        assert first.execution_id in section(store, "intents")
+        assert second.execution_id in section(store, "intents")
 
     assert store.execution_registry.archive("fixture") == 2
 
@@ -292,7 +296,12 @@ def test_archive_keeps_rows_without_a_seat_or_generation(store):
 
 @pytest.mark.feature("swarm-archive-prunes-intents")
 def test_reconcile_archives_dead_rows(store):
-    first, second, *_ = history(store)
+    from scripts.swarm import lease
+
+    held = lease.acquire(store, "fixture", "home")
+    assert held is not None
+    with lease.fencing(held.epoch):
+        first, second, *_ = history(store)
     runtime = MagicMock()
     runtime.live_names.return_value = set()
 
