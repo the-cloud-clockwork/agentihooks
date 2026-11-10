@@ -123,6 +123,15 @@ def test_order_ack_and_live_execution(setup):
     assert not setup.redis.xrange(setup.orders.stream("host"))
 
 
+def test_a_hive_ack_carries_the_remote_control_its_launch_recorded(setup):
+    off = {"state": "off", "detail": "subscription token fallback"}
+    placed = replace(setup.runtime.spawn.return_value.value, remote_control=off)
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    setup.orders.send("host", setup.order)
+    assert setup.consumer.poll() == 1
+    assert setup.orders.ack(setup.order).execution["remote_control"] == off
+
+
 @pytest.mark.parametrize(
     "field,value,failure", [("epoch", 0, "stale_epoch"), ("expires_at", 1, "expired"), ("generation", 9, "identity")]
 )

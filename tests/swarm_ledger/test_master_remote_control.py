@@ -62,11 +62,7 @@ console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
         "attrs": {"data-tip": "Remote Control: off (fallback auth), phone access unavailable"},
         "kids": [
             {"label": "phone access unavailable", "tone": "off"},
-            {
-                "tag": "span",
-                "attrs": {"class": "sw-sub", "text": "fallback auth"},
-                "kids": [],
-            },
+            {"tag": "span", "attrs": {"class": "sw-sub", "text": "fallback auth"}, "kids": []},
         ],
     }
 

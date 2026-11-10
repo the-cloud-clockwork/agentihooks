@@ -443,6 +443,7 @@ class Consumer:
             "launched_at": placed.launched_at,
             "launch_timings": placed.launch_timings,
             "overlays": list(placed.overlays),
+            **({"remote_control": placed.remote_control} if placed.remote_control else {}),
         }
         return Ack("live", target, "", execution)
 
