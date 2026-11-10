@@ -9,7 +9,8 @@ nav_order: 8
 Addresses and host names on this page are documentation placeholders:
 `192.0.2.200` stands for the internal ingress, `192.0.2.130` for the host
 that runs the data plane containers and `example.com` for the deployment's
-domain. The built in defaults carry the deployment's own values.
+domain. Where this page names a built in default, the code carries the
+deployment's real ingress address and domain; the page shows their placeholders.
 
 AgentiHooks sends telemetry along five paths. Only the agent trace exporter
 writes to Langfuse; the others speak OTLP to an OpenTelemetry collector.

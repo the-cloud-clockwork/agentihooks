@@ -30,7 +30,10 @@ PRIVATE_HOST = re.compile(
     r"(?<![\w.-])((?:[A-Za-z0-9-]+\.)+(?:" + "|".join(re.escape(s) for s in HOST_SUFFIXES) + r"))(?![\w-]|\.\w)",
     re.IGNORECASE,
 )
-PUBLIC_HOST = re.compile(r"(?:^|\.)(?:example\.|cluster\.local$)", re.IGNORECASE)
+PUBLIC_HOST = re.compile(
+    r"(?:^|\.)(?:example\.(?:" + "|".join(re.escape(s) for s in HOST_SUFFIXES) + r")|cluster\.local)$",
+    re.IGNORECASE,
+)
 TOKENS = {
     "github-token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
     "aws-access-key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
@@ -124,11 +127,11 @@ def walk(paths: Iterable[str], excludes: Iterable[str]) -> Iterator[Path]:
 
 
 def scan_file(path: Path, keywords: Iterable[str]) -> list[Hit]:
-    """Return every hit in one text file; a binary or undecodable file yields none."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
+    """Return every hit in one file; a file holding a NUL byte is binary and yields none."""
+    data = path.read_bytes()
+    if b"\0" in data:
         return []
+    text = data.decode("utf-8", errors="replace")
     words = tuple(keywords)
     return [
         Hit(path.as_posix(), number, rule)

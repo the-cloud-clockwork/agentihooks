@@ -3219,7 +3219,9 @@
         "tests/test_docs_sanity.py::test_a_vendor_sample_key_marked_example_is_not_a_token",
         "tests/test_docs_sanity.py::test_keywords_from_the_environment_and_a_file_hit_without_printing_the_keyword",
         "tests/test_docs_sanity.py::test_directories_are_walked_and_excluded_globs_skipped",
-        "tests/test_docs_sanity.py::test_a_missing_path_is_a_usage_error"
+        "tests/test_docs_sanity.py::test_a_missing_path_is_a_usage_error",
+        "tests/test_docs_sanity.py::test_an_example_label_passes_only_right_before_the_private_suffix",
+        "tests/test_docs_sanity.py::test_a_text_file_that_is_not_utf8_is_still_scanned"
       ]
     }
   ],

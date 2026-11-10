@@ -86,6 +86,21 @@ def test_directories_are_walked_and_excluded_globs_skipped(tmp_path: Path, capsy
 
 
 @pytest.mark.feature("docs-sanity-scan")
+def test_an_example_label_passes_only_right_before_the_private_suffix() -> None:
+    assert docs_sanity.line_rules("swarm.example.internal", ()) == []
+    assert docs_sanity.line_rules("db.example.corp.lan", ()) == ["private-host"]
+
+
+@pytest.mark.feature("docs-sanity-scan")
+def test_a_text_file_that_is_not_utf8_is_still_scanned(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    page = tmp_path / "latin.md"
+    page.write_bytes("café at 10.9.8.7\n".encode("latin-1"))
+
+    assert docs_sanity.main([str(page)]) == 1
+    assert capsys.readouterr().out.splitlines() == [f"{page.as_posix()}:1: private-ipv4"]
+
+
+@pytest.mark.feature("docs-sanity-scan")
 def test_a_missing_path_is_a_usage_error(tmp_path: Path) -> None:
     assert docs_sanity.main([str(tmp_path / "absent")]) == 2
     assert docs_sanity.main(["--keywords-file", str(tmp_path / "absent.txt"), str(tmp_path)]) == 2
