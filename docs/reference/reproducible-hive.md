@@ -9,7 +9,9 @@ nav_order: 21
 Two workstation commands add and remove a Kubernetes hive: `agentihooks hive create` brings a new hive live in herdr
 with an engineer working on it, and `agentihooks hive remove` drains a hive and deletes everything it owns. Every
 other step, the antoncore pull request, the OpenBao record, the member credential and the herdr entry, runs inside
-them.
+them. [Invite a member by hand](#invite-a-member-by-hand) runs the credential step alone, and
+[Time a run from zero to a healthy engineer](#time-a-run-from-zero-to-a-healthy-engineer) times the path with
+`scripts/packaging/hive-reproduce.sh`.
 
 1. TOC
 {:toc}
@@ -99,7 +101,7 @@ It needs `OPENBAO_URL` and `OPENBAO_TOKEN` and reaches the swarm Redis this work
 
 | Key | Value |
 |---|---|
-| `credential` | the member's `hive.env`: hive URL, hive id, Redis credential, and `AGENTIHOOKS_SWARM_URL` when a ledger address is known; with a NATS address also `AGENTIHOOKS_BUS=nats` and `AGENTIHOOKS_BUS_URL` |
+| `credential` | the member's `hive.env`: `AGENTIHOOKS_HIVE_ID`, `AGENTIHOOKS_HIVE_URL`, `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL`, `AGENTIHOOKS_HIVE_REDIS_URL`; `AGENTIHOOKS_SWARM_URL` when a ledger address is known; with a NATS address also `AGENTIHOOKS_BUS=nats` and `AGENTIHOOKS_BUS_URL`, and with a bus grant `AGENTIHOOKS_BUS_CREDENTIALS`, `AGENTIHOOKS_BUS_BIND=1` and `AGENTIHOOKS_BUS_SWARMS` |
 | `swarm_url` | the ledger address the hive reaches |
 | `ca_pem` | the ledger CA |
 
@@ -113,9 +115,12 @@ It needs `OPENBAO_URL` and `OPENBAO_TOKEN` and reaches the swarm Redis this work
 | `--bus-url` | from `--like`, else the hub signer record | the NATS address the new hive reaches |
 | `--swarm` | every swarm | a swarm the member's bus credential reaches; repeat for several. Applies only when `AGENTIHOOKS_NATS_SIGNER` names the hub signer record |
 
-With `AGENTIHOOKS_NATS_SIGNER` set, the new member is listed in that signer record, the credential carries
-`AGENTIHOOKS_BUS_SCOPED=1`, and the signer is synced to `AGENTIHOOKS_NATS_SIGNER_SYNC` (default
-`agentihooks-swarm/agentihooks-swarm-nats-signer`).
+With `AGENTIHOOKS_NATS_SIGNER` set and that signer record already holding its member swarm listing (`agentihooks hive
+scope` writes it), the new member is listed there with its swarms, the credential carries `AGENTIHOOKS_BUS_SCOPED=1`,
+and the invite force syncs the ExternalSecret `AGENTIHOOKS_NATS_SIGNER_SYNC` (namespace/name, default
+`agentihooks-swarm/agentihooks-swarm-nats-signer`). The success line then ends `requested a sync of the signer record
+<target>`, or `could not force the sync of <target> (<reason>), so hive join sees it at the next refresh`; a failed
+sync never fails the invite. Without the listing the member is not listed and the credential is not scoped.
 
 Success prints `invited hive member <id> as <label>; OpenBao secret/<path>: wrote <keys> (<n> keys total)`, with key
 names only. A rerun on the same record revokes the member the record held before and adds `revoked the previous member
@@ -132,7 +137,8 @@ kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/component
 ## Time a run from zero to a healthy engineer
 
 `scripts/packaging/hive-reproduce.sh` runs the invite path against a namespace ArgoCD already synced and records the
-wall time of every step up to the first healthy engineer. Run it on the workstation from an agentihooks checkout, with
+wall time of every step up to the first healthy engineer: an engineer working on the new hive whose join report grades
+`complete` or `partial`. Run it on the workstation from an agentihooks checkout, with
 the same settings as `hive invite` and `kubectl` reaching the cluster:
 
 ```bash
@@ -153,8 +159,14 @@ is its name. It refuses at once unless a swarm has `hive-placement=on`, and fail
 | `join report` | a join report on the hive grades `complete` or `partial` |
 
 Each step prints `hive-reproduce: <step> after <seconds>s: <detail>`. At the end it prints a table of every step with
-its UTC time, the seconds it took and the seconds since the start, and the final line `healthy engineer after
-<seconds>s`. A step past its limit prints `timed out: <reason>`, the table so far, `failed at <step>`, and exits 1.
+its UTC time, the seconds it took and the seconds since the start; the elapsed seconds of the `join report` row are
+the wall time. A step past its limit prints `hive-reproduce: <step> after <seconds>s: timed out: <reason>` and the
+table so far, and exits 1. The outcome line, `healthy engineer after <seconds>s` or `failed at <step>`, is written only
+to `HIVE_TIMING_FILE`.
+
+A failure outside a timed wait exits at once with no table: a missing namespace (the `kubectl get namespace` error),
+an invite that refuses or prints no member id (`hive-reproduce: hive invite printed no member: <output>`), and a
+failed forced sync or rollout restart (the `kubectl` error).
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -168,15 +180,19 @@ its UTC time, the seconds it took and the seconds since the start, and the final
 | `HIVE_KEEP` | `no` | `yes` keeps the invited member when the script exits |
 | `HIVE_REMOVE_WAIT_S` | `300` | the `--wait` passed to `hive remove` |
 
-When the script exits, on success or failure, it runs `hive remove <member> --label <label> --path <record>` on the
-member it invited, unless `HIVE_KEEP=yes`. A failed remove prints the command to run by hand. Set `HIVE_KEEP=yes` to
-keep the hive after a timing run:
+When the script exits after its invite, on success or failure, it runs `hive remove <member> --label <label> --path
+<record> --wait <HIVE_REMOVE_WAIT_S>` on the member it invited, unless `HIVE_KEEP=yes`. That is the full
+[remove](#remove-a-hive): it drains the hive's agents, then deletes the member, the herdr entry, the registry records,
+the OpenBao record, and opens a pull request into antoncore `dev` deleting the hive's manifests. A failed remove prints
+`hive-reproduce: hive remove <member> failed; run agentihooks hive remove <member> --label <label>`; add `--path
+<record>` when `HIVE_RECORD` was set. Set `HIVE_KEEP=yes` to keep the hive after a timing run:
 
 ```bash
 HIVE_KEEP=yes HIVE_TIMING_FILE=~/hive-timing.log scripts/packaging/hive-reproduce.sh swarm-hive-002 swarm-hive-002
 ```
 
-Record the final `healthy engineer after <seconds>s` line and its step table as the wall time of the run.
+Record the `healthy engineer after <seconds>s` line and the step table from the timing file as the wall time of the
+run.
 
 ## Check by hand
 
