@@ -977,7 +977,7 @@
     },
     {
       "id": "swarm-tick-view-lane-fit",
-      "origin": "incident",
+      "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-view-critical-lane-fit",
       "behaviour": "The tick wrapper waits for the pass view only while the critical and slow lanes keep a reserve for the reread and the steps that need the view; a build that misses that bound yields the last view the swarm completed in the long running tick process, and a late build replaces it once it ends unless a newer build is kept, so waits end, merge pass, done recheck and health findings run every pass. The first pass of a process has no earlier view and waits for its build as before.",
       "seam": "pass_view in scripts.tick.steps.host, called by the relay hook of the wrapper pass in scripts.swarm.cli",
