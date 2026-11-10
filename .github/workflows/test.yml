@@ -2716,6 +2716,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
 
+      - name: Keep internal addresses, identifiers and private keywords out of public docs
+        if: ${{ !cancelled() }}
+        env:
+          DOCS_SANITY_KEYWORDS: ${{ secrets.DOCS_SANITY_KEYWORDS }}
+        run: |
+          scanner="$RUNNER_TEMP/grader/scripts/docs_sanity.py"
+          if [[ ! -f "$scanner" ]]; then scanner=scripts/docs_sanity.py; fi
+          python -I "$scanner" --keywords-env DOCS_SANITY_KEYWORDS docs evidence changelog.d README.md
+
       - name: Require wall clock markers on elapsed bounds
         if: ${{ !cancelled() }}
         run: |

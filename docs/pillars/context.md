@@ -227,7 +227,7 @@ Agents learn from mistakes — but only within a single session. Close the termi
 │ [2026-04-03 14:22] Bash -- Permission denied: /var/run/docker.sock  │
 │   (input: docker ps -a)                                             │
 │ [2026-04-05 09:14] mcp__anton__unraid_ssh -- Connection refused     │
-│   (input: host=192.168.1.10)                                        │
+│   (input: host=192.0.2.10)                                          │
 │ [2026-04-06 22:38] Bash -- kubectl: command not found               │
 │   (input: kubectl rollout status deploy/api -n prod)                │
 └────────────────────────────────────────────────────────────────────┘
