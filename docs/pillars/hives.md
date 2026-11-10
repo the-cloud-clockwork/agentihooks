@@ -1502,6 +1502,46 @@ system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is 
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
 lists.
 
+### Accounts on a worker pod
+
+A worker pod holds every Claude and Codex account the workstation routes, never one account per pod. Its hive reads
+each `AH_CC_TOKEN_<slug>` and `AH_CX_TOKEN_<slug>` in its environment by name and advertises one subscription slot per
+account, so placement and the launch reservation can put an agent of any account on the pod. Give the pod the tokens
+through one Secret in `workers.envFromSecrets` whose keys are the environment variable names. In Anton the
+`<hive>-accounts` ExternalSecret extracts every `AH_CC_TOKEN_*` key from the `agentihooks/claude-creds` record and
+every `AH_CX_TOKEN_*` key from `agentihooks/codex-creds` in OpenBao, and drops any other key:
+
+```yaml
+workers:
+  envFromSecrets:
+    - swarm-hive-001-env
+    - swarm-hive-001-accounts   # every AH_CC_TOKEN_* and AH_CX_TOKEN_* key, named as its variable
+    - swarm-hive-001-settings
+```
+
+A token added to either record reaches the pod at the next ExternalSecret refresh (one hour in Anton) and the next pod
+start, since environment variables are read at container start. `agentihooks hive setup` never writes account tokens
+into the settings record; the accounts records carry them.
+
+The pod holds the tokens but never probes their quota, so its own readings stay missing and its subscription caps
+would read 0. Each beat, a subscription slot with no reading, or an older one, takes the cap and quota reading of the
+newest reading any other live hive published for the same account, usually the workstation's; see
+[Account caps on every hive](#account-caps-on-every-hive). The pod therefore admits up to the account's real cap, and
+the launch reservation still counts the account's sessions across every hive against that one cap.
+
+Check that a pod carries every account and real caps from the workstation:
+
+```bash
+agentihooks hive compare --base <workstation id>   # no "accounts missing AH_CC_TOKEN_<slug>" line for the pod
+agentihooks hive show <pod hive id>                # "slots": one subscription slot per account, each with its cap
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive compare` prints `accounts missing AH_CC_TOKEN_<slug>` or `AH_CX_TOKEN_<slug>` for the pod | The accounts Secret lacks the key: the token is not in the OpenBao record, the key is not prefixed `AH_CC_TOKEN_` or `AH_CX_TOKEN_`, or the pod started before the Secret refreshed. | Add the token to the record under its variable name, wait for the ExternalSecret refresh or force one, then roll the pod. |
+| A pod slot shows `cap` 0 while the workstation shows a cap for that account | No other live hive has published a reading for the account: the workstation is stale or does not hold that token either. | Start or restart the workstation hive so it probes the account; `agentihooks hive list` shows which hives are live. |
+| The pod lists no Codex slot for an account it holds | The Codex router refuses the token: it is not a usable Codex credential, or it expires sooner than the router's minimum token life. | Replace the token in `agentihooks/codex-creds`; see [Codex accounts](load-balancing.md#codex-accounts). |
+
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
