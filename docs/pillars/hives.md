@@ -1625,7 +1625,7 @@ workers:
 **Per node storage.** `workers.node` names the node; its `hiveStorage.nodes` entry, else `hiveStorage.default`, gives
 the host folders. The chart pins the pod to that node, mounts `<homes>/<release>` as `/home/worker` and
 `<tmp>/<release>` as `/tmp`, and runs a pre-install and pre-upgrade Job (`<fullname>-storage`, an ArgoCD PreSync hook
-when `workers.rollout.enabled`) on that node that makes both folders with owner 10001 and mode 0750. With `mount` set,
+when `workers.rollout.enabled`) on that node that makes both folders for uid 10001 with mode 0750. With `mount` set,
 the Job first checks that `mount.path` is an `fsType` filesystem holding `mount.marker` and fails otherwise, so the sync
 stops before any folder lands on the system drive. Both `homes` and `tmp` must sit under `mount.path`.
 
@@ -1686,7 +1686,9 @@ kubectl -n <namespace> logs job/<fullname>-storage
 is deleted once it succeeds, so its log exists only while it fails or runs. One engineer on the hive passing
 `wt.sh new` proves the floor holds.
 
-**Troubleshooting.**
+### Worker hive home volume refusals
+
+The chart refuses these values at render time; the storage Job and the kubelet report the rest on the cluster.
 
 | Symptom | Cause | Fix |
 |---|---|---|
