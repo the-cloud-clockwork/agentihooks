@@ -1959,8 +1959,8 @@ The image fills the venv in two layers:
 | Hive layer | `deploy/worker/Dockerfile` | the agentihooks wheel with `--no-deps`, built from a clone of `AGENTIHOOKS_REF` by default or from the build context with `AGENTIHOOKS_SOURCE=local`, as the kind proof builds it, and the pinned `ruff`, into a build stage venv copied over `/opt/venv`; the build requirements stay in that stage's system Python |
 
 The hive layer resolves no runtime dependency of agentihooks, so `requirements.lock` is the only source of the
-packages agentihooks imports in the pod. A package that `pyproject.toml` requires and the lock leaves out is missing in the pod while the
-workstation has it. Pods built before [pull request #5200](https://github.com/the-cloud-clockwork/agentihooks/pull/5200)
+packages agentihooks imports in the pod. A package that `pyproject.toml` requires and the lock leaves out is missing
+in the pod while the workstation has it. Pods built before [pull request #5200](https://github.com/the-cloud-clockwork/agentihooks/pull/5200)
 had this gap: `agentihooks init` in step 4 failed with `ModuleNotFoundError: No module named 'croniter'`, and agents
 in that pod ran without the profile.
 
@@ -1980,7 +1980,8 @@ To add or raise a dependency:
 1. Change `pyproject.toml`.
 2. Regenerate the lock from its existing pins plus the new requirement, so every other entry keeps its version.
    Replace `<package>` with the package's name and `<specifier>` with its requirement from `pyproject.toml`, such as
-   `croniter` and `>=6.2.4,<7`; the second grep drops its old pin when it has one. The lock also pins `setuptools` and `setuptools-scm`, which build
+   `croniter` and `>=6.2.4,<7`; the second grep drops its old pin when it has one. The lock also pins `setuptools`
+   and `setuptools-scm`, which build
    the agentihooks wheel in the base; they stay in the input.
 
    ```bash
