@@ -465,7 +465,7 @@ starts it while the swarm runs at `autonomy=full` and has an open dispatcher tri
 uncovered bottleneck share, a red dev run that holds work, or an inbox item for the seat. It ends the seat when the
 triggers close. It spawns through hive placement like the `eng`, `ci` and `plan` lanes: the
 `dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
-`dispatch`, `dispatcher` or the lane, ordered as in [Placement](#placement).
+`dispatch` or `dispatcher`, ordered as in [Placement](#placement).
 
 A worker hive pod excludes only `master` by default (`HIVE_EXCLUDED`, chart value `excluded: [master]`), so every
 pod takes the dispatcher. A UI hive excludes nothing by default, so the workstation takes the dispatcher on equal
