@@ -997,7 +997,7 @@ days, so the refresher below keeps it alive.
 
 - The slug follows the `accounts env` rule: lower cased, `@` becomes `at` and
   every other character outside `a-z` and `0-9` becomes `_`, one for one, so an
-  email works (`nestor.colt@gmail.com` becomes `nestor_coltatgmail_com`, `team-a`
+  email works (`operator@example.com` becomes `operatoratexample_com`, `team-a`
   becomes `team_a`) and the login prints a note recommending the email of the
   target account. A result that is empty, starts with `_`, or is `status`,
   `help`, `default` or `api` is refused. Both logins use this rule. An account

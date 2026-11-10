@@ -3,7 +3,7 @@
   "state": "passed",
   "evidence_class": "mocked: a recording stand in for the Anton herdr client answers herdr machine list, add, rename and remove with the 0.9.1 reply shapes captured in the SV2-HDR-01 live proof, and its status and schema replies are the SV2-HDR-01 captures; no herdr process, SSH connection or cluster runs in these cases",
   "input_sha256": {
-    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-registrations.json": "a5c5e29cfd985e820df102f0cdd0428f887ad397b288436a2d4874a03c56e8c0",
     "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940"
   },
   "observed": {
@@ -39,7 +39,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -49,7 +49,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -164,7 +164,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -174,7 +174,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -242,7 +242,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -252,7 +252,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -304,7 +304,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -314,7 +314,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -335,7 +335,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -345,7 +345,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "devbox",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -372,7 +372,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -382,7 +382,7 @@
         {
           "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
           "label": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
-          "target": "ssh://operator@devbox.lan",
+          "target": "ssh://operator@devbox.example.internal",
           "session": "default",
           "enabled": true,
           "selected": false
@@ -432,7 +432,7 @@
       "manual_after": {
         "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
         "label": "devbox",
-        "target": "ssh://operator@devbox.lan",
+        "target": "ssh://operator@devbox.example.internal",
         "session": "default",
         "enabled": true,
         "selected": false

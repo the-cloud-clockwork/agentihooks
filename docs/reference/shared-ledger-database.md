@@ -194,7 +194,7 @@ Each allowed write then lists those locks, with the client address of each refus
 `writer` alert per refused writer on the ledger it is writing, targeted at the master:
 
 ```
-The ledger writer at 10.0.0.5 was refused: ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
+The ledger writer at 192.0.2.5 was refused: ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
 ```
 
 A session with no client address, such as one on a local socket, shows as `an unseen client`.
