@@ -10,7 +10,7 @@ from functools import partial
 from pathlib import Path
 from time import monotonic, time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -266,14 +266,16 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        from scripts.hive import placement_waits
+
         runtime = self.runtime
         hive = getattr(runtime, "hive_launch", None) is not None
-        totals = ""
+        counted = workstation or (self.deployment == LOCAL and not hive)
+        totals = self.store.key(self.slug, placement_waits.TOTALS) if counted else ""
         if workstation or self.deployment == LOCAL:
-            from scripts.hive import admission, placement_waits
+            from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
-            totals = self.store.key(self.slug, placement_waits.TOTALS) if workstation or not hive else ""
             admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}", totals)
         if workstation:
             runtime = runtime.herdr_runtime
@@ -283,11 +285,9 @@ class FencedRuntime:
             task = self._hive_task(config, lane, task)
         with timing.step(f"{__name__}.FencedRuntime.runtime_spawn", report=False):
             try:
-                return cast("Placed", runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch}))
+                return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
             except BaseException:
                 if totals:
-                    from scripts.hive import placement_waits
-
                     placement_waits.admitted(self.store, self.slug, -1)
                 raise
 
