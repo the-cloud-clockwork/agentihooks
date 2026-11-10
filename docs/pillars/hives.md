@@ -1835,6 +1835,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
+   Init imports from the image's locked venv; see
+   [Python dependencies in the worker image](#python-dependencies-in-the-worker-image).
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
    prefer=<workers.prefer>`, by default `excluded=master master-swarms= prefer=`, keeping a stored excluded list, ui and ephemeral.
    `workers.prefer` takes `role:rank` pairs, such as `eng:1,ci:1,plan:1`: placement gives a role's agents to the
@@ -1942,6 +1944,81 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
 lists. [Worker hive home volume](#worker-hive-home-volume) gives examples, checks and refusals.
+
+### Python dependencies in the worker image
+
+The worker pod runs `agentihooks` from `/opt/venv`. That venv carries the same Python dependencies as the
+workstation install, `pip install -e ".[all]"`: every package in `[project] dependencies` of `pyproject.toml` and
+every package of the `all` extra, such as `croniter`, `redis`, `boto3`, `psycopg2-binary` and `nats-py`.
+
+The image fills the venv in two layers:
+
+| Layer | Dockerfile | Python install |
+|---|---|---|
+| Worker base | `docker/swarm-node/Dockerfile` | `pip install --require-hashes -r requirements.lock` from `docker/swarm-node/requirements.lock`, offline from the downloaded wheels, then the venv is made read only |
+| Hive layer | `deploy/worker/Dockerfile` | the agentihooks wheel built from the checked out source and the pinned `ruff`, both with `--no-deps` |
+
+The hive layer installs no dependency of its own, so `requirements.lock` is the only list of packages the pod can
+import. A package that `pyproject.toml` requires and the lock leaves out is missing in the pod while the
+workstation has it. Pods built before [pull request #5200](https://github.com/the-cloud-clockwork/agentihooks/pull/5200)
+had this gap: `agentihooks init` in step 4 failed with `ModuleNotFoundError: No module named 'croniter'`, and agents
+in that pod ran without the profile.
+
+Two checks keep the lock and the workstation install equal:
+
+| Check | Where it runs | Fails when |
+|---|---|---|
+| `test_base_lock_satisfies_every_requirement_of_the_workstation_install` in `tests/deployment/test_worker_hive_image.py` | the Tests workflow and the merge queue unit suite | a requirement of `[project] dependencies` or the `all` extra has no pinned version in `requirements.lock` that its specifier accepts |
+| Init check in `deploy/worker/kind-proof.sh` | the `kind` job of the Worker hive pod workflow (`hive-worker.yml`) | `agentihooks init --profile engineer` in the built image fails, or its `~/.claude/CLAUDE.md` lacks the line `<!-- profile: engineer -->` |
+
+The init check runs the built image as a Pod with an empty, memory backed `/home/worker` and `fsGroup` 10001, the
+same home the chart's worker Pod mounts, so a file the bare image leaves in the home cannot hide or cause a failure.
+[Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) covers the rest of that proof.
+
+To add or raise a dependency:
+
+1. Change `pyproject.toml`.
+2. Regenerate the lock from its existing pins plus the new requirement, so every other entry keeps its version.
+   Delete the old pin line of a package you raise. The lock also pins `setuptools` and `setuptools-scm`, which build
+   the agentihooks wheel in the base; they stay in the input.
+
+   ```bash
+   in=~/scratchpad/agentihooks/worker-lock/input.txt
+   mkdir -p "$(dirname "$in")"
+   grep -oE '^[A-Za-z0-9._-]+==[^ ]+' docker/swarm-node/requirements.lock > "$in"
+   echo 'croniter>=6.2.4,<7' >> "$in"
+   uv pip compile "$in" --generate-hashes --python-version 3.12 \
+     --python-platform x86_64-unknown-linux-gnu \
+     --output-file docker/swarm-node/requirements.lock
+   ```
+
+3. Write the lock's new checksum into `requirements_sha256` in `docker/swarm-node/versions.lock`. The base build
+   refuses a lock whose checksum differs:
+
+   ```bash
+   sha256sum docker/swarm-node/requirements.lock
+   ```
+
+4. Push. A change under `docker/swarm-node` is a base input, so the Worker hive pod proof rebuilds the base from the
+   new lock and runs the init check on it, and the Swarm worker image workflow publishes the new base on `dev`.
+
+To check a running pod after a rollout, read its start log and import the packages init needs inside it:
+
+```bash
+kubectl logs deployment/<release>-worker-hive -n <namespace> \
+  | grep -E 'worker-hive: agentihooks init|ModuleNotFoundError'
+kubectl exec deployment/<release>-worker-hive -n <namespace> -- \
+  python -c 'import croniter, redis, boto3, psycopg2, nats; print("worker venv imports: ok")'
+```
+
+A healthy start prints neither grep pattern, and the import prints `worker venv imports: ok`.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| The pod log shows `ModuleNotFoundError: No module named '<package>'` from `agentihooks init` | The pod runs an image whose base lock lacks a package `pyproject.toml` requires | Roll the pod onto a current image. On a current image, add the package to `requirements.lock` as above. |
+| `test_base_lock_satisfies_every_requirement_of_the_workstation_install` fails with `unmet` naming requirements | `pyproject.toml` gained or raised a requirement the lock does not satisfy | Regenerate the lock and its checksum in the same pull request. |
+| The `kind` job fails after the build, with `init.txt` in the `worker-hive-proof` artifact showing an init error or nothing | `agentihooks init --profile engineer` failed in the image, or rendered a profile other than `engineer` | Read `init.txt`; fix the import or render failure it names. |
+| The base build fails on the requirements checksum | `requirements_sha256` in `versions.lock` does not match `requirements.lock` | Write the `sha256sum` output into `versions.lock`. |
 
 ### Worker hive home volume
 

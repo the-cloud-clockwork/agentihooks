@@ -2438,6 +2438,25 @@ Limits: the check reads and compares only the `linux/amd64` base of a published 
 
 The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image; the init check's fresh home is an `emptyDir` with `fsGroup` 10001, as in the chart's worker Pod. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name; the proof records that image id in `image.txt`.
 
+### Init check
+
+While the cluster serves the proof, the script runs the built image as the Pod `init`:
+
+```bash
+agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"
+```
+
+The Pod mounts an empty, memory backed `emptyDir` at `/home/worker` with `fsGroup` 10001, as the chart's worker Pod
+mounts its home volume. A failed init, a missing import such as `No module named 'croniter'`, or a rendered
+`CLAUDE.md` without the line `<!-- profile: engineer -->` exits non zero; the script waits on that Pod before the
+chart checksum step, so the `kind` job fails and the image is not published. The Pod's output is `init.txt` in the
+`worker-hive-proof` artifact. `test_kind_proof_checks_init_renders_the_engineer_profile_in_a_pod_with_a_memory_home`
+pins the command, its order after the cluster wait and the Pod's home volume.
+
+The check catches a package `pyproject.toml` requires that `docker/swarm-node/requirements.lock` lacks, because the
+hive layer installs agentihooks with `--no-deps` over the locked base venv. See
+[Python dependencies in the worker image](pillars/hives.md#python-dependencies-in-the-worker-image).
+
 ### What the hive proof asserts
 
 After the worker Deployment rolls out, the proof runs a Python block on stdin inside the `hive-join` Pod against the proof Redis. It sends a `reap` order for an absent scratch folder, then checks the worker's hive record and the order's acknowledgement:
@@ -2529,6 +2548,8 @@ Runs [39100700634](https://github.com/the-cloud-clockwork/agentihooks/actions/ru
 | `worker_base=published` but the Pod lacks a base change | a path the base copies is missing from the base inputs | add the path to `base-current.sh` and the test's `INPUTS`; `test_base_inputs_cover_every_base_source_the_wheel_does_not_replace` should fail first |
 | `pod did not register a live hive`, `pod did not acquire hive membership` or `scratch order not acknowledged` | the worker Pod started but failed the hive proof; the build choice does not cause this | read `pods.txt`, `failed-worker.txt`, `previous-worker.txt`, `join.txt` and `previous-join.txt` in the `worker-hive-proof` artifact, written when the script fails |
 | `AssertionError` from `File "<stdin>"` right after `kubectl rollout status` of the worker Deployment, with no message | a registration field differs from the expectation: `ui`, `ephemeral`, `excluded`, `max_agents` or a `roles` key | read the values the worker set in `failed-worker.txt` and the Pod environment in `pods.txt`; when the change to `start.sh` or the chart was intended, update the assertion in `kind-proof.sh`, otherwise fix the registration |
+| The `kind` job fails while the `init` Pod runs, and `init.txt` shows `ModuleNotFoundError` | the base lock lacks a package that `pyproject.toml` requires | add it to `docker/swarm-node/requirements.lock` and its checksum to `versions.lock`; see [Python dependencies in the worker image](pillars/hives.md#python-dependencies-in-the-worker-image) |
+| The `kind` job fails while the `init` Pod runs, and `init.txt` shows init succeeded | the rendered `~/.claude/CLAUDE.md` lacks `<!-- profile: engineer -->`: init rendered another profile or no `CLAUDE.md` | fix the render; the check needs the marker line exactly |
 | `test_worker_hive_image.py` fails on the build lines | `kind-proof.sh` no longer has one hive-only build and a base plus hive rebuild branch | restore that shape; the tests pin both branches and the `WORKER_IMAGE` default |
 
 ## Historical measurements

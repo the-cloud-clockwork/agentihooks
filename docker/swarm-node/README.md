@@ -14,6 +14,14 @@ Debian snapshot and shell package versions, native herdr, Claude and Codex relea
 checksums, and the hashed Python requirements closure. The agentihooks source
 wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
+`requirements.lock` is the whole Python dependency set of the hive worker image:
+the hive layer installs agentihooks with `--no-deps` over it, so the lock must
+satisfy every `[project] dependencies` and `all` extra requirement in
+`pyproject.toml`, the workstation `-e ".[all]"` install.
+`tests/deployment/test_worker_hive_image.py` fails when it does not, and the hive
+image proof fails when `agentihooks init --profile engineer` does not render the
+profile in the built image. The [hives pillar](../../docs/pillars/hives.md#python-dependencies-in-the-worker-image)
+shows how to regenerate the lock.
 Template inputs come from the repository's packaged profiles, never a host home
 or credential store. Every package role profile and the shared `_guards` folder
 also sit at the template root, so a role name resolves as a template and a
