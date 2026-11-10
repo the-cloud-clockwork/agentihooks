@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm import capacity, cli, host_budget, tick
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, HiveAcks
 
 CAPS = {"eng": 2, "ci": 1, "plan": 0}
