@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "local-enforcements-store-ignored",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
+      "behaviour": "The repository ignore rules cover the project local enforcements store and its write temp file, so a checkout holding only that store reads clean to the push stop gate and to the dev sync after wt.sh done.",
+      "seam": "push_stop.inspect and git status on a checkout carrying the repository .gitignore after add_enforcement with local",
+      "tests": [
+        "tests/gates/test_local_enforcements_ignored.py::test_the_repo_ignore_rules_cover_the_local_enforcements_store",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_stop_gate_reads_a_checkout_holding_only_the_store_as_clean",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_dev_sync_after_wt_done_reads_a_checkout_holding_only_the_store_as_clean"
+      ]
+    },
+    {
       "id": "fleet-worker-reserved-master-ceiling",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
@@ -858,6 +870,23 @@
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
+      "id": "swarm-tick-hook-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-hook-read-guard",
+      "behaviour": "Every tick and wrapper site hook runs under a runtime guard on the pass box keys it declares; a keyed read of any other key, by item, get or membership, logs a warning naming the site and key in observe mode, the default, raises in enforce mode and is not checked when AGENTIHOOKS_TICK_HOOK_READS is off.",
+      "seam": "scripts.tick.hook_reads.guarded, the reads of scripts.tick.steps.PassBox, scripts.tick.sites.TickSites.hooks and scripts.swarm.cli._Wrapper.hooks",
+      "tests": [
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_tick_site_hook_logs_in_observe_mode_and_the_hook_still_answers",
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_wrapper_site_hook_raises_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_each_site_hook_declares_exactly_the_box_keys_it_reads",
+        "tests/tick/test_hook_reads.py::test_off_mode_hands_back_the_hooks_unguarded",
+        "tests/tick/test_hook_reads.py::test_an_unknown_or_missing_mode_observes",
+        "tests/tick/test_hook_reads.py::test_reads_outside_a_hook_and_after_it_ends_are_not_checked",
+        "tests/tick/test_hook_reads.py::test_each_keyed_pass_box_read_reaches_the_guard_and_keeps_its_answer"
       ]
     },
     {
@@ -3349,6 +3378,16 @@
       "tests": [
         "tests/swarm/test_launches.py::test_select_profile_records_the_launched_agent_process_and_retire_ends_it",
         "tests/swarm/test_launches.py::test_select_profile_ends_the_agent_when_its_launch_cannot_be_recorded"
+      ]
+    },
+    {
+      "id": "tick-status-publish-survives-dropped-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-status-publish-drop",
+      "behaviour": "The closing group runs status publish even when the health findings step it needs was dropped or cut, waiting at most its own budget, so the swarm status is published every pass.",
+      "seam": "engine.run_group on the closing group with the registered status publish step",
+      "tests": [
+        "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
       ]
     }
   ],
