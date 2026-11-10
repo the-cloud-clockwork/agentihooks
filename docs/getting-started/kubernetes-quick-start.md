@@ -94,7 +94,7 @@ kubectl -n agentihooks port-forward service/agentihooks-swarm-ledger 8765:8765
 
 Then open `http://127.0.0.1:8765/`. Publish the ledger outside the cluster with the chart's `ingress` values or your own route.
 
-### Host names the ledger answers
+## Host names the ledger answers
 
 The ledger refuses every request whose `Host` header it does not list with `403 forbidden` and the message `Host not allowed`. The chart builds that list into `SWARM_ALLOWED_HOSTS` on the ledger StatefulSet from:
 
