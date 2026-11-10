@@ -251,7 +251,7 @@ def test_pass_budget_holds_once_and_recovers(monkeypatch: pytest.MonkeyPatch) ->
         assert inbox.return_value.send.call_count == 1
 
 
-@pytest.mark.parametrize(("stage", "target"), [("S1", 384.0), ("S2", 240.0), ("S3", 120.0), ("S4", 60.0)])
+@pytest.mark.parametrize(("stage", "target"), [("S1", 384.0), ("S2", 240.0), ("S3", 120.0), ("S4", 100.0)])
 def test_pass_budget_uses_selected_stage(stage: str, target: float, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 

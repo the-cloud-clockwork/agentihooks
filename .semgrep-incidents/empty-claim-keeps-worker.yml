@@ -1,0 +1,15 @@
+rules:
+  - id: empty-claim-keeps-worker
+    languages: [python]
+    severity: ERROR
+    message: Empty task ownership must use the shared claim loss check and exit the previous worker.
+    paths:
+      include:
+        - /hooks/context/claim_watch.py
+        - /scripts/tick/steps/common.py
+        - empty-claim-keeps-worker.py
+    pattern-either:
+      - pattern: return $ROW.get("claimed_by", "") in ("", $NAME)
+      - pattern: |
+          if not $OWNER or $OWNER == $NAME:
+              return None

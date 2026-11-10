@@ -1424,7 +1424,7 @@ def test_a_paneless_hive_worker_whose_process_or_pod_is_gone_is_retired_and_its_
         report["started_at"] = LAUNCHED + pod_started_after
     remote.redis.set(remote.reports.key(HIVE), json.dumps(report))
     remote.store.claim("fixture", "task", agent.name, 60000)
-    rows = {"task": {"state": "open", "claimed_by": ""}}
+    rows = {"task": {"state": "open", "claimed_by": agent.name}}
     remote.runtime.retire = Mock(side_effect=AssertionError("a gone hive process needs no remote command"))
 
     actions = agent_steps._reap("fixture", remote.store, Mock(), remote.runtime, rows, LAUNCHED + 10**9)
