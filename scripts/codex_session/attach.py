@@ -6,7 +6,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
 
@@ -34,6 +34,19 @@ Open = Callable[[str, list[str]], "Placement"]
 
 class AttachError(RuntimeError):
     pass
+
+
+class ViewerProcess(Protocol):
+    @property
+    def returncode(self) -> int | None: ...
+
+    def poll(self) -> int | None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
 
 
 def viewer_argv(codex_bin: str, record: TransportRecord) -> list[str]:
@@ -101,7 +114,7 @@ def server_ended(read: Read) -> bool:
 def watched(
     command: list[str],
     read: Read,
-    popen: Callable[[list[str]], "subprocess.Popen[bytes]"] = subprocess.Popen,
+    popen: Callable[[list[str]], "ViewerProcess"] = subprocess.Popen,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Run the viewer until it closes, or end it once its app-server is recorded gone: Codex keeps a dead reconnect open."""
@@ -116,7 +129,7 @@ def watched(
                 viewer.wait()
             break
         sleep(WATCH_S)
-    return viewer.returncode
+    return viewer.wait()
 
 
 def recorded(slug: str, name: str) -> Read:

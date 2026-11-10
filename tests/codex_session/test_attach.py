@@ -171,22 +171,24 @@ def test_main_reads_the_named_agent_and_runs_the_viewer_by_default(monkeypatch):
 
 
 class Viewer:
-    def __init__(self, polls, code=-15):
-        self.polls, self.code, self.returncode, self.signals = list(polls), code, None, []
+    def __init__(self, polls: list[int | None], code: int = -15) -> None:
+        self.polls, self.code = list(polls), code
+        self.returncode: int | None = None
+        self.signals: list[str] = []
 
-    def poll(self):
+    def poll(self) -> int | None:
         if self.returncode is None and self.polls:
             self.returncode = self.polls.pop(0)
         return self.returncode
 
-    def terminate(self):
+    def terminate(self) -> None:
         self.signals.append("terminate")
         self.returncode = self.code
 
-    def wait(self, timeout=None):
-        return self.returncode
+    def wait(self, timeout: float | None = None) -> int:
+        return self.code if self.returncode is None else self.returncode
 
-    def kill(self):
+    def kill(self) -> None:
         self.signals.append("kill")
 
 
@@ -220,11 +222,9 @@ def test_a_viewer_on_a_live_server_runs_until_it_closes():
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
 def test_an_unreadable_store_keeps_the_viewer_running():
-    from redis.exceptions import ConnectionError as RedisDown
-
     viewer = Viewer([None, None, 0])
     sleep, _ = bounded(5)
-    outages = [RedisDown("down"), OSError("gone")]
+    outages = [RuntimeError("store down"), OSError("gone")]
 
     def read():
         raise outages.pop(0)
@@ -236,10 +236,10 @@ def test_an_unreadable_store_keeps_the_viewer_running():
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
 def test_a_viewer_that_ignores_terminate_is_killed():
     class Stubborn(Viewer):
-        def wait(self, timeout=None):
+        def wait(self, timeout: float | None = None) -> int:
             if timeout is not None and "kill" not in self.signals:
                 raise attach.subprocess.TimeoutExpired("codex", timeout)
-            return self.returncode
+            return super().wait()
 
     viewer = Stubborn([None])
     sleep, _ = bounded(5)
