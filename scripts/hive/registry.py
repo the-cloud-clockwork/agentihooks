@@ -31,6 +31,7 @@ JSON_FIELDS = {
     "interactive": dict,
     "master_login": dict,
     "repos": list,
+    "registered_repos": list,
     "capabilities": list,
     "drains": list,
     "members": dict,
@@ -303,8 +304,24 @@ def update(
     return record
 
 
-def beat(client, hive_id: str, fields: dict) -> None:
-    _amend(client, hive_id, lambda stored: {**_seeded(hive_id), **(stored or {}), **fields})
+def beat(client: Any, hive_id: str, fields: dict[str, Any]) -> None:
+    def write(stored: dict[str, Any] | None) -> dict[str, Any]:
+        merged = {**_seeded(hive_id), **(stored or {}), **fields}
+        registered = merged.get("registered_repos")
+        return {**merged, "repos": sorted({*merged["repos"], *registered})} if registered else merged
+
+    _amend(client, hive_id, write)
+
+
+def register(client: Any, hive_id: str, name: str, repos: list[str]) -> None:
+    """Records the name and repos hive create gave a hive; every later heartbeat keeps those repos listed."""
+
+    def write(stored: dict[str, Any] | None) -> dict[str, Any]:
+        merged = {**_seeded(hive_id), **(stored or {})}
+        return {**merged, "name": name, "registered_repos": repos, "repos": sorted({*merged["repos"], *repos})}
+
+    _amend(client, hive_id, write)
+    _index(client, hive_id)
 
 
 def forget(client: Any, hive_id: str) -> None:

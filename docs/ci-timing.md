@@ -2438,6 +2438,25 @@ Limits: the check reads and compares only the `linux/amd64` base of a published 
 
 The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image; the init check's fresh home is an `emptyDir` with `fsGroup` 10001, as in the chart's worker Pod. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name; the proof records that image id in `image.txt`.
 
+### What the hive proof asserts
+
+After the worker Deployment rolls out, the proof runs a Python block on stdin inside the `hive-join` Pod against the proof Redis. It sends a `reap` order for an absent scratch folder, then checks the worker's hive record and the order's acknowledgement:
+
+| Check | Expected | Source of the value |
+|---|---|---|
+| Live registration | `registry.show` returns a record that `registry.live` accepts within 60 seconds | the worker's heartbeat |
+| UI and lifetime | `ui` is `no`, `ephemeral` is `yes` | fixed in `deploy/worker/start.sh` |
+| Excluded work | `excluded` is `["master"]` | `HIVE_EXCLUDED`, from the chart's `workers.excluded`; `start.sh` defaults it to `master` |
+| Capacity | `max_agents` is `1` | `HIVE_MAX_AGENTS`, from `--set workers.maxAgents=1` |
+| No roles field | the record has no `roles` key | hives register an `excluded` list instead of roles |
+| Order acknowledgement | the scratch order acknowledges `done` within 60 seconds and the command stream is empty | the worker's order loop |
+
+A passing proof writes `pod registered a live worker hive with its excluded list and capacity` and `{"ack": "done", "pending": 0, "scratch_order": "reap"}` to `orders.txt` in the artifact. The proof then holds an agent on the hive, restarts the Deployment, checks that the drain preStop keeps the Pod running until that agent finishes, and runs the same checks on the replacement Pod, which must reuse the first Pod's hive membership. The step ends with `worker hive kind registration and scratch order acknowledgement: passed`.
+
+The `contracts` job (`deploy/worker/chart-proof.sh`) checks the chart renders `HIVE_EXCLUDED=master` and the `HIVE_MAX_AGENTS` value, but not what the worker registers. A change to the worker's registration defaults in `start.sh` or the chart must update the `kind-proof.sh` assertions in the same pull request, or every `dev` push of this workflow fails in the `kind` job while `contracts` stays green.
+
+From `89414efb0` ([#4988](https://github.com/the-cloud-clockwork/agentihooks/pull/4988)) the workflow failed every `dev` push: that change made `dispatch` a default worker role and updated `chart-proof.sh`, but `kind-proof.sh` still asserted the roles `eng`, `ci`, `plan`. Run [39367037280](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39367037280) failed with `File "<stdin>", line 15 ... AssertionError`, and its `failed-worker.txt` showed the hive registered `["eng", "ci", "plan", "dispatch"]`. Pull request [#5090](https://github.com/the-cloud-clockwork/agentihooks/pull/5090) added `dispatch` to the expectation, proven green by run [39368311793](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39368311793). Pull request [#5309](https://github.com/the-cloud-clockwork/agentihooks/pull/5309) later replaced roles with the `excluded` list, and the proof now asserts the record above.
+
 ### Reading the result
 
 The build step prints, and saves to `build.txt` in the `worker-hive-proof` artifact:
@@ -2509,6 +2528,7 @@ Runs [39100700634](https://github.com/the-cloud-clockwork/agentihooks/actions/ru
 | `worker_base=rebuilt` with a `Worker hive base` warning | the base could not be pulled or read, or its revision could not be fetched or compared | read the warning's reason; pull the base by hand or check that its revision still exists on `origin` |
 | `worker_base=published` but the Pod lacks a base change | a path the base copies is missing from the base inputs | add the path to `base-current.sh` and the test's `INPUTS`; `test_base_inputs_cover_every_base_source_the_wheel_does_not_replace` should fail first |
 | `pod did not register a live hive`, `pod did not acquire hive membership` or `scratch order not acknowledged` | the worker Pod started but failed the hive proof; the build choice does not cause this | read `pods.txt`, `failed-worker.txt`, `previous-worker.txt`, `join.txt` and `previous-join.txt` in the `worker-hive-proof` artifact, written when the script fails |
+| `AssertionError` from `File "<stdin>"` right after `kubectl rollout status` of the worker Deployment, with no message | a registration field differs from the expectation: `ui`, `ephemeral`, `excluded`, `max_agents` or a `roles` key | read the values the worker set in `failed-worker.txt` and the Pod environment in `pods.txt`; when the change to `start.sh` or the chart was intended, update the assertion in `kind-proof.sh`, otherwise fix the registration |
 | `test_worker_hive_image.py` fails on the build lines | `kind-proof.sh` no longer has one hive-only build and a base plus hive rebuild branch | restore that shape; the tests pin both branches and the `WORKER_IMAGE` default |
 
 ## Historical measurements
