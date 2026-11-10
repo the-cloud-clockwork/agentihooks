@@ -10,7 +10,7 @@
     "scripts/swarm_v2/herdr/catalog.py": "a68a92c73e374f550f13f5586b9610c2724d5dec2b38943e81f6b1836d26afdc",
     "scripts/swarm_v2/herdr/reconcile.py": "e46929604509bea853671ba954f50d6c1be9f74820911f9b87341a61b94582ab",
     "scripts/swarm_v2/herdr/attach.py": "5f8ea8f43052ef4f3dc8dc050aad469f12b37026fd7ed2897e12c911b91d3c74",
-    "tests/fixtures/swarm_v2/herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "tests/fixtures/swarm_v2/herdr-registrations.json": "a5c5e29cfd985e820df102f0cdd0428f887ad397b288436a2d4874a03c56e8c0",
     "tests/fixtures/swarm_v2/herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
     "tests/sv2_hdr03_cases.py": "c38dbbcd1ab17fa79220fc35d5c8e12bba349b4ee773989850d49391ef8f2b93",
     "tests/test_swarm_v2_herdr_registrations.py": "d3c747101aec317825d1b65c0ac51fc9f99af55e7582cc4dd29a15af6cef1158",

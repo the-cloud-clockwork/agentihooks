@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "local-enforcements-store-ignored",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
+      "behaviour": "The repository ignore rules cover the project local enforcements store and its write temp file, so a checkout holding only that store reads clean to the push stop gate and to the dev sync after wt.sh done.",
+      "seam": "push_stop.inspect and git status on a checkout carrying the repository .gitignore after add_enforcement with local",
+      "tests": [
+        "tests/gates/test_local_enforcements_ignored.py::test_the_repo_ignore_rules_cover_the_local_enforcements_store",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_stop_gate_reads_a_checkout_holding_only_the_store_as_clean",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_dev_sync_after_wt_done_reads_a_checkout_holding_only_the_store_as_clean"
+      ]
+    },
+    {
       "id": "fleet-worker-reserved-master-ceiling",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
@@ -858,6 +870,23 @@
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
+      "id": "swarm-tick-hook-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-hook-read-guard",
+      "behaviour": "Every tick and wrapper site hook runs under a runtime guard on the pass box keys it declares; a keyed read of any other key, by item, get or membership, logs a warning naming the site and key in observe mode, the default, raises in enforce mode and is not checked when AGENTIHOOKS_TICK_HOOK_READS is off.",
+      "seam": "scripts.tick.hook_reads.guarded, the reads of scripts.tick.steps.PassBox, scripts.tick.sites.TickSites.hooks and scripts.swarm.cli._Wrapper.hooks",
+      "tests": [
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_tick_site_hook_logs_in_observe_mode_and_the_hook_still_answers",
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_wrapper_site_hook_raises_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_each_site_hook_declares_exactly_the_box_keys_it_reads",
+        "tests/tick/test_hook_reads.py::test_off_mode_hands_back_the_hooks_unguarded",
+        "tests/tick/test_hook_reads.py::test_an_unknown_or_missing_mode_observes",
+        "tests/tick/test_hook_reads.py::test_reads_outside_a_hook_and_after_it_ends_are_not_checked",
+        "tests/tick/test_hook_reads.py::test_each_keyed_pass_box_read_reaches_the_guard_and_keeps_its_answer"
       ]
     },
     {
@@ -3327,6 +3356,28 @@
       "tests": [
         "tests/context/test_quota_policy.py::test_a_master_on_the_primary_login_at_90_percent_used_gets_no_handoff",
         "tests/routing/test_reservation.py::test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left"
+      ]
+    },
+    {
+      "id": "docs-sanity-scan",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
+      "behaviour": "The docs sanity scanner flags private IPv4 addresses, real looking emails, private host name suffixes, token and key shapes and caller supplied private keywords in public files, prints each hit as file, line and rule without the matched text, and exits 1 on any hit.",
+      "seam": "scripts.docs_sanity.main",
+      "tests": [
+        "tests/test_docs_sanity.py::test_the_red_fixture_fails_with_every_hit_as_file_line_rule",
+        "tests/test_docs_sanity.py::test_the_clean_fixture_passes_with_documentation_values",
+        "tests/test_docs_sanity.py::test_each_token_shape_is_flagged_by_its_own_rule",
+        "tests/test_docs_sanity.py::test_a_vendor_sample_key_marked_example_is_not_a_token",
+        "tests/test_docs_sanity.py::test_keywords_from_the_environment_and_a_file_hit_without_printing_the_keyword",
+        "tests/test_docs_sanity.py::test_directories_are_walked_and_excluded_globs_skipped",
+        "tests/test_docs_sanity.py::test_a_missing_path_is_a_usage_error",
+        "tests/test_docs_sanity.py::test_an_example_label_passes_only_right_before_the_private_suffix",
+        "tests/test_docs_sanity.py::test_a_text_file_that_is_not_utf8_is_still_scanned",
+        "tests/test_docs_sanity.py::test_every_missing_path_is_named_on_standard_error",
+        "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
+        "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
+        "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
       ]
     }
   ],

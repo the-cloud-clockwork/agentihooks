@@ -4,7 +4,7 @@
   "input_sha256": {
     "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
     "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
-    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-registrations.json": "a5c5e29cfd985e820df102f0cdd0428f887ad397b288436a2d4874a03c56e8c0",
     "herdr-terminal-reconnect.json": "32abd57e558c817dac8ed2be158b56f845d0a6b6f2c59b604f390d65c2b136dc"
   },
   "observed": {
