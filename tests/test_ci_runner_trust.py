@@ -489,6 +489,40 @@ def test_other_remote_calls_and_untrusted_runner_inputs_are_red(uses, runner):
     assert len(problems) == 1 and "test.yml/scan" in problems[0]
 
 
+DOCS_SANITY = "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@main"
+
+
+def test_hosted_only_docs_sanity_call_passes_without_a_runner_input() -> None:
+    job = {"uses": DOCS_SANITY, "with": {"paths": "docs"}, "secrets": "inherit"}
+    candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": job}}
+    assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
+
+
+def test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event() -> None:
+    candidate = {"on": {"pull_request_target": {}}, "jobs": {"docs-sanity": {"uses": DOCS_SANITY}}}
+    hosted = {"on": {"pull_request_target": {}}, "jobs": {"plain": {"runs-on": "ubuntu-latest"}}}
+    assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
+    assert ci_runner_trust.check({"ci.yml": hosted}, POLICY) == []
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@dev",
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity-check.yml@main",
+        "someone/agentihooks/.github/workflows/docs-sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@MAIN",
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/Docs-Sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks/.GitHub/workflows/docs-sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks",
+    ],
+)
+def test_docs_sanity_lookalike_calls_are_red(uses: str) -> None:
+    candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": {"uses": uses}}}
+    problems = ci_runner_trust.check({"ci.yml": candidate}, POLICY)
+    assert len(problems) == 1 and "ci.yml/docs-sanity" in problems[0]
+
+
 def test_loader_name_is_optional_and_does_not_change_admission():
     from pathlib import Path
 
