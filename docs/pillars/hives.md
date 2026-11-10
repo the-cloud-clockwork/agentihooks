@@ -1356,51 +1356,62 @@ instead of being retried inside one command:
 | Command client | 3 seconds | 5 seconds | Beats, reports and the helper threads' writes. |
 | Wait client | 3 seconds | 15 seconds | The scheduler process timer waits between beats and in both helper threads. |
 
-Both send TCP keepalives and run a connection health check every 15 seconds.
+Both send TCP keepalives. A connection with no reply for more than 15 seconds gets a `PING` health check before its
+next command.
 
 ### A dead connection never stalls the beat
 
 A Redis connection can die without closing: the TCP socket stays established, the peer stops answering and the
-bytes the hive sent sit unacknowledged in the socket's send queue. This happens after a workstation reboot, a network
-change or a Redis host that stops answering without resetting its connections. Before pull request
+bytes the hive sent sit unacknowledged in the socket's send queue. On 21 October, after a workstation reboot, the
+local hive service started and then published no beat for 13 minutes: its single beat thread waited on such a socket
+with 153 bytes in the send queue. Before pull request
 [#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475) the wait between beats used a client with no
-read timeout, so the single beat thread waited on that socket forever. The service stayed active, logged nothing and
-published no beat, every hive read stale and the tick spawned nothing until someone restarted the service.
+read timeout, so that wait never ended. The service stayed active and logged nothing, every hive read stale and the
+tick spawned nothing until the service was restarted.
 
-Every Redis call the daemon makes now ends in bounded time:
+With the timeouts in [Client timeouts](#client-timeouts), every Redis call the daemon makes ends in bounded time:
 
-- A beat command that gets no answer raises `TimeoutError` after the command client's 5 second read timeout.
-- The wait between beats raises `TimeoutError` after the wait client's 15 second read timeout, one beat interval.
-- A connection that sat idle for longer than 15 seconds is checked with a `PING` before its next command, so a
-  connection that died while idle fails on that check instead of on a later read.
-- A connection attempt to an unreachable host fails after 3 seconds.
+- A beat command that gets no answer raises `TimeoutError` when the command client's read timeout expires.
+- The wait between beats raises `TimeoutError` when the wait client's read timeout expires, one beat interval after
+  the wait's last reply.
+- A connection that died while idle fails on its health check `PING` instead of on a later read.
 
-The beat loop treats that `TimeoutError` as a lost connection. It prints the reconnect line, backs off, opens a new
-pair of clients and beats at once, as in [Reconnect and backoff](#reconnect-and-backoff). The tests for this drive a
-real TCP socket that accepts the connection and never answers, once during a beat and once during the wait, and
-assert the reconnected beat lands within one beat interval.
+The beat loop treats `TimeoutError` like `ConnectionError`: a lost connection. It prints the reconnect line, backs off
+1 second on the first failure, opens a new pair of clients and beats at once, as in
+[Reconnect and backoff](#reconnect-and-backoff). A stall during a beat therefore ends in a reconnected beat about 6
+seconds later. A stall during the wait raises within one beat interval of the last beat, and the reconnected beat
+follows after the backoff, about 16 seconds after the last beat. The helper threads do not reconnect: the headroom
+thread logs `hive headroom wait failed` and waits one headroom interval, and the herdr stats thread logs
+`hive herdr stats wait failed` and exits until the next beat starts it again on the new connection.
+
+The tests for this, in `tests/hive/test_daemon.py`, point the daemon at a listening socket that never accepts or
+answers, once during a beat and once during the wait, and assert that the reconnect line is logged and the next beat
+lands within one beat interval, plus a quarter second margin for the wait stall. They run with scaled constants (a 0.5
+second beat) and do not count the backoff sleep.
 
 The scheduled waits stay shorter than the read timeout they run under, so a healthy wake always arrives before the
 socket times out and a read timeout always means a dead connection:
 
 | Wait | Scheduled delay | Wait timeout | Read timeout it runs under |
 |---|---|---|---|
-| Between beats | 15 seconds minus the beat's run time or minus 2 seconds, whichever is shorter | At most 14 seconds | 15 seconds |
+| Between beats | 15 seconds minus the larger of the beat's run time and 2 seconds, never below 0 | At most 14 seconds | 15 seconds |
 | Headroom thread | 10 seconds | 12 seconds | 15 seconds |
 | Herdr stats thread | 10 seconds | 12 seconds | 15 seconds |
 
-The 2 second slack is `WAKE_SLACK_S` in `scripts.hive.daemon`. The timeouts, the health check interval and the slack
-are constants in the daemon, not settings: they follow `BEAT_SECONDS`, so the stall detection always fits one beat
-interval.
+These values are constants in `scripts.hive.daemon`, not settings. The wait read timeout and the health check
+interval equal `BEAT_SECONDS`; the 3 second connect timeout (`CONNECT_TIMEOUT_S`), the 5 second command read timeout
+(`READ_TIMEOUT_S`) and the 2 second slack (`WAKE_SLACK_S`) are fixed values.
 
-To see whether a running hive sits on a dead connection, list its Redis sockets with their send queues:
+To see whether a running hive sits on a dead connection, list its sockets to the Redis port with their send queues,
+replacing `6379` with the port in the hive's Redis URL:
 
 ```bash
-ss -tnp | grep -E "python|agentihooks"
+ss -tnp | grep -E "python|agentihooks" | grep ":6379"
 ```
 
-An established connection to the Redis port whose `Send-Q` stays above 0 across several runs is not being answered.
-On current code the daemon drops it within 15 seconds and the journal shows the reconnect.
+An established connection whose `Send-Q` stays above 0 across several samples a few seconds apart is not being
+answered. On current code the daemon raises on it within 15 seconds, reconnects after the backoff and logs the
+reconnect line to the journal.
 
 ### Troubleshooting
 
@@ -1419,7 +1430,7 @@ On current code the daemon drops it within 15 seconds and the journal shows the 
 | Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
-| Redis read timeouts | 5 seconds per command, 15 seconds per wait | A Redis connection that stops answering raises and reconnects within one beat interval; see [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
+| Redis read timeouts | 5 seconds per command, 15 seconds per wait | A Redis connection that stops answering raises within one beat interval and reconnects after the backoff; see [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
 | Redis reconnect backoff | 1, 2, 4, 8, 16, then 30 seconds | A hive that lost its Redis connection retries at these delays and beats at once when it reconnects; see [Redis restarts](#redis-restarts). |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
