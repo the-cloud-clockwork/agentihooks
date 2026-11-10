@@ -52,6 +52,7 @@ LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutatio
 CALLED = {
     "semgrep.yml:feature-tests": "feature fixtures run in a called workflow and must not hold the caller lane",
     "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
+    "docs-sanity.yml:scan": "the reusable docs sanity scan runs in its caller's repository and must not hold a lane there",
 }
 if (_WORKFLOWS / "hive-join.yml").is_file():
     CALLED["hive-join.yml"] = "called hive join smoke must not hold the caller lane"
