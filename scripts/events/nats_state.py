@@ -1,6 +1,6 @@
 import datetime
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from nats.js.errors import APIError, NotFoundError
 
@@ -76,7 +76,7 @@ class ScopedStateStore:
     def get_many(self, keys: list[str]) -> list[StateEntry | None]:
         root = self._root
         read = nats_batch.read_entries(root._js, self._stream, keys, self._subject, self._read_chunk, self._revision)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportPrivateUsage]
-        return cast(list[StateEntry | None], root._loop.run(read))  # pyright: ignore[reportUnknownMemberType, reportPrivateUsage]
+        return root._loop.run(read)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportPrivateUsage]
 
     def create(self, key: str, value: bytes) -> int:
         try:

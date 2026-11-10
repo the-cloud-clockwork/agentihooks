@@ -5,7 +5,7 @@ import logging
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
-from typing import Any, cast
+from typing import Any
 
 import nats as nats_client
 from nats.aio.client import Client
@@ -432,7 +432,7 @@ class NatsStateStore:
         read = nats_batch.read_entries(
             self._js, f"KV_{self._bucket}", keys, self._kv_subject, self._read_chunk, self._last_revision
         )
-        return cast(list[StateEntry | None], self._loop.run(read))  # pyright: ignore[reportUnknownMemberType]
+        return self._loop.run(read)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
 
     def _kv_subject(self, key: str) -> str:
         return f"$KV.{self._bucket}.{key}"
