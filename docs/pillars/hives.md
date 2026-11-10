@@ -2258,12 +2258,14 @@ agent limit below its request and a memory value under `workers.resources` are e
 
 A release's worker hive capacity is the sum of each pod's `maxAgents`: the base hive's when `workers.replicas` is 1,
 plus every `workers.hives` entry's own or inherited value. Placement holds each hive to its own ceiling, so the swarm
-runs at most that sum of agents on the release's pods. A target total, such as twenty agents, is a split of that sum
+runs at most that sum of agents on the release's pods. The swarm's lane caps bound it too: a swarm set to
+`max-eng-agents=4 max-ci-agents=2` launches at most six lane agents however much hive room there is. A target total, such as twenty agents, is a split of that sum
 across hives, each with its own member credential.
 
 **Sizing the split.** Every pod's memory request is its `maxAgents` times `memoryPerAgentMi.request`, and each pod
 must fit on one node. Fewer, larger hives need nodes with more free memory; more, smaller hives spread over smaller
-nodes. With the defaults of 700 MiB request and 2048 MiB limit per agent, twenty agents split as 8, 8 and 4 render:
+nodes. With the defaults of 700 MiB request and 2048 MiB limit per agent, a split of twenty agents as 8, 8 and 4
+renders:
 
 | Hive | `maxAgents` | Memory request | Memory limit |
 |---|---|---|---|
@@ -2300,11 +2302,12 @@ Total the split before installing it; the render prints each pod's request:
 
 ```bash
 helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml -s templates/worker-hive.yaml \
-  | grep -E '^  name: .*-worker-hive|^ +memory: [0-9]+Mi'
+  | grep -E '^  name: .*-(worker-hive|storage)|^ +memory: [0-9]+Mi'
 ```
 
 Each `-worker-hive` Deployment name is followed by its pod's memory limit, then its request. A hive with
-`workers.node` set also prints its storage Job's `64Mi` limit and `16Mi` request; leave those out of the total.
+`workers.node` set also renders a `-storage` Job, whose name line is followed by its `64Mi` limit and `16Mi` request;
+leave those out of the total.
 
 **Scaling in stages.** Reach the total one values change at a time, and prove each stage before the next. A stage is
 one of: raising one hive's `maxAgents`, or adding one `workers.hives` entry. Toward the split above:
@@ -2321,10 +2324,12 @@ For each stage:
    ([Scaling worker hives](#scaling-worker-hives)); an entry whose Secret does not exist leaves its pod unable to
    start.
 2. Check node room for the new or raised pod's request, as in
-   [Raising agents step by step](#worker-hive-memory-and-placement).
+   [Worker hive memory and placement](#worker-hive-memory-and-placement).
 3. Deliver the values change through the values repository's pull request, as every other chart change. Adding an
-   entry creates one new Deployment; raising an entry's `maxAgents` rolls only that hive's pod, whose preStop drains its
-   agents to other hives first. Raising `workers.maxAgents` also raises and rolls every entry that inherits it.
+   entry creates one new Deployment; raising an entry's `maxAgents` rolls only that hive's pod. Raising `workers.maxAgents`
+   also raises and rolls every entry that inherits it. A hive with a hostPath or claim home rolls by Recreate: the old
+   pod's preStop drains its agents before the new pod starts. A hive on the default `emptyDir` home rolls by
+   RollingUpdate, so the new pod starts while the old one still drains.
 4. Confirm the stage: every worker hive pod is `Running`, and `agentihooks hive list` shows each hive live with its
    cap, the `(cap <n>)` values summing to the stage's capacity. The number after `of` is the ceiling, which reads
    below the cap while the pod's headroom is short ([Headroom](#headroom)):
@@ -2337,7 +2342,13 @@ For each stage:
    # <hive-c>  live  ui=no  workers=0 of 4 (cap 4)  excluded=master  ...
    ```
 
-5. Confirm agents use the new room: within the next ticks the new hive's `workers=<n>` rises as placement sends it
+5. Raise the lane caps when the swarm's caps sit below the new capacity, so placement has agents to send:
+
+   ```bash
+   agentihooks swarm <slug> set max-eng-agents=14 max-ci-agents=6
+   ```
+
+6. Confirm agents use the new room: within the next ticks the new hive's `workers=<n>` rises as placement sends it
    agents. A pod held `Pending` with `Insufficient memory`, or a hive missing from `hive list`, stops the rollout at
    this stage: fix it before the next stage.
 
