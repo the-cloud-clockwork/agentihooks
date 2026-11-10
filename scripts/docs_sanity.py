@@ -75,7 +75,7 @@ def real_email(text: str) -> bool:
 def _real_address(token: str) -> bool:
     """Return whether one token is a real looking email; URL user names and scp style remotes are not."""
     local, at, rest = token.partition("@")
-    domain = NOT_HOST.split(rest, maxsplit=1)[0]
+    domain = NOT_HOST.split(rest)[0]
     labels = domain.split(".")
     if not at or not local or ":" in local or "/" in local or local == "git":
         return False

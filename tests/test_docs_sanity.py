@@ -163,6 +163,7 @@ def test_a_passing_match_does_not_hide_a_later_hit_on_the_line(line: str) -> Non
         ("mail jane@mailhost.io.", ["email"]),
         ("@mailhost.io and x@y and x@y.c and x@y.12 and x@.io and x@y..io", []),
         ("https://user:pw@github.com/org/repo.git", []),
+        ("user:pw@mailhost.io and x@y@mailhost.io and x@host.mailhost.i0", []),
         ("scp o/r-git@github.com:o/r.git", []),
         ("git@github.com:org/repo.git", []),
         ("--flag.local -cache.lan", []),
