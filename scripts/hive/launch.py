@@ -259,6 +259,11 @@ def _account_full(outcome: object) -> bool:
     )
 
 
+def _launched(outcome: object) -> bool:
+    """Whether a launch answer placed the order, so the hive admitted the launch."""
+    return isinstance(outcome, Outcome) and outcome.status in (Status.OK, Status.PENDING)
+
+
 def _match(check: str, expected: object, actual: object) -> None:
     if expected != actual:
         raise SwarmError(
@@ -610,6 +615,8 @@ class HiveLaunch:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail=refused)
             outcome = self._ordered(request, selected)
             if not _account_full(outcome):
+                if _launched(outcome):
+                    placement_waits.admitted(self.store, self.slug)
                 return outcome
             self._release_room(request, selected)
             accounts = accounts | {f"{selected.account.harness}:{selected.account.name}"}
