@@ -147,7 +147,7 @@ def test_a_stop_signal_between_passes_exits_at_once(rig: Rig, monkeypatch: pytes
 
 @pytest.mark.feature("controller-drains-pass-on-stop-signal")
 def test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another(
-    rig: Rig, monkeypatch: pytest.MonkeyPatch
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
     passes: list[str] = []
 
@@ -161,6 +161,10 @@ def test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another
     assert rig.run() == 143
     assert passes == ["pass"]
     assert "wait" not in rig.events
+    assert capfd.readouterr().err.splitlines() == [
+        f"controller: stop signal {int(signal.SIGINT)}, finishing the running pass before exit",
+        "controller: the last pass before exit ended: ledger gone",
+    ]
 
 
 @pytest.mark.feature("controller-drains-pass-on-stop-signal")

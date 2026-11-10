@@ -633,7 +633,7 @@ def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm:
     except Exception as exc:
         if not DRAINING.is_set():
             raise
-        print(f"controller: the last pass before exit ended: {exc}", file=sys.stderr, flush=True)
+        os.write(2, f"controller: the last pass before exit ended: {exc}\n".encode())
     finally:
         RUNNING.clear()
     if DRAINING.is_set():
