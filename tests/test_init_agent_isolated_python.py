@@ -29,17 +29,19 @@ CASES = {
 }
 
 
-def _words(text: str) -> list[str]:
+def _nested(token):
     try:
-        tokens = shlex.split(text)
+        return _words(token)
     except ValueError:
-        return [text]
-    if tokens == [text]:
-        return tokens
-    return [word for token in tokens for word in (_words(token) if re.search(r"\s", token) else [token])]
+        return [token]
 
 
-def _is_python(word: str) -> bool:
+def _words(text):
+    tokens = shlex.split(text)
+    return [word for token in tokens for word in (_nested(token) if re.search(r"\s", token) else [token])]
+
+
+def _is_python(word):
     path = word.removeprefix("$(")
     return path == sys.executable or re.fullmatch(r"python[\d.]*", Path(path).name) is not None
 
