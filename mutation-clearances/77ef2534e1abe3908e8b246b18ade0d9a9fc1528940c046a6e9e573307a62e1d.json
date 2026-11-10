@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/approved.py:scripts.swarm_v2.kubernetes.approved.x\u01c1AccountRoute\u01c1seats:5ab2248c60b37bdef6f608e664c5bbf876e889cba798502773769dfa0200a282": {
+    "reader": "standards_reader",
+    "reason": "The only use of lane is lane == MASTER with MASTER = \"master\", so \"\" and \"XXXX\" both take the reserved_accounts branch and produce identical output."
+  }
+}
