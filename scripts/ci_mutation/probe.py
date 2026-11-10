@@ -58,10 +58,6 @@ def read_probe_results(path: Path) -> tuple[dict[str, str], float]:
     return probe_results(json.loads(path.read_text())) if path.is_file() else ({}, 0)
 
 
-def probe_elapsed(stats: SharedStats | None) -> float:
-    return read_probe_results(stats.folder / "plan.json")[1] if stats and stats.part is None else 0
-
-
 def mark_probe_results(work: Path, results: dict) -> dict:
     early, _ = read_probe_results(work / SHARD_PLAN)
     for values in results.values() if early else ():
@@ -72,8 +68,15 @@ def mark_probe_results(work: Path, results: dict) -> dict:
 
 
 def reuse_kills(run_tests: Callable[..., int], early: dict[str, str]) -> Callable[..., int]:
-    def run_cached(self, *, mutant_name, tests):
+    def run_cached(self: object, *, mutant_name: str | None, tests: list[str]) -> int:
         if mutant_name is not None and early.get(mutant_name) == "killed":
+            return 1
+        if (
+            mutant_name is None
+            and not tests
+            and os.environ.get("MUTANT_UNDER_TEST") == "fail"
+            and "killed" in early.values()
+        ):
             return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 

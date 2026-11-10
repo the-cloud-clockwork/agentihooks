@@ -6,11 +6,14 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlencode
 
 from scripts.swarm import notice_text
 from scripts.swarm.store import SwarmError
+
+if TYPE_CHECKING:
+    from scripts.swarm_ledger.repository import live_rows
 
 LEDGER_DIR = Path(__file__).resolve().parents[1] / "swarm_ledger"
 SERVICE_AUTHORS = ("swarm", None)
@@ -46,6 +49,7 @@ SLOW: ContextVar[bool] = ContextVar("tick_ledger_slow", default=False)
 OFFLINE_READ = "the pass runs from its last good view while the server is slow or down, fresh reads wait"
 SNAPSHOT_TIMEOUT_S = 3.0
 EXPORT_TIMEOUT_S = 30.0
+CLEAR_BATCH = 200
 
 
 def offline() -> bool:
@@ -360,6 +364,14 @@ class LedgerClient:
     def clear_priority(self, slug, priority_id, reason):
         self._call(slug, [_op("priority_clear", "swarm", target=priority_id, reason=reason)])
 
+    def clear_priorities(self, slug: str, cleared: list[tuple[str, str]]) -> None:
+        """Clear each ``(priority id, reason)`` of ``cleared`` as the swarm, ``CLEAR_BATCH`` clears per ledger write."""
+        ops: list[dict[str, Any]] = [
+            _op("priority_clear", "swarm", target=priority_id, reason=reason) for priority_id, reason in cleared
+        ]
+        for start in range(0, len(ops), CLEAR_BATCH):
+            self._call(slug, ops[start : start + CLEAR_BATCH])
+
     def comment_item(self, slug, item, text):
         self._write(slug, _op("add", "swarm", thread=f"{item}/comments", text=text))
 
@@ -436,13 +448,21 @@ class LedgerClient:
         return slug in ledger_bin.entries()
 
 
-def pass_state(ledger: Any, slug: str) -> dict[str, Any]:
-    """The whole document of ledger ``slug``: the tick pass's held view patched with one delta read while the
-    pass holds a view of that ledger, else the ledger's own whole read."""
+def pass_state(ledger: Any, slug: str, scope: "live_rows.Scope | None" = None) -> dict[str, Any]:
+    """The tasks of ledger ``slug`` the tick reads, with its metadata and phases: the tick pass's held view patched
+    with one delta read while the pass holds a view of that ledger, else the ledger's own whole read. ``scope``
+    names which closed or frozen tasks a reader needs; any scope but the tick's filters the whole read."""
+    from scripts.swarm_ledger.repository import live_rows
     from scripts.tick import view
 
-    held = view.document(slug)
-    return ledger.state(slug) if held is None else held
+    held = view.document(slug) if scope is None else None
+    if held is not None:
+        return held
+    doc = ledger.state(slug)
+    if scope is None or scope == view.TICK_SCOPE:
+        return doc
+    answer = live_rows.answer(doc, scope)
+    return {**doc, "tasks": answer.rows, live_rows.FROZEN_IDS: answer.frozen_ids}
 
 
 def _op(kind, by, **fields):

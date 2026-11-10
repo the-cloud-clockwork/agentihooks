@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from importlib import import_module
 from pathlib import Path
 
+from scripts import feature_map
 from scripts.tick import registry, steps
 from scripts.tick.registry import Catalogue
 from scripts.tick.step import Step
@@ -51,7 +52,7 @@ def scenarios(root: Path) -> frozenset[str]:
 
 def load(root: Path) -> Catalogue:
     """The catalogue recorded in ``root``, refusing an index that names a scenario no golden records."""
-    features = frozenset(entry["id"] for entry in json.loads((root / FEATURE_MAP).read_text())["features"])
+    features = frozenset(entry["id"] for entry in feature_map.load(root / FEATURE_MAP)["features"])
     index = json.loads((root / INDEX).read_text())
     listed: dict[str, frozenset[str]] = {step: frozenset(names) for step, names in index["scenarios"].items()}
     unknown = sorted(frozenset[str]().union(*listed.values()) - scenarios(root))

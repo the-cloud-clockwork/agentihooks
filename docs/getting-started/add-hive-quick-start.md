@@ -7,7 +7,7 @@ permalink: /docs/getting-started/add-hive-quick-start/
 
 # Add a Hive
 
-A hive is a machine or a Kubernetes pod that runs swarm agents. It joins a running hub with one private invite file and then pulls work from the swarm. The same invite enrolls a machine or a Kubernetes worker hive. The [hives guide](../pillars/hives.md) covers every option.
+A hive is a machine or a Kubernetes pod that runs swarm agents. It joins a running hub with one private invite file and then pulls work from the swarm. The same invite enrolls a machine or a Kubernetes worker hive. The [hives guide](../pillars/hives.md) covers every option. The [hive enablement record](../reference/hive-enablement-record.md) explains which steps this path removed.
 
 ## Prerequisites
 

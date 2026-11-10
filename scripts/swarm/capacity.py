@@ -1,6 +1,6 @@
 import json
 import sys
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -233,13 +233,20 @@ def accounts(environ: dict, now: float, refresh: bool = True, redis: Any = None)
 
     A ``redis`` client reads the hive quota reports on it, whatever the runtime backend setting says.
     """
-    from scripts.routing import aggregate, reservation
+    from scripts.routing import aggregate
 
     rows = (
         _global(environ, now, redis)
         if redis is not None or aggregate.enabled(environ)
         else _claude(environ, now, refresh) + _codex(environ, now, refresh)
     )
+    return reserved_accounts(rows, environ)
+
+
+def reserved_accounts(rows: list[Account], environ: Mapping[str, str]) -> list[Account]:
+    """Close each harness's reserved master account for workers at the ceiling the quota hook enforces."""
+    from scripts.routing import reservation
+
     store = reservation._store(environ)
     for harness in LABELS:
         held = reservation.current(harness, environ)

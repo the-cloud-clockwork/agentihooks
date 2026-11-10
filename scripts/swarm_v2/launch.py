@@ -31,7 +31,7 @@ ENDED = "ended"
 WORKER_DEFAULT = "default"
 NO_ACCOUNT = "no approved account has quota and a free launch slot"
 Target = Callable[[SpawnRequest], dict]
-AccountChooser = Callable[[int, str | None, tuple[str, str] | None, str], str | None]
+AccountChooser = Callable[[int, str | None, tuple[str, str] | None, str, str], str | None]
 PlannedAccount = Callable[[str, str], str | None]
 Ending = Callable[[AgentRecord, str], AgentRecord]
 
@@ -242,7 +242,7 @@ class DistributedLaunch:
         harness: str = task.get("harness") or planned_harness or "claude"
         if self.accounts is not None:
             planned = None if self.planned is None else self.planned(task["id"], harness)
-            account = self.accounts(terms.cap, planned, quota_predecessor(task), harness)
+            account = self.accounts(terms.cap, planned, quota_predecessor(task), harness, request.lane)
             if account is None:
                 return Outcome("spawn", Status.UNAVAILABLE, backend, detail=NO_ACCOUNT)
             terms = replace(terms, account=account)

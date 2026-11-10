@@ -41,7 +41,6 @@ def client(monkeypatch: pytest.MonkeyPatch, placed: set[str]) -> Any:
     import fakeredis
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
-    monkeypatch.setattr(auth, "_LEDGER_OF", {})
     monkeypatch.setattr(authority, "_HIVE_CHECKS", OrderedDict(), raising=False)
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
     monkeypatch.setattr(ports.swarm().store, "redis_client", lambda: redis)

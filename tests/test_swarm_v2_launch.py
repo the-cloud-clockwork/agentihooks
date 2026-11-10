@@ -858,7 +858,7 @@ def test_a_tick_spawn_hands_the_worker_the_api_address_of_its_swarm_config(world
 
 def test_a_tick_spawn_launches_on_the_account_its_route_chooses_for_the_launch_cap(world):
     asked = []
-    world.launcher.accounts = lambda cap, planned, predecessor, harness: asked.append(cap) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, predecessor, harness, lane: asked.append(cap) or "routed-key"
     name = world.store.next_name(SLUG, "eng")
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", name, {"id": "task", "seat": FIRST})
@@ -887,7 +887,9 @@ def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_
     world, envelope, assignment, predecessor
 ):
     asked = []
-    world.launcher.accounts = lambda cap, planned, left, harness: asked.append((cap, planned, left)) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, left, harness, lane: (
+        asked.append((cap, planned, left)) or "routed-key"
+    )
     world.launcher.planned = {"task": "planned-key"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     task = {"id": "task", "seat": FIRST, "handoff_envelope": envelope, "launch_assignment": assignment}
@@ -900,7 +902,7 @@ def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_
 
 def test_a_tick_spawn_without_a_plan_reader_hands_its_route_no_planned_account(world):
     asked = []
-    world.launcher.accounts = lambda cap, planned, left, harness: asked.append(planned) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, left, harness, lane: asked.append(planned) or "routed-key"
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), {"id": "task", "seat": FIRST})
 
@@ -910,7 +912,7 @@ def test_a_tick_spawn_without_a_plan_reader_hands_its_route_no_planned_account(w
 
 
 def test_a_tick_spawn_whose_route_finds_no_account_is_unavailable_before_admission(world):
-    world.launcher.accounts = lambda cap, planned, predecessor, harness: None
+    world.launcher.accounts = lambda cap, planned, predecessor, harness, lane: None
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     request = SpawnRequest(config, "eng", "e1", {"id": "task", "seat": FIRST})
 
@@ -1125,7 +1127,9 @@ def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_record
 
 
 @pytest.mark.parametrize(
-    "chooser", [None, lambda cap, planned, predecessor, harness: None], ids=["reservation full", "no account with room"]
+    "chooser",
+    [None, lambda cap, planned, predecessor, harness, lane: None],
+    ids=["reservation full", "no account with room"],
 )
 def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(world, chooser):
     world.launch(FIRST)
@@ -1260,8 +1264,10 @@ def test_registration_reports_a_missing_global_reservation(world, monkeypatch):
 
 
 def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a_codex_agent(world: World) -> None:
-    asked: list[tuple[str | None, str]] = []
-    world.launcher.accounts = lambda cap, planned, left, harness: asked.append((planned, harness)) or "codex-key"
+    asked: list[tuple[str | None, str, str]] = []
+    world.launcher.accounts = lambda cap, planned, left, harness, lane: (
+        asked.append((planned, harness, lane)) or "codex-key"
+    )
     world.launcher.planned = lambda task, harness: f"{task}-{harness}"
     world.launcher.planned_harness = {"task": "codex"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
@@ -1269,7 +1275,7 @@ def test_a_codex_task_asks_its_route_and_plan_for_a_codex_account_and_launches_a
 
     world.launcher.from_tick(request, world.terms, pod_target)
 
-    assert asked == [("task-codex", "codex")]
+    assert asked == [("task-codex", "codex", "eng")]
     [sent] = world.runtime.requests
     assert sent.task["harness"] == "codex"
     agent = world.store.execution(SLUG, sent.task["execution_id"])

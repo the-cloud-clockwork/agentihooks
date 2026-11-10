@@ -67,7 +67,7 @@ def _group(group: str, seen: dict[int, Thread], lock: Lock) -> tuple[Step, ...]:
     return tuple(steps)
 
 
-def test_a_pass_of_three_groups_of_eight_steps_uses_at_most_two_executors_and_the_slow_lane_thread() -> None:
+def test_a_pass_of_three_groups_of_eight_steps_uses_at_most_three_executors_and_the_slow_lane_thread() -> None:
     seen: dict[int, Thread] = {}
     before = set(threads())
     lock = Lock()
@@ -76,11 +76,12 @@ def test_a_pass_of_three_groups_of_eight_steps_uses_at_most_two_executors_and_th
         for group in GROUPS:
             rows.append(engine.run_group(group, _ctx(), _group(group, seen, lock), finished=rows.append))
     names = sorted(thread.name for thread in seen.values() if thread not in before)
-    assert len(names) <= 2 * WORKERS + 1, f"{len(names)} pooled threads: {names}"
+    assert len(names) <= 3 * WORKERS + 1, f"{len(names)} pooled threads: {names}"
     assert sum(name.startswith("tick-step") for name in names) <= WORKERS
     assert sum(name.startswith("tick-fan-out") for name in names) <= WORKERS
+    assert sum(name.startswith("tick-handed") for name in names) <= WORKERS
     assert names.count("tick-slow-lane") == 1
-    assert {name.split("_")[0] for name in names} <= {"tick-step", "tick-fan-out", "tick-slow-lane"}
+    assert {name.split("_")[0] for name in names} <= {"tick-step", "tick-fan-out", "tick-handed", "tick-slow-lane"}
     assert sum(len(row) for row in rows) == 24
     assert all(record.outcome == engine.OK for row in rows for record in row)
 
@@ -123,10 +124,10 @@ def test_a_group_whose_needs_never_end_is_refused_on_the_first_idle_round(monkey
     checks: list[str] = []
     waiting = engine._waiting
 
-    def bounded(step: Step, names: set[str], found: pool.Pass) -> bool:
+    def bounded(step: Step, names: set[str], found: pool.Pass, awaited: frozenset[str] = frozenset()) -> bool:
         checks.append(step.name)
         assert len(checks) <= 2, "the group kept looping on needs that never end"
-        return waiting(step, names, found)
+        return waiting(step, names, found, awaited)
 
     def action(ctx: Context) -> Result:
         return Result()

@@ -299,6 +299,55 @@ def test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view(tmp_p
     )
 
 
+@pytest.mark.feature("swarm-intent-check-budget")
+@pytest.mark.parametrize("mode", ["coach", "observe"])
+def test_a_later_pass_over_draft_pulls_rewrites_no_verdict(tmp_path: Any, monkeypatch: Any, mode: str) -> None:
+    doc = _doc()
+    pulls, _ = _pulls(doc, draft=True)
+    _check(mode, pulls, [], tmp_path).run(doc)
+    before = [Verdicts(SLUG, "intent", tmp_path).read(task["id"]) for task in doc["tasks"]]
+    writes: list[str] = []
+    monkeypatch.setattr(Verdicts, "write", lambda self, subject, *args, **fields: writes.append(subject))
+    later, _ = _pulls(doc, draft=True)
+    assert _check(mode, later, [], tmp_path, now=NOW + intent.TURN_MS).run(doc) == []
+    assert writes == []
+    assert [Verdicts(SLUG, "intent", tmp_path).read(task["id"]) for task in doc["tasks"]] == before
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_split_draft_record_stands_only_for_its_own_half_and_phase() -> None:
+    url = "https://github.com/o/r/pull/7"
+    task = {"id": "t7", "phase": "p8", "split": "1-4", "pr_url": url}
+    record = {"verdict": intent.PENDING, "reason": intent.DRAFT, "at": 1, "phase": "p8", "url": url, "split": True}
+    assert intent._drafted_as(record, task)
+    assert not intent._drafted_as({**record, "url": "https://github.com/o/r/pull/8"}, task)
+    assert not intent._drafted_as({**record, "phase": "p9"}, task)
+    assert not intent._drafted_as({**record, "reason": intent.RUNNING}, task)
+    assert not intent._drafted_as(None, task)
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_draft_pull_that_turns_ready_is_marked_running_and_judged(tmp_path: Any, monkeypatch: Any) -> None:
+    doc = {**_doc(), "tasks": _doc()["tasks"][:1]}
+    pulls, _ = _pulls(doc, draft=True)
+    _check("observe", pulls, [], tmp_path).run(doc)
+    writes: list[tuple[str, str, str]] = []
+    write = Verdicts.write
+
+    def recorded(self: Verdicts, subject: str, verdict: str, reason: str, *args: Any, **fields: Any) -> dict:
+        writes.append((subject, verdict, reason))
+        return write(self, subject, verdict, reason, *args, **fields)
+
+    monkeypatch.setattr(Verdicts, "write", recorded)
+    ready, _ = _pulls(doc, draft=False)
+    calls: list[str] = []
+    _check("observe", ready, calls, tmp_path, now=NOW + intent.TURN_MS).run(doc)
+    record = Verdicts(SLUG, "intent", tmp_path).read("t0")
+    assert "ask" in calls
+    assert writes[:1] == [("t0", intent.PENDING, intent.RUNNING)]
+    assert record and record["reason"] != intent.DRAFT
+
+
 def _watched_doc() -> dict[str, Any]:
     """A pull in pr, a claimed pull, an open pull and a pr task without a pull."""
     tasks = [
