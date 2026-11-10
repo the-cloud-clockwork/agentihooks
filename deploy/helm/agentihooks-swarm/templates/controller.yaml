@@ -262,19 +262,32 @@ spec:
               containerPort: {{ $tls.port }}
             {{- end }}
           startupProbe:
-            exec:
-              command: [agentihooks, controller, live]
+            httpGet:
+              path: /v2/health/live
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
             {{- toYaml .Values.controller.startupProbe | nindent 12 }}
           readinessProbe:
-            exec:
-              command: [agentihooks, controller, ready]
+            httpGet:
+              path: /v2/health/ready
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
             {{- toYaml .Values.controller.readinessProbe | nindent 12 }}
           {{- end }}
           livenessProbe:
+            {{- if $api.enabled }}
+            httpGet:
+              path: /v2/health/live
+              port: api
+              httpHeaders:
+                - name: Host
+                  value: "127.0.0.1:{{ $api.port }}"
+            {{- else }}
             exec:
-              {{- if $api.enabled }}
-              command: [agentihooks, controller, live]
-              {{- else }}
               command:
                 - python
                 - -c
@@ -284,7 +297,7 @@ spec:
                   held = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
                   stale = [slug for slug in held if not lease.current(store, slug)];
                   assert not stale, f"no live controller lease for {stale}"
-              {{- end }}
+            {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
