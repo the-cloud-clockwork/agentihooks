@@ -36,7 +36,7 @@ PUBLIC_HOST = re.compile(
     re.IGNORECASE,
 )
 TOKENS = {
-    "github-token": re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
+    "github-token": re.compile(r"\b(?:(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
     "aws-access-key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "slack-token": re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}\b"),
     "anthropic-key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
