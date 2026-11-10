@@ -91,6 +91,6 @@ def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(monkeypat
     state = {"slug": "sw", "store": object(), "rows": {}, "now_ms": 7}
     step = next(step for step in agents.STEPS if step.name == "reap")
     result = step.run(Context(_View(state), Deadline.after(10), tools))
-    [actions] = [write.value for write in result.writes]
+    actions = cast(list[str], result.writes[0].value)
     assert "watched fine-eng" in actions
     assert any("stale-eng" in action for action in actions)
