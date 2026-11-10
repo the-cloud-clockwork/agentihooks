@@ -1,5 +1,6 @@
 """The step starvation tick step records each step's last completed run and alarms once a step misses three windows."""
 
+import hashlib
 import json
 import time
 from importlib import import_module
@@ -277,3 +278,68 @@ def test_swarm_status_findings_list_the_starved_step_at_the_status_clock(
     assert [(row["subject"], row["summary"]) for row in rows] == [
         ("waits-end", "Tick step waits end has not completed for 5 minutes")
     ]
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_the_alarm_item_carries_its_id_ref_and_every_evidence_line(store: RedisStore) -> None:
+    """The master's item is keyed by the step and its first miss, names its ref and joins every evidence line."""
+    replay(store, 4)
+    [item] = items(store)
+    digest = hashlib.sha256(f"step-starvation:{SLUG}:{WAITS}:{START + MINUTE}".encode()).hexdigest()[:12]
+    assert (item.id, item.ref) == (digest, f"step-starvation:{SLUG}:{WAITS}")
+    assert item.text == (
+        "URGENT: Tick step waits end has not completed for 3 minutes on swarm sw. Evidence: "
+        "Last completed run: never since the watch began; "
+        "4 passes since ran it without a completed run, the first at 06 November 21:21 UTC; "
+        "Window 60s from budgets.FLOORS; three windows is 180s."
+    )
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_a_step_already_alarmed_never_hides_the_next_starved_step(store: RedisStore) -> None:
+    """A starved step alarmed earlier is passed over and a step that starves later still alarms the master."""
+    step_starvation.step(store, SLUG, START, WINDOWS)
+    for index in range(1, 9):
+        at = START + index * MINUTE
+        journal(store, at, "spawn", engine.LATE, abandoned=True)
+        journal(store, at + 1, WAITS, engine.OK if index < 5 else engine.FAILED)
+        step_starvation.step(store, SLUG, at + 1_000, WINDOWS)
+    assert sorted(item.ref for item in items(store)) == [
+        f"step-starvation:{SLUG}:spawn",
+        f"step-starvation:{SLUG}:{WAITS}",
+    ]
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_reading_again_with_no_new_records_counts_nothing_twice(store: RedisStore) -> None:
+    """The record at the cursor was already counted; a read with nothing newer leaves every step as it was."""
+    step_starvation.step(store, SLUG, START, WINDOWS)
+    journal(store, START + MINUTE, WAITS, engine.FAILED)
+    step_starvation.step(store, SLUG, START + MINUTE + 1_000, WINDOWS)
+    step_starvation.step(store, SLUG, START + MINUTE + 2_000, WINDOWS)
+    saved = step_starvation.read(store, SLUG)
+    assert (saved["cursor"], saved["steps"]) == (
+        f"{START + MINUTE}-0",
+        {WAITS: {"missed": START + MINUTE, "misses": 1}},
+    )
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_one_read_takes_only_the_newest_records_up_to_its_limit(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the read limit the oldest unread records are skipped and the newest are counted."""
+    monkeypatch.setattr(step_starvation, "READ_LIMIT", 3)
+    step_starvation.step(store, SLUG, START, WINDOWS)
+    for index in range(1, 6):
+        journal(store, START + index * MINUTE, WAITS, engine.FAILED)
+    step_starvation.step(store, SLUG, START + 6 * MINUTE, WINDOWS)
+    assert step_starvation.read(store, SLUG)["steps"][WAITS] == {"missed": START + 3 * MINUTE, "misses": 3}
+
+
+@pytest.mark.feature("tick-step-starvation")
+def test_a_stream_entry_id_reads_as_its_millisecond_and_sequence() -> None:
+    """An entry id gives its millisecond and sequence; anything else is refused by name."""
+    assert step_starvation._position("1794000000000-7") == (1_794_000_000_000, 7)
+    with pytest.raises(ValueError, match="^not a stream entry id: 1794000000000$"):
+        step_starvation._position("1794000000000")

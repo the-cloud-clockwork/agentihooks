@@ -10,6 +10,7 @@ starvation and is listed as a health finding in swarm status.
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -28,6 +29,7 @@ WINDOWS = 3
 READ_LIMIT = 2000
 COMPLETED = frozenset({"ok", "late"})
 SPOKEN = "%d %B %H:%M UTC"
+ENTRY_ID = re.compile(r"(?P<ms>\d+)-(?P<seq>\d+)")
 _PASS_READS: dict[tuple[str, str], dict[str, Any]] = {}
 
 
@@ -61,14 +63,17 @@ def note(steps: dict[str, dict[str, int]], row: Mapping[str, Any], at: int) -> N
 
 
 def _position(entry: str) -> tuple[int, int]:
-    ms, _, seq = entry.partition("-")
-    return int(ms), int(seq or 0)
+    """Return the millisecond and sequence of stream entry id ``entry``."""
+    found = ENTRY_ID.fullmatch(entry)
+    if found is None:
+        raise ValueError(f"not a stream entry id: {entry}")
+    return int(found["ms"]), int(found["seq"])
 
 
 def _read_with_rows(store: Any, slug: str, at: int) -> tuple[dict[str, Any], str, list[tuple[str, dict[str, Any]]]]:
     """Return the saved state, its cursor and the newest pass record rows after the cursor, oldest first, in one round
     trip; the first read's cursor is ``at``."""
-    pipe = store.redis.pipeline(transaction=False)
+    pipe = store.redis.pipeline()
     pipe.get(store.key(slug, KEY))
     pipe.xrevrange(store.key(slug, RECORDS), count=READ_LIMIT)
     raw, newest = pipe.execute()
@@ -89,7 +94,7 @@ def observe(store: Any, slug: str, at: int, windows: Mapping[str, float]) -> dic
     state, cursor, rows = _read_with_rows(store, slug, at)
     steps = dict[str, dict[str, int]](state.get("steps", {}))
     for entry, row in rows:
-        note(steps, row, int(entry.partition("-")[0]))
+        note(steps, row, _position(entry)[0])
         cursor = entry
     state = {"cursor": cursor, "steps": steps, "windows": dict(windows)}
     _save(store, slug, state)
