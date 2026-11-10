@@ -550,7 +550,7 @@ agentihooks hive set pod-a max-agents=auto
 
 With the defaults, a `ui=no` hive takes `ci`, `plan` and every other worker role or profile and refuses `master`;
 a `ui=yes` hive takes every agent type, masters included. A hive still on a legacy `roles` record reads under these
-defaults until its next heartbeat; `agentihooks hive set <id> excluded=<list>` writes its own list at once.
+defaults until its next heartbeat, join or `hive set`; `agentihooks hive set <id> excluded=<list>` writes its own list at once.
 
 ### Capabilities and task needs
 
