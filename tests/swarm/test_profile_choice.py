@@ -375,19 +375,20 @@ def _overlaid(task: dict, overlays: dict, hosted: frozenset[str]) -> profile_cho
 
 @pytest.mark.feature("hosted-overlay-on-hive")
 @pytest.mark.parametrize(
-    ("task", "defaults"),
+    ("task", "defaults", "held"),
     [
-        ({**TASK, "profile": "engineer"}, {"engineer": ["frontend"]}),
-        ({**TASK, "profile": "designer", "overlays": ["frontend"]}, {}),
+        ({**TASK, "profile": "engineer"}, {"engineer": ["frontend"]}, ()),
+        ({**TASK, "profile": "designer", "overlays": ["frontend"]}, {}, ()),
+        ({**TASK, "profile": "designer", "overlays": ["frontend"]}, {}, ("frontend",)),
     ],
 )
 def test_a_hosted_controller_leaves_overlays_a_target_hive_hosts_to_that_hive(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: dict, defaults: dict
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: dict, defaults: dict, held: tuple[str, ...]
 ) -> None:
     from scripts.targets import _common
     from tests.swarm.overlay_installer import installer
 
-    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ()))
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, held))
     decision = _overlaid(task, defaults, frozenset({"designer", "frontend"}))
     assert (decision.profile, decision.overlays) == (task["profile"], ())
 
