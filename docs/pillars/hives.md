@@ -463,6 +463,48 @@ is in the hive index and holds a member record. An agent on any other host, and 
 its inbox and session readings in the controller keys under the plain root. Those keys are the same as before
 member scoping, so a local install and a single host install see no change.
 
+### Member id after a refused credential
+
+When a hive process replaces its Redis credential it takes the member id from the same place, so every key it
+builds carries the id of the member its Redis user `hive-<id>` was made for. Outside ledger local mode, where a
+process uses `AGENTIHOOKS_SWARM_REDIS_URL` and none of this applies, a process connects in this order:
+
+1. It reads `hive.env` in the hive home (`AGENTIHOOKS_HOME`, else `~/.agentihooks`). When that file names a Redis
+   user other than the one in the process environment, as after `hive create` or a rejoin replaced the member, the
+   process takes `AGENTIHOOKS_HIVE_ID` and `AGENTIHOOKS_HIVE_REDIS_URL` from the file. `hive add` writes both into the
+   new host's file, and every refresh writes both into the refreshing host's file.
+2. It logs in with `AGENTIHOOKS_HIVE_REDIS_URL`.
+3. When Redis refuses that credential, it tries the URL saved in `hive.env`. If that one logs in, the process takes
+   the member id saved beside it.
+4. Otherwise it runs `hive refresh` under the per-host refresh lock. The refresh answer names the member the new
+   credential belongs to; the process writes both values into `hive.env` and into its own environment.
+
+The hive daemon (`hive run`) reads the member id it keys under after it connects. Its heartbeat, headroom
+publisher and scheduler keys therefore use the recovered member on the first start. A daemon on a hive recreated
+by `hive create` writes its scheduler under its own member:
+
+```text
+<root>:hive:<id>:scheduler:<machine>:<suffix>      for example agentihooks:hive:lab-vm:scheduler:pod-0:entries
+```
+
+`<machine>` is the host name. A process without `AGENTIHOOKS_HIVE_ID` writes the same keys under
+`<root>:scheduler:<machine>`; in ledger local mode the scheduler keeps its local key.
+The member ACL is not widened: a member still writes no other member's hive keys.
+
+Check which member a hive daemon keys under:
+
+```bash
+# On the swarm host: the hive's member id
+agentihooks hive list
+
+# As an admin user: that member's scheduler keys exist, and no other member's id carries this machine
+redis-cli --user <admin> --askpass --scan --pattern 'agentihooks:hive:<id>:scheduler:*'
+redis-cli --user <admin> --askpass --scan --pattern 'agentihooks:hive:*:scheduler:<machine>:*'
+
+# The hive service has not restarted since it started
+systemctl --user show agentihooks-hive -p NRestarts
+```
+
 ### Worker keys
 
 An engineer on a joined hive runs its swarm commands as the member's Redis user. Those commands write swarm and seat
@@ -700,6 +742,7 @@ the member's own keys.
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes a key outside its hive key and outside the [worker keys](#worker-keys), such as a launch slot row or swarm settings. | Expected for controller keys. A worker command refused this way is a bug to file with the command and the key named. |
 | `swarm done` fails with `NoPermissionError` deleting the task claim, or `swarm status` fails with `NoPermissionError` writing a finding verdict | The member's Redis user was written before its hive endpoint ran a release with the worker keys, so `ACL GETUSER hive-<id>` lists no `~<root>:swarm:*:claim:*` or `~<root>:swarm:*:findings` pattern. | Restart the hive endpoint (`agentihooks hive serve`) on a current release, or run `agentihooks hive refresh` on the member; see [Applying the grant](#applying-the-grant). |
+| A new hive's service restarts at startup and Redis refuses `<root>:hive:<old id>:scheduler:<machine>:entries` to user `hive-<new id>` | The daemon keyed its scheduler under a member id that did not match its Redis user. | Upgrade the hive and restart its service. The daemon now takes the id with the credential; see [Member id after a refused credential](#member-id-after-a-refused-credential). |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
 | A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
