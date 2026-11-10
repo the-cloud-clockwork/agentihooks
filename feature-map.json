@@ -3278,7 +3278,8 @@
         "tests/swarm/test_lease_cache_records.py::test_the_cheap_lease_read_survives_an_unrelated_records_write",
         "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_inside_its_margin_writes_nothing",
         "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_refuses_a_lease_another_owner_took",
-        "tests/swarm/test_lease_cache_records.py::test_a_records_swarm_with_no_lease_reads_none"
+        "tests/swarm/test_lease_cache_records.py::test_a_records_swarm_with_no_lease_reads_none",
+        "tests/swarm/test_lease_cache_records.py::test_a_document_swarm_still_reads_its_lease_from_the_cache"
       ]
     }
   ],

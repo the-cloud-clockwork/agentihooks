@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from typing import Any
 
 import pytest
@@ -20,7 +21,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
     at = [1000]
     monkeypatch.setattr(fencing, "now_ms", lambda: at[0])
-    monkeypatch.setattr(lease, "now_ms", lambda saved: at[0])
+    monkeypatch.setattr(lease, "now_ms", lambda _store: at[0])
     return at
 
 
@@ -51,13 +52,13 @@ def test_the_cheap_lease_read_answers_the_lease_written_through_records(store: A
     _records(store)
     held = lease.acquire(store, "sw", "home")
     assert held is not None
-    assert fencing.read_lease(store, "sw") == {"lease": held.__dict__}
+    assert fencing.read_lease(store, "sw") == {"lease": asdict(held)}
 
     clock[0] = held.expires_at + 1
     taken = lease.acquire(store, "sw", "other")
     assert taken is not None
     assert taken.epoch == held.epoch + 1
-    assert fencing.read_lease(store, "sw") == {"lease": taken.__dict__}
+    assert fencing.read_lease(store, "sw") == {"lease": asdict(taken)}
 
 
 @pytest.mark.feature("lease-cache-records")
@@ -68,7 +69,7 @@ def test_the_cheap_lease_read_survives_an_unrelated_records_write(store: Any, cl
     held = lease.acquire(store, "sw", "home")
     assert held is not None
     fencing.write(store, "sw", lambda doc: doc["grants"].update({"g": {"n": 1}}))
-    assert fencing.read_lease(store, "sw") == {"lease": held.__dict__}
+    assert fencing.read_lease(store, "sw") == {"lease": asdict(held)}
 
 
 @pytest.mark.feature("lease-cache-records")
@@ -106,3 +107,15 @@ def test_a_records_swarm_with_no_lease_reads_none(store: Any) -> None:
 
     _records(store)
     assert fencing.read_lease(store, "sw") == {"lease": None}
+
+
+@pytest.mark.feature("lease-cache-records")
+def test_a_document_swarm_still_reads_its_lease_from_the_cache(store: Any, clock: list[int]) -> None:
+    from scripts.swarm import fencing, lease
+
+    held = lease.acquire(store, "sw", "home")
+    assert held is not None
+    assert fencing.records(store, "sw").layout("sw") == fencing.DOCUMENT
+    assert fencing.read_lease(store, "sw") == {"lease": asdict(held)}
+    store.redis.delete(store.key("sw", fencing.LEASE_CACHE))
+    assert fencing.read_lease(store, "sw") is None
