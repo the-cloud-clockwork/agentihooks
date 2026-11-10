@@ -143,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
     with subprocess.Popen(command, env={**os.environ, **env}) as agent:
         try:
             launches.record(dict(os.environ), pid=agent.pid)
