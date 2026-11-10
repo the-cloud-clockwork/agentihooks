@@ -3155,6 +3155,18 @@
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
       ]
+    },
+    {
+      "id": "swarm-tick-view-shared-pr-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-intent-check-speed",
+      "behaviour": "tick_view shares every pull request it fetches through the swarm store for github_reads.RUN_TTL_S, so a caller that passes no earlier view, such as the standalone wait pass, reuses what another caller or an earlier pass just fetched instead of refetching and repaginating every pull request cold; a value that is not a pull request or has aged past that window is never kept.",
+      "seam": "scripts.swarm.ledger_events.tick_view, _shared_views and _save_shared_views",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_the_shared_view_cache_round_trips_a_pull_request_and_expires_it",
+        "tests/swarm/test_pull_views.py::test_a_caller_with_no_earlier_view_reuses_what_another_caller_just_fetched",
+        "tests/swarm/test_pull_views.py::test_a_multi_page_pull_request_is_shared_across_calls_without_a_second_pagination_pass"
+      ]
     }
   ],
   "unmapped_rules": [
