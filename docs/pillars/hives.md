@@ -273,8 +273,8 @@ compares each remote after normalizing it to lowercase `host/owner/name`, so
 
 When the hive has no checkout with the carried origin, it passes the origin identity itself to
 `init-agent --dir`, which refuses the launch with `directory does not exist: <path>`. `<path>` is the identity
-joined to the `init-agent` base directory, `RUN_CLAUDE_BASE_DIR` or else `~/dev`, such as
-`/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`. The task then carries a failed launch finding.
+joined to the `init-agent` base directory (`RUN_CLAUDE_BASE_DIR`, else `~/dev` when it exists, else `$HOME`),
+such as `/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`.
 
 ## Hive endpoint limits
 
