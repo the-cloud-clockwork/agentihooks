@@ -284,3 +284,37 @@ def test_within_records_its_budget_and_reads_late_only_past_it(
 def test_within_outside_a_tick_runs_the_call_and_records_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     assert timing.within(1.0, sorted, [2, 1]) == [1, 2]
     assert capsys.readouterr().err == ""
+
+
+def _traced_sort(items: list[int]) -> list[int]:
+    return sorted(items)
+
+
+def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setenv("AGENTIHOOKS_TICK_PROFILE_STEPS", "collect acks")
+    with timing.tick("sw"):
+        assert timing.within(2.5, _traced_sort, [2, 1], name="collect acks") == [1, 2]
+    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+    profiles = [row for row in rows if row["event"] == "swarm_tick_step_profile"]
+    assert len(profiles) == 1
+    profile = profiles[0]
+    assert profile["step"] == "collect acks"
+    assert any("_traced_sort" in line for line in profile["top_cumulative"])
+    assert any("_traced_sort" in line for line in profile["top_own"])
+
+
+def test_within_without_the_env_var_never_calls_the_profiler(monkeypatch: pytest.MonkeyPatch) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.delenv("AGENTIHOOKS_TICK_PROFILE_STEPS", raising=False)
+
+    def _forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("profiler ran with the env var unset")
+
+    monkeypatch.setattr(timing, "_profile_call", _forbidden)
+    with timing.tick("sw"):
+        assert timing.within(2.5, _traced_sort, [2, 1], name="collect acks") == [1, 2]
+    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert all(row["event"] != "swarm_tick_step_profile" for row in rows)
