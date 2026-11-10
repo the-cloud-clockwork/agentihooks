@@ -784,7 +784,7 @@ and placement steps are in bold; the others hold steps from other changes.
 
 | Order | Group | Site in the pass | Steps |
 | --- | --- | --- | --- |
-| 1 | `start` | First line of the pass | config load, stopped branch; its site check first loads the [master move modules](../pillars/hives.md#master-move-code-preload) |
+| 1 | `start` | First line of the pass | config load, stopped branch |
 | 2 | `pass setup` | After `start`, unless the stopped branch ended the pass | spawn hold clear, pass budget |
 | 3 | `observe` | After `pass setup` | pane evidence through verify, including **spawn due** |
 | 4 | `agents` | After the observation sweeps | reap, recover outages, strays, failed panes |

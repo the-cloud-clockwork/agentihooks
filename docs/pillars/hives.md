@@ -1558,8 +1558,8 @@ The tick loads those modules at the start of every pass, in the `start` site che
 later passes find them already loaded and the check costs nothing.
 
 Before this preload, the first pass after a tick process started imported the modules inside the fail over step.
-Its budget was then about one second, measured from warm passes. On a contended runner the import outlasted it,
-the engine abandoned the step as `late`
+Its budget was then about one second, measured from warm passes. On a contended runner the import outlasted it.
+The engine abandoned the step as `late`
 (see [When a step exceeds its budget](../reference/tick-engine-steps.md#when-a-step-exceeds-its-budget)) and the
 move was dropped for that pass. The swarm master recovery test that moves a master off a lost hive to the hive
 with room failed on its first run for this reason and passed only on a retry.
