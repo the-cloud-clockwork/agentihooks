@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.788 · 2026-11-10
+
+### 2026-11-10 · fdc245c03f36 · #10459 · @nestorcolt
+
+**Give the tick view's pull request batch cache its own TTL**
+
+This change fixes tick_view's pull-request batch read repeatedly refetching cold from GitHub every pass, costing 35-39 seconds each time, because its cache entries expired under the shared 60-second TTL while tick passes only run 88-114 seconds apart. It adds an optional ttl parameter to github_reads.snapshot (defaulting to the existing shared value, so no other caller is affected) and threads it through ledger_events.views, with tick_view now passing a new 180-second TICK_VIEW_TTL_S constant. The batch snapshot now survives across tick passes instead of expiring every time, eliminating the redundant large GraphQL refetches without touching any other caching behavior.
+
 ## v2.17.787 · 2026-11-10
 
 ### 2026-11-10 · 050450aafb26 · #10386 · @agenticore-app
