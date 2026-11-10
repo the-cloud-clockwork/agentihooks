@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.events.bus import StateStore
 from scripts.events.config import BusConfig
 from scripts.events.memory import open_bus
 from scripts.scheduler.core import Scheduler
@@ -45,23 +44,3 @@ def test_new_timer_prunes_abandoned_history_and_preserves_live_work(scheduler: S
         current = scheduler.timer(owner="process", payload="new wait", delay=1)
     assert {row["id"] for row in scheduler.records()} == {active.id, current.id}
     assert active.state == "active"
-
-
-@pytest.mark.feature("scheduler-bounded-history")
-def test_timer_polling_reads_one_record() -> None:
-    import fakeredis
-
-    from scripts.events.scheduler_records import SchedulerState
-
-    scheduler = Scheduler(SchedulerState(fakeredis.FakeRedis(decode_responses=True), "scheduler"), machine="headed")
-    timer = scheduler.timer(owner="process", payload="wait", delay=1)
-    timer.start()
-    state: StateStore = scheduler.state
-    original = state.get
-
-    def read(key: str) -> object:
-        assert key != scheduler.name("entries"), "timer polling loaded the whole history"
-        return original(key)
-
-    with patch.object(state, "get", side_effect=read):
-        assert timer.state == "active"

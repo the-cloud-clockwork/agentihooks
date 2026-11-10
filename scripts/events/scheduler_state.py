@@ -1,16 +1,23 @@
 import atexit
 import json
 import os
+import time
 from collections.abc import Mapping
 from functools import lru_cache
 from threading import Lock
+from typing import TYPE_CHECKING, Any
 
 from . import state
 from .bus import StateConflict, StateEntry, StateStore
 from .config import BusConfig
 
+if TYPE_CHECKING:
+    from .redis_state import RedisStateStore
+
 BACKEND_ENV = "AGENTIHOOKS_SCHEDULER_STATE_BACKEND"
+MAX_DOCUMENT = 8 * 1024 * 1024
 _lock = Lock()
+_recovery = Lock()
 
 
 @lru_cache
@@ -37,18 +44,48 @@ def open_scheduler_state(bucket: str) -> StateStore:
             return bus.state(bucket)
     from scripts.swarm.store import redis_client
 
-    from .scheduler_records import SchedulerState
+    from .redis_state import RedisStateStore
 
-    return SchedulerState(redis_client(), bucket)
+    return RedisStateStore(redis_client(), bucket)
+
+
+def live(document: dict[str, Any], now: float) -> dict[str, Any]:
+    """The scheduler document without retired entries and abandoned process timers."""
+    from scripts.scheduler.core import abandoned
+
+    retired = document.get("retired", {})
+    entries = document.get("entries", {})
+    kept = {key: row for key, row in entries.items() if key not in retired and not abandoned(row, now)}
+    return {**document, "entries": kept, "retired": {}}
+
+
+def shrink(state: "RedisStateStore", key: str) -> None:
+    """Rewrites an oversized scheduler document once, under a process lock, so concurrent waiters never each decode it."""
+    from .redis_state import WRITE_TRIES
+
+    with _recovery:
+        for _ in range(WRITE_TRIES):
+            if state.redis.hstrlen(state.watch_key, key) <= MAX_DOCUMENT:
+                return
+            stored = state.get(key)
+            if stored is None:
+                return
+            document = live(json.loads(stored.value), time.time())
+            try:
+                state.update(key, json.dumps(document).encode(), stored.revision)
+            except StateConflict:
+                continue
+            return
+    raise StateConflict(f"scheduler recovery {key!r} kept changing")
 
 
 def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
-    import time
-
-    from scripts.scheduler.core import abandoned as is_abandoned
+    from scripts.scheduler.core import abandoned
 
     from .redis_state import WRITE_TRIES, RedisStateStore
 
+    if isinstance(state, RedisStateStore) and state.redis.hstrlen(state.watch_key, key) > MAX_DOCUMENT:
+        shrink(state, key)
     for _ in range(WRITE_TRIES):
         stored = state.get(key)
         if not isinstance(state, RedisStateStore):
@@ -57,28 +94,15 @@ def read(state: StateStore, key: str, legacy_key: str) -> StateEntry | None:
         if "entries" in document:
             return stored
         now = time.time()
-        entries: dict[str, object] = {}
-        abandoned: list[str] = []
-        for entry_id, raw in state.redis.hscan_iter(legacy_key, count=128):
+        entries = {}
+        for entry_id, raw in state.redis.hscan_iter(legacy_key):
             entry = json.loads(raw)
-            if entry.get("owner") == "process" and is_abandoned(entry, now):
-                abandoned.append(entry_id)
-                if len(abandoned) == 128:
-                    state.redis.hdel(legacy_key, *abandoned)
-                    abandoned.clear()
-            else:
+            if not abandoned(entry, now):
                 entries[entry_id] = entry
-        if abandoned:
-            state.redis.hdel(legacy_key, *abandoned)
-        retired = dict(state.redis.hscan_iter(legacy_key.removesuffix("entries") + "retired", count=128))
+        retired = [entry_id for entry_id, _ in state.redis.hscan_iter(legacy_key.removesuffix("entries") + "retired")]
         if not entries and not retired:
             return stored
-        document.update(
-            {
-                "entries": entries,
-                "retired": dict.fromkeys(retired, True),
-            }
-        )
+        document.update({"entries": entries, "retired": dict.fromkeys(retired, True)})
         try:
             if stored is None:
                 state.create(key, json.dumps(document).encode())

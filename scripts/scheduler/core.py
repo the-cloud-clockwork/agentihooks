@@ -72,8 +72,11 @@ class Entry:
     id: str
 
     @property
-    def record(self) -> dict[str, Any]:
-        return self.scheduler.record(self.id)
+    def record(self) -> dict:
+        entry = self.scheduler.document()["entries"].get(self.id)
+        if entry is None:
+            raise KeyError(self.id)
+        return entry
 
     @property
     def state(self) -> str:
@@ -155,17 +158,8 @@ class Scheduler:
     def name(self, suffix: str) -> str:
         return self.key(suffix).replace(":", ".")
 
-    def document(self) -> dict[str, Any]:
+    def document(self) -> dict:
         return self._read()[0]
-
-    def record(self, entry_id: str) -> dict[str, Any]:
-        reader = getattr(self.state, "scheduler_record", None)
-        entry = reader(self.name("entries"), entry_id) if reader is not None else None
-        if entry is None:
-            entry = self.document()["entries"].get(entry_id)
-        if entry is None:
-            raise KeyError(entry_id)
-        return entry
 
     def _read(self) -> tuple[dict[str, Any], int | None]:
         from scripts.events.scheduler_state import read
@@ -283,7 +277,6 @@ class Scheduler:
         def insert(document: dict[str, Any]) -> None:
             for old_id in [key for key, row in document["entries"].items() if abandoned(row, now)]:
                 document["entries"].pop(old_id)
-                document["retired"].pop(old_id, None)
             document["entries"][entry_id] = entry
 
         self.change(insert)

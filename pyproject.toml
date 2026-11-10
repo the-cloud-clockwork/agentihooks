@@ -46,7 +46,6 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     # The swarm keeps its claims and agent registry in Redis (scripts/swarm/store.py).
     "redis>=5.0.0",
-    "ijson>=3.3",
     "croniter>=6.2.4,<7",
     "jsonschema>=4.23",
     # The ledger repository writes a multi-megabyte indented document on every sync;
