@@ -2091,7 +2091,8 @@
         "tests/swarm_ledger/test_live_rows.py::test_a_scoped_full_export_names_frozen_ids_only_when_it_carries_the_tasks",
         "tests/tick/test_live_rows_replay.py::test_a_pass_keeps_the_most_rows_any_of_its_reads_held",
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
-        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon"
+        "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon",
+        "tests/tick/test_live_rows_replay.py::test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick"
       ]
     },
     {

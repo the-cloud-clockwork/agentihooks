@@ -154,6 +154,25 @@ def test_a_pass_keeps_the_most_rows_any_of_its_reads_held() -> None:
 
 
 @pytest.mark.feature("swarm-tick-live-rows")
+def test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick() -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm.ledger_client import pass_state
+
+    doc = {
+        "tasks": [{"id": "a", "state": "open"}, {"id": "b", "state": "done"}],
+        "freezes": [],
+    }
+    stand_in = SimpleNamespace(state=lambda slug: doc)
+    with view.holding():
+        assert pass_state(stand_in, "sw") is doc
+        assert pass_state(stand_in, "sw", view.TICK_SCOPE) is doc
+        live = pass_state(stand_in, "sw", live_rows.Scope())
+    assert [task["id"] for task in live["tasks"]] == ["a"]
+    assert live[live_rows.FROZEN_IDS] == []
+
+
+@pytest.mark.feature("swarm-tick-live-rows")
 def test_the_pass_view_reads_the_ledger_with_the_tick_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
