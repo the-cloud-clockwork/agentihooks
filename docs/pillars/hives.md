@@ -256,7 +256,8 @@ A hive that lists the swarm path itself gets no `hive_origin` field and launches
 
 With the records in [Matching a repo across machines](#matching-a-repo-across-machines), an engineer placed on
 the headless worker launches with `--dir /home/worker/dev/agentihooks`, never `/home/me/dev/agentihooks`. No
-setting selects the launch directory; it follows from `HIVE_REPO_ROOT` and the checkouts' `origin` remotes on the hive.
+setting selects the launch directory; it follows from `HIVE_REPO_ROOT` and the checkouts' `origin` remotes on
+the hive.
 
 ```bash
 # On the hive: each direct child checkout and its origin remote
@@ -271,8 +272,9 @@ compares each remote after normalizing it to lowercase `host/owner/name`, so
 `https://github.com/the-cloud-clockwork/agentihooks.git` matches `github.com/the-cloud-clockwork/agentihooks`.
 
 When the hive has no checkout with the carried origin, it passes the origin identity itself to
-`init-agent --dir`, which refuses the launch with `directory does not exist: <path>`, where `<path>` is that
-identity resolved as a relative directory. The task then carries a failed launch finding.
+`init-agent --dir`, which refuses the launch with `directory does not exist: <path>`. `<path>` is the identity
+joined to the `init-agent` base directory, `RUN_CLAUDE_BASE_DIR` or else `~/dev`, such as
+`/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`. The task then carries a failed launch finding.
 
 ## Hive endpoint limits
 
