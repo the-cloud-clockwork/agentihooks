@@ -883,6 +883,9 @@ def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(mon
     ]
     counts = metrics_swarm.placement_counts(redis, agents)
     assert counts == {"workstation_agents": 4, "hive_agents": 2}
+    headless = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    assert metrics_swarm.placement_counts(headless, agents) == {"workstation_agents": 3, "hive_agents": 3}
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 6), counts)
     assert [host[key] for key in ("workstation_agents", "hive_agents")] == [4, 2]
     assert [metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), {})[key] for key in counts] == [0, 0]

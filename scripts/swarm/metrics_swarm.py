@@ -333,7 +333,10 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
 
 
 def placement_counts(redis: Any, agents: list[dict]) -> dict:
-    home = {"", *(hive["id"] for hive in registry.hives(redis) if hive.get("ui") == placement.YES)}
+    from scripts.swarm.commands import hive_id
+
+    headed = [hive["id"] for hive in registry.hives(redis) if hive.get("ui") == placement.YES]
+    home = {"", *(headed or [hive_id()])}
     remote = sum(
         agent.get("runtime_backend", "local") != "local"
         or (agent.get("runtime_target") or {}).get("host_id", "") not in home
