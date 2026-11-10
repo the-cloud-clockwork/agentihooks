@@ -593,9 +593,10 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 
 `--list`, and every selector match outside `--stand-down`, reads two sources:
 the session registry and the local process table. `--stand-down` matches only
-Codex records, through the stand-down resolver. A process counts as an agent when the basename of its
-command name or of one of its first two arguments is `claude` (or the argument
-ends in `claude-code/cli.js`), or is `codex` or starts with `codex-`.
+Codex records, through the stand-down resolver. A process counts as an agent
+when the basename of its command name or of one of its first two arguments is
+`claude` (or the argument ends in `claude-code/cli.js`), or is `codex` or starts
+with `codex-`.
 
 | Source | Shown when | `STATUS` |
 |---|---|---|
@@ -627,10 +628,11 @@ Two columns can show something other than the raw record:
   has another `alive`, `handed_off` or `superseded` record outside a memory
   thread. Without one, the memory thread's own values stay.
 - An unregistered process whose parent is also an agent process has an empty
-  `NAME`, printed `-`, unless its command line carries `--name`. Such a name
-  shows as given, or as the agent's `AGENTIHOOKS_AGENT_NAME` when that name
-  matches it or the `--name` value is a master pane title
-  such as `master 2 · rig`.
+  `NAME`, printed `-`, unless its command line carries `--name`. The `--name`
+  value shows as given. Two cases show the process's
+  `AGENTIHOOKS_AGENT_NAME` instead: the `--name` value equals that name with
+  `@` written as `-`, or the variable is set and the `--name` value is a master
+  pane title such as `master 2 · rig`.
 
 The real output separates columns with tabs. A `claude -p "hello"` running
 beside the two listed sessions adds no row. Rows sort by type, name,
