@@ -137,16 +137,17 @@ def test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker() -> No
     }
 
 
-@pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
-    kept_ran = Event()
+    critical_started, kept_ran = Event(), Event()
 
     def critical(ctx: Context) -> Result:
-        assert kept_ran.wait(BUSY_S), "the kept handed step waited for the critical step's worker"
+        critical_started.set()
+        assert kept_ran.wait(BUSY_S), "the kept handed step shared the critical step's only worker"
         return Result()
 
     def kept(ctx: Context) -> Result:
+        assert critical_started.wait(BUSY_S), "the critical step shared the kept handed step's only worker"
         kept_ran.set()
         return Result()
 
