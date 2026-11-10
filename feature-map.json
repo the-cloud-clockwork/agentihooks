@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "swarm-master-skips-host-hold",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
+      "behaviour": "An over budget host room never holds a master spawn, the lead launch or an extra seat, the same way workstation admission passes the master lane; the master launch still counts against the room and an over budget engineer spawn stays held.",
+      "seam": "master_fill.run and the masters step master launch against the tick spawn stop host check",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_an_over_budget_host_launches_the_master_and_still_holds_an_engineer"
+      ]
+    },
+    {
       "id": "local-enforcements-store-ignored",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
