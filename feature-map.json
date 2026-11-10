@@ -2580,6 +2580,7 @@
         "tests/hive/test_create.py::test_the_dry_run_names_the_registry_record_and_writes_none",
         "tests/hive/test_create.py::test_no_repo_is_named_as_no_repos",
         "tests/hive/test_create.py::test_cli_create_passes_its_repos",
+        "tests/hive/test_create.py::test_cli_create_names_its_repos_option",
         "tests/hive/test_create.py::test_cli_create_refuses_a_repo_that_is_not_host_owner_name",
         "tests/hive/test_registry.py::test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones"
       ]

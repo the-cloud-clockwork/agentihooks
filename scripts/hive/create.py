@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
 from scripts.hive import auth, create_github, create_render, invite, machine, member_swarms, nats_grant, registry, setup
@@ -450,9 +450,8 @@ def _swarm_repos(tools: Tools) -> list[str]:
     from scripts.hive.daemon import origin
     from scripts.swarm.store import RedisStore
 
-    store = RedisStore(tools.redis)
-    slugs = cast("list[str]", store.slugs())
-    configs = [store.config(slug) for slug in slugs]
+    store: Any = RedisStore(tools.redis)
+    configs = [store.config(slug) for slug in store.slugs()]
     repos = [origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo for config in configs]
     return sorted(set(filter(None, repos)))
 

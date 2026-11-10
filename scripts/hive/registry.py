@@ -281,22 +281,21 @@ def update(
 def beat(client: Any, hive_id: str, fields: dict[str, Any]) -> None:
     def write(stored: dict[str, Any] | None) -> dict[str, Any]:
         merged = {**_seeded(hive_id), **(stored or {}), **fields}
-        registered = merged.get("registered_repos", [])
+        registered = merged.get("registered_repos")
         return {**merged, "repos": sorted({*merged["repos"], *registered})} if registered else merged
 
     _amend(client, hive_id, write)
 
 
-def register(client: Any, hive_id: str, name: str, repos: list[str]) -> dict[str, Any]:
+def register(client: Any, hive_id: str, name: str, repos: list[str]) -> None:
     """Records the name and repos hive create gave a hive; every later heartbeat keeps those repos listed."""
 
     def write(stored: dict[str, Any] | None) -> dict[str, Any]:
         merged = {**_seeded(hive_id), **(stored or {})}
         return {**merged, "name": name, "registered_repos": repos, "repos": sorted({*merged["repos"], *repos})}
 
-    record = _settle(hive_id, _amend(client, hive_id, write))
+    _amend(client, hive_id, write)
     _index(client, hive_id)
-    return record
 
 
 def forget(client: Any, hive_id: str) -> None:

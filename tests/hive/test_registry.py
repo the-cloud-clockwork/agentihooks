@@ -503,8 +503,14 @@ def test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones() -> No
     import fakeredis
 
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
-    registered = registry.register(redis, "member-1", "swarm-hive-007", ["o/antoncore"])
-    assert (registered["name"], registered["repos"]) == ("swarm-hive-007", ["o/antoncore"])
+    registry.register(redis, "member-1", "swarm-hive-007", ["o/antoncore"])
+    registered = registry.show(redis, "member-1")
+    assert registered is not None
+    assert (registered["id"], registered["name"], registered["repos"]) == (
+        "member-1",
+        "swarm-hive-007",
+        ["o/antoncore"],
+    )
     registry.beat(redis, "member-1", {"repos": ["/home/worker/dev/x", "o/x"], "heartbeat_at": 5})
 
     record = registry.show(redis, "member-1")

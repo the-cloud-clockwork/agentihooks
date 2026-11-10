@@ -1289,6 +1289,8 @@ def test_create_records_the_repos_it_was_given_over_the_swarm_repos(world: Simpl
     assert record is not None
     expected = ["github.com/o/a", "github.com/o/b"]
     assert (record["repos"], record["registered_repos"]) == (expected, expected)
+    recorded = f"recorded hive {member} as {NAME} with github.com/o/a, github.com/o/b in the hive registry"
+    assert f"hive create {NAME}: registry: {recorded}" in world.lines
 
 
 @pytest.mark.feature("hive-create-registers-name-and-repos")
@@ -1375,6 +1377,17 @@ def test_cli_create_passes_its_repos(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(create, "create", created)
     assert cli.main(["create", "--repos", " GitHub.com/o/a, ,github.com/o/b,github.com/o/a "]) == 0
     assert seen["options"] == create.Options(repos=("github.com/o/a", "github.com/o/b"))
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_cli_create_names_its_repos_option() -> None:
+    parser = cli._parser()
+    (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    (option,) = [action for action in commands.choices["create"]._actions if action.dest == "repos"]
+    assert option.option_strings == ["--repos"]
+    assert option.help == (
+        "comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
 
 
 @pytest.mark.feature("hive-create-registers-name-and-repos")
