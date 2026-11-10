@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.780 · 2026-11-10
+
+### 2026-11-10 · ee32580eb0da · #10319 · @agenticore-app
+
+**Reserve hive create's chosen name atomically before the manifests pull request opens**
+
+This change fixes a race where two concurrent hive create runs could both pick the name swarm-hive-001, causing failures. Now the chosen name is atomically reserved in Redis with SET NX plus an expiry before the manifests pull request opens, so a name already taken by another run is skipped or rejected if explicitly requested. The reservation is restored on resume until its pull request exists, and safely released via compare-and-delete on failure or completion; dry runs reserve and release nothing.
+
+### 2026-11-10 · e6c194d166e6 · #10301 · @agenticore-app
+
+**Keep controller probes responsive on busy nodes**
+
+This change replaces the controller's exec-based liveness and startup probes with lightweight HTTP checks against the loopback host when API access is enabled, fixing the root cause of the 9 November kill where a timed-out exec probe terminated a controller under CPU load. Readiness now queries Redis with a four-second deadline and limits concurrent background checks. The CPU request rises from 50m to the master-approved 250m, matching real usage so the pod still schedules on constrained nodes without going Pending. Lease-based liveness when API access is disabled is untouched, and the chart test now enforces these probe and request values.
+
+### 2026-11-10 · 3290dc809498 · #10382 · @agenticore-app
+
+**Document ledger watchdog signal attribution**
+
+This change adds documentation for the ledger watchdog's restart-signal logging, covering where records are written, what fields they contain, how target and caller processes are attributed, how folder configuration affects behavior, and how to inspect records for restart order and logging failures. It links the new reference page from the existing docs index and clarifies the difference between current reload records and direct signal attempts, so operators can now trace why a ledger server exited and who triggered it, closing a prior gap where clean exits left no attributable evidence.
+
 ## v2.17.779 · 2026-11-10
 
 ### 2026-11-09 · b26469f58586 · #10363 · @agenticore-app
