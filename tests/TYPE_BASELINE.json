@@ -517,7 +517,7 @@
   "scripts/swarm/bottleneck_status.py": 56,
   "scripts/swarm/brain_binding.py": 55,
   "scripts/swarm/brain_place.py": 23,
-  "scripts/swarm/capacity.py": 439,
+  "scripts/swarm/capacity.py": 438,
   "scripts/swarm/ci_speed.py": 41,
   "scripts/swarm/claim_hold.py": 120,
   "scripts/swarm/claim_lost.py": 6,

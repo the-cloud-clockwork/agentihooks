@@ -570,10 +570,22 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `max-agents` | whole number, 0 or more, or `auto` | `auto` | A cap on the hive's agent ceiling. With no cap the ceiling is computed each tick from the hive's own heartbeat reading: the agents it runs plus the room the workstation host room rule gives its free memory less swap in use and its one minute load. A cap holds the ceiling lower; `0` scales the hive fully down, so the tick places no new agent there; `auto` clears it. Placement admits no hive past the ceiling, and the headroom admission still applies beside it. With no cap and no fresh reading the ceiling reads `unknown`. Masters do not count against it. A stored value is kept. |
 | `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
-Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
-role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded`
-follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
-stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role
+or profile is in its `excluded` list, and never past its max agents. `prefer` refuses a role the hive excludes. An
+unset `excluded` follows the hive's current `ui`. A hive still on a legacy record with the old `roles` setting drops
+it, with its stored `max-agents`, on its next heartbeat, join or `hive set`, and reads under the defaults until then.
+
+```bash
+agentihooks hive set pod-a excluded=master,frontend,qa max-agents=12
+agentihooks hive show pod-a        # "excluded": ["master", "frontend", "qa"], "max_agents": 12
+agentihooks hive set pod-a excluded=
+agentihooks hive show pod-a        # "excluded": [], every agent type may land here
+agentihooks hive set pod-a max-agents=auto
+```
+
+With the defaults, a `ui=no` hive takes `ci`, `plan` and every other worker role or profile and refuses `master`;
+a `ui=yes` hive takes every agent type, masters included. A hive still on a legacy `roles` record reads under these
+defaults until its next heartbeat, join or `hive set`; `agentihooks hive set <id> excluded=<list>` writes its own list at once.
 
 ### Capabilities and task needs
 
@@ -1546,6 +1558,87 @@ refusal: hive <host> refused retire: runtime target names no process
 On the Doctor swarm the finding for one ci agent reached 25 failing ticks and came back after a resolved verdict
 because the count kept growing.
 
+### A hive worker whose pane is gone
+
+The tick cannot read another hive's panes or processes, so it judges a worker on another hive from that hive's
+execution report. Every hive daemon publishes the report on each 15 second beat under `<root>:hive:<id>:executions`,
+which expires after 45 seconds, so a hive that stopped beating has no report. The report carries:
+
+| Field | What it holds |
+|---|---|
+| `observed_at` | When the hive took the snapshot, in milliseconds. |
+| `started_at` | When the hive's own process started. |
+| `names` | The agent names the hive's herdr lists. |
+| `process_namespace` | The hive's process namespace. Written only while the hive runs at least one execution. |
+| `pane_ids` | Every pane id herdr lists. Written only while the hive runs at least one execution; `null` when herdr refuses the pane listing or its answer cannot be read. |
+
+A worker's execution record names its hive in its runtime target (`host_id`). The tick counts the worker gone,
+and retires it with `its hive pane is gone`, when the report is no older than the worker's launch and one of these
+holds:
+
+- the hive process started after the launch;
+- `names` lists other agents but not this one, six minutes or more after the launch;
+- `pane_ids` is a list, and either the report's `process_namespace` differs from the one recorded at launch,
+  which is a restarted hive pod, or the worker's pane id is not in the list.
+
+The namespace check needs a readable pane listing: a report without `pane_ids` never retires a worker through it.
+The tick also retires a worker with `its hive pane is gone` when its runtime reads the pane as `exited`. Other
+reasons share the same path:
+
+| Reason | When |
+|---|---|
+| `its hive no longer lists it` | All of: the hub admitted the worker before its hive recorded a host target; the hive that admitted the worker has a report; six minutes or more have passed since the launch; the report's `names` omits the worker. The last holds only while `names` lists other agents, or when the hive process started after the launch. |
+| `its hive stopped reporting` | The worker's hive publishes no report and its registry beat is more than ten minutes old, the worker's own heartbeat is also older than ten minutes, and no declared wait holds. For a worker already `finished`, a hive beat older than 90 seconds is enough. |
+
+The report keeps the claim when it cannot prove the pane gone:
+
+| Report | Outcome |
+|---|---|
+| No report for the hive | The worker is not gone; the ten minute lost window applies instead. |
+| `observed_at` before the worker's launch | The snapshot predates the worker, so it cannot retire it. |
+| `pane_ids` is `null` or missing | An unreadable listing is an outage, never an empty one; neither the pane id nor the namespace is compared. |
+| An empty `pane_ids` list | Every pane is gone; the worker is retired. |
+
+A lane worker whose task is still active and whose own heartbeat is no older than ten minutes keeps its claim
+no matter which of these reasons the tick finds: the tick refreshes its claim lease and judges it again next tick. A master
+is never kept this way.
+
+Retiring the worker:
+
+1. clears any master retire request for it;
+2. refunds the claim life of a task that is parked, was handed off at quota, or was handed off because an
+   operator preempted this worker, so the reclaim does not count against it;
+3. releases the task claim and removes the agent record, which frees the engineer seat for a successor execution;
+4. reopens the task when the worker still held it and it is not waiting on a merge;
+5. settles the worker's open inbox items: they move to its seat for the next occupant when the task reopens,
+   otherwise they are withdrawn and each sender is told.
+
+The tick sends the hive no retire order, so a replacement pane that reused the slot is never stopped. The hive's
+launch slot frees on its own: the hive daemon refreshes launch slots only for executions whose agent record
+still exists, so the dropped record's slot expires after its 45 second time to live. The tick prints one line
+per worker:
+
+```text
+retired <agent>: its hive pane is gone, task <task> reopened
+```
+
+Both the controller and every hive daemon must run a release that carries
+[pull request #5387](https://github.com/the-cloud-clockwork/agentihooks/pull/5387). A hive daemon on an older
+release publishes no `pane_ids` or `process_namespace`, so its workers keep their claims until it is upgraded.
+
+Before that pull request a hive worker whose pane disappeared stayed `suspect` without end: the record held its
+engineer seat and the hive slot, and no successor could start.
+
+To see what the tick reads, fetch the hive's latest report from the swarm Redis:
+
+```bash
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" GET "$P:hive:<id>:executions" \
+  | jq '{observed_at, started_at, process_namespace, pane_ids}'
+```
+
+An empty answer means the hive has not beaten for 45 seconds.
+
 ### Troubleshooting
 
 | Symptom | Check | Fix |
@@ -1554,6 +1647,8 @@ because the count kept growing.
 | The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
 | A spawn failed with `hive launch failed: <cause>` for an execution already `finished` | The cause, against [Refusal causes](#refusal-causes) | The hive acknowledged the launch as failed. Fix the cause on the hive; for a canary timeout see [Profile launch home](../reference/profile-launch-home.md). |
 | A spawn failed with `the hive launch order ended before its acknowledgement` | `agentihooks hive list` for the order's hive | The order's receipt holds no acknowledgement, so the hive never answered it. Check that the hive beats and its `agentihooks-hive` service runs. |
+| A hive worker whose pane closed stays `suspect` and holds its seat | The hive's report, as in [A hive worker whose pane is gone](#a-hive-worker-whose-pane-is-gone) | `pane_ids` `null` or missing: herdr refused the listing, or the hive daemon predates pull request #5387; fix herdr on the hive or upgrade it. `observed_at` older than the launch: the hive's snapshot is stale; check that it beats. A fresh heartbeat from the worker keeps the claim until it ages past ten minutes. |
+| The tick printed `retired <agent>: its hive pane is gone` for a worker that was running | The report's `process_namespace` and `started_at` against the worker's launch | The hive pod restarted after the launch, which ends every process it ran. The task reopens for a successor. |
 
 ## Hive placement for one swarm on a local machine
 
@@ -2278,10 +2373,10 @@ credential answers `403 forbidden` with `swarm controls need the operator`.
 | `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
 
 Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
-`ui`, `ephemeral`, `excluded`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
-`heartbeat_at`, `version`) and three computed fields:
+`ui`, `ephemeral`, `draining`, `excluded`, `master_swarms`, `prefer`, `max_agents`, `capabilities`, `harnesses`,
+`slots`, `interactive`, `repos`, `heartbeat_at`, `version`) and three computed fields:
 
-- `live`: `true` while the heartbeat is under ninety seconds old.
+- `live`: `true` while the heartbeat is under ninety seconds old and the last finished beat under five minutes old.
 - `agents`: the placement load described under [Panel](#panel).
 - `master`: `{"slug", "name"}` of the live master on the hive, or `null`.
 
@@ -2295,7 +2390,7 @@ curl -s http://127.0.0.1:8765/api/v1/hives/pod-a
 {
   "data": {
     "id": "pod-a", "name": "pod-a", "ui": "no", "ephemeral": "yes",
-    "roles": ["eng", "ci"], "prefer": {}, "max_agents": 4, "agents": 1,
+    "excluded": ["master"], "prefer": {}, "max_agents": 4, "agents": 1,
     "live": true, "master": null,
     "slots": [{"harness": "claude", "account": "work", "kind": "subscription", "cap": 2, "provider": "", "agents": 1}],
     "...": "..."
@@ -2310,19 +2405,21 @@ The PATCH body takes one or more of these fields and nothing else:
 |---|---|
 | `name` | string, 1 to 200 characters |
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
-| `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
+| `excluded` | array of lane role or profile names, each starting with a letter or digit followed by letters, digits, `.`, `_` or `-`; the server joins the array with commas before parsing, so an entry holding a comma becomes two names and padding spaces are dropped; `[]` excludes nothing |
 | `prefer` | object of role to whole number rank |
-| `max_agents` | integer, 0 or more |
+| `max_agents` | integer, 0 or more, or `"auto"` to clear the cap |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
-UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
-credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
+malformed `excluded` name, a `prefer` role the hive excludes, a rank below 1 or a negative max agents is refused.
+The retired `roles` field is an unknown field and is refused. `master-swarms` and `capabilities` are set only with
+`agentihooks hive set`. The credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in
+`X-Ledger-Slug`.
 
 ```bash
 curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
   -H "Content-Type: application/json" \
   -H "X-Ledger-Slug: $SLUG" -H "X-Ledger-Token: $LEDGER_TOKEN" \
-  -d '{"roles": ["eng", "ci", "plan"], "max_agents": 4}'
+  -d '{"excluded": ["master", "qa", "frontend"], "max_agents": 12}'
 ```
 
 | Status | Code | When |
@@ -2345,7 +2442,7 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | `Could not read hives.` | The server answered an error, usually 503 with Redis down. | `curl` the list to read the error, then restore Redis. |
 | An edit shows `Hive settings need the operator` | The page was opened with an agent's credential. | Open the ledger with the operator's credential. |
-| An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
+| An edit shows `prefer names qa, a role this hive excludes` | `prefer` named a role in the hive's `excluded` list. | Remove the role from `excluded`, or drop it from `prefer`. |
 | move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
 | A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
 

@@ -15,7 +15,7 @@ import tomlkit
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
-from scripts.ci_mutation.probe import mark_probe_results, probe_elapsed, probe_results
+from scripts.ci_mutation.probe import mark_probe_results, probe_results
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -463,7 +463,7 @@ def run_gate(
     first: tuple[str, ...] = (),
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
-    started = time.monotonic() - probe_elapsed(stats)
+    started = time.monotonic()
     deadline = started + budget
     cleared = load_clearances(root)
     selection_path = root / ".mutation-selection.json"
