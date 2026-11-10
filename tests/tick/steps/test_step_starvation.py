@@ -167,6 +167,7 @@ def counted_reads(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[st
         return real(key)
 
     monkeypatch.setattr(store.redis, "get", get)
+    monkeypatch.setattr(step_starvation, "_PASS_READS", {})
     return reads
 
 
