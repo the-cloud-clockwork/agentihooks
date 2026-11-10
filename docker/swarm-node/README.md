@@ -12,8 +12,8 @@ docker build \
 The supported architecture is Linux amd64. `versions.lock` pins the base digest,
 Debian snapshot and shell package versions, native herdr, Claude and Codex release
 checksums, the Codex code mode host from the same Codex release (see
-[Codex code mode host in the worker image](../../docs/reference/worker-image-codex-code-mode.md)), and the hashed Python requirements closure. The agentihooks source
-wheel uses version zero with its tested source revision recorded in the manifest.
+[Codex code mode host in the worker image](../../docs/reference/worker-image-codex-code-mode.md)),
+and the hashed Python requirements closure. The agentihooks source wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
 or credential store. Every package role profile and the shared `_guards` folder

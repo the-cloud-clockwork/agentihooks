@@ -9,7 +9,8 @@ nav_order: 78
 The swarm worker image installs `codex-code-mode-host` in `/usr/local/bin`
 beside `codex`, taken from the same Codex release and pinned by its own sha256.
 Codex 0.162 runs the shell tool of a `code_mode_only` model through that sibling
-binary. Without it every `exec` call fails, the agent cannot run its profile
+binary, as the [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces)
+canaries showed on a bare `codex` install. Without it every `exec` call fails, the agent cannot run its profile
 canary, and the tick logs that the Codex agent reported no canary within 90
 seconds. The image smoke run proves the host works by running one Codex shell
 command through it with the network disabled.
@@ -18,9 +19,13 @@ command through it with the network disabled.
 
 The workstation's standalone Codex install ships the code mode host and its
 other package resources next to `codex`. The worker image used to install only
-the bare `codex` binary from the release archive, so hive pods on release
-2.17.330 carried `codex` alone. Every Codex launch on a hive then failed its
-launch check while Codex quota sat idle. The same gap on a bare binary is
+the bare `codex` binary from the release archive, so hive pods carried `codex`
+alone and every Codex launch on a hive failed its launch check. The swarm
+recorded this on release 2.17.330: `/usr/local/bin` in the hive worker image
+held only `codex`, agents reported a missing code mode host, and the tick logged
+no canary within 90 seconds. Pull request
+[#7131](https://github.com/the-cloud-clockwork/agentihooks/pull/7131) added the
+host to the lock and the probe to the smoke run. The same gap on a bare binary is
 described for the clamp probe host in
 [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces).
 
@@ -103,14 +108,19 @@ differs from its manifest with `installed inventory differs from build manifest`
 
 `docker/swarm-node/smoke.sh` runs the probe in the `startup` proof, and so in
 `all`; the `rebuild` and `profiles` legs skip it. It is one more offline
-container:
+container, run against the proof image built from an archived clean context and
+written to the evidence folder:
 
 ```bash
 docker run --rm --network none --read-only \
     --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
-    -v "$PWD/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
-    agentihooks-worker:dev python /opt/probe/code_mode_probe.py /usr/local/bin/codex
+    -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
+    "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
 ```
+
+To run the probe against an image built by hand, as in the README build command,
+replace `"$context"` with the repository root and `"$image"` with
+`agentihooks-worker:dev`.
 
 `tests/swarm_node/code_mode_probe.py`:
 
@@ -140,9 +150,10 @@ which the smoke run saves as `codex-code-mode.json` in the evidence folder:
 | `code_mode_errors` | Empty: no error event whose message mentions `Code Mode` |
 | `host_output` | `true`: the marker came back in the tool output |
 
-Any other value exits non-zero with
+Any failing value prints the report first, then exits 1 with
 `Codex shell command through the code mode host failed:` followed by the last
-2000 characters of Codex stderr, and the smoke run stops.
+2000 characters of Codex stderr. The smoke run stops, and the saved report shows
+which condition failed.
 
 ## Reading the evidence in CI
 
@@ -155,8 +166,12 @@ gh run download <run id> --name swarm-worker-image-startup --dir worker-evidence
 jq . worker-evidence/codex-code-mode.json
 ```
 
-The installed host's manifest line is under `observed.tools` in the leg's
-`first.json` and `second.json` startup reports.
+The installed host's manifest line is under `manifest.observed.tools` in the
+leg's `first.json` and `second.json` startup reports:
+
+```bash
+jq '.manifest.observed.tools["codex-code-mode-host"]' worker-evidence/first.json
+```
 
 ## Moving to a new Codex release
 
@@ -200,8 +215,9 @@ runs the probe against the new release.
 |---|---|
 | `invalid artifact lock: codex-code-mode-host` | The entry breaks one of the lock rules above. Most often `codex` was bumped without the host: set both to the same release. |
 | `artifact checksum mismatch: codex-code-mode-host` | The downloaded archive does not match `sha256`. Recompute it from the release asset; never copy the `codex` checksum. |
-| `binary usage mismatch: codex-code-mode-host` | `member` names another file in the archive, or the asset is not the host. Check the member name in the release archive. |
+| `KeyError` from `tarfile` during `worker_image.py install` | `member` names a file the archive does not hold. List the archive with `tar -tzf` and copy the exact member name. |
+| `binary usage mismatch: codex-code-mode-host` | The installed file is another binary: `member` or `url` points at the wrong asset. Check both against the release. |
 | `Codex model catalog offers no code mode model` | The Codex release lists no `code_mode_only` model. The probe has nothing to exercise; check the release notes before bumping. |
-| `Codex shell command through the code mode host failed` with `code_mode_errors` set | Codex could not reach the host. Confirm `/usr/local/bin/codex-code-mode-host` exists in the image and `observed.tools` lists it. |
+| `Codex shell command through the code mode host failed` with `code_mode_errors` set | Codex reported a Code Mode error. Read the error text in the report and the stderr tail, then confirm `/usr/local/bin/codex-code-mode-host` exists in the image and `manifest.observed.tools` lists it. |
 | Same failure with `host_output` false and no errors | The shell command did not run or its output did not return. Read the Codex stderr tail in the failure message. |
 | A Codex agent on a hive reports a missing code mode host, or the tick logs no canary within 90s | The hive pod runs an image built before the host was locked. Roll the hive onto a release that carries it and check `codex-code-mode-host` in the pod's `/usr/local/bin`. |
