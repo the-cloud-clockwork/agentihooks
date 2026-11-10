@@ -309,9 +309,21 @@ def test_a_later_pass_over_draft_pulls_rewrites_no_verdict(tmp_path: Any, monkey
     writes: list[str] = []
     monkeypatch.setattr(Verdicts, "write", lambda self, subject, *args, **fields: writes.append(subject))
     later, _ = _pulls(doc, draft=True)
-    _check(mode, later, [], tmp_path, now=NOW + intent.TURN_MS).run(doc)
+    assert _check(mode, later, [], tmp_path, now=NOW + intent.TURN_MS).run(doc) == []
     assert writes == []
     assert [Verdicts(SLUG, "intent", tmp_path).read(task["id"]) for task in doc["tasks"]] == before
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_a_split_draft_record_stands_only_for_its_own_half_and_phase() -> None:
+    url = "https://github.com/o/r/pull/7"
+    task = {"id": "t7", "phase": "p8", "split": "1-4", "pr_url": url}
+    record = {"verdict": intent.PENDING, "reason": intent.DRAFT, "at": 1, "phase": "p8", "url": url, "split": True}
+    assert intent._drafted_as(record, task)
+    assert not intent._drafted_as({**record, "url": "https://github.com/o/r/pull/8"}, task)
+    assert not intent._drafted_as({**record, "phase": "p9"}, task)
+    assert not intent._drafted_as({**record, "reason": intent.RUNNING}, task)
+    assert not intent._drafted_as(None, task)
 
 
 @pytest.mark.feature("swarm-intent-check-budget")

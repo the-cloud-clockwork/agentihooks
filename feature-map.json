@@ -2889,6 +2889,7 @@
         "tests/gates/test_intent_budget.py::test_only_a_process_that_keeps_running_passes_judges_off_the_pass",
         "tests/gates/test_intent_budget.py::test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view",
         "tests/gates/test_intent_budget.py::test_a_later_pass_over_draft_pulls_rewrites_no_verdict",
+        "tests/gates/test_intent_budget.py::test_a_split_draft_record_stands_only_for_its_own_half_and_phase",
         "tests/gates/test_intent_budget.py::test_a_draft_pull_that_turns_ready_is_marked_running_and_judged",
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
