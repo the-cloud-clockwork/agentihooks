@@ -1699,6 +1699,21 @@
       ]
     },
     {
+      "id": "controller-drains-pass-on-stop-signal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-sigint-finish",
+      "behaviour": "The controller treats the interrupt signal the swarm image stops it with like the terminate signal: a stop signal during a tick pass lets that pass finish and then exits, a stop signal between passes or a second one exits at once releasing held tick locks, and the controller Pod grace period outlasts the golden pass with margin.",
+      "seam": "scripts.swarm.controller.main run with its stop signal handler, and the agentihooks-swarm chart controller terminationGracePeriodSeconds",
+      "tests": [
+        "tests/swarm/test_controller_drain.py::test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_exit",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_during_a_pass_lets_the_pass_finish_then_exits",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_between_passes_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another",
+        "tests/swarm/test_controller_drain.py::test_a_second_stop_signal_during_a_pass_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_the_controller_grace_period_outlasts_the_golden_pass_with_margin"
+      ]
+    },
+    {
       "id": "swarm-reopened-claim-loss",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
