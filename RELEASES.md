@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.778 · 2026-11-10
+
+### 2026-11-09 · 7e1d7f59a4c2 · #10371 · @nestorcolt
+
+**Compute the spawn claim order once per pass and fit the spawn budget**
+
+This change fixes spawn passes timing out and abandoning under load. Previously, each lane recomputed launch order from scratch and readiness checks rescanned all freeze and focus records twice per task, building discarded reason text along the way, causing 26–41 second spawn runs that ran out of budget while urgent tasks waited. Now launch order and freeze targets are computed once per pass and reused across lanes, cutting `_launch_order` calls from 3 to 1 and eliminating 3.3 million redundant freeze coverage checks, with identical results verified against a real ledger replay.
+
 ## v2.17.775 · 2026-11-09
 
 ### 2026-11-09 · 3c0e3c23216f · #10285 · @nestorcolt
