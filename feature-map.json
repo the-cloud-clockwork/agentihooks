@@ -2954,7 +2954,9 @@
         "tests/tick/test_slow_lane_start.py::test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane",
         "tests/tick/test_slow_lane_start.py::test_a_handed_step_needing_a_lost_critical_step_is_still_dropped",
         "tests/tick/test_slow_lane_start.py::test_a_busy_handed_lane_leaves_the_critical_steps_their_workers",
-        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve"
+        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker",
+        "tests/tick/test_slow_lane_start.py::test_a_kept_handed_step_runs_on_the_handed_workers"
       ]
     }
   ],

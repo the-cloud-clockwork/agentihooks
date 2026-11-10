@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from threading import Event, current_thread
 from time import sleep
 
 import pytest
@@ -37,6 +38,7 @@ class Step:
     writes: frozenset[Domain] = frozenset()
     effects: frozenset[str] = frozenset()
     feature: str = ""
+    kept: bool = False
 
     def run(self, ctx: Context) -> Result:
         return self.action(ctx)
@@ -105,6 +107,51 @@ def test_a_busy_handed_lane_leaves_the_critical_steps_their_workers() -> None:
         records = engine.run_graph(steps, ctx, finished=later.append)
     assert [(record.name, record.outcome) for record in records] == [("critical beside busy", engine.OK)]
     assert {record.outcome for record in later[0]} == {engine.OK}
+
+
+@pytest.mark.feature("swarm-tick-slow-lane-start")
+def test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker() -> None:
+    later: list[tuple[engine.StepRecord, ...]] = []
+    free_ran = Event()
+
+    def critical(ctx: Context) -> Result:
+        assert free_ran.wait(BUSY_S), "the free handed step never got the handed worker"
+        return Result()
+
+    def free(ctx: Context) -> Result:
+        free_ran.set()
+        return Result()
+
+    steps = (
+        Step("critical awaited", "a", critical),
+        Step("waits on critical", "a", needs=frozenset({"critical awaited"}), lane=engine.SLOW),
+        Step("free beside the wait", "a", free, lane=engine.SLOW),
+    )
+    ctx = Context(View(), Deadline.after(10.0))
+    with pool.running(workers=1, critical_s=2 * BUSY_S, slow_s=2 * BUSY_S):
+        records = engine.run_graph(steps, ctx, finished=later.append)
+    assert [(record.name, record.outcome) for record in records] == [("critical awaited", engine.OK)]
+    assert {record.name: record.outcome for record in later[0]} == {
+        "waits on critical": engine.OK,
+        "free beside the wait": engine.OK,
+    }
+
+
+@pytest.mark.feature("swarm-tick-slow-lane-start")
+def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
+    later: list[tuple[engine.StepRecord, ...]] = []
+    names: list[str] = []
+
+    def kept(ctx: Context) -> Result:
+        names.append(current_thread().name)
+        return Result()
+
+    steps = (Step("critical first", "a"), Step("kept handed", "a", kept, lane=engine.SLOW, kept=True))
+    ctx = Context(View(), Deadline.after(10.0))
+    with pool.running(workers=2, critical_s=CRITICAL_S, slow_s=CRITICAL_S):
+        engine.run_graph(steps, ctx, finished=later.append)
+    assert [record.outcome for record in later[0]] == [engine.OK]
+    assert [name.split("_")[0] for name in names] == ["tick-handed"]
 
 
 @pytest.mark.feature("swarm-tick-slow-lane-start")
