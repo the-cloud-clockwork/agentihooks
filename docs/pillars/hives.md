@@ -863,7 +863,7 @@ runs such a launch in the machine's own herdr panes while the machine is under `
 under [Placement by role](#placement-by-role); set `local-max-agents=0` on the swarm to keep the load run on the
 kept hives alone.
 
-Example. Three headless hives list the swarm's repo:
+Example: three headless hives list the swarm's repo:
 
 | Hive | Agents running | `max-agents` | `prefer` |
 |---|---|---|---|
