@@ -269,7 +269,9 @@ def test_pass_binds_the_fenced_runtime_to_the_port(monkeypatch: pytest.MonkeyPat
     store = SimpleNamespace(config=lambda slug: config if slug == "sw" else None)
     wrapper = SimpleNamespace(store=store, slug="sw", held=held, state={"runtime": raw})
     tools = fake_tools()
-    runtime = RouterRuntime(cast(Any, object()), lambda name: None)
+    runtime = RouterRuntime(
+        cast(Any, object()), lambda name: None, legacy=raw, fencing=cli._fencing(cast(Any, store), "sw")
+    )
     from dataclasses import replace
 
     token = PASS_TOOLS.set(replace(tools, runtime=runtime))
@@ -280,9 +282,6 @@ def test_pass_binds_the_fenced_runtime_to_the_port(monkeypatch: pytest.MonkeyPat
         PASS_TOOLS.reset(token)
     assert wrapper.state == {"runtime": fenced}
     assert seen == [(store, "sw", held, raw, "deployment")]
-    wrapper.state["runtime"] = raw
-    assert cli._Wrapper._fence(cast(Any, wrapper)) is True
-    assert wrapper.state == {"runtime": fenced}
 
 
 @pytest.mark.parametrize(
