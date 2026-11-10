@@ -324,18 +324,25 @@ def test_primary_login_reads_the_first_entry_of_the_order_setting(monkeypatch):
 
 
 def test_primary_reserve_pct_reads_the_setting_and_falls_back_on_nonsense():
-    assert reservation.primary_reserve_pct({}) == 20.0
+    assert reservation.primary_reserve_pct({}) == 2.0
     assert reservation.primary_reserve_pct({reservation.PRIMARY_RESERVE_ENV: "35"}) == 35.0
-    assert reservation.primary_reserve_pct({reservation.PRIMARY_RESERVE_ENV: "nonsense"}) == 20.0
+    assert reservation.primary_reserve_pct({reservation.PRIMARY_RESERVE_ENV: "nonsense"}) == 2.0
 
 
 def test_primary_reserved_follows_the_configured_threshold(monkeypatch):
     monkeypatch.setattr(reservation, "primary_login", lambda: "main")
-    assert reservation.primary_reserved("main", 20.0, {}) is True
-    assert reservation.primary_reserved("main", 20.1, {}) is False
+    assert reservation.primary_reserved("main", 2.0, {}) is True
+    assert reservation.primary_reserved("main", 2.1, {}) is False
     custom = {reservation.PRIMARY_RESERVE_ENV: "35"}
     assert reservation.primary_reserved("main", 21.0, custom) is True
     assert reservation.primary_reserved("main", 21.0, {}) is False
+
+
+@pytest.mark.feature("master-primary-login-reserve-2pct")
+def test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left(monkeypatch):
+    monkeypatch.setattr(reservation, "primary_login", lambda: "main")
+    assert reservation.primary_reserved("main", 10.0, {}) is False
+    assert reservation.primary_reserved("main", 2.0, {}) is True
 
 
 def test_primary_reserved_matches_account_names_across_separators_and_ignores_others(monkeypatch):
@@ -352,7 +359,7 @@ def test_primary_reserved_is_false_with_no_primary_login_configured(monkeypatch)
 
 def test_primary_login_ceiling_is_the_complement_of_the_reserve(monkeypatch):
     monkeypatch.setattr(reservation, "primary_login", lambda: "main")
-    assert reservation.primary_login_ceiling("main", {}) == 80.0
+    assert reservation.primary_login_ceiling("main", {}) == 98.0
     assert reservation.primary_login_ceiling("other", {}) is None
     monkeypatch.setattr(reservation, "primary_login", lambda: "")
     assert reservation.primary_login_ceiling("main", {}) is None

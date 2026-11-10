@@ -145,7 +145,7 @@ def _week(monkeypatch, **used):
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, used[account] + 0 * now, 0.0))
 
 
-@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 96.0])
+@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 99.0])
 def test_a_login_past_the_master_limit_yields_to_the_next_in_order(monkeypatch, rendered, tmp_path, spent):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
