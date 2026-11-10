@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.794 · 2026-11-10
+
+### 2026-11-10 · 3b2109b8a64d · #10474 · @agenticore-app
+
+**Document hive invite and the timed hive reproduce run**
+
+This change fills a gap in the reproducible hive runbook by documenting two previously undocumented pieces: the `agentihooks hive invite` command, including its flags, the OpenBao keys it writes, NATS signer scoping, rerun and failure revocation behavior, and the force sync and restart a running pod needs; and `scripts/packaging/hive-reproduce.sh`, covering its seven timed steps, every `HIVE_*` setting, the step and timing output, and the exit-time `hive remove` unless `HIVE_KEEP=yes`. Each statement was verified against the actual source on dev, so operators now have an accurate, complete reference for standing up and timing a new hive from scratch.
+
+### 2026-11-10 · 526a1fd90bee · #10469 · @agenticore-app
+
+**Document hive first placement with local machine fallback and its cap**
+
+This change adds documentation to docs/pillars/hives.md explaining how worker spawns are placed when hive placement is enabled: hives with available room are tried first, with a fallback to the local machine as long as it stays under its own cap, defined as the smallest of local-max-agents, the machine's hive max-agents, and host room. It includes a concrete eight-agent workstation example, verification steps using the local slot claim journal line, and a troubleshooting table, all cross-checked against the actual placement and overflow logic in the codebase so operators can understand and verify this previously undocumented but already-shipped behavior.
+
+### 2026-11-10 · 3a676ba3a2c3 · #10345 · @agenticore-app
+
+**Remove dead hive machines from herdr**
+
+This change teaches the operator's terminal sync to prune hive machines that are no longer alive, so stale entries stop cluttering the registered list. Explicit removal now writes a shared retirement record, while registered hives that fail herdr status checks for fifteen straight minutes are automatically expired, including ones whose worker never reports in; successful pings or target swaps reset that timer, and brief restarts or manually added machines are left alone. Cleanup deletes the host key before the saved registration record so a failed key removal can be retried safely, and the reason for removal is logged for traceability.
+
+### 2026-11-10 · 1c3f2b5b5472 · #10468 · @agenticore-app
+
+**Document hive refresh trust and test environment isolation**
+
+This change adds documentation only, with no code behavior changes. It explains how hive refresh decides which CA to trust (LEDGER_CA_PEM first, then system roots plus an existing CA file, then system roots on first refresh) in docs/pillars/hives.md, and clarifies in CONTRIBUTING.md how to safely set environment variables in tests using monkeypatch inside an empty patch.dict to avoid leaking values between tests, referencing the earlier LEDGER_CA_PEM incident that caused a confusing test failure. This closes the gap left by the earlier fix so future contributors understand the trust logic and avoid repeating the same test isolation bug.
+
 ## v2.17.790 · 2026-11-10
 
 ### 2026-11-10 · d81e8386cf38 · #10443 · @agenticore-app
