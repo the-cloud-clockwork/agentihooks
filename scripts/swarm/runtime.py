@@ -103,15 +103,15 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
-def _required(want, task):
-    required = task.get("requires_harness", "")
+def _required(want: str, task: dict[str, Any]) -> str:
+    required: str = task.get("requires_harness", "")
     if required and want and want != required:
         raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
     return want or required
 
 
-def _off_requirement(saved, task, admitted):
-    required = task.get("requires_harness", "")
+def _off_requirement(saved: dict[str, Any], task: dict[str, Any], admitted: bool) -> bool:
+    required: str = task.get("requires_harness", "")
     off = bool(required and saved and saved.get("harness") != required)
     if off and admitted:
         raise SpawnError(
@@ -738,7 +738,7 @@ class HerdrRuntime:
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config, lane, name, task: dict[str, Any]):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
