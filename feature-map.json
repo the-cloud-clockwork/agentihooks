@@ -13,6 +13,16 @@
       ]
     },
     {
+      "id": "hive-label-reserves-identifier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
+      "behaviour": "Machine label reservations retain both the registered hive identifier and its settled name, including interface hives named swarm-master.",
+      "seam": "scripts.hive.machine.held_names with registry interface records",
+      "tests": [
+        "tests/hive/test_machine_names.py::test_an_interface_hive_reserves_its_settled_name_and_identifier"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
@@ -69,6 +79,21 @@
         "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
         "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
         "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
+      ]
+    },
+    {
+      "id": "hive-agent-token-cache",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
+      "behaviour": "The ledger authority checks a hive agent token against the hive credential store once and answers repeated requests with that token from a bounded cache scoped to its ledger and agent for fifteen seconds; refusals are never cached and the hive placement check stays live, so a revoked token is refused within fifteen seconds and an agent that leaves its hive is refused at once.",
+      "seam": "ledger_authority.hive_principal",
+      "tests": [
+        "tests/swarm_ledger/test_hive_token_cache.py::test_repeated_requests_with_one_hive_token_make_one_credential_store_read",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_revoked_hive_token_is_refused_once_its_cached_check_expires",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_is_refused_once_its_agent_leaves_the_hive",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_cached_hive_token_check_holds_only_its_own_ledger_and_agent",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_the_hive_token_cache_keeps_at_most_its_bound",
+        "tests/swarm_ledger/test_hive_token_cache.py::test_a_hive_token_check_is_read_again_once_exactly_its_window_has_passed"
       ]
     },
     {
@@ -1406,6 +1431,19 @@
       ]
     },
     {
+      "id": "managed-swarm-brain-rendering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
+      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
+      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "tests": [
+        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
+        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
@@ -1450,6 +1488,18 @@
         "tests/test_claude_quota_balancer.py::test_the_launch_refusal_names_the_rule_that_closes_the_account",
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_keeps_a_refusal_that_read_no_account",
         "tests/test_claude_quota_balancer.py::test_an_operator_launch_names_the_fable_week_when_it_closes_the_only_account"
+      ]
+    },
+    {
+      "id": "reply-wait-reads-every-inbox-world",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
+      "behaviour": "A swarm wait on a reply reads its item by id from every inbox world the tick reaches, holds while the item is pending in a hive member's world, holds on a member scoped tick that cannot see the item's world, and ends only when the item is replied, closed or gone from every world.",
+      "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply",
+        "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
+        "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
       ]
     },
     {
@@ -2690,6 +2740,22 @@
       ]
     },
     {
+      "id": "controller-busy-node-probes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
+      "behaviour": "The controller uses shallow kubelet HTTP startup and liveness probes, Redis bounded readiness, a loopback Host header and a schedulable 250m CPU reservation.",
+      "seam": "Controller Helm probes and the open health readiness route",
+      "tests": [
+        "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
+        "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
+        "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
+        "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
+        "tests/test_swarm_v2_readiness.py::test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks"
+      ]
+    },
+    {
       "id": "hive-join-heartbeat-keeps-passed-grade",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
@@ -2760,6 +2826,19 @@
       ]
     },
     {
+      "id": "hive-signer-membership-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2194",
+      "behaviour": "Invite refreshes the mounted signer after adding a member; revoke and remove unlist the member and refresh the signer without waiting for the hourly secret sync.",
+      "seam": "hive invite, revoke and remove signer member listing",
+      "tests": [
+        "tests/hive/test_signer_sync.py::test_an_invited_member_joins_at_once_through_the_mounted_signer",
+        "tests/hive/test_signer_sync.py::test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs",
+        "tests/hive/test_signer_sync.py::test_hive_remove_syncs_the_signer_record_after_it_unlists",
+        "tests/hive/test_signer_sync.py::test_the_invite_command_passes_the_signer_sync_target"
+      ]
+    },
+    {
       "id": "swarm-intent-check-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
@@ -2785,6 +2864,40 @@
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check",
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_builds_its_view_timed_inside_the_callers_context",
         "tests/gates/test_intent_budget.py::test_a_kept_judging_settles_draft_pulls_inside_the_pass"
+      ]
+    },
+    {
+      "id": "ledger-workflow-task-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2428",
+      "behaviour": "Ledger task add accepts workflow and case strings through the API for a master identity, and initial ledger content preserves workflow task kind and inputs.",
+      "seam": "task_add API schema and HTTP mutation; new_ledger.build_doc seed tasks",
+      "tests": [
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_task_add_schema_accepts_workflow_and_case_as_strings",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_a_master_adds_a_workflow_task_through_the_api",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_initial_content_preserves_workflow_task_fields"
+      ]
+    },
+    {
+      "id": "controller-quota-read-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "The controller scans the hive quota reports once per tick pass and every later quota or reservation read in that pass reuses the scan; outside a pass each read scans.",
+      "seam": "aggregate.read under the tick pass, reached by capacity.accounts, capacity.hive_accounts and reservation.current",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_one_pass_makes_one_hive_quota_read_for_every_account",
+        "tests/swarm/test_quota_pass_read.py::test_reads_outside_a_pass_stay_fresh"
+      ]
+    },
+    {
+      "id": "controller-hive-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "A hive publishes a provider refusal with its Claude quota reading and the controller closes that account.",
+      "seam": "hive daemon subscription quota report and capacity.accounts over hive reports",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
       ]
     }
   ],

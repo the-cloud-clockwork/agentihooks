@@ -9,11 +9,14 @@ import subprocess
 import sys
 import time
 import tomllib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from hooks.context.profile_chain import BUNDLE_PROFILES
+from scripts.swarm import brain_binding
 from scripts.swarm_v2 import filesystem
 
 TARGETS = ("claude", "codex")
@@ -222,6 +225,7 @@ def child_environment(home: Path, interpreter: Path) -> dict[str, str]:
         "AGENTIHOOKS_HOME": str(home / ".agentihooks"),
         "AGENTIHOOKS_PYTHON": str(interpreter),
         "AGENTIHOOKS_MCP_TRANSPORT": "stdio",
+        **({brain_binding.VARIABLE: managed} if (managed := os.environ.get(brain_binding.VARIABLE)) else {}),
     }
 
 
@@ -295,7 +299,8 @@ def materialize(attempt: Path, target: str) -> None:
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
     workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
-    adapter.register_mcp(browser.configure(workable, names))
+    apply = cast(Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]], brain_binding.apply)
+    adapter.register_mcp(apply(browser.configure(workable, names), os.environ))
 
 
 def _strings(value: object) -> list[str]:

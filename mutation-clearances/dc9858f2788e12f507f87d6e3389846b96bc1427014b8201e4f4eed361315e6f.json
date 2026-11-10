@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/readiness.py:scripts.swarm_v2.api.readiness.x_available:6b7d614b84f7722bc474fb2424027dd8be80b634fe33034a1fb1dbcb6c78b885": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged; replacing the type argument Any with None changes no runtime behavior."
+  }
+}
