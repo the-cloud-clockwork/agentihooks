@@ -44,3 +44,15 @@ def test_new_timer_prunes_abandoned_history_and_preserves_live_work(scheduler: S
         current = scheduler.timer(owner="process", payload="new wait", delay=1)
     assert {row["id"] for row in scheduler.records()} == {active.id, current.id}
     assert active.state == "active"
+
+
+@pytest.mark.feature("scheduler-bounded-history")
+def test_stopwatch_and_cron_prune_against_the_creation_time_they_are_given(scheduler: Scheduler) -> None:
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 4)
+    stopwatch = scheduler.stopwatch(owner="operator", payload="lap", limit=60, now=10_000)
+    assert [row["id"] for row in scheduler.records()] == [stopwatch.id]
+    with patch("scripts.scheduler.core.time.time", return_value=0):
+        finished(scheduler, 4)
+    cron = scheduler.cron(owner="operator", payload="tick", expression="* * * * *", now=10_000)
+    assert {row["id"] for row in scheduler.records()} == {stopwatch.id, cron.id}

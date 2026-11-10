@@ -2799,6 +2799,7 @@
       "tests": [
         "tests/scheduler/test_bounded_history.py::test_abandoned_only_history_is_reaped_without_new_work",
         "tests/scheduler/test_bounded_history.py::test_new_timer_prunes_abandoned_history_and_preserves_live_work",
+        "tests/scheduler/test_bounded_history.py::test_stopwatch_and_cron_prune_against_the_creation_time_they_are_given",
         "tests/events/test_scheduler_recovery.py::test_live_keeps_live_and_operator_timers_and_drops_retired_and_abandoned_ones",
         "tests/events/test_scheduler_recovery.py::test_live_reads_a_document_missing_its_entries_or_retired_map",
         "tests/events/test_scheduler_recovery.py::test_an_oversized_document_is_rewritten_once_to_its_live_timers",
