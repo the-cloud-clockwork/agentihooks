@@ -2851,6 +2851,32 @@
       ]
     },
     {
+      "id": "scheduler-bounded-history",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-headed-hive-oom",
+      "behaviour": "Scheduler waits reap abandoned process timers, prune them on each new timer, skip them when migrating legacy rows, and rewrite an oversized Redis scheduler document once under a process lock to its live timers, so concurrent waiters never each decode it.",
+      "seam": "Scheduler timer creation and idle dispatch; scripts.events.scheduler_state read, shrink and live",
+      "tests": [
+        "tests/scheduler/test_bounded_history.py::test_abandoned_only_history_is_reaped_without_new_work",
+        "tests/scheduler/test_bounded_history.py::test_new_timer_prunes_abandoned_history_and_preserves_live_work",
+        "tests/scheduler/test_bounded_history.py::test_stopwatch_and_cron_prune_against_the_creation_time_they_are_given",
+        "tests/events/test_scheduler_recovery.py::test_live_keeps_live_and_operator_timers_and_drops_retired_and_abandoned_ones",
+        "tests/events/test_scheduler_recovery.py::test_live_reads_a_document_missing_its_entries_or_retired_map",
+        "tests/events/test_scheduler_recovery.py::test_an_oversized_document_is_rewritten_once_to_its_live_timers",
+        "tests/events/test_scheduler_recovery.py::test_a_document_at_the_size_limit_is_left_alone",
+        "tests/events/test_scheduler_recovery.py::test_shrink_skips_a_missing_document",
+        "tests/events/test_scheduler_recovery.py::test_shrink_retries_a_concurrent_write_and_keeps_its_live_timer",
+        "tests/events/test_scheduler_recovery.py::test_shrink_gives_up_on_a_document_that_keeps_changing",
+        "tests/events/test_scheduler_recovery.py::test_legacy_migration_skips_abandoned_process_timers",
+        "tests/events/test_scheduler_recovery.py::test_an_oversized_document_of_only_live_timers_is_never_rewritten",
+        "tests/events/test_scheduler_recovery.py::test_shrink_waits_for_a_rewrite_already_running_in_the_process",
+        "tests/events/test_scheduler_recovery.py::test_legacy_rows_of_only_abandoned_timers_or_only_retired_ids"
+      ],
+      "rules": [
+        "scheduler-legacy-history-materialization"
+      ]
+    },
+    {
       "id": "independent-ci-records",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",

@@ -1,0 +1,10 @@
+rules:
+  - id: scheduler-legacy-history-materialization
+    languages: [python]
+    severity: ERROR
+    message: Stream legacy scheduler rows and discard abandoned process timers before materializing scheduler state.
+    pattern: $STATE.redis.hgetall(...)
+    paths:
+      include:
+        - /scripts/events/scheduler_state.py
+        - scheduler-legacy-history-materialization.py
