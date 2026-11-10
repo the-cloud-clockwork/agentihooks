@@ -1657,7 +1657,8 @@ makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and 
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
 (`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a
-hive to land on. `hive-placement=off` rolls back on the next tick. On a machine in any other mode the setting changes nothing.
+hive to land on. `hive-placement=off` rolls back on the next
+tick. On a machine in any other mode the setting changes nothing.
 
 Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
 panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 15),
@@ -1673,7 +1674,7 @@ For each eng, ci, plan or dispatch spawn the tick decides in this order:
    [Placement](#placement). When one does, the agent launches there. When the chosen hive is the machine itself, the
    spawn takes a local slot under the cap below.
 2. When no hive takes it, the spawn falls back to the local machine only when all of these hold:
-   - the controller is `hybrid`, or the swarm sets `hive-placement=on`;
+   - the controller is `hybrid`, or the machine is `local` and the swarm sets `hive-placement=on`;
    - the role is not `master`, `qa` or `frontend`;
    - the task does not set `hive`;
    - the machine's own herdr server answers;
@@ -1712,8 +1713,8 @@ The local count is the union of:
 Agents on remote hives and in Kubernetes never count. The count leaves out agents on the spawning task in the same
 swarm, so a successor does not count its predecessor. A slot claim is a Redis transaction on the machine's claim
 hash, retried when another claim lands first, so launches in one pass, or in two swarms on the same machine, see
-each other's claims. The agent records and running sessions behind the count are read once per claim, so a session
-started by hand during the claim is counted on the next one.
+each other's claims. The agent records and running sessions behind the count are read once per placement pass, so a
+session started by hand during a pass is counted on the next pass.
 
 A slot frees once its agent's record reads finished or ended and its session no longer runs, when a failed spawn
 releases its claim, or when a claim whose agent never appeared turns five minutes old.
@@ -1734,7 +1735,7 @@ agentihooks swarm <id> autoscale --json | jq .local_slots
 `max-agents` first; up to eight more workers run on the workstation; anything beyond waits. To keep every worker
 off the machine, exclude the worker roles on its hive record
 (`agentihooks hive set desk excluded=eng,ci,plan,dispatch`). `hive-placement=off` returns the swarm to local
-spawning on the next tick.
+spawning, as described above.
 
 ### Verify placement
 
