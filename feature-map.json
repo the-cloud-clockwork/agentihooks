@@ -3370,6 +3370,16 @@
       ]
     },
     {
+      "id": "tick-status-publish-survives-dropped-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-status-publish-drop",
+      "behaviour": "The closing group runs status publish even when the health findings step it needs was dropped or cut, waiting at most its own budget, so the swarm status is published every pass.",
+      "seam": "engine.run_group on the closing group with the registered status publish step",
+      "tests": [
+        "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
+      ]
+    },
+    {
       "id": "alert-writer-closes-its-sync-alert",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1769",
