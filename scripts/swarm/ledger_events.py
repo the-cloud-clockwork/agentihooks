@@ -29,6 +29,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 
 MINUTE_MS = 60_000
+TICK_VIEW_TTL_S = 180
 TASK_FINDINGS = frozenset({"proof loop", "failed launch", "stale claim"})
 HELD_FINDINGS = frozenset({"idle with claim", "waiting on input", "stalled", "working on drain"})
 FOLLOWUP_RAISE_MS = 15 * MINUTE_MS
@@ -455,7 +456,10 @@ def _paged(commit: str | None, field: str, page: Any, source: SourceControl, num
 
 
 def views(
-    urls: list[str], source: SourceControl | None = None, cache: object | None = None
+    urls: list[str],
+    source: SourceControl | None = None,
+    cache: object | None = None,
+    ttl: float = github_reads.RUN_TTL_S,
 ) -> dict[str, PullRequest | None]:
     port = source or stack.login_source_control()
     urls = list(dict.fromkeys(urls))
@@ -472,7 +476,7 @@ def views(
         ]
         query = "{" + " ".join(fields) + "}"
         data = (
-            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port))
+            github_reads.snapshot(query, time.time(), lambda: _graphql(query, port), ttl)
             if cache is not None
             else _graphql(query, port)
         )
@@ -591,7 +595,10 @@ def tick_view(
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
     known = {url: pr for url, pr in getattr(earlier, "snapshots", {}).items() if pr is not None}
-    snapshots = {**known, **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis)}
+    snapshots = {
+        **known,
+        **views([url for url in dict.fromkeys(urls) if url not in known], cache=store.redis, ttl=TICK_VIEW_TTL_S),
+    }
 
     @functools.cache
     def lookup(url):
