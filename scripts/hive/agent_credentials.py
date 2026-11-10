@@ -62,7 +62,7 @@ def compact(client: Any, members: list[str], readers_compatible: bool = False) -
 
 
 def _index_key(member_id: str, slug: str, name: str) -> str:
-    return hive_state.agent_key(member_id, slug, name).replace("agent.", "agent-index.", 1)
+    return hive_state.agent_key(member_id, slug, name).replace("agent.", "agent-index.")
 
 
 def _index_legacy(client: Any, member_id: str) -> None:

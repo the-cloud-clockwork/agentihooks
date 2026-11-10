@@ -2439,7 +2439,14 @@
         "tests/hive/test_credential_compaction.py::test_compacted_independent_tokens_are_removed_when_the_agent_ends",
         "tests/hive/test_credential_compaction.py::test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers",
         "tests/hive/test_credential_compaction.py::test_compaction_and_retirement_share_a_fence",
-        "tests/hive/test_credential_compaction.py::test_scoped_credential_keys_preserve_existing_record_addresses"
+        "tests/hive/test_credential_compaction.py::test_scoped_credential_keys_preserve_existing_record_addresses",
+        "tests/hive/test_credential_compaction.py::test_retiring_a_legacy_projection_removes_its_hive_token",
+        "tests/hive/test_credential_compaction.py::test_named_retirement_covers_recorded_and_previous_hives_only",
+        "tests/hive/test_credential_compaction.py::test_ending_an_orphan_execution_removes_its_token",
+        "tests/hive/test_credential_compaction.py::test_retiring_a_compact_member_never_scans_the_credential_store",
+        "tests/hive/test_credential_compaction.py::test_retirement_indexes_uncompacted_independent_tokens",
+        "tests/hive/test_credential_compaction.py::test_legacy_indexes_keep_separate_scopes_and_exclude_scoped_records",
+        "tests/hive/test_credential_compaction.py::test_legacy_indexing_bounds_reads_and_skips_tombstones"
       ]
     },
     {

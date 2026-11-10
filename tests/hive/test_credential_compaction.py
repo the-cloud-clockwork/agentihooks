@@ -77,6 +77,7 @@ def test_ended_agent_tokens_are_removed_and_active_peers_keep_access(client: Any
 def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     from dataclasses import replace
 
+    import scripts.swarm.execution as execution
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     store = RedisStore(client)
@@ -85,12 +86,173 @@ def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     agent = store.start_execution("alpha", AgentRecord(name, "eng", "task", seat="eng-1@alpha", hive="m1"))
     token = auth.issue_agent(client, "m1", "alpha", name)
 
-    store.put_agent("alpha", replace(agent, state="ended"))
+    execution.ExecutionRegistry(store).update("alpha", replace(agent, state="ended"))
 
     assert auth.agent_member(client, token, "alpha", name) is None
     assert (
         hive_state.read(hive_state.credentials(client, auth.PREFIX), hive_state.agent_key("m1", "alpha", name)) is None
     )
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_ending_an_orphan_execution_removes_its_token(client: Any) -> None:
+    import scripts.swarm.execution as execution
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(client)
+    store.create(SwarmConfig("alpha", "/repo", 1, 0))
+    name = store.next_name("alpha", "eng")
+    agent = store.start_execution("alpha", AgentRecord(name, "eng", "task", seat="eng-1@alpha", hive="m1"))
+    token = auth.issue_agent(client, "m1", "alpha", name)
+    client.hdel(store.key("alpha", "agents"), name)
+
+    assert execution.ExecutionRegistry(store).end_orphan("alpha", agent, 100)
+    assert auth.agent_member(client, token, "alpha", name) is None
+    assert store.execution("alpha", agent.execution_id).state == "ended"
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_retiring_a_compact_member_never_scans_the_credential_store(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive import agent_credentials
+
+    credentials = hive_state.credentials(client, auth.PREFIX)
+    hive_state.amend(credentials, "member.m1", lambda _: {"name": "hive", "ledger": "d"})
+    token = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+
+    def refused_scan(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("compact member retirement scanned the credential store")
+
+    monkeypatch.setattr(client, "hscan_iter", refused_scan)
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_retirement_indexes_uncompacted_independent_tokens(client: Any) -> None:
+    from scripts.hive import agent_credentials
+
+    credentials = hive_state.credentials(client, auth.PREFIX)
+    token = "hive.m1.unindexed"
+    key = f"agent.m1.{_digest(token)}"
+    hive_state.amend(credentials, key, lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]})
+
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+
+    assert hive_state.read(credentials, key) is None
+    assert auth.agent_member(client, token, "alpha", "engineer@1") is None
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_legacy_indexes_keep_separate_scopes_and_exclude_scoped_records(client: Any) -> None:
+    from scripts.hive import agent_credentials
+
+    credentials = hive_state.credentials(client, auth.PREFIX)
+    tokens = [
+        ("hive.m1.first", "alpha", "engineer@1"),
+        ("hive.m1.peer", "alpha", "engineer@peer"),
+        ("hive.m1.other", "beta", "engineer@1"),
+    ]
+    for token, slug, name in tokens:
+        hive_state.amend(credentials, f"agent.m1.{_digest(token)}", lambda _: {"ledger": "d", "scope": [slug, name]})
+    scoped = auth.issue_agent(client, "m1", "alpha", "engineer@1")
+    agent_credentials.compact(client, ["m1"], readers_compatible=True)
+    index = "agent-index.m1.d540e79213ffc4316c706b9576c85f31dad274814e278a86a4d8392eeb0362f5"
+
+    assert hive_state.read(credentials, index) == [f"agent.m1.{_digest(tokens[0][0])}"]
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+
+    assert hive_state.read(credentials, index) is None
+    assert auth.agent_member(client, scoped, "alpha", "engineer@1") is None
+    assert auth.agent_member(client, tokens[0][0], "alpha", "engineer@1") is None
+    assert auth.agent_member(client, tokens[1][0], "alpha", "engineer@peer") == "m1"
+    assert auth.agent_member(client, tokens[2][0], "beta", "engineer@1") == "m1"
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_legacy_indexing_bounds_reads_and_skips_tombstones(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections.abc import Iterator
+
+    from scripts.hive import agent_credentials
+
+    credentials = hive_state.credentials(client, auth.PREFIX)
+    tokens = [f"hive.m1.batch-{number}" for number in range(129)]
+    for token in tokens:
+        hive_state.amend(
+            credentials, f"agent.m1.{_digest(token)}", lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]}
+        )
+    empty = "agent.m1.empty"
+    hive_state.amend(credentials, empty, lambda _: {"ledger": "d", "scope": ["alpha", "engineer@1"]})
+    hive_state.amend(credentials, empty, lambda _: None)
+    original_scan, original_many = client.hscan_iter, client.hmget
+    batches: list[int] = []
+
+    def scan(name: str, **kwargs: Any) -> Iterator[tuple[str, str]]:
+        assert kwargs.get("count") is not None and 0 < kwargs["count"] <= 128
+        rows: list[tuple[str, str]] = list(original_scan(name, **kwargs))
+        rows.sort(key=lambda row: row[0] != empty)
+        return iter(rows)
+
+    def many(name: str, keys: list[str], *args: Any) -> Any:
+        assert 0 < len(keys) <= 128
+        batches.append(len(keys))
+        return original_many(name, keys, *args)
+
+    monkeypatch.setattr(client, "hscan_iter", scan)
+    monkeypatch.setattr(client, "hmget", many)
+    agent_credentials.compact(client, ["m1"], readers_compatible=True)
+    assert len(batches) >= 2
+    agent_credentials.retire(client, "m1", "alpha", "engineer@1")
+    assert all(auth.agent_member(client, token, "alpha", "engineer@1") is None for token in tokens)
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_retiring_a_legacy_projection_removes_its_hive_token(client: Any) -> None:
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(client)
+    store.create(SwarmConfig("alpha", "/repo", 1, 0))
+    name = store.next_name("alpha", "eng")
+    store.put_agent("alpha", AgentRecord(name, "eng", "task", hive="m1"))
+    token = auth.issue_agent(client, "m1", "alpha", name)
+
+    assert store.drop_agent("alpha", name)
+    assert auth.agent_member(client, token, "alpha", name) is None
+
+
+@pytest.mark.feature("hive-credential-compaction")
+def test_named_retirement_covers_recorded_and_previous_hives_only(client: Any) -> None:
+    import json
+
+    from scripts.hive import agent_credentials
+    from scripts.swarm.store import AgentRecord
+
+    credentials = hive_state.credentials(client, auth.PREFIX)
+    for member_id in ("m2", "m3", "m4"):
+        digest = f"d-{member_id}"
+        hive_state.amend(credentials, f"member.{member_id}", lambda _: {"name": member_id, "ledger": digest})
+        hive_state.amend(credentials, f"ledger.{digest}", lambda _: member_id)
+        hive_state.amend(credentials, f"holder.{member_id}", lambda _: digest)
+    tokens = {
+        member_id: auth.issue_agent(client, member_id, "alpha", "engineer@1") for member_id in ("m1", "m2", "m3", "m4")
+    }
+    peer = auth.issue_agent(client, "m1", "alpha", "engineer@peer")
+    lives = [
+        AgentRecord("engineer@1", "eng", "task", hive="m1"),
+        AgentRecord("engineer@1", "eng", "task", hive="m2"),
+        AgentRecord("engineer@peer", "eng", "peer", hive="m3"),
+        AgentRecord("engineer@1", "eng", "task"),
+    ]
+
+    agent_credentials.retire_named(client, "alpha", "engineer@1", json.dumps({"hive": "m4"}), lives)
+
+    assert all(
+        auth.agent_member(client, tokens[member_id], "alpha", "engineer@1") is None for member_id in ("m1", "m2", "m4")
+    )
+    assert auth.agent_member(client, tokens["m3"], "alpha", "engineer@1") == "m3"
+    assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
 
 
 @pytest.mark.feature("hive-credential-compaction")
@@ -178,6 +340,8 @@ def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytes
 
     @contextmanager
     def observed_lock(name: str, **kwargs: Any) -> Generator[None]:
+        assert kwargs.get("timeout") is not None and 0 < kwargs["timeout"] <= 600
+        assert kwargs.get("blocking_timeout") is not None and 0 < kwargs["blocking_timeout"] <= 10
         if snapshot.is_set():
             retirement_attempted.set()
         with original_lock(name, **kwargs):
@@ -310,10 +474,14 @@ def test_cli_explains_the_reader_precondition(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit) as raised:
         cli.main(["--help"])
     assert raised.value.code == 0
-    assert "Compact member documents after verifying deployed readers" in " ".join(capsys.readouterr().out.split())
+    assert "compact-credentials Compact member documents after verifying deployed readers refresh" in (
+        " ".join(capsys.readouterr().out.split())
+    )
     with pytest.raises(SystemExit) as raised:
         cli.main(["compact-credentials", "--help"])
     assert raised.value.code == 0
     help_text = " ".join(capsys.readouterr().out.split())
-    assert "member whose deployed readers were verified" in help_text
-    assert "confirm independent token readers are deployed" in help_text
+    assert help_text.rsplit("options:", 1)[1].strip() == (
+        "-h, --help show this help message and exit --member MEMBER member whose deployed readers were verified "
+        "--readers-compatible confirm independent token readers are deployed"
+    )
