@@ -25,6 +25,7 @@ from scripts.tick import engine, registry, steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.ports.contracts import Coordination
+from scripts.tick.ports.tools import Tools
 from scripts.tick.step import Domain
 from scripts.tick.steps import CallStep, Left, pass_domains, tasks
 
@@ -502,7 +503,7 @@ def _lease_deadline() -> Deadline:
     return Deadline.after(lease.ttl_ms() / 1000)
 
 
-def _master_tools(slug: str, store: RedisStore, runtime: Any) -> Any:
+def _master_tools(slug: str, store: RedisStore, runtime: Any) -> Tools:
     """Return the port tools a master placement of swarm ``slug`` acts through, as this hive, over ``runtime``."""
     from scripts.swarm.commands import hive_id
 
