@@ -33,9 +33,10 @@ class RouterRuntime:
         herdr: Callable[[list[str]], dict[str, object]] = _herdr,
         homes: Callable[[AgentRecord], tuple[Path, ...]] = lambda agent: (),
         legacy: Any = None,
+        fencing: Callable[[object, str, Any], Any] | None = None,
     ) -> None:
         self.router, self.agents, self.herdr, self.homes = router, agents, herdr, homes
-        self.legacy = legacy
+        self.legacy, self.fencing = legacy, fencing
 
     def inspect(self, handle: str, *, deadline: Deadline) -> Outcome:
         deadline.live()
@@ -161,3 +162,12 @@ class RouterRuntime:
         deadline.live()
         activated: bool = self.legacy.admission.activate(slug, task_id, reservation)
         return activated
+
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any:
+        """Fence the pass runtime to the lease ``held`` in ``deployment``, keep it for every later operation and
+        return it."""
+        deadline.live()
+        if self.fencing is None:
+            raise RuntimeError("this runtime port has no fence")
+        self.legacy = self.fencing(held, deployment, self.legacy)
+        return self.legacy

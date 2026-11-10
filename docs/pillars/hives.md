@@ -99,6 +99,63 @@ A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver it
 `agentihooks hive invite <label>` writes into OpenBao, which brings a new hive up from an empty namespace; see
 [Reproducible hive](../reference/reproducible-hive.md).
 
+### Checking an added machine
+
+`hive add` is done when herdr lists the machine, a pane on it runs a command, and its `hive.env` holds the member
+the add printed. On the UI hive, with the label from the `added <target> to herdr as <label>` line:
+
+```bash
+herdr machine list                                    # swarm-hive-001 is listed and enabled
+herdr --machine swarm-hive-001 pane list              # panes on the machine; pick one pane id
+herdr --machine swarm-hive-001 pane run <pane id> hostname
+ssh <target> 'stat -c %a "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env"'   # 600
+ssh <target> 'grep -c "^AGENTIHOOKS_HIVE_" "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env"'   # 4
+agentihooks hive list                                 # the hive shows live once hive run beats
+```
+
+- `herdr machine add` prepares the remote herdr server over SSH before it saves the machine, so a listed machine
+  has been reached once. herdr has no `machine status` command; `machine list` and a `pane run` that answers are
+  the check.
+- A pane on a worker pod runs as the worker user, so `pane run` prints the pod hostname.
+- The `hive.env` that `hive add` delivers holds exactly the four `AGENTIHOOKS_HIVE_` keys and no `AGENTIHOOKS_BUS_`
+  lines; bus credentials arrive only through a later `hive refresh` against a hub that signs them. The
+  `AGENTIHOOKS_HIVE_ID` value is the member id `hive add` printed.
+- The hive appears in `hive list` only after `agentihooks hive run` (or the worker pod's start script) beats with
+  the delivered credential.
+
+### Retired join path
+
+The join by code ceremony is gone. Adding a machine never asks the operator to copy a code or run a command on the
+new machine to fetch its credential; the UI hive mints the member and writes it over SSH.
+
+| Retired | Replaced by |
+|---|---|
+| A join code printed on the UI hive and typed on the new machine | `agentihooks hive add <ssh target> --url <url>` on the UI hive |
+| `POST /hive/join` on `agentihooks hive serve` | `hive serve` answers only `POST /hive/refresh`; any other path is 404 |
+| The antoncore hive join service, a separate join path in Anton | `hive add`; the hive endpoint, wherever it runs, answers only refresh |
+| The worker hive chart's join code mode | `workers.credentialSecret`, or a `hive.env` that `hive add` delivers to the pod |
+
+The data plane stays: a hive endpoint answers `POST /hive/refresh`, each member keeps its ledger credential and Redis
+user, and `hive refresh` mints a new Redis credential through it. The endpoint is `hive serve` on a UI hive or the
+hosted endpoint a worker pod names with the chart's `workers.hiveUrl`; neither mints a member.
+
+`agentihooks hive invite` and `agentihooks hive join` today are a different path that came later: `hive invite`
+writes a member credential into an OpenBao record for a hive brought up from an empty namespace, and `hive join`
+reads that invite file and posts to `/hive/refresh`. Neither restores a join endpoint. See
+[Reproducible hive](../reference/reproducible-hive.md) and the
+[add a hive quick start](../getting-started/add-hive-quick-start.md).
+
+### Hive add troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `hive add refused: hive <id> is headless; only a UI hive adds machines` | `agentihooks hive show <id>`, the `ui` field | Run `hive add` on the UI hive. |
+| `<host> already runs hive <label>; one machine runs one hive` | `herdr machine list --json` for another label on the same host | Raise that hive's max agents with `agentihooks hive set`, or `hive remove` it first. |
+| `herdr exited 1: <stderr>` while `ssh <target>` works | Whether `HOME` differs from the passwd home | Put the host in the passwd home's `~/.ssh/config`; herdr's health check calls ssh without `-F`. |
+| `ssh exited 255: <stderr>` | `ssh -o BatchMode=yes <target> true` | Fix the key or host key so ssh logs in with no prompt. The minted member was revoked; rerun `hive add`. |
+| `added ... to herdr` but the machine has no `hive.env` | Whether a member already carried the label | The add kept that member and delivered nothing; `hive remove <id>`, then `hive add`. |
+| A worker pod exits with `no member credential was delivered within <n>s` | The pod log for sshd start, and that `hive add` ran against its ssh address | Run `hive add` within `HIVE_DELIVERY_WAIT_S`, or mount `workers.credentialSecret`. |
+
 ## Ledger CA on a hive
 
 A hosted ledger signed by a private certificate authority is reachable only by clients that trust that CA. A hive
@@ -1964,7 +2021,63 @@ instead of being retried inside one command:
 | Command client | 3 seconds | 5 seconds | Beats, reports and the helper threads' writes. |
 | Wait client | 3 seconds | 15 seconds | The scheduler process timer waits between beats and in both helper threads. |
 
-Both send TCP keepalives and run a connection health check every 15 seconds.
+Both send TCP keepalives. A connection with no reply for more than 15 seconds gets a `PING` health check before its
+next command.
+
+### A dead connection never stalls the beat
+
+A Redis connection can die without closing: the TCP socket stays established, the peer stops answering and the
+bytes the hive sent sit unacknowledged in the socket's send queue. Issue
+[#5472](https://github.com/the-cloud-clockwork/agentihooks/issues/5472) records the case: on 21 October 2026, after a
+workstation reboot, the local hive service published no beat for 13 minutes while its single beat thread waited on
+such a socket with 153 bytes in the send queue. Before pull request
+[#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475) the wait between beats used a client with
+no read timeout, so that wait never ended. The service stayed active and logged nothing, every hive read stale and the
+tick spawned nothing until the service was restarted.
+
+With the timeouts in [Client timeouts](#client-timeouts), every Redis call the daemon makes ends in bounded time:
+
+- A beat command that gets no answer raises `TimeoutError` when the command client's read timeout expires.
+- The wait between beats raises `TimeoutError` when the wait client's read timeout expires, one beat interval after
+  the wait's last reply.
+- A connection that died while idle fails on its health check `PING` instead of on a later read.
+
+The beat loop treats `TimeoutError` like `ConnectionError`: a lost connection. It prints the reconnect line, backs off
+1 second on the first failure, opens a new pair of clients and beats at once, as in
+[Reconnect and backoff](#reconnect-and-backoff). A stall during a beat therefore ends in a reconnected beat about 6
+seconds later. A stall during the wait raises within one beat interval of the last beat, and the reconnected beat
+follows after the backoff, 15 to 16 seconds after the last beat. The helper threads do not reconnect: the headroom
+thread logs `hive headroom wait failed` and waits one headroom interval, and the herdr stats thread logs
+`hive herdr stats wait failed` and exits until the next beat starts it again on the new connection.
+
+The tests for this, in `tests/hive/test_daemon.py`, point the daemon at a listening socket that never accepts or
+answers, once during a beat and once during the wait, and assert that the reconnect line is logged and the next beat
+lands within one beat interval, plus a quarter second margin for the wait stall. They run with scaled constants (a 0.5
+second beat) and do not count the backoff sleep.
+
+The scheduled waits stay shorter than the read timeout they run under, so a healthy wake always arrives before the
+socket times out and a read timeout always means a dead connection:
+
+| Wait | Scheduled delay | Wait timeout | Read timeout it runs under |
+|---|---|---|---|
+| Between beats | 15 seconds minus the larger of the beat's run time and 2 seconds, never below 0 | At most 14 seconds | 15 seconds |
+| Headroom thread | 10 seconds | 12 seconds | 15 seconds |
+| Herdr stats thread | 10 seconds | 12 seconds | 15 seconds |
+
+These values are constants in `scripts.hive.daemon`, not settings. The wait read timeout and the health check
+interval equal `BEAT_SECONDS`; the 3 second connect timeout (`CONNECT_TIMEOUT_S`), the 5 second command read timeout
+(`READ_TIMEOUT_S`) and the 2 second slack (`WAKE_SLACK_S`) are fixed values.
+
+To see whether a running hive sits on a dead connection, list its sockets to the Redis port with their send queues,
+replacing `6379` with the port in the hive's Redis URL:
+
+```bash
+ss -tnp | grep -E "python|agentihooks" | grep ":6379"
+```
+
+An established connection whose `Send-Q` stays above 0 across several samples a few seconds apart is not being
+answered. On current code the daemon raises on it within 15 seconds, reconnects after the backoff and logs the
+reconnect line to the journal.
 
 ### Troubleshooting
 
@@ -1973,6 +2086,8 @@ Both send TCP keepalives and run a connection health check every 15 seconds.
 | `hive list` shows a joined hive stale after a Redis rollout | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive Redis connection lost` | Repeated lines with a 30 second delay mean Redis or the network is still unreachable from the hive; fix that and the hive returns on its next beat. No lines and an exited service mean the hive runs code from before [#5168](https://github.com/the-cloud-clockwork/agentihooks/pull/5168); upgrade it and restart the service or roll its pod. |
 | Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | Whether the hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
 | `hive run` exits with a traceback right after Redis returns | The error in the traceback | The error is not a lost connection, so the daemon does not retry it; fix the error it names, such as a Redis user missing a permission. The service restarts the process after 5 seconds. |
+| A hive reads stale while its service is active, the journal shows no `hive Redis connection lost` line, and `ss -tnp` shows its Redis connection established with a `Send-Q` above 0 | The hive's agentihooks version | The hive runs code from before [#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475), whose wait between beats has no read timeout. Restart the service to recover at once, then upgrade the hive. See [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
+| The journal shows `hive Redis connection lost (TimeoutError: ...)` every few beats and the hive flaps between live and stale | Redis latency from the hive, for example `redis-cli --latency` against the same address | Redis or the path to it accepts connections but does not answer within the 5 second command or 15 second wait read timeout. Fix the Redis load or the network path; the daemon reconnects on its own each time. |
 
 ## Failover timing
 
@@ -1981,6 +2096,7 @@ Both send TCP keepalives and run a connection health check every 15 seconds.
 | Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
+| Redis read timeouts | 5 seconds per command, 15 seconds per wait | A Redis connection that stops answering raises within one beat interval and reconnects after the backoff; see [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
 | Redis reconnect backoff | 1, 2, 4, 8, 16, then 30 seconds | A hive that lost its Redis connection retries at these delays and beats at once when it reconnects; see [Redis restarts](#redis-restarts). |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
@@ -2150,6 +2266,65 @@ failed with "hive launch failed: `<cause>`".
 | `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
+
+### Launch check on a hive
+
+A hive agent's launch check uses the time its own session started and never expects an overlay its host cannot
+render. A hive without agentibrain installed launches engineers without the `brain` overlay, and they keep running.
+
+When the hive acknowledges a launch as `live`, the acknowledgement's execution carries:
+
+| Field | Value |
+|---|---|
+| `profile_decision.host_overlays` | The overlays the hive can render for the order's profile: every overlay the profile chain declares that resolves on the hive, then the worn overlays of the launch, without duplicates. |
+| `launched_at` | The session start time the hive recorded, in milliseconds. |
+| `launch_timings` | The launch timings the hive recorded for the session. |
+| `overlays` | The worn overlays of the launch. |
+
+The controller stores these fields on the execution record when it collects the acknowledgement, and the agent
+record the tick reads carries them. A field the acknowledgement omits keeps the value the controller already holds.
+
+The tick's launch check then reads:
+
+- **Start time**: the later of `launched_at` (or the spawn time when `launched_at` is zero) and `harness_at`, taken
+  from the launch timings when present, else the time the profile canary validated. A miss is judged only once the
+  sixty second deadline, or the longer canary deadline, has passed since this time.
+- **Expected overlays**: `host_overlays` when the agent's profile decision holds it, else the overlays the
+  workstation declares for the profile and its worn overlays. This list applies to agents graded by process
+  observation; a workstation agent has no `host_overlays`, so its check is unchanged.
+
+An agent on a hive is graded by its session join report instead of process observation, so the overlay comparison
+and the `late` check do not run for it. Every check the join report names is required except `brain`, which is
+report only: a hive without the brain connector reports the `hive_brain` miss and keeps its agent running. Join
+report grading for hive agents arrived after this change, in
+[pull request #5481](https://github.com/the-cloud-clockwork/agentihooks/pull/5481).
+
+Check a fresh hive launch:
+
+```bash
+agentihooks swarm <slug> status
+# launch  engineer@<code>-<n>  passed  41250ms
+# launch  engineer@<code>-<n>  reported  38800ms
+#   hive_brain  report only  expected available; observed missing
+```
+
+Each `launch` line names the agent, the report state and the time from session start to the join, or to the check's
+decision when the agent never joined. `passed` means no miss and `reported` means only report only misses, such as
+`hive_brain` for a hive agent or `late` for a workstation agent. `failed` means an enforced miss: the tick retires the
+agent and relaunches it once; a second enforced miss retires it without a relaunch. The report is kept per task under
+the swarm key `<root>:swarm:<slug>:launch-check-reports`, where `<root>` is `agentihooks` unless the keyspace root is
+set.
+
+Before [pull request #5319](https://github.com/the-cloud-clockwork/agentihooks/pull/5319) the acknowledgement carried
+none of these four fields. [Issue #5292](https://github.com/the-cloud-clockwork/agentihooks/issues/5292) records the
+result on the Anton worker hive: the check expected the workstation's overlays, `brain` included, so every hive
+engineer failed `overlay` sixty seconds after start and was retired, and `launched_at` read zero, so the start time
+was wrong.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A hive engineer fails `overlay` and is retired soon after start | The hive runs a release older than pull request #5319, so its acknowledgement carries no `host_overlays`. | Upgrade the hive to a release carrying the change and roll its pod. |
+| A hive agent's execution record shows `launched_at` 0 | The same older release. | The same upgrade. |
 
 ### A worker that finishes before the tick collects its acknowledgement
 
@@ -2443,7 +2618,8 @@ When the pod stops, for an image update, a rollout or a node drain, its preStop 
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
 agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
 30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
-out.
+out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
+time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
@@ -3152,6 +3328,121 @@ before the next one:
 4. Confirm agents use the room: within the next ticks `workers=<n> of <maxAgents>` rises as placement sends the hive
    agents, and each new agent claims its task on the ledger. Then take the next step.
 
+### Sizing a pinned hive to its node
+
+A hive held to one node by `workers.node`, `workers.nodeSelector` or `workers.affinity` can only grow into that
+node's memory. Size it from the node's budget and the agents' measured use, in this order:
+
+1. Read the node's allocatable memory and what the pods other than the hives already request, and the node's
+   current use:
+
+   ```bash
+   kubectl describe node <node> | grep -A6 -E '^Allocatable|Allocated resources'
+   kubectl top node <node>
+   ```
+
+   The service reserve is the requests of every pod on the node except the worker hives, rounded up. It covers the
+   other pods the node runs, such as a database, so a hive raise never starves them.
+
+2. Measure what one agent uses on the hive today: the pod's memory divided by its running agent count.
+
+   ```bash
+   kubectl top pods -A | grep worker-hive
+   agentihooks hive list   # workers=<running> of <ceiling>
+   ```
+
+3. Pick `memoryPerAgentMi.request` at or above the measured mean, and `memoryPerAgentMi.limit` with room above it
+   for the agents that run larger than the mean. Then pick the largest `maxAgents` for which every hive limit on the
+   node plus the service reserve stays inside allocatable:
+
+   ```text
+   sum over the node's hives of (maxAgents x memoryPerAgentMi.limit) + service reserve <= allocatable
+   ```
+
+   The limit is the bound, not the request: the chart multiplies both into the pod only, and no agent has a memory
+   cgroup of its own. Past the pod limit the kernel OOM killer ends a process in the pod cgroup; when that is the
+   hive's main process, the container restarts and every agent on the hive ends.
+
+4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless 0.5 CPU fits under 80
+   percent of the pod's CPU limit, measured on the pod's load ([Headroom](#headroom)). Launches stop once pod load
+   nears that line, so the hive reaches `maxAgents` only while its agents average about 0.8 times the CPU limit
+   divided by `maxAgents`. A higher `maxAgents` with too small a CPU limit leaves the hive at a ceiling below its
+   cap, with launches refused for `cpu`.
+
+5. Render the values and read the pod's memory, then deliver them through the values repository and confirm the new
+   cap and pod limit, as in the raising steps of [Worker hive memory and placement](#worker-hive-memory-and-placement).
+
+**Worked example: a stable hive on a 92 GiB node.** One node runs a stable hive, a small dev hive and the swarm's
+services. Measured before the raise:
+
+| Reading | Value |
+|---|---|
+| Node allocatable memory (`kubectl describe node`) | 94322 MiB, 16 CPU |
+| Requests of pods other than the two hives | 23876 MiB, kept as a 24576 MiB (24 GiB) service reserve |
+| Stable hive pod (`kubectl top pods`) | 12103 MiB with 16 agents, about 756 MiB per agent |
+| Dev hive limit | 8184 MiB |
+| Stable hive pod CPU limit (`workers.resources.limits.cpu`) | 7 CPU |
+
+The stable hive went from 28 agents at 1024 MiB request and 2048 MiB limit to 48 agents at 1024 MiB request and 1280
+MiB limit. The lower per agent limit still leaves 1.7 times the measured mean, and pays for twenty more agents in the
+same pod limit budget:
+
+```yaml
+workers:
+  maxAgents: 48
+  memoryPerAgentMi:
+    request: 1024
+    limit: 1280
+```
+
+| | Before | After |
+|---|---|---|
+| `maxAgents` | 28 | 48 |
+| Pod memory request | `28672Mi` | `49152Mi` |
+| Pod memory limit | `57344Mi` | `61440Mi` |
+| Hive limits plus reserve | 57344 + 8184 + 24576 = 90104 MiB | 61440 + 8184 + 24576 = 94200 MiB |
+
+94200 MiB fits the node's 94322 MiB allocatable. The render shows the new pod memory, limit first, then request; a
+`-storage` Job, when the hive renders one, follows with its own `64Mi` and `16Mi`:
+
+```bash
+helm template proof deploy/helm/agentihooks-swarm -f stable-hive.yaml -s templates/worker-hive.yaml \
+  | grep -E '^ +memory: [0-9]+Mi'
+#           memory: 61440Mi
+#           memory: 49152Mi
+```
+
+After the pod rolls, `hive list` shows the new cap and pod limit:
+
+```bash
+agentihooks hive list   # tab separated; headroom fields abridged
+# <stable hive>  live  ui=no  workers=16 of 48 (cap 48)  ...  pod-limit-mb=61440  pending=0
+```
+
+Pod memory admission does not hold this hive below 48: 48 agents at the measured 756 MiB use about 36300 MiB, under
+the 80 percent line of 61440 MiB. CPU can: launches stop once pod load reaches 80 percent of the 7 CPU limit, which at
+48 agents is an average of about 0.12 CPU each, so raise the CPU limit with `maxAgents` when `hive list` shows a
+ceiling below the cap.
+
+**Hold the budget in a test.** When the values live in a repository with a test suite, record the measured
+allocatable and service reserve there and assert the budget, so a later raise that no longer fits the node fails in
+CI instead of at the kernel. An excerpt, where `stable` and `dev` are the two hives' `workers` values:
+
+```python
+NODE_ALLOCATABLE_MI = 94322
+SERVICE_REQUESTS_MI = 24 * 1024
+
+
+def test_hives_fit_the_node() -> None:
+    """Both hive pod limits plus the service reserve fit the node's allocatable memory."""
+    stable_memory = stable["maxAgents"] * stable["memoryPerAgentMi"]["limit"]
+    dev_memory = dev["maxAgents"] * dev["memoryPerAgentMi"]["limit"]
+    assert stable["maxAgents"] >= 48
+    assert stable_memory + dev_memory + SERVICE_REQUESTS_MI <= NODE_ALLOCATABLE_MI
+```
+
+Re-measure the node and update both constants when the node's memory or its other pods change.
+
 ### Scaling worker hives
 
 One hive credential is one hive. The hive id inside a member credential is fixed when the member is minted, and the
@@ -3335,6 +3626,105 @@ it at eight agents while the worker hives carry the rest.
 If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
 chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
 releases and give each its own member.
+
+### Release roll one hive at a time
+
+`workers.rollout` makes a release roll take the hives down one at a time, each for a bounded drain, so the swarm keeps
+every other hive serving while one restarts. It is off by default and is an ArgoCD feature: its hooks are ArgoCD sync
+hooks.
+
+```yaml
+workers:
+  rollout:
+    enabled: true                       # default false
+    namespace: default                  # where the shared Lease lives
+    leaseName: agentihooks-hive-rollout # one Lease name for every hive release that must roll in turn
+    drainSeconds: 1200                  # preStop drain while rollout is on, 0 to 1500
+    release: ""                         # optional pod stamp; each new value rolls the hives
+```
+
+With `enabled: true` and at least one worker hive, the chart adds:
+
+| Piece | What it does |
+|---|---|
+| PreSync Job `<fullname>-rollout-acquire` | Takes the Lease `<namespace>/<leaseName>` for the owner `<release namespace>/<release name>`. A Lease held by another owner and not expired is waited on, checked every 5 seconds, for up to 5400 seconds; the Job then fails with `another hive rollout owns the lease; no workload was changed` and the sync changes nothing. The Job sets the renew time once and nothing renews it, so a held Lease expires 3600 seconds after it was taken. |
+| PostSync Job `<fullname>-rollout-release` | Frees the Lease only when every worker hive Deployment of the release is serving: replicas above 0, the current generation observed, and updated, ready and available replicas all equal to replicas. Otherwise it fails with `replacement hive is not serving; rollout ownership retained` and retries, up to 3 times. When it still fails, the sync fails. |
+| SyncFail Job `<fullname>-rollout-abandon` | Frees the Lease after a failed sync, a failed PostSync release included, when this release still holds it. The next sync's PreSync takes it again. |
+| Readiness probe | `python3 -m scripts.hive.rollout ready` every 5 seconds: ready while the marker `HIVE_READY_FILE` (`/tmp/hive-ready`) was touched in the last 60 seconds. The start script removes the marker, and `hive run` touches it after each successful heartbeat, so a pod is ready from its first beat and turns unready after 60 seconds without one. |
+| Bounded drain | The preStop drain waits `workers.rollout.drainSeconds` instead of `workers.drainSeconds`, and the grace period is that value plus 30 seconds. A value outside 0 to 1500 fails the render with `workers.rollout.drainSeconds must be between 0 and 1500`. |
+| Sync waves | Each worker hive Deployment of the release gets its own sync wave: wave 1 for the first worker hive, then one wave per further `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
+| RBAC | A ServiceAccount `<fullname>-rollout`, a Role in the Lease namespace that may create Leases and get and update the named one, and a Role that may get the release's worker hive Deployments. |
+| `release` stamp | A non empty value is written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. |
+
+Each hook Job has 5500 seconds in total, its retries included, which holds the 5400 second acquire wait. The hook Jobs
+run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
+release version such as `2.17.467` nor `dev` fails the render; at `dev` the hooks use `workers.image.tag`.
+
+Hives in separate releases roll in turn when they share one `namespace` and `leaseName`: the second release's
+PreSync waits until the first release's PostSync finds its hive serving and frees the Lease. The hive drained during
+its turn sends each agent one inbox order to hand off, so successors start on the hives that are still serving.
+
+#### Antoncore hives
+
+The antoncore swarm hives are one ArgoCD Application each, `swarm-hive-001` and `swarm-hive-003`, with values in
+`k8s/values-overlays/<hive>/values.yaml`. Each takes the `agentihooks-swarm` chart from
+`ghcr.io/the-cloud-clockwork/charts` at `targetRevision: '*'`, runs the hive worker image at tag `release` with
+`pullPolicy: Always`, and sets `workers.rollout.enabled: true` (the chart default is false), keeping the other
+rollout defaults:
+
+```yaml
+workers:
+  image:
+    tag: release
+    pullPolicy: Always
+  rollout:
+    enabled: true
+```
+
+ArgoCD syncs each release's chart, and a hive rolls only when that release changes its rendered pod template. Pod
+templates carry no chart version label, so a release that changes only the chart version rolls no hive
+([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)). A rolled pod pulls the current `:release`
+image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
+set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
+template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump
+leaves each hive pod template unchanged.
+
+Antoncore [#1474](https://github.com/the-cloud-clockwork/antoncore/pull/1474) first wrote each release's `:release`
+digest into `workers.rollout.release` through the ArgoCD image updater. On release v2.17.472 that rolled every hive
+twice, once for the chart and once for the digest stamp, and
+[#1500](https://github.com/the-cloud-clockwork/antoncore/pull/1500) removed the image updater from the hive
+Applications.
+
+The roll on release v2.17.472, across the three hives antoncore ran then and sampled every 15 seconds, took each hive
+from down to serving again in 53 seconds to 6 minutes 42 seconds, and no sample showed more than one hive pod in a
+state other than Running or Terminating. 17 of its 104 samples showed two hives not ready. In those samples one
+replacement pod failed readiness on Redis socket timeouts. A replacement pod that cannot reach Redis stays unready,
+because its readiness marker ages past 60 seconds. If its release Job then fails, the abandon Job frees the Lease and
+the next hive can take its turn while that hive is still down.
+
+Watch a roll:
+
+```bash
+kubectl get lease agentihooks-hive-rollout -n default -o jsonpath='{.spec.holderIdentity} {.spec.renewTime}{"\n"}'
+for n in 001 003; do
+  kubectl -n swarm-hive-$n get pods -l app.kubernetes.io/component=worker-hive \
+    -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[0].ready}{"\n"}{end}'
+done
+kubectl -n swarm-hive-001 get jobs | grep rollout
+```
+
+An empty holder means no roll is in progress. A holder naming `swarm-hive-<n>/swarm-hive-<n>` means that hive has its
+turn.
+
+#### Release roll troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A sync fails at PreSync with `another hive rollout owns the lease; no workload was changed` | Another release held the Lease for the whole 5400 second wait. | Read the holder with the `kubectl get lease` command above and fix that release's roll; the next sync retries. |
+| A hive's `rollout-release` Job fails with `replacement hive is not serving; rollout ownership retained` and its sync fails | The replacement hive pod is not ready: no successful heartbeat in the last 60 seconds, often Redis unreachable from the pod. The abandon Job frees the Lease, so another hive may roll while this one is down. | Read the pod log for `hive Redis connection lost` (see [Redis restarts](#redis-restarts)) and fix the cause; the next sync retakes the Lease. |
+| The render fails with `workers.rollout.drainSeconds must be between 0 and 1500` | The value is negative or above 1500. | Set a value from 0 to 1500. |
+| The render fails with `appVersion must be a release version such as 2.17.467, or dev for an unreleased chart` | The chart's `appVersion` is neither form. | Package the chart with a release version, or keep `dev`. |
+| Each release rolls a hive twice | A second writer changes the pod template after the chart sync, such as an image updater stamping `workers.rollout.release`. | Remove the second writer, so one sync carries every template change of the release. |
 
 ## Ledger Hives panel
 
