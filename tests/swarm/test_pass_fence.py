@@ -42,7 +42,7 @@ def test_the_first_pass_site_fences_the_runtime_every_later_step_reads(monkeypat
         PASS_TOOLS.reset(token)
     assert state["runtime"] == "fenced"
     assert [(call.operation, call.args) for call in port.calls] == [("fence", ("held", "deployment for config of sw"))]
-    assert cli.TICK_LOCK_MS / 1000 - 1 < port.calls[0].deadline.remaining <= cli.TICK_LOCK_MS / 1000
+    assert cli.TICK_LOCK_MS / 1000 - 0.05 < port.calls[0].deadline.remaining <= cli.TICK_LOCK_MS / 1000
 
 
 @pytest.mark.feature("tick-pass-fence-first-site")
