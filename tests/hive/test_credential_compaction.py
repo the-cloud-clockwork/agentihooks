@@ -5,8 +5,6 @@ import pytest
 
 from scripts.hive import auth, hive_state
 
-pytestmark = pytest.mark.feature("hive-credential-compaction")
-
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Any:
@@ -28,12 +26,14 @@ def _digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_scoped_credential_keys_preserve_existing_record_addresses() -> None:
     assert hive_state.agent_key("m1", "alpha", "engineer@1") == (
         "agent.m1.d540e79213ffc4316c706b9576c85f31dad274814e278a86a4d8392eeb0362f5"
     )
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_preserves_legacy_tokens_and_removes_member_maps(client: Any) -> None:
     from scripts.hive import agent_credentials
 
@@ -52,6 +52,7 @@ def test_compaction_preserves_legacy_tokens_and_removes_member_maps(client: Any)
     assert agent_credentials.compact(client, ["m1"], readers_compatible=True) == {"m1": 31}
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_ended_agent_tokens_are_removed_and_active_peers_keep_access(client: Any) -> None:
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -72,6 +73,7 @@ def test_ended_agent_tokens_are_removed_and_active_peers_keep_access(client: Any
     assert store.drop_agent("alpha", name)
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     from dataclasses import replace
 
@@ -91,6 +93,7 @@ def test_recording_an_ended_execution_removes_its_token(client: Any) -> None:
     )
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: Any) -> None:
     from scripts.hive import agent_credentials
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
@@ -115,6 +118,7 @@ def test_compacted_independent_tokens_are_removed_when_the_agent_ends(client: An
     assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(client: Any) -> None:
     from scripts.hive import agent_credentials
 
@@ -147,6 +151,7 @@ def test_ending_an_agent_removes_retained_map_tokens_and_keeps_active_peers(clie
     assert auth.agent_member(client, peer, "alpha", "engineer@peer") == "m1"
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from collections.abc import Generator
     from concurrent.futures import ThreadPoolExecutor
@@ -193,6 +198,7 @@ def test_compaction_and_retirement_share_a_fence(client: Any, monkeypatch: pytes
     assert auth.agent_member(client, token, "alpha", "engineer@1") is None
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_minted_members_omit_the_obsolete_agents_map(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth, "_set_user", lambda *_: None)
     monkeypatch.setattr(auth.redis_acl, "save", lambda *_: None)
@@ -203,6 +209,7 @@ def test_minted_members_omit_the_obsolete_agents_map(client: Any, monkeypatch: p
 
 
 @pytest.mark.parametrize(("members", "verified"), [(["m1"], False), ([], True)])
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_requires_explicit_members_and_verified_readers(
     client: Any, members: list[str], verified: bool
 ) -> None:
@@ -214,6 +221,7 @@ def test_compaction_requires_explicit_members_and_verified_readers(
     assert auth.member(client, "m1") == {"name": "hive", "ledger": "d", "agents": {}}
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_defaults_to_unverified_readers(client: Any) -> None:
     from scripts.hive import agent_credentials
 
@@ -222,6 +230,7 @@ def test_compaction_defaults_to_unverified_readers(client: Any) -> None:
     assert str(raised.value) == "compaction requires verified readers and an explicit member list"
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_refuses_other_backends(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import agent_credentials
 
@@ -231,6 +240,7 @@ def test_compaction_refuses_other_backends(client: Any, monkeypatch: pytest.Monk
     assert str(raised.value) == "credential compaction requires the Redis state backend"
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_refuses_unknown_members(client: Any) -> None:
     from scripts.hive import agent_credentials
 
@@ -239,6 +249,7 @@ def test_compaction_refuses_unknown_members(client: Any) -> None:
     assert str(raised.value) == "unknown hive member missing"
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_cli_compacts_only_the_selected_members(
     client: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -267,6 +278,7 @@ def test_cli_compacts_only_the_selected_members(
     assert raised.value.code == 2
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_compaction_replaces_large_history_and_preserves_existing_independent_records(client: Any) -> None:
     import base64
     import json
@@ -291,6 +303,7 @@ def test_compaction_replaces_large_history_and_preserves_existing_independent_re
     ]
 
 
+@pytest.mark.feature("hive-credential-compaction")
 def test_cli_explains_the_reader_precondition(capsys: pytest.CaptureFixture[str]) -> None:
     from scripts.hive import cli
 
