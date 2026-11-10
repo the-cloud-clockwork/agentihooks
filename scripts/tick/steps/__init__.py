@@ -157,23 +157,21 @@ class DeclaredBox(MutableMapping[str, Any]):
         self.step = step
         self.allowed = allowed
 
-    @property
-    def left(self) -> list[str]:
-        """Return the names of the steps the pass left, as the box keeps them."""
-        return cast(list[str], getattr(self.box, "left", []))
+    def _check(self, key: str) -> None:
+        """Refuse ``key`` when it names a box value, known or stored, the step does not declare."""
+        if key not in self.allowed and (key in BOX_KEYS or key in self.box):
+            refuse(self.step, key)
 
     def __getitem__(self, key: str) -> Any:
         """Return the box value under ``key`` once the step declares it, raising ``Left`` when no step stored it."""
-        if key not in self.allowed:
-            refuse(self.step, key)
+        self._check(key)
         if key not in self.box:
             raise Left(key)
         return self.box[key]
 
     def __contains__(self, key: object) -> bool:
         """Return whether the box holds ``key`` once the step declares it."""
-        if key not in self.allowed:
-            refuse(self.step, str(key))
+        self._check(str(key))
         return key in self.box
 
     def __setitem__(self, key: str, value: Any) -> None:

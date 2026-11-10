@@ -77,7 +77,7 @@ def test_the_box_view_refuses_undeclared_keys_and_writes_through() -> None:
     assert box["doc"] == 3
     assert dict(view) == {"raised": None, "doc": 3}
     assert len(view) == 2
-    assert view.left is box.left
+    assert "scratch" not in view
 
 
 @pytest.mark.feature("swarm-tick-declared-reads")
@@ -106,7 +106,10 @@ def test_the_box_keys_are_the_values_steps_and_hooks_declare_writing() -> None:
     domains = {domain for step in registry.steps() for domain in step.writes}
     domains |= {domain for _, writes in keys.values() for domain in writes}
     named = tick_steps.declared_keys(domains) - {tick_steps.RAISED}
+    reads = {domain for step in registry.steps() for domain in step.reads}
+    reads |= {domain for read, _ in keys.values() for domain in read}
     assert named == tick_steps.BOX_KEYS
+    assert tick_steps.declared_keys(reads) - {tick_steps.RAISED} <= tick_steps.BOX_KEYS
 
 
 def _wrapper_hooks() -> tuple[str, ...]:
