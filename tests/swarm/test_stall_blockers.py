@@ -193,6 +193,16 @@ def test_a_task_out_of_pr_listed_first_leaves_later_merged_tasks_counted(store: 
     assert found.detail == "1 tasks still in pr after their pull request merged, oldest task a"
 
 
+def test_a_held_category_keeps_counting_while_its_start_holds(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    github = _pulls(**{"pr-a": _done(now - 2 * HOUR)})
+    _observe(store, [_task("a", "pr-a")], github, now - MINUTE)
+    _observe(store, [_task("a", "pr-a")], github, now)
+    found = blockers.active(store, SLUG, now)[stall_blockers.MERGED_IN_PR]
+    assert (found.first_seen, found.last_seen, found.count) == (now - 2 * HOUR + stall_blockers.MERGED_MS, now, 2)
+
+
 def test_a_done_task_with_a_merged_pull_request_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)

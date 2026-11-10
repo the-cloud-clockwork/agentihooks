@@ -40,7 +40,6 @@ GATE = StallBlockersGate()
 
 @dataclass(frozen=True)
 class Held:
-    category: str
     since: int
     detail: str
 
@@ -70,7 +69,7 @@ def merge_stall(
     if not open_urls:
         return None
     detail = f"{len(open_urls)} focused pull requests open and no merge into dev on {state['repo']}"
-    return Held(MERGE_STALL, int(state["merged"]), detail)
+    return Held(int(state["merged"]), detail)
 
 
 def merged_in_pr(
@@ -91,7 +90,7 @@ def merged_in_pr(
     if not left:
         return None
     since, title = min(left)
-    return Held(MERGED_IN_PR, since, f"{len(left)} tasks still in pr after their pull request merged, oldest {title}")
+    return Held(since, f"{len(left)} tasks still in pr after their pull request merged, oldest {title}")
 
 
 def _apply(
