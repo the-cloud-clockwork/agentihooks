@@ -194,7 +194,7 @@ def test_a_refused_early_probe_prints_each_ungraded_mutant(tmp_path, monkeypatch
     )
 
 
-def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts(tmp_path, monkeypatch):
+def test_the_remaining_worker_keeps_the_whole_budget_after_a_shared_early_probe(tmp_path, monkeypatch):
     plan = _plan()
     stats = _shared(tmp_path, probe.merge_probes(plan, _records(plan)))
     source = tmp_path / "scripts/a.py"
@@ -212,7 +212,7 @@ def test_shared_early_elapsed_time_is_charged_before_the_remaining_worker_starts
 
     monkeypatch.setattr(runner, "mutate_files", mutate)
     runner.run_gate(tmp_path, {"scripts/a.py": {2}}, tmp_path / "output", 1080, (0, 2), stats)
-    assert calls == [1071]
+    assert calls == [1080]
 
 
 @pytest.mark.parametrize("planned", [False, True])
@@ -339,9 +339,3 @@ def test_probe_provenance_marks_only_a_reused_kill_and_preserves_other_rows(tmp_
         {"name": "scripts.a.x_f__mutmut_2", "status": "survived"},
         {"name": "scripts.a.x_g__mutmut_1", "status": "killed"},
     ]
-    shared = SharedStats(tmp_path, "revision")
-    assert probe.probe_elapsed(None) == 0
-    assert probe.probe_elapsed(shared) == 0
-    (tmp_path / "plan.json").write_text(json.dumps(merged))
-    assert probe.probe_elapsed(shared) == 9
-    assert probe.probe_elapsed(SharedStats(tmp_path, "revision", (0, 1))) == 0

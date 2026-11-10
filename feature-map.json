@@ -1625,6 +1625,24 @@
       ]
     },
     {
+      "id": "swarm-reopened-claim-loss",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
+      "behaviour": "A hive worker whose claim is emptied, reopened or reassigned ends through hook exit and tick retirement; a workstation worker ends through the hook and exit command when its claim names another agent and keeps its emptied claim restorable.",
+      "seam": "hooks.context.claim_watch.check and scripts.tick.steps.common._current_owner, _ended with scripts.tick.steps.agents._reap_agent",
+      "tests": [
+        "tests/tick/steps/test_claim_loss.py::test_reopened_or_reassigned_claims_end_the_previous_worker",
+        "tests/tick/steps/test_claim_loss.py::test_tick_retires_a_lost_claim_before_restore_or_watch",
+        "tests/tick/steps/test_claim_loss.py::test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state",
+        "tests/tick/steps/test_claim_loss.py::test_retirement_preserves_other_claims_and_fences_its_own_reopen",
+        "tests/test_claim_watch.py::test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner",
+        "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner",
+        "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
+        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
+        "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
+      ]
+    },
+    {
       "id": "inbox-wake",
       "origin": "inventory",
       "behaviour": "An idle Codex pane with a pending item gets exactly one typed wake; a busy pane, a Claude pane with its inbox channel and the master pane are never typed into.",
@@ -3196,21 +3214,14 @@
       ]
     },
     {
-      "id": "swarm-reopened-claim-loss",
+      "id": "mutation-shard-probe-kills-own-clock",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2433",
-      "behaviour": "A hive worker whose claim is emptied, reopened or reassigned ends through hook exit and tick retirement; a workstation worker ends through the hook and exit command when its claim names another agent and keeps its emptied claim restorable.",
-      "seam": "hooks.context.claim_watch.check and scripts.tick.steps.common._current_owner, _ended with scripts.tick.steps.agents._reap_agent",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-steps-lazy-import",
+      "behaviour": "A mutation shard answers mutmut's forced fail control from a kill its probe recorded instead of rerunning every selected test, and measures its budget and wall time from its own start, never charging the probe job's seconds.",
+      "seam": "scripts.ci_mutation.probe.reuse_kills and scripts.ci_mutation.runner.run_gate",
       "tests": [
-        "tests/tick/steps/test_claim_loss.py::test_reopened_or_reassigned_claims_end_the_previous_worker",
-        "tests/tick/steps/test_claim_loss.py::test_tick_retires_a_lost_claim_before_restore_or_watch",
-        "tests/tick/steps/test_claim_loss.py::test_a_live_workstation_worker_with_an_intact_claim_can_restore_its_state",
-        "tests/tick/steps/test_claim_loss.py::test_retirement_preserves_other_claims_and_fences_its_own_reopen",
-        "tests/test_claim_watch.py::test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner",
-        "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner",
-        "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
-        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
-        "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
+        "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
+        "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
       ]
     }
   ],
