@@ -206,6 +206,7 @@ def _host(clock: Any, run: Callable, tmp_path: Path, ledger: Ledger | None = Non
         known_hosts=known,
         home=tmp_path,
         ledger=lambda: opened,
+        worktrees=tmp_path / "worktrees",
     )
 
 
@@ -831,7 +832,7 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
     assert (clock.now, clock.slept) == (30, 2)
     assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
     for name, task, seat in (("engineer@1", "t1", SEAT), ("engineer@2", "t2", f"eng-2@{SLUG}")):
-        text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task))
+        text = remove.RECOVERY.format(name=name, task=task, hive=member, wait=30, folder=folder(SLUG, task), pushed="")
         assert store.handoffs[(SLUG, task)] == (text, seat)
         assert text.endswith(
             f"## Next\nRead the task folder {folder(SLUG, task)} (steering.md, progress.md, proof.md) and the ledger "
@@ -850,6 +851,114 @@ def test_a_stopping_hive_writes_a_recovery_handoff_for_each_agent_still_running_
         (store, SLUG, "engineer@1", "exit", None, 1793500, run),
         (store, SLUG, "engineer@2", "exit", None, 1793500, run),
     ]
+
+
+@pytest.mark.feature("hive-drain-push-resume")
+def test_a_release_roll_orders_each_agent_to_commit_and_push_before_it_hands_off(store: Any, tmp_path: Path) -> None:
+    member = _member(store)
+    _agent(store, member)
+
+    remove.settle(store, member, 3600, _host(Clock(store, member, 1), Run(), tmp_path))
+
+    (order,) = _orders(store, SEAT)
+    assert "commit and push your branch so no work is lost with the pod" in order.text
+    assert order.text.index("commit and push") < order.text.index("hand off with the handoff skill")
+
+
+@pytest.mark.feature("hive-drain-push-resume")
+def test_an_agent_still_running_at_the_deadline_has_its_unpushed_worktrees_pushed_and_named_in_its_recovery(
+    store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from hooks.lifecycle import gitstate
+    from scripts.handoff import envelope
+
+    member = _member(store)
+    _agent(store, member)
+    monkeypatch.setattr(envelope, "build", lambda swarm, slug, agent, reason, rows, at, run: {"agent": agent.name})
+    states: dict[str, tuple[tuple[str, ...], bool] | None] = {
+        "engineer-1": (("a.py",), False),
+        "engineer-1-2": ((), True),
+        "engineer-1-3": ((), False),
+        "engineer-1-4": None,
+        "engineer-10": (("b.py",), True),
+    }
+    for name in states:
+        (tmp_path / "worktrees" / "agentihooks" / name).mkdir(parents=True)
+    inspected: list[tuple[str, float]] = []
+
+    def inspect(path: Path, now: float) -> SimpleNamespace | None:
+        inspected.append((path.name, now))
+        state = states[path.name]
+        return None if state is None else SimpleNamespace(dirty=state[0], unpushed=state[1])
+
+    monkeypatch.setattr(gitstate, "inspect", inspect)
+    pushed: list[str] = []
+
+    def rescue(path: Path) -> str:
+        pushed.append(path.name)
+        if path.name == "engineer-1-2":
+            raise subprocess.TimeoutExpired(["git", "push"], 600)
+        return f"wip/agentihooks/{path.name}"
+
+    host = replace(_host(Clock(store, member, 99), Run(), tmp_path), rescue=rescue)
+    store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
+    (tmp_path / "worktrees" / "agentihooks" / "engineer-2").mkdir(parents=True)
+    states["engineer-2"] = ((), True)
+
+    remove.settle(store, member, 30, host)
+
+    assert pushed == ["engineer-1", "engineer-1-2", "engineer-2"]
+    assert inspected == [
+        *((name, 1793.5) for name in ("engineer-1", "engineer-1-2", "engineer-1-3", "engineer-1-4")),
+        ("engineer-2", 1793.5),
+    ]
+    left = tmp_path / "worktrees" / "agentihooks" / "engineer-1-2"
+    refs = (
+        "pushed to wip/agentihooks/engineer-1, "
+        f"left in worktree {left} because its push failed (Command '['git', 'push']' timed out after 600 seconds)"
+    )
+    text = remove.RECOVERY.format(
+        name="engineer@1",
+        task="t1",
+        hive=member,
+        wait=30,
+        folder=folder(SLUG, "t1"),
+        pushed=f"\nIts unpushed work: {refs}; continue from there.",
+    )
+    assert store.handoffs[(SLUG, "t1")] == (text, SEAT)
+    assert f"still running.\nIts unpushed work: {refs}; continue from there.\n\n##" in text
+    second = store.handoffs[(SLUG, "t2")][0]
+    assert "\nIts unpushed work: pushed to wip/agentihooks/engineer-2; continue from there.\n" in second
+
+
+def test_the_drain_pushes_through_the_lifecycle_wip_snapshot_from_the_worktree_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hooks.lifecycle import act
+
+    monkeypatch.setattr(act, "snapshot", lambda path: f"wip/{path.name}")
+
+    assert remove.wip_push(tmp_path / "tree") == "wip/tree"
+    assert remove.Host().rescue is remove.wip_push
+    assert remove.Host().worktrees == Path.home() / "dev" / "worktrees"
+
+
+@pytest.mark.parametrize("failure", ["action", "os"])
+def test_a_failed_wip_push_names_the_worktree_left_behind(tmp_path: Path, failure: str) -> None:
+    from hooks.lifecycle.act import ActionError
+
+    error = ActionError("git push: rejected") if failure == "action" else OSError("disk gone")
+
+    def rescue(path: Path) -> str:
+        raise error
+
+    host = remove.Host(rescue=rescue)
+
+    assert remove._rescued(tmp_path / "tree", host) == (
+        f"left in worktree {tmp_path / 'tree'} because its push failed ({error})"
+    )
 
 
 def test_an_agent_with_a_recorded_handoff_no_longer_holds_the_drain_and_keeps_its_document(store, tmp_path):
@@ -880,7 +989,9 @@ def test_a_handoff_an_earlier_occupant_left_on_the_task_still_holds_the_drain(st
     assert settled.startswith(f"hive {member} stops after 30 seconds; engineer@1 did not hand off")
     assert clock.slept == 2
     assert store.envelopes[(SLUG, "t1")] == {"agent": "engineer@1"}
-    text = remove.RECOVERY.format(name="engineer@1", task="t1", hive=member, wait=30, folder=folder(SLUG, "t1"))
+    text = remove.RECOVERY.format(
+        name="engineer@1", task="t1", hive=member, wait=30, folder=folder(SLUG, "t1"), pushed=""
+    )
     assert store.handoffs[(SLUG, "t1")] == (text, SEAT)
 
 

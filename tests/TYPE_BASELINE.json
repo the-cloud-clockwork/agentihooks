@@ -651,7 +651,7 @@
   "scripts/swarm/readiness.py": 97,
   "scripts/swarm/ready.py": 742,
   "scripts/swarm/reaper.py": 7,
-  "scripts/swarm/reboot.py": 231,
+  "scripts/swarm/reboot.py": 180,
   "scripts/swarm/recovery_view.py": 80,
   "scripts/swarm/redis_budget.py": 50,
   "scripts/swarm/redis_commands.py": 6,
