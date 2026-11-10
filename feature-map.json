@@ -3076,6 +3076,18 @@
       ]
     },
     {
+      "id": "priorities-sweep-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-priorities-sweep-budget",
+      "behaviour": "The priorities sweep tick step clears every stale priority of a pass in bounded batched ledger writes, so a thousand stale priorities finish under the step floor budget.",
+      "seam": "scripts.swarm.priority_sweep.priority_pass and LedgerClient.clear_priorities",
+      "tests": [
+        "tests/swarm/test_priority_sweep.py::test_a_thousand_stale_priorities_clear_inside_the_step_floor",
+        "tests/swarm/test_priority_sweep.py::test_the_sweep_clears_its_stale_priorities_in_one_batch",
+        "tests/swarm/test_ledger_client_priorities.py::test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches"
+      ]
+    },
+    {
       "id": "mutation-shard-probe-kills-own-clock",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-steps-lazy-import",

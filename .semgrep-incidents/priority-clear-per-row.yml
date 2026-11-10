@@ -1,0 +1,21 @@
+rules:
+  - id: priority-clear-per-row
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A priority is cleared with one ledger write per row inside a loop. On release 2.17.779 the priorities sweep tick
+      step was abandoned after 577 seconds because each stale priority cost one ledger round trip. Collect the clears
+      and send them with LedgerClient.clear_priorities, which batches them.
+    paths:
+      exclude:
+        - /scripts/swarm_ledger/
+    patterns:
+      - pattern: $LEDGER.clear_priority(...)
+      - pattern-either:
+          - pattern-inside: |
+              for $ROW in $ROWS:
+                  ...
+          - pattern-inside: |
+              while $COND:
+                  ...
+          - pattern-inside: '[$X for $ROW in $ROWS]'
