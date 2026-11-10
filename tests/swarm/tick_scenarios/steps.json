@@ -1,16 +1,19 @@
 {
  "scenarios": {
-  "hive sweep": [
-   "running"
-  ],
   "doc items map": [
    "running"
   ],
-  "workflow runner": [
+  "hive sweep": [
    "running"
   ],
   "reap": [
    "hive-roll"
+  ],
+  "step starvation": [
+   "running"
+  ],
+  "workflow runner": [
+   "running"
   ]
  },
  "unmapped": [

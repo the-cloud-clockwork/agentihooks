@@ -1,0 +1,22 @@
+rules:
+  - id: status-without-step-starvation
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Swarm status gathers the tick health findings without step_starvation.findings, so a tick step that stops
+      completing (waits end went 56 hours unfinished on 9 November) is found only by its symptoms. Add
+      step_starvation.findings(store, slug, now) to the same findings sum.
+    paths:
+      include:
+        - /scripts/swarm/status.py
+        - status-without-step-starvation.py
+    patterns:
+      - pattern-inside: |
+          def $FN(...):
+              ...
+      - pattern: spawn_stall.findings(...)
+      - pattern-not-inside: |
+          def $FN(...):
+              ...
+              $FOUND = <... step_starvation.findings(...) ...>
+              ...
