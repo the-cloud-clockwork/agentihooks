@@ -385,6 +385,7 @@ def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
         held = redis.exists(*_keys(redis, plan.hive)) + _recorded(redis, plan.hive)
         lines = [f"would delete {held} registry records of {plan.hive}"]
     else:
+        machine.removal(redis, plan.label, "hive removed")
         lines = forget(redis, plan.hive)
         if nodes:
             redis.hdel(machine.MACHINES, *nodes)

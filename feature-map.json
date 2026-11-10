@@ -1615,6 +1615,37 @@
       ]
     },
     {
+      "id": "herdr-hive-lifecycle",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-herdr-dead-hive-lifecycle",
+      "behaviour": "Operator terminal sync forgets removed hive machines immediately and unreachable registered hives after fifteen minutes of persisted failed connections, including hives that never report, retaining brief restarts and manual machines, clearing host keys and logging the reason. Recovery resets the deadline and explicit removal reaches other clients.",
+      "seam": "operator Service run_pass, hive machine forget, and hive remove unregister",
+      "tests": [
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_removed_and_unplugged_hives_leave_herdr_with_their_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_brief_restart_keeps_the_saved_machine_and_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_lifecycle_cleanup_runs_even_when_worker_attempts_do_not_change",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_recovered_hive_keeps_its_machine_past_the_first_outage_deadline",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_reaches_another_client_with_a_custom_hive_name",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_dry_run_removal_does_not_retire_another_clients_machine",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_readding_a_removed_name_clears_its_removal_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_unrelated_manual_machine_names_are_never_removed",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_hive_that_never_reports_has_a_bounded_startup_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreadable_catalog_reports_failure_without_removing_machines",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_outage_after_a_stale_heartbeat_still_gets_the_full_restart_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_startup_failure_expires_even_when_the_member_has_no_hive_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_outage_deadlines_survive_scheduled_service_recreation",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_successful_connection_resets_the_outage_deadline",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_replacing_a_saved_target_starts_a_new_outage_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_manually_forgotten_machine_loses_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_records_the_hive_removed_reason",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_the_status_probe_is_bounded_by_the_herdr_timeout",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreachable_removal_drops_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unregistered_custom_label_drops_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_adding_a_member_name_again_clears_its_removal_record"
+      ]
+    },
+    {
       "id": "inbox-settlement",
       "origin": "inventory",
       "behaviour": "Information closes on receipt while work stays open and reminds its receiver until it is explicitly replied to or closed.",

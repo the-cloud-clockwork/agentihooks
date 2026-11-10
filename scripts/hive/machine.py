@@ -5,10 +5,10 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from scripts.hive import auth, registry
+from scripts.hive import auth, hive_state, registry
 from scripts.hive.placement import YES
 
 if TYPE_CHECKING:
@@ -96,6 +96,7 @@ def add(
     _one_per_machine(listed, target, label)
     member = named_member(redis, label)
     _keep(listed, target, label, run)
+    removal(redis, label, None)
     if member:
         return {"id": member, "name": label}
     grant = auth.mint(redis, label, delivery.redis_url)
@@ -130,6 +131,7 @@ def save(
 ) -> None:
     _ui(redis, local_id)
     _keep(_listed(run), target, label, run)
+    removal(redis, label, None)
 
 
 def _ui(redis: "Redis", local_id: str) -> None:
@@ -148,7 +150,7 @@ def _keep(listed: list[dict], target: str, label: str, run: Callable[..., subpro
         )
 
 
-def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
+def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict[str, Any]]:
     listed = run_checked(run, list(LIST), None, HERDR_TIMEOUT_S)
     try:
         return json.loads(listed)
@@ -156,7 +158,33 @@ def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
         raise auth.HiveError(f"herdr machine list answered with output that is not JSON ({exc})") from exc
 
 
-def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess], dry_run: bool) -> list[str]:
+def targets(run: Callable[..., subprocess.CompletedProcess[str]]) -> dict[str, str]:
+    return {saved["label"]: saved["target"] for saved in _listed(run)}
+
+
+def removed(redis: "Redis") -> dict[str, str]:
+    return hive_state.read(hive_state.records(redis, "machines"), "removed-machines") or {}
+
+
+def removal(redis: "Redis", label: str, reason: str | None) -> None:
+    def change(current: dict[str, str] | None) -> dict[str, str]:
+        changed = dict(current or {})
+        if reason is None:
+            changed.pop(label, None)
+        else:
+            changed[label] = reason
+        return changed
+
+    hive_state.amend(hive_state.records(redis, "machines"), "removed-machines", change)
+
+
+def forget(
+    label: str,
+    known_hosts: Path,
+    run: Callable[..., subprocess.CompletedProcess[str]],
+    dry_run: bool,
+    reason: str = "hive removed",
+) -> list[str]:
     found = [machine for machine in _listed(run) if machine.get("label") == label]
     if not found:
         return [f"herdr holds no machine {label}"]
@@ -164,11 +192,13 @@ def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.Complete
         return [f"would remove herdr machine {label} and the host key of {known_host(m['target'])}" for m in found]
     done = []
     for machine in found:
-        run_checked(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)
-        done.append(f"removed herdr machine {label}")
         host = known_host(machine["target"])
-        if known_hosts.is_file():
+        trusted = known_hosts.is_file()
+        if trusted:
             run_checked(run, ["ssh-keygen", "-R", host, "-f", str(known_hosts)], None, SSH_TIMEOUT_S)
+        run_checked(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)
+        done.append(f"removed herdr machine {label}: {reason}")
+        if trusted:
             done.append(f"removed the host key of {host}")
     return done
 
@@ -179,7 +209,7 @@ def known_host(target: str) -> str:
 
 
 def run_checked(
-    run: Callable[..., subprocess.CompletedProcess], argv: list[str], stdin: str | None, timeout: int
+    run: Callable[..., subprocess.CompletedProcess[str]], argv: list[str], stdin: str | None, timeout: int
 ) -> str:
     try:
         done = run(argv, input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
