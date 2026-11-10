@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x__intent_pass:6d8cacce6882c672a55c0cd25285a6be3d4b05ac7d59ef7e3b9c904a4742d67f": {
+    "reader": "standards_reader",
+    "reason": "shutdown(wait=None) is falsy like wait=False; ThreadPoolExecutor joins its threads only for a truthy wait, so the pass returns at once in both."
+  }
+}
