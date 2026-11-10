@@ -1,11 +1,12 @@
 """Hive admission outcomes are counted per swarm and exported as admission samples."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from scripts.hive import admission, launch, placement_waits
-from scripts.swarm import metrics_service
+from scripts.swarm import controller, metrics_service
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import ACK_LATER
 from scripts.swarm_v2.runtime.base import Status
@@ -87,3 +88,20 @@ def test_a_hive_launch_counts_admitted_for_its_swarm(setup: SimpleNamespace) -> 
     assert setup.store.redis.hgetall(setup.store.key("fixture", placement_waits.TOTALS)) == {
         placement_waits.ADMITTED: "1"
     }
+
+
+@pytest.mark.parametrize(("runtime", "counted"), [(Mock(), False), (Mock(spec=["spawn"]), True)])
+def test_a_local_launch_counts_admitted_only_without_a_hive_runtime(
+    setup: SimpleNamespace,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: Mock,
+    counted: bool,
+) -> None:
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, runtime, controller.LOCAL)
+    monkeypatch.setattr(fenced, "_refusal", lambda lane, task, name: "")
+    fenced.spawn(setup.config, "eng", "eng name", {"id": "task", "seat": "eng-1@fixture"})
+    totals = setup.store.redis.hgetall(setup.store.key(setup.config.slug, placement_waits.TOTALS))
+    assert (placement_waits.ADMITTED in totals) is counted
