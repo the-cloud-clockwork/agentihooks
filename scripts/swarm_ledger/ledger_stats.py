@@ -131,7 +131,7 @@ def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     held = set(pending) - counted
     waiting = {tid: t for tid, t in pending.items() if t.get("state") == "open"}
     for _ in waiting:
-        grown = held | {tid for tid, t in waiting.items() if held & set(t.get("depends_on") or [])}
+        grown: set[str] = held | {tid for tid, t in waiting.items() if held & set(t.get("depends_on") or [])}
         if grown == held:
             break
         held = grown
