@@ -25,7 +25,9 @@ def test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_t
     monkeypatch.setenv("MUTANT_UNDER_TEST", "fail")
     assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 1
     assert calls == []
-    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "survived"})("worker", mutant_name=None, tests=[]) == 0
+    assert (
+        probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "survived"})("worker", mutant_name=None, tests=[]) == 0
+    )
     assert probe.reuse_kills(execute, {})("worker", mutant_name=None, tests=[]) == 0
     assert calls == [(None, []), (None, [])]
     monkeypatch.delenv("MUTANT_UNDER_TEST")
