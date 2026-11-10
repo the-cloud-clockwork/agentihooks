@@ -36,7 +36,7 @@ def _knowledge_warm(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Embed the new and changed items of the swarm's ledger into its knowledge index, so an ask finds it fresh."""
     slug: str = get("slug")
     if os.environ.get(embedders.PREFIX + "EMBEDDER", HASH) != HASH:
-        return [f"knowledge warm of {slug} skipped: the tick warms only the hash embedder index"]
+        return []
     path = service.index_path(slug, os.environ)
     if not _claim(path):
         return [f"knowledge warm of {slug} skipped: an earlier refresh is still running"]
