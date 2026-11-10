@@ -1217,9 +1217,9 @@ CI work as Pods while its master, planners and dispatcher stay on the workstatio
 
 ### Worker hive memory and placement
 
-Every worker hive pod in a cluster uses the same placement: no node pin and no host network. The scheduler places
-the pod on any node whose free memory covers the pod's request, and the hive reaches the swarm over the network the
-node already has, so a new node joins the pool with no chart change.
+With the defaults, every worker hive pod has no node pin and no host network: the scheduler places it on any node
+whose free memory covers its request, and the hive reaches the swarm over the network the node already has, so a new
+node joins the pool with no chart change.
 
 **Memory per agent.** The chart computes the container's memory from two values and the agent count:
 
@@ -1246,8 +1246,8 @@ Each `workers.hives` entry computes its own memory from its own `maxAgents`, or 
 agents on the hive measure above 700 MiB each, so the scheduler stops placing more agents on a node than it can hold;
 raise `limit` when the pod log shows agents killed for memory while the node has room.
 
-Inside the pod, admission counts the pod's memory limit as one more limit, at 850 MB per agent of the room the limit
-leaves ([Headroom](#headroom)); `hive list` prints it as `pod-limit-mb`. A launch refused with a `ram` detail that
+Inside the pod, admission counts the pod's memory limit as one more limit, at 850 MB per agent under 80 percent of that
+limit ([Headroom](#headroom)); `hive list` prints it as `pod-limit-mb`. A launch refused with a `ram` detail that
 names the pod, `pod <n> of <total> MB available`, means the agents already running use the pod limit: raise
 `memoryPerAgentMi.limit`, or lower `maxAgents`.
 
@@ -1255,7 +1255,7 @@ names the pod, `pod <n> of <total> MB available`, means the agents already runni
 
 | Key | Effect |
 |---|---|
-| `workers.node` | Adds `kubernetes.io/hostname: <node>` to the pod's `nodeSelector` and mounts that node's `hiveStorage` folders. |
+| `workers.node` | Adds `kubernetes.io/hostname: <node>` to the pod's `nodeSelector` and uses that node's `hiveStorage` homes and tmp paths for its home and `/tmp` volumes. |
 | `workers.nodeSelector` | Copied into the pod's `nodeSelector`. |
 | `workers.affinity` | Copied into the pod's `affinity`. |
 
@@ -1288,7 +1288,7 @@ before the next one:
    `kubectl describe pod` means no node has room for the new request: lower `maxAgents` or add a node.
 
    ```bash
-   agentihooks hive list
+   agentihooks hive list   # tab separated; headroom fields abridged
    # anton-2  live  ui=no  workers=0 of 4 (cap 4)  excluded=master  ...  pod-limit-mb=8192  pending=0
    ```
 
