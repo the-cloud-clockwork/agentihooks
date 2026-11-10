@@ -1602,6 +1602,7 @@
       "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
       "tests": [
         "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply",
+        "tests/swarm/test_waits.py::test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply",
         "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
         "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
       ]

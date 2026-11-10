@@ -2131,6 +2131,37 @@ def test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_t
 
 
 @pytest.mark.feature("reply-wait-reads-every-inbox-world")
+def test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply() -> None:
+    import fakeredis
+
+    from scripts.hive import auth
+    from scripts.swarm.store import SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    store.create(SwarmConfig("sw", "agentihooks", 2, 0))
+    store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+    store.redis.sadd(auth.INDEX, "m1")
+    master, waiter = store.next_name("sw", "master"), store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(master, "master", "master", seat="master@sw", hive="m1"))
+    store.start_execution("sw", AgentRecord(waiter, "eng", "t1", seat="eng-1@sw"))
+    InboxStore(store.redis).seats.occupy("master@sw", master, 1)
+    item = InboxStore(store.redis).send(waiter, "master@sw", "which way")
+    seat_inbox = InboxStore(store.redis, world="m1")
+    assert (item.address, seat_inbox.get(item.id).state) == ("master@sw", "pending")
+    idle.declare_wait(store.redis, "sw", waiter, 10_000_000, "", 1, on={"kind": "reply", "target": item.id})
+    tick_inbox = InboxStore(store.redis, world="")
+
+    assert waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 5_000, {}.get) == []
+    assert idle.wait(store.redis, "sw", waiter)["on"] == {"kind": "reply", "target": item.id}
+
+    seat_inbox.reply(item.id, "master@sw", "left")
+    assert waits.end_pass(store, "sw", {}, tick_inbox, {}.get, 6_000, {}.get) == [
+        f"ended the wait of {waiter}: message {item.id}, now done"
+    ]
+    assert idle.wait(store.redis, "sw", waiter) is None
+
+
+@pytest.mark.feature("reply-wait-reads-every-inbox-world")
 def test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox() -> None:
     import fakeredis
 
