@@ -1064,12 +1064,12 @@ reads that second room for the role:
 
 | Limit | Rule |
 |---|---|
-| Host memory | Refused at or above 80 percent used (`available_mb` at or under 20 percent of `total_mb`). Below that line it fits whole agents at 850 MB each up to the line, and never fewer than one. |
+| Host memory | Refused at or above 80 percent used (`available_mb` at or under 20 percent of `total_mb`). Below that line it fits whole agents at 850 MB each up to the line, counted as at least one before pending launches are subtracted. |
 | Pod memory | The same rule on `pod_available_mb` and `pod_total_mb` when the cgroup sets a memory limit. |
 | Pending launches | Launches reserved on the hive in the last fifteen minutes are subtracted from each memory limit, so they can hold the last agent of room under the line. |
 | Host and pod CPU | The same CPU limits as the general room. |
 | Disk floor, `max-agents` and the local machine cap | Still refuse the hive as in the general room. |
-| Missing reading | No fresh reading, or a reading with no memory fields, gives room 0 with `missing telemetry`. |
+| Missing reading | No fresh reading gives room 0 with `missing telemetry: no fresh headroom reading`, as in the general room; a fresh reading with no memory fields gives room 0 with `missing telemetry: no memory reading`. |
 
 The smallest limit wins, as in the general room. The launch reservation reads the same rule, so a hive placement
 admits is not refused again at reservation by a general limit it was spared.
@@ -1115,7 +1115,7 @@ The hive launcher prints the same fields to stderr, which the tick journal keeps
 | `no hive for <role> has room: <hive> <reason>: <detail>` | Placement chose it, and the launch reservation then found its room spent by launches already reserved on it. |
 | `no hive for <role> advertises the <harness> slot <slot>` | It does not advertise the account slot chosen for the launch. |
 | `no hive for <role> lists the repo <repo>` | It does not list the task's repository. |
-| `no hive for <role> holds the <harness> login for <slot>`, or `master login` | It lacks the interactive or master login the launch route needs. |
+| `no hive for <role> holds the <harness> login for <slot>`, or `no hive for <role> holds the <harness> master login for <slot>` | It lacks the interactive or master login the launch route needs. |
 | `its heartbeat is older than 90 seconds` | It is not live. |
 | `it is draining` | Its drain is on. |
 | `it excludes <role>` | Its `excluded` list names the lane, the role or the profile. |
