@@ -80,6 +80,7 @@ def test_the_handed_workers_are_named_and_bounded_by_the_pass_workers() -> None:
         assert [future.result() for future in met] == [False, False]
 
 
+@pytest.mark.wall_clock
 @pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_a_pass_ends_without_waiting_on_its_handed_workers_and_cancels_their_queue() -> None:
     gate, started = Event(), Event()
