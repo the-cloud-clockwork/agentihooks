@@ -344,10 +344,10 @@ class SiteGate:
         if first:
             self._open(step.group, opening)
         found = pool.active()
-        if not opening.wait(0.0 if found is None else min(step.budget_s, found.lane(step.lane).remaining)):
+        if found is not None and not opening.wait(min(step.budget_s, found.lane(step.lane).remaining)):
             return False
         with self.guard:
-            return self.opened.get(step.group, False) and not self.shut(step)
+            return bool(self.opened.get(step.group)) and not self.shut(step)
 
     def _open(self, group: str, opening: Event) -> None:
         """Run the hook of site ``group`` and keep its answer, then release the steps waiting on it."""
