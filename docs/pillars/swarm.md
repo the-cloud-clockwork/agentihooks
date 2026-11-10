@@ -3073,7 +3073,7 @@ ends reservations:
 | `admitted` | A task got a pending reservation. |
 | `deferred` | A pending cap or the free provider sessions held the task. |
 | `impossible` | The task's resources exceed every approved template, or are unreadable. |
-| `expired` | A reservation passed its deadline before it was activated or released. |
+| `expired` | A reservation passed its deadline before it was activated or released. Counted when the next admission decision for the swarm prunes it, which may be after the deadline. |
 | `activated` | The launch took up its reservation. |
 | `released` | The reservation was given back without a launch. |
 
@@ -3090,7 +3090,7 @@ headroom the hive publishes every heartbeat:
 |---|---|---|---|
 | `host` | `cpu` | CPUs on the node | CPUs minus the five minute load average |
 | `host` | `memory` | Node memory in MB | Available memory in MB |
-| `pod` | `cpu` | The pod's CPU limit | The limit minus the CPUs the pod used since its previous reading |
+| `pod` | `cpu` | The pod's CPU limit | The limit minus the average CPUs the pod used over the interval since its previous reading |
 | `pod` | `memory` | The pod's memory limit in MB | The limit minus the pod's used memory, in MB |
 
 Each row also carries `hive`, `name` and `measured_at_ms`, the time the hive
@@ -3124,19 +3124,21 @@ the dashboard's `ledger` variable and the time range.
 | Panel | Source | Shows |
 |---|---|---|
 | Admission outcomes per tick | `swarm.admission_samples` | Each outcome's increase between consecutive metrics passes. The first sample is the baseline; a reset starts a new count. |
-| Master scale decisions | `swarm.master_scaling`, metric `master_seat_count` | One row per change to the master seat count, written when the tick recounts the seats. See [Several master seats](#several-master-seats). |
+| Master scale decisions | `swarm.master_scaling`, metric `master_seat_count` | One row per change to the master seat count, written when the tick recounts the seats. Written only when the swarm has a master-per rule or a masters step and is not stopping or stopped. See [Several master seats](#several-master-seats). |
 | Hive CPU headroom | `swarm.hive_headroom`, resource `cpu` | `available` as a percentage of `total`, one series per hive name and scope. Negative values show overload. |
 | Hive memory headroom | `swarm.hive_headroom`, resource `memory` | `available` as a percentage of `total`, one series per hive name and scope. |
-| Freeze changes over time | `swarm.ledger_events`, kinds `frozen` and `unfrozen` | Each freeze set and clear with its target, actor and reason. Focus changes are excluded. |
+| Freeze changes over time | `swarm.ledger_events`, kinds `frozen` and `unfrozen` | Each freeze set and clear with its target, actor and reason. Focus sets are excluded; a clear can still emit an `unfrozen` event when the cleared target held a focus. |
 
-The panels draw a point only per metrics pass, so they update at most once per
-`AGENTIHOOKS_METRICS_EVERY_MINUTES`. A gap in a headroom series means the hive
+The admission and headroom panels draw a point only per metrics pass, so they
+update at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`. The master scale
+panel draws a point each time the master seat count changes, and the freeze
+panel one per freeze set or clear. A gap in a headroom series means the hive
 sent no fresh reading at that pass, or the pod resource was not measured.
 
 | Symptom | Cause and fix |
 |---|---|
 | Admission outcomes per tick is empty. | The swarm never ran pending admission, so it has no totals to copy. Check `admission_samples` with the query above. |
-| A hive is missing from a headroom panel. | Its last heartbeat reading was older than 30 seconds at every pass in range. Check the hive's heartbeat in `hive_samples`. |
+| A hive is missing from a headroom panel. | Its latest headroom reading was older than 30 seconds at every pass in range. Check the hive's heartbeat in `hive_samples`. |
 | Only the `host` series shows for a hive. | The hive runs without cgroup limits, so it reports no pod scope. |
 
 ### Spawn holds in the stage report
