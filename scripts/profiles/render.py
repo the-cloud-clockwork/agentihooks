@@ -105,7 +105,7 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
     )
     always = [name, *(o for o in declared(name) if managed or o != brain_binding.OVERLAY)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
-    dirs = _resolve_chain([*always, *worn])
+    dirs = [d for d in _resolve_chain([*always, *worn]) if managed or d[0] != brain_binding.OVERLAY]
     profile_chain.require_capabilities(dirs, profile_chain.hive_capabilities(os.environ))
     return dirs
 
