@@ -153,6 +153,15 @@ def test_the_oldest_merged_task_starts_the_category(store: RedisStore) -> None:
     assert found.detail == "2 tasks still in pr after their pull request merged, oldest task b"
 
 
+def test_a_merged_task_without_a_title_is_named_by_its_id(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    task = {"id": "t9", "state": "pr", "pr_url": "pr-a"}
+    _observe(store, [task], _pulls(**{"pr-a": _done(now - 30 * MINUTE)}), now)
+    found = blockers.active(store, SLUG, now)[stall_blockers.MERGED_IN_PR]
+    assert found.detail == "1 tasks still in pr after their pull request merged, oldest t9"
+
+
 def test_no_known_merge_or_no_open_pull_request_records_no_stall(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
