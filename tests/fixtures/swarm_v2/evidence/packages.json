@@ -22,7 +22,7 @@
         "kind": "test",
         "case": "B",
         "ref": "evidence/SV2-FND-01/b-result.json",
-        "sha256": "15fbfebd5ba2520d85a12ac8ba18cef894dc88ed8c37d3f97647b6f0f9489f09",
+        "sha256": "4741f6ec793838a2c19fc8198271cfd2d0a2db63467f63511874ef2de99d5144",
         "commit": "e7cae6fcb9fe377eafc15e83c9309de4f2a7a2c4",
         "outcome": "passed"
       },

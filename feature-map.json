@@ -486,6 +486,23 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2466",
+      "behaviour": "A tick step reads a pass box value only when its reads or writes declare it, as a step domain or a site hook domain; reading any other box value, stored yet or not, raises UndeclaredRead naming the step and the key, and every site hook declares the box values it reads and writes.",
+      "seam": "scripts.tick.steps.declared_read and DeclaredBox behind CallStep and WriteStep, with scripts.swarm.cli.WRAPPER_HOOK_KEYS and scripts.tick.sites.TICK_HOOK_KEYS",
+      "tests": [
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_it_does_not_declare_is_refused",
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name",
+        "tests/tick/test_declared_reads.py::test_declared_step_and_hook_values_and_pass_state_read_through",
+        "tests/tick/test_declared_reads.py::test_the_box_view_refuses_undeclared_keys_and_writes_through",
+        "tests/tick/test_declared_reads.py::test_every_site_hook_declares_its_keys",
+        "tests/tick/test_declared_reads.py::test_every_hook_value_a_step_reads_is_written_by_a_hook_at_or_before_its_site",
+        "tests/tick/test_declared_reads.py::test_the_box_keys_are_the_values_steps_and_hooks_declare_writing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_recorded_passes_read_only_declared_values"
+      ]
+    },
+    {
       "id": "swarm-tick-live-budgets",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g5",
@@ -3319,20 +3336,25 @@
       ]
     },
     {
-      "id": "swarm-tick-declared-reads",
+      "id": "docs-sanity-scan",
       "origin": "inventory",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2466",
-      "behaviour": "A tick step reads a pass box value only when its reads or writes declare it, as a step domain or a site hook domain; reading any other box value, stored yet or not, raises UndeclaredRead naming the step and the key, and every site hook declares the box values it reads and writes.",
-      "seam": "scripts.tick.steps.declared_read and DeclaredBox behind CallStep and WriteStep, with scripts.swarm.cli.WRAPPER_HOOK_KEYS and scripts.tick.sites.TICK_HOOK_KEYS",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
+      "behaviour": "The docs sanity scanner flags private IPv4 addresses, real looking emails, private host name suffixes, token and key shapes and caller supplied private keywords in public files, prints each hit as file, line and rule without the matched text, and exits 1 on any hit.",
+      "seam": "scripts.docs_sanity.main",
       "tests": [
-        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_it_does_not_declare_is_refused",
-        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name",
-        "tests/tick/test_declared_reads.py::test_declared_step_and_hook_values_and_pass_state_read_through",
-        "tests/tick/test_declared_reads.py::test_the_box_view_refuses_undeclared_keys_and_writes_through",
-        "tests/tick/test_declared_reads.py::test_every_site_hook_declares_its_keys",
-        "tests/tick/test_declared_reads.py::test_every_hook_value_a_step_reads_is_written_by_a_hook_at_or_before_its_site",
-        "tests/tick/test_declared_reads.py::test_the_box_keys_are_the_values_steps_and_hooks_declare_writing",
-        "tests/swarm/tick_scenarios/test_characterisation.py::test_recorded_passes_read_only_declared_values"
+        "tests/test_docs_sanity.py::test_the_red_fixture_fails_with_every_hit_as_file_line_rule",
+        "tests/test_docs_sanity.py::test_the_clean_fixture_passes_with_documentation_values",
+        "tests/test_docs_sanity.py::test_each_token_shape_is_flagged_by_its_own_rule",
+        "tests/test_docs_sanity.py::test_a_vendor_sample_key_marked_example_is_not_a_token",
+        "tests/test_docs_sanity.py::test_keywords_from_the_environment_and_a_file_hit_without_printing_the_keyword",
+        "tests/test_docs_sanity.py::test_directories_are_walked_and_excluded_globs_skipped",
+        "tests/test_docs_sanity.py::test_a_missing_path_is_a_usage_error",
+        "tests/test_docs_sanity.py::test_an_example_label_passes_only_right_before_the_private_suffix",
+        "tests/test_docs_sanity.py::test_a_text_file_that_is_not_utf8_is_still_scanned",
+        "tests/test_docs_sanity.py::test_every_missing_path_is_named_on_standard_error",
+        "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
+        "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
+        "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
       ]
     }
   ],
