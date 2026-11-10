@@ -802,7 +802,7 @@ def test_the_primary_login_is_capped_to_zero_at_its_reserve(monkeypatch):
 
     monkeypatch.setenv(login.ORDER_ENV, "main")
     above = balancer.ProbeResult(
-        "main", "allowed", "NORMAL", 97.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(97.0)
+        "main", "allowed", "NORMAL", 90.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(90.0)
     )
     at = balancer.ProbeResult("main", "allowed", "NORMAL", 2.0, balancer.QuotaWindow(4.0), balancer.QuotaWindow(98.0))
     assert balancer.account_cap(above, 1000) == 6
