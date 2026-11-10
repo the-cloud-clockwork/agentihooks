@@ -40,6 +40,7 @@ def hive():
     redis = fakeredis.FakeRedis(decode_responses=True)
     redis.set(f"{auth.PREFIX}:ledger:{auth._digest(CREDENTIAL)}", "member-1")
     redis.hset(f"{auth.PREFIX}:member:member-1", "ledger", auth._digest(CREDENTIAL))
+    auth.hive_state.amend(auth._store(redis), "holder.member-1", lambda _: auth._digest(CREDENTIAL))
     store = RedisStore(redis)
     store.names.adopt(SLUG, "323133", "", "")
     redis.hset(store.names.key("name", WORKER), mapping={"swarm": SLUG, "code": "323133"})
