@@ -319,7 +319,8 @@ class SiteGate:
 
     def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
         """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step; a
-        step of a site whose hook runs on another thread waits for it, and steps of other sites never do."""
+        step of a site whose hook runs on another thread waits for it at most until its lane ends, and stays shut
+        when the hook did not answer by then; steps of other sites never wait."""
         with self.guard:
             self.seen.update(records)
             if self.shut(step):
@@ -328,7 +329,9 @@ class SiteGate:
             opening = self.opening.setdefault(step.group, Event())
         if first:
             self._open(step.group, opening)
-        opening.wait()
+        found = pool.active()
+        if not opening.wait(None if found is None else found.lane(step.lane).remaining):
+            return False
         with self.guard:
             return self.opened.get(step.group, False) and not self.shut(step)
 
