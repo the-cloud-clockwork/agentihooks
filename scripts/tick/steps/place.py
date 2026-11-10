@@ -667,13 +667,13 @@ def _spawn_order(
     caps = timing.timed(capacity.caps, decision, config)
     dispatched = timing.timed(preempt.yielding, store, slug, doc, timing.timed(dispatcher.claim_key, config, doc))
     claims = timing.timed(tick.claim_view, slug, store, rows, doc, dispatched)
+    lanes = timing.timed(tick.ready_by_lane, slug, store, rows, doc, list(caps), dispatched, claims)
     queue: list[tuple[int, str, dict[str, Any]]] = []
     waits: list[Any] = []
     for lane, cap in caps.items():
         running = timing.timed(tick._running, agents, rows, lane)
         busy = len(running)
-        ready = timing.timed(tick.ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
-        ready = timing.timed(readiness.launchable, config.engine, decision, ready)
+        ready = timing.timed(readiness.launchable, config.engine, decision, lanes[lane])
         locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
         ready, refused = timing.timed(focus_budget.place, doc, ready, lane, cap, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
