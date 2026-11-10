@@ -1,4 +1,4 @@
-"""agentihooks timer|stopwatch|cron: schedule a message for the fleet, a swarm, a seat or a session.
+"""agentihooks timer|stopwatch|cron: schedule a message for the fleet, a swarm, a seat, a session or a workflow run.
 
 agentihooks timer add (--in DURATION | --at TIME) TARGET MESSAGE...
 agentihooks timer list | cancel ID
@@ -7,7 +7,8 @@ agentihooks stopwatch stop ID | show ID
 agentihooks cron add --expr "MIN HOUR DAY MONTH WEEKDAY" [--tz ZONE] TARGET MESSAGE...
 agentihooks cron list | remove ID
 
-TARGET is --fleet, --swarm SLUG, --seat SEAT@SLUG or --session NAME. DURATION is seconds or a number with s, m, h or d.
+TARGET is --fleet, --swarm SLUG, --seat SEAT@SLUG, --session NAME or --workflow NAME --case FILE.
+DURATION is seconds or a number with s, m, h or d.
 Ids come from the scheduler; the owner is this session: AGENTIHOOKS_AGENT_NAME, else CLAUDE_CODE_SESSION_ID.
 """
 
@@ -21,8 +22,9 @@ from scripts.scheduler import commands
 def _targets(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--fleet", dest="target", action="store_const", const=("fleet", ""))
-    for target in ("swarm", "seat", "session"):
+    for target in ("swarm", "seat", "session", "workflow"):
         group.add_argument(f"--{target}", dest="target", type=lambda name, kind=target: (kind, name))
+    parser.add_argument("--case", default="")
     parser.add_argument("message", nargs="+")
 
 
@@ -37,7 +39,7 @@ def _owner() -> str:
 
 
 def _slot(args) -> commands.Slot:
-    return commands.target_slot(*args.target)
+    return commands.target_slot(*args.target, args.case)
 
 
 def _timer_add(scheduler, args):
