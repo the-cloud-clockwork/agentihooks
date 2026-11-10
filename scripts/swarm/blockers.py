@@ -35,12 +35,13 @@ def _client(store: RedisStore) -> Any:
     return getattr(store, "redis")
 
 
-def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int) -> None:
+def record(store: RedisStore, slug: str, category: str, detail: str, now_ms: int, since: int | None = None) -> None:
+    """Record one sighting of a category; a first sighting starts at since when given, else now."""
     key = _key(slug)
     raw = _client(store).hget(key, category)
     previous = json.loads(raw) if raw else None
     row = {
-        "first_seen": previous["first_seen"] if previous else now_ms,
+        "first_seen": previous["first_seen"] if previous else (now_ms if since is None else since),
         "last_seen": now_ms,
         "count": (previous["count"] + 1) if previous else 1,
         "detail": detail,
