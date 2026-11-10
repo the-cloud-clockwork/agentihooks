@@ -78,11 +78,14 @@ def test_setting_refuses_an_unknown_role_overlay_or_more_than_three(key, value, 
 
 def test_the_task_list_wins_over_the_role_default(bundle):
     defaults = {"engineer": ["tuner"], "qa": ["trader"]}
-    assert overlays.chosen("engineer", {"id": "t1"}, defaults) == ("tuner",)
-    assert overlays.chosen("engineer", {"id": "t1", "overlays": ["trader", "scout"]}, defaults) == ("scout", "trader")
-    assert overlays.chosen("engineer", {"id": "t1", "overlays": []}, defaults) == ()
-    assert overlays.chosen("engineer", {"id": "t1"}, {"qa": ["trader"]}) == ()
-    assert overlays.chosen("engineer", {"id": "t1"}, {}) == ()
+    assert overlays.chosen("engineer", {"id": "t1"}, defaults, ()) == ("tuner",)
+    assert overlays.chosen("engineer", {"id": "t1", "overlays": ["trader", "scout"]}, defaults, ()) == (
+        "scout",
+        "trader",
+    )
+    assert overlays.chosen("engineer", {"id": "t1", "overlays": []}, defaults, ()) == ()
+    assert overlays.chosen("engineer", {"id": "t1"}, {"qa": ["trader"]}, ()) == ()
+    assert overlays.chosen("engineer", {"id": "t1"}, {}, ()) == ()
 
 
 @pytest.mark.parametrize(

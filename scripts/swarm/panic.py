@@ -2,6 +2,12 @@
 CI cancellation that frees runners for the named fix, and the business-as-usual level that releases it.
 
 THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet.
+
+A step or a pass that merely runs long, up to the golden pass duration (`scripts.tick.engine.GOLDEN_PASS_S`),
+never reaches either counter here: `count_error` only takes a category a caller chose to report, and the one
+caller wired to a tick step (`scripts.swarm.timing.step`) reports only on a raised exception, never on a step
+recorded late; `count_pass` only takes the ``ok`` a caller computed, and that caller
+(`scripts.swarm.health.spawn_stall.watch`) sets it from whether any step raised, never from the pass's wall time.
 """
 
 import json

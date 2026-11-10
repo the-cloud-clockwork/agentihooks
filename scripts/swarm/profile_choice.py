@@ -60,7 +60,9 @@ def choose(
             f"agentihooks init or {_remedy(config.slug, task)}"
         )
     try:
-        return replace(decision, overlays=overlays.chosen(decision.profile, task, getattr(config, "overlays", {})))
+        return replace(
+            decision, overlays=overlays.chosen(decision.profile, task, getattr(config, "overlays", {}), hosted)
+        )
     except ValueError as exc:
         raise ProfileUnresolved(f"task {task.get('id')} overlays are refused: {exc}") from exc
 

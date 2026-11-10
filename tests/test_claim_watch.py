@@ -131,11 +131,21 @@ def test_the_claimant_itself_keeps_working() -> None:
     assert not (ledger_workspace.folder("sw", "t1") / "progress.md").exists()
 
 
-def test_an_absent_pushed_claim_keeps_the_session() -> None:
+def test_an_absent_pushed_claim_keeps_a_workstation_session() -> None:
     stop, _, spawn = _check(None)
 
     assert stop is None
     assert spawn.calls == []
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_an_absent_pushed_claim_ends_a_hive_session(hive: list) -> None:
+    redis, spawn = Pushed(None), Spawn()
+    stop = claim_watch.check(ENV, redis, 1000.0, spawn)
+
+    assert stop == claim_watch.STOP.format(task="t1", slug="sw", owner="")
+    assert len(spawn.calls) == 1
+    assert hive == [ENV]
 
 
 @pytest.mark.parametrize(
@@ -163,17 +173,13 @@ def test_the_ci_lane_is_checked() -> None:
     assert stop is not None
 
 
-def test_a_pushed_answer_is_kept_thirty_seconds_then_read_again() -> None:
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner(hive: list) -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
-    assert claim_watch.CACHE_S >= 30
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
     redis.holder = OTHER
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S - 1, spawn) is None
-    assert redis.reads == [KEY]
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner=OTHER
-    )
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
     assert redis.reads == [KEY, KEY]
     assert len(spawn.calls) == 1
 
@@ -253,16 +259,23 @@ def test_the_client_reads_the_swarm_redis_with_a_fifty_millisecond_bound_and_no_
     ]
 
 
-def test_a_released_claim_keeps_the_session_until_the_next_claimant_takes_the_key() -> None:
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read(hive: list) -> None:
+    redis, spawn = Pushed(OTHER), Spawn()
+
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+    assert redis.reads == [KEY]
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner(hive: list) -> None:
     redis, spawn = Pushed(NAME), Spawn()
 
     assert claim_watch.check(ENV, redis, 1000.0, spawn) is None
     redis.holder = None
-    assert claim_watch.check(ENV, redis, 1000.0 + claim_watch.CACHE_S, spawn) is None
-    redis.holder = OTHER
-    assert claim_watch.check(ENV, redis, 1000.0 + 2 * claim_watch.CACHE_S, spawn) == claim_watch.STOP.format(
-        task="t1", slug="sw", owner=OTHER
-    )
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner="")
+    assert redis.reads == [KEY, KEY]
     assert len(spawn.calls) == 1
 
 
