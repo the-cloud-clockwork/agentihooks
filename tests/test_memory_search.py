@@ -222,10 +222,10 @@ def test_a_session_not_retained_is_not_searched(inputs, corpus):
 
 def test_a_deleted_session_is_not_searched_before_the_sweep(inputs: dict, corpus: Corpus) -> None:
     uid = inputs["sessions"][2]["session_uid"]
-    kernel = {chunk_id for label, chunk_id in corpus.labels().items() if label.startswith("kernel:")}
-    stored = "SELECT COUNT(*) FROM search_chunk WHERE access_domain = ? AND session_uid = ?"
+    stored = "SELECT chunk_id FROM search_chunk WHERE access_domain = ? AND session_uid = ?"
     revision = corpus.catalog.session(DOMAIN, uid)["revision"]
     corpus.catalog.set_state(DOMAIN, uid, "deleted", revision)
+    deleted = {row[0] for row in corpus.catalog.db.execute(stored, (DOMAIN, uid)).fetchall()}
     answer = corpus.searcher.search(grant(inputs), query(inputs, limit=search.MAX_LIMIT), embedder(inputs))
     returned = {result["chunk_id"] for result in answer["results"]} | {
         item["chunk_id"]
@@ -233,10 +233,10 @@ def test_a_deleted_session_is_not_searched_before_the_sweep(inputs: dict, corpus
         for side in ("before", "after")
         for item in result["context"][side]
     }
-    assert corpus.catalog.db.execute(stored, (DOMAIN, uid)).fetchone()[0] > 0
+    assert deleted
     assert answer["mode"] == "hybrid"
     assert answer["results"]
-    assert not returned & kernel
+    assert returned.isdisjoint(deleted)
     assert all(result["session_uid"] != uid for result in answer["results"])
 
 
