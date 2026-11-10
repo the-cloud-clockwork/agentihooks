@@ -518,7 +518,7 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     states = _states(store)
     if not isinstance(states, RedisStateStore):
         return None
-    with store.redis.pipeline(transaction=False) as pipe:
+    with store.redis.pipeline() as pipe:
         pipe.hmget(RedisRecords(store.redis).key(slug, META), LAYOUT, "lease")
         pipe.get(_lease_cache_key(store, slug))
         pipe.get(states.revision_key)
