@@ -1837,6 +1837,10 @@ or remove the duplicate clone, then repeat the command. Setting
 `HIVE_REPO_ROOT` replaces the default `~/dev` scan root; the search beside the
 swarm repository always applies. No other flag or setting changes this.
 
+For an agent of the swarm, the swarm repository here is the checkout its
+launch named in `AGENTIHOOKS_SWARM_REPO`, the hive's own clone on a hive; see
+[Swarm commands use the launch checkout](hives.md#swarm-commands-use-the-launch-checkout).
+
 The rest of the task record follows the same name match:
 
 | Record or command | Behaviour on another host |

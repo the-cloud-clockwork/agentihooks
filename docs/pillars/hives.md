@@ -276,6 +276,53 @@ When the hive has no checkout with the carried origin, it passes the origin iden
 joined to the `init-agent` base directory (`RUN_CLAUDE_BASE_DIR`, else `~/dev` when it exists, else `$HOME`),
 such as `/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`.
 
+### Swarm commands use the launch checkout
+
+Every swarm launch, on a hive or on the workstation, sets `AGENTIHOOKS_SWARM_REPO` in the agent's environment to
+the directory it passed to `init-agent --dir`, next to `AGENTIHOOKS_SWARM`, the swarm slug. The launch resolves
+that directory from the swarm repo:
+
+| Swarm repo | `--dir` and `AGENTIHOOKS_SWARM_REPO` |
+|---|---|
+| An origin identity, such as `github.com/the-cloud-clockwork/agentihooks` | The first checkout by path under `HIVE_REPO_ROOT` whose `origin` matches, else the identity unchanged |
+| A local path, such as `/home/me/dev/agentihooks` | The path unchanged |
+
+These swarm commands read their repository from that variable instead of the swarm repo:
+
+| Command | What it reads from the checkout |
+|---|---|
+| `swarm <slug> prepare` | The repository it creates the task worktree from |
+| `swarm <slug> publish` | The repository it commits, gates and pushes from |
+| `swarm <slug> block "<why>"` | The pushed task branch it records on the task before blocking |
+| `swarm <slug> block --dev-red "<why>"` | The GitHub repository whose latest finished dev Tests run must have failed |
+
+A command uses `AGENTIHOOKS_SWARM_REPO` only when the variable is set and not empty and `AGENTIHOOKS_SWARM`
+names the slug the command was given. Otherwise it uses the swarm repo from the swarm config, as before. An agent
+of one swarm that runs a command for another swarm therefore reads that swarm's repo, never its own checkout. On
+the workstation the two are the same path, so nothing changes there.
+
+With the records in [Matching a repo across machines](#matching-a-repo-across-machines), an engineer on the
+headless worker runs with:
+
+```bash
+# In the agent's pane on the hive
+printf '%s %s\n' "$AGENTIHOOKS_SWARM" "$AGENTIHOOKS_SWARM_REPO"
+# rig-grade-swarm /home/worker/dev/agentihooks
+
+# Both read /home/worker/dev/agentihooks, never the workstation path the swarm config names
+agentihooks swarm rig-grade-swarm block "waiting on a token"
+agentihooks swarm rig-grade-swarm publish --message "Fix the parser" -- scripts/parser.py
+```
+
+The variable belongs to the launch. Set it by hand only in a shell that has no swarm launch, such as a recovered
+pane, and only to a checkout of the swarm's repository; a wrong path sends the commands to the wrong repository.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `swarm block` on a hive fails with `FileNotFoundError` naming a workstation path | `echo "$AGENTIHOOKS_SWARM_REPO"` in the agent's pane | The agent started before this behavior shipped, or outside a swarm launch. Release the task so the swarm relaunches it, or export the hive checkout path and the swarm slug in that pane |
+| A command reads the swarm config repo although the variable is set | `echo "$AGENTIHOOKS_SWARM"` against the slug in the command | Run the command with the agent's own swarm slug |
+| `AGENTIHOOKS_SWARM_REPO` is an origin identity such as `github.com/owner/name` | The hive's checkouts under `HIVE_REPO_ROOT` and their `origin` remotes | No checkout matched at launch, so `init-agent` refused it with `directory does not exist`. See [Launch directory on a hive chosen by origin](#launch-directory-on-a-hive-chosen-by-origin) |
+
 ## Hive endpoint limits
 
 `agentihooks hive serve` answers `POST /hive/refresh` (a ledger credential for a new Redis password) on one thread
