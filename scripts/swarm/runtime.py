@@ -114,7 +114,9 @@ def _off_requirement(saved, task, admitted):
     required = task.get("requires_harness", "")
     off = bool(required and saved and saved.get("harness") != required)
     if off and admitted:
-        raise SpawnError(f"admitted {saved['harness']} launch cannot run a task that requires {required}", "unsupported")
+        raise SpawnError(
+            f"admitted {saved['harness']} launch cannot run a task that requires {required}", "unsupported"
+        )
     return off
 
 
