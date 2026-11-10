@@ -10,7 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from scripts import openbao_kv
-from scripts.hive import auth, create, create_github, create_render, machine, member_swarms, nats_grant, registry
+from scripts.hive import (
+    auth,
+    create,
+    create_github,
+    create_render,
+    join_report,
+    machine,
+    member_swarms,
+    nats_grant,
+    registry,
+)
 from scripts.hive.purge import FINISHED, forget, hosted, on_hive
 from scripts.hive.purge import keys as _keys
 from scripts.hive.purge import recorded as _recorded
@@ -242,7 +252,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host, member: str 
         registry.update(client, hive, ["draining=yes"], drain=drain)
     inbox, ordered = InboxStore(client), {}
     deadline = host.clock() + wait_s
-    while remaining := _unhanded(store, hive, own if shared else ""):
+    while remaining := _unhanded(store, client, hive, own if shared else "", int(host.wall() * 1000)):
         _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             ended = _recover(store, hive, wait_s, remaining, host)
@@ -261,15 +271,28 @@ def _withdraw(inbox: "InboxStore", ordered: dict[tuple[str, str], str], hive: st
             world.settle(item_id, SENDER, "cancel", WITHDRAWN.format(hive=hive))
 
 
-def _unhanded(store: "RedisStore", hive: str, own: str) -> list[tuple[str, "AgentRecord"]]:
-    """The hive's agents still to hand off; with own, only those whose process runs in that namespace."""
+def _unhanded(store: "RedisStore", client: Any, hive: str, own: str, now_ms: int) -> list[tuple[str, "AgentRecord"]]:
+    """The hive's running agents still to hand off; with own, only those whose process runs in that namespace."""
     return [
         (slug, agent)
         for slug, agent in hosted(store, hive)
         if agent.task
+        and _running(client, agent, now_ms)
         and not _handed(store, slug, agent)
         and (not own or agent.runtime_target.get("process_namespace") == own)
     ]
+
+
+def _running(client: Any, agent: "AgentRecord", now_ms: int) -> bool:
+    """Whether ``agent`` still runs on its hive: its join report for this generation has not ended, it launched under
+    one heartbeat ago or at no recorded time and has not reported yet, or it has no execution id and so never reports
+    joins."""
+    if not agent.execution_id:
+        return True
+    if report := join_report.read(client, agent):
+        return "ended_at" not in report
+    launched = max(agent.launched_at, agent.started_at)
+    return not launched or now_ms - launched < join_report.HEARTBEAT_MS
 
 
 def _handed(store: "RedisStore", slug: str, agent: "AgentRecord") -> bool:
