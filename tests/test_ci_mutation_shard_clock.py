@@ -1,6 +1,7 @@
 """A mutation shard answers its forced fail control from recorded probe kills and runs on its own clock."""
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -22,18 +23,25 @@ def test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_t
         calls.append((mutant_name, tests))
         return 0
 
-    monkeypatch.setenv("MUTANT_UNDER_TEST", "fail")
-    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 1
+    killed = probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})
+    survived = probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "survived"})
+    unprobed = probe.reuse_kills(execute, {})
+
+    def control(cached: Callable[..., int], selector: str | None) -> int:
+        with monkeypatch.context() as scoped:
+            if selector is None:
+                scoped.delenv("MUTANT_UNDER_TEST", raising=False)
+            else:
+                scoped.setenv("MUTANT_UNDER_TEST", selector)
+            return cached("worker", mutant_name=None, tests=[])
+
+    assert control(killed, "fail") == 1
     assert calls == []
-    assert (
-        probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "survived"})("worker", mutant_name=None, tests=[]) == 0
-    )
-    assert probe.reuse_kills(execute, {})("worker", mutant_name=None, tests=[]) == 0
+    assert control(survived, "fail") == 0
+    assert control(unprobed, "fail") == 0
     assert calls == [(None, []), (None, [])]
-    monkeypatch.setenv("MUTANT_UNDER_TEST", "stats")
-    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 0
-    monkeypatch.delenv("MUTANT_UNDER_TEST")
-    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 0
+    assert control(killed, "stats") == 0
+    assert control(killed, None) == 0
     assert calls == [(None, []), (None, []), (None, []), (None, [])]
 
 
@@ -48,15 +56,17 @@ def test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_w
     folder.mkdir()
     (folder / "plan.json").write_text(json.dumps(plan))
     stats = SharedStats(folder, plan["head"])
-    assert probe.probe_elapsed(stats) == 9
+    assert plan["probe"]["seconds"] == 9
     source = tmp_path / "hooks/sample.py"
     source.parent.mkdir(parents=True)
     source.write_text("def f():\n    return 1\n")
     (tmp_path / ".mutation-selection.json").write_text(json.dumps({"hooks/sample.py": ["tests/test_sample.py"]}))
     ran: list[list[str]] = []
 
-    def mutate(*args: object, **kwargs: object) -> tuple[dict[str, list[dict[str, str]]], str]:
-        ran.append(list(args[2]))
+    def mutate(
+        root: Path, work: Path, selected: dict[str, tuple[set[int], list[str]]], *rest: object
+    ) -> tuple[dict[str, list[dict[str, str]]], str]:
+        ran.append(list(selected))
         return {"hooks/sample.py": []}, ""
 
     readings = iter([0.0])

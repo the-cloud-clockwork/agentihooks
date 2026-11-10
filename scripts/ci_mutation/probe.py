@@ -58,10 +58,6 @@ def read_probe_results(path: Path) -> tuple[dict[str, str], float]:
     return probe_results(json.loads(path.read_text())) if path.is_file() else ({}, 0)
 
 
-def probe_elapsed(stats: SharedStats | None) -> float:
-    return read_probe_results(stats.folder / "plan.json")[1] if stats and stats.part is None else 0
-
-
 def mark_probe_results(work: Path, results: dict) -> dict:
     early, _ = read_probe_results(work / SHARD_PLAN)
     for values in results.values() if early else ():
