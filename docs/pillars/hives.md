@@ -540,6 +540,19 @@ role or profile is in its `excluded` list. `prefer` refuses a role the hive excl
 follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
 
+```bash
+agentihooks hive set pod-a excluded=master,frontend,qa max-agents=12
+agentihooks hive show pod-a        # "excluded": ["master", "frontend", "qa"], "max_agents": 12
+agentihooks hive set pod-a excluded=
+agentihooks hive show pod-a        # "excluded": [], every agent type may land here
+agentihooks hive set pod-a max-agents=auto
+```
+
+With the defaults, a `ui=no` hive takes `ci`, `plan` and every other worker role or profile and refuses `master`;
+a `ui=yes` hive takes every agent type, masters included. A hive whose record still carries `roles` keeps working
+under these defaults; run `agentihooks hive set <id> excluded=<list>` to write its own list at once rather than
+wait for its next heartbeat.
+
 ### Capabilities and task needs
 
 A hive declares what it offers with `capabilities`, and a task names what it requires with `needs`:
@@ -2008,7 +2021,7 @@ curl -s http://127.0.0.1:8765/api/v1/hives/pod-a
 {
   "data": {
     "id": "pod-a", "name": "pod-a", "ui": "no", "ephemeral": "yes",
-    "roles": ["eng", "ci"], "prefer": {}, "max_agents": 4, "agents": 1,
+    "excluded": ["master"], "prefer": {}, "max_agents": 4, "agents": 1,
     "live": true, "master": null,
     "slots": [{"harness": "claude", "account": "work", "kind": "subscription", "cap": 2, "provider": "", "agents": 1}],
     "...": "..."
@@ -2023,19 +2036,20 @@ The PATCH body takes one or more of these fields and nothing else:
 |---|---|
 | `name` | string, 1 to 200 characters |
 | `ui`, `ephemeral` | `"yes"` or `"no"` |
-| `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
+| `excluded` | array of lane role or profile names, each starting with a letter or digit followed by letters, digits, `.`, `_` or `-`; `[]` excludes nothing |
 | `prefer` | object of role to whole number rank |
-| `max_agents` | integer, 0 or more |
+| `max_agents` | integer, 0 or more, or `"auto"` to clear the cap |
 
 The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
-UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
-credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
+malformed `excluded` name, a `prefer` role the hive excludes, a rank below 1 or a negative max agents is refused.
+The retired `roles` field is an unknown field and is refused. `master-swarms` and `capabilities` are set only with
+`agentihooks hive set`. The credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
 
 ```bash
 curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
   -H "Content-Type: application/json" \
   -H "X-Ledger-Slug: $SLUG" -H "X-Ledger-Token: $LEDGER_TOKEN" \
-  -d '{"roles": ["eng", "ci", "plan"], "max_agents": 4}'
+  -d '{"excluded": ["master", "qa", "frontend"], "max_agents": 12}'
 ```
 
 | Status | Code | When |
