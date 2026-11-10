@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.789 · 2026-11-10
+
+### 2026-11-10 · c236b2942905 · #10458 · @nestorcolt
+
+**Make proven-cause-first master culture default doctrine**
+
+This change codifies the 10 November rule into the package master role's rule file, CLAUDE.md, and toolbelt rules so it's enforced by default rather than relying on memory or ad hoc reminders: no fix may be written, pushed, queued, or merged until a scouter has proven its root cause with evidence. This closes a gap where unverified fixes could slip through, protecting against wasted effort and regressions caused by patching symptoms instead of actual causes.
+
 ## v2.17.788 · 2026-11-10
 
 ### 2026-11-10 · fdc245c03f36 · #10459 · @nestorcolt
