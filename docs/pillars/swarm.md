@@ -5263,7 +5263,8 @@ Swarm <slug> stopped at <HH:MM UTC>, so its tick, stale since <HH:MM UTC>, is no
 
 Every pass of an open episode also records a `stale tick` blocker for the swarm, with the evidence as its detail,
 and adds one `stale tick` error to the fleet panic counter (see `agentihooks swarm <id> panic` in
-[Commands](#commands)). A seat answers an alert by continuing its own task; the watcher repairs the tick.
+[Commands](#commands)). Both deployments send the same alert text; in a cluster the repair is the master placement alone. A seat answers an
+alert by continuing its own task.
 
 #### Running the watcher
 
@@ -5322,9 +5323,9 @@ journalctl --user -u agentihooks-tick-watch --since "1 hour ago" --no-pager
 | Symptom | Cause and action |
 |---|---|
 | The tick stopped and no seat got an alert | Fewer than 10 minutes have passed, the watcher is not running, or the swarm is stopped. Read `systemctl --user status agentihooks-tick-watch`; a workstation whose swarms are all served in Anton or stopped has no watcher unit. Only running, paused, stopping and drained swarms are judged. |
-| `left the scheduler alone: a swarm tick is still running` | A tick pass holds the tick lock, which proves the scheduler delivers. The watcher retries on its next check; a pass that never ends is stopped at its 450 second deadline. |
+| `left the scheduler alone: a swarm tick is still running` | A tick pass holds the tick lock, which proves the scheduler delivers. The watcher tries the restart again once 10 minutes have passed since that attempt and respawns or places the master on every check meanwhile; a pass that never ends is stopped at its 450 second deadline. |
 | `restarted the scheduler, but the tick did not register` | The supervisor stopped but the tick did not register again. Read the scheduler journal (`journalctl --user -u agentihooks-scheduler`), then run `agentihooks swarm <id> start` to enable the swarm services again. |
-| Alerts continue and no repair line appears | The swarm's ledger is gone, binned or in an open ledger outage. Restore the ledger; the next pass that reads it clears the marks. |
+| Alerts continue and no repair line appears | The swarm's ledger is gone, binned or in an open ledger outage. Restore the ledger; the next pass that reads it clears the gone and binned marks, and an outage closes when its observer finds no more evidence. |
 | A repair line appears but the scheduler is not restarted | The watcher restarted the scheduler less than 10 minutes ago for some swarm on the machine; it restarts at most once per 10 minutes and only respawns or places the master in between. |
 | The evidence names an input, such as `the quota it decides on was 14 minutes old` | Passes complete, but that input stopped refreshing: the quota prober for `quota`, ledger writes that do not land for `ledger revision`, the capacity decision for `host room`. Fix the source of that input; the episode resolves at the first pass where it is fresh. |
 | An alert arrives at once after the watcher restarts | The heartbeat was already older than 10 minutes when the watcher started; a restarted watcher judges an existing heartbeat from its own time. |
