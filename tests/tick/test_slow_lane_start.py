@@ -138,7 +138,8 @@ def test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker() -> No
 
 
 @pytest.mark.feature("swarm-tick-slow-lane-start")
-def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
+@pytest.mark.parametrize("is_kept", [True, False], ids=["kept", "plain"])
+def test_a_kept_handed_step_runs_on_the_handed_workers(is_kept: bool) -> None:
     later: list[tuple[engine.StepRecord, ...]] = []
     critical_started, kept_ran = Event(), Event()
 
@@ -152,7 +153,7 @@ def test_a_kept_handed_step_runs_on_the_handed_workers() -> None:
         kept_ran.set()
         return Result()
 
-    steps = (Step("critical holding", "a", critical), Step("kept handed", "a", kept, lane=engine.SLOW, kept=True))
+    steps = (Step("critical holding", "a", critical), Step("kept handed", "a", kept, lane=engine.SLOW, kept=is_kept))
     ctx = Context(View(), Deadline.after(10.0))
     with pool.running(workers=1, critical_s=2 * BUSY_S, slow_s=2 * BUSY_S):
         records = engine.run_graph(steps, ctx, finished=later.append)
