@@ -14,7 +14,7 @@ comment on [issue 5111](https://github.com/the-cloud-clockwork/agentihooks/issue
 and adds, for each proposal, what current dev already does. "Hypothesis" marks anything the record did not prove.
 
 To add a hive today, follow [Add a Hive](../getting-started/add-hive-quick-start.md) and the
-[hives guide](../pillars/hives.md). This page explains why those paths look the way they do.
+[hives guide](../pillars/hives.md). This page explains which steps those paths removed.
 
 1. TOC
 {:toc}
@@ -93,6 +93,7 @@ All times UTC.
 | Hand made hive state | about 7 restarts and manual fixes | Stale Redis host in the hive home, slot caps at 0 from a stale quota cache, herdr server down, missing ledger CA, a master login flag inherited from the parent session. |
 | Seat churn | 3 lives on t1199, 7 on t518 | Long waits on releases pushed seats to the compact limit; each new life re-read its folders and re-checked scope. |
 | Task text drifting from rulings | about 5 m and one declined action | Rulings arrived by inbox while the task text still said hosted ledger. |
+| Red Worker hive pod workflow | blocked the worker release the join needed | 4988 added the dispatch role but left the kind proof expecting three roles; fix 5090 was in the queue. |
 | Pieces found only at join time | about 6 h 20 m from join to first launch | Machine wide deployment mode, a too broad token Secret, node DNS, no quota reading in the pod, raw string repository matching, no workstation fallback, the wrong checkout path, a stale `:dev` image, and no `gh` or GitHub login in the worker image. |
 
 ## The path that worked on 20 October
@@ -108,21 +109,28 @@ All times UTC.
 8. On a machine hive, also by hand: `SWARM_URL`, `AGENTIHOOKS_DEPLOYMENT`, the ledger CA file, a quota balance run to
    warm the slot caps, repository checkouts, a running herdr server, and `hive set` for roles and max agents.
 
+Already automated then: the code exchange with a per hive Redis ACL user and ledger credential, `hive.env` at mode
+0600 loaded at hook import, a systemd unit, credential refresh and revoke, the pod entrypoint (clone, join, set, run,
+with durable membership across pod replacement), the chart join endpoint with TLS enforced, and ledger agent tokens
+from the hive credential.
+
 ## Proposals ranked by steps removed
 
 A step is one hand action taken that night or still needed by the path above. A live defect cycle counts as four
-steps: fix, queue, promotion and rollout. The status column was read from current dev on 10 November 2026.
+steps: fix, queue, promotion and rollout. The status column was read from dev at commit `db267794e` on 10 November
+2026: the hive command set, the settings `hive join` writes, the worker image, the Worker hive pod workflow triggers,
+the control service log text and the worker chart.
 
 | Rank | Proposal | Steps removed | Status on current dev |
 |---|---|---|---|
-| 1 | **Member launch proof before merge.** Extend the worker hive kind proof to launch one stub agent through the real init-agent as a member ACL user, with a hive home holding only what join wrote, then ack, join the ledger, run one engineer step such as a `gh` read, and retire. Run it on pull requests that touch `scripts/hive`, `scripts/swarm_v2` or `deploy/worker`, or in the queue tier. | about 24 to 32 | Open. The Worker hive pod workflow still runs only on dev pushes and manual dispatch. |
+| 1 | **Member launch proof before merge.** Extend the worker hive kind proof to launch one stub agent through the real init-agent as a member ACL user, with a hive home holding only what join wrote, then ack, join the ledger, run one engineer step such as a `gh` read, and retire. Run it on pull requests that change hive, controller or worker image code, or in the queue tier. | about 24 to 32 | Open. The Worker hive pod workflow still runs only on dev pushes and manual dispatch. |
 | 2 | **Complete join grant, a worker that can work, and a hive that keeps its own quota fresh.** | 7 | Shipped. `hive join` writes `AGENTIHOOKS_SWARM_URL` and `AGENTIHOOKS_DEPLOYMENT` (default `distributed`) into `hive.env`; `hive refresh` and `hive add` write the ledger CA ([Ledger CA on a hive](../pillars/hives.md#ledger-ca-on-a-hive)); the worker image ships `gh`; `hive run` refreshes quota itself ([Automatic quota refresh](../pillars/hives.md#automatic-quota-refresh)). |
-| 3 | **One command swarm host listen** that mints the CA and certificate and binds the ledger, Redis and `hive serve` on the tailnet address with TLS. | 4 | Partly. The compose stack ships the tailnet fronts and `deploy/compose/start-tailnet.sh` ([Compose quick start](../getting-started/compose-quick-start.md)); the certificate and key must already exist, and no command mints them. |
+| 3 | **One command swarm host listen** that mints the CA and certificate and binds the ledger, Redis and `hive serve` on the tailnet address with TLS. | 4 | Partly. The compose stack ships the tailnet fronts and their startup script ([Compose quick start](../getting-started/compose-quick-start.md)); the certificate and key must already exist, and no command mints them. |
 | 4 | **Invite straight to OpenBao and antoncore.** | 4 | Shipped. `hive invite` writes the invite into an OpenBao record (`--like` copies endpoint, bus and CA from another hive); the worker chart reads it from a Secret; `hive create` builds a Kubernetes hive from nothing through a GitOps pull request. |
 | 5 | **`agentihooks hive doctor` and logged placement waits.** | 3 to 5 per hive start | Partly. Every placement refusal appears in tick output as `task <id> waits: <reason>` ([Placement waits](../pillars/hives.md#placement-waits)). No read only hive doctor command exists. |
 | 6 | **Controller refuses an unreachable swarm loudly** and the overlay test fails. | 3 | Open. The control service still logs that the swarm "does not exist yet; waits for it" ([Deployment modes](deployment-modes.md)). |
 | 7 | **Tailscale as a declared dependency**, with the one working credential location recorded and the dead key retired. | 3 | Partly. The tailnet fronts read `tailscale ip -4` and refuse to start without a tailnet address; Tailscale itself is not a compose service. |
-| 8 | **Reap expired, unacknowledged launch orders.** | 2 | Partly. A launch reserves its slot row for at most 300 seconds, and an order a hive picks up after 300 seconds is acknowledged as failed with the reason `expired` ([Launches on a hive](../pillars/hives.md#launches-on-a-hive)). |
+| 8 | **Reap expired, unacknowledged launch orders.** | 2 | Shipped. A launch reserves its slot row for at most 300 seconds. The controller ends an order left unacknowledged past that deadline with "hive launch order expired without an acknowledgement" and reaps its execution; an order a hive picks up late is acknowledged as failed with the reason `expired` ([Launches on a hive](../pillars/hives.md#launches-on-a-hive)). |
 | 9 | **Several hives per release.** | 3 per extra hive | Shipped. `workers.replicas` stays at most 1; each `workers.hives` entry renders its own hive with its own credential ([Scaling worker hives](../pillars/hives.md#scaling-worker-hives)). |
 
 Two process lessons need no code:
