@@ -864,7 +864,7 @@
       "id": "swarm-tick-hook-reads",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-hook-read-guard",
-      "behaviour": "Every tick and wrapper site hook runs under a runtime guard on the pass box keys it declares; a read of any other key logs a warning naming the site and key in observe mode, the default, raises in enforce mode and is not checked when AGENTIHOOKS_TICK_HOOK_READS is off.",
+      "behaviour": "Every tick and wrapper site hook runs under a runtime guard on the pass box keys it declares; a keyed read of any other key, by item, get or membership, logs a warning naming the site and key in observe mode, the default, raises in enforce mode and is not checked when AGENTIHOOKS_TICK_HOOK_READS is off.",
       "seam": "scripts.tick.hook_reads.guarded, the reads of scripts.tick.steps.PassBox, scripts.tick.sites.TickSites.hooks and scripts.swarm.cli._Wrapper.hooks",
       "tests": [
         "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_tick_site_hook_logs_in_observe_mode_and_the_hook_still_answers",
@@ -874,7 +874,7 @@
         "tests/tick/test_hook_reads.py::test_off_mode_hands_back_the_hooks_unguarded",
         "tests/tick/test_hook_reads.py::test_an_unknown_or_missing_mode_observes",
         "tests/tick/test_hook_reads.py::test_reads_outside_a_hook_and_after_it_ends_are_not_checked",
-        "tests/tick/test_hook_reads.py::test_every_pass_box_read_kind_reaches_the_guard_and_keeps_its_answer"
+        "tests/tick/test_hook_reads.py::test_each_keyed_pass_box_read_reaches_the_guard_and_keeps_its_answer"
       ]
     },
     {

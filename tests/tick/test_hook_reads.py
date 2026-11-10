@@ -123,7 +123,7 @@ def test_reads_outside_a_hook_and_after_it_ends_are_not_checked(caplog: pytest.L
 
 
 @pytest.mark.feature("swarm-tick-hook-reads")
-def test_every_pass_box_read_kind_reaches_the_guard_and_keeps_its_answer() -> None:
+def test_each_keyed_pass_box_read_reaches_the_guard_and_keeps_its_answer() -> None:
     box = PassBox({"doc": 2})
     found = guarded(
         {
