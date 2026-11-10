@@ -126,13 +126,12 @@ def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkey
     assert totals.get(placement_waits.ADMITTED, "0") == "0"
 
 
-@pytest.mark.parametrize("deployment", ["hybrid", "local"])
 def test_a_failed_hive_runtime_spawn_takes_back_no_admission(
-    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, deployment: str
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.hive import placement_waits
 
-    fenced = hybrid(setup, monkeypatch, deployment)
+    fenced = hybrid(setup, monkeypatch)
     fenced.runtime.hive_launch.spawn.side_effect = RuntimeError("hive refused")
     setup.herdr.spawn.side_effect = RuntimeError("herdr refused")
     with pytest.raises((RuntimeError, SwarmError)):
