@@ -1461,8 +1461,8 @@ Masters, qa and frontend keep the UI host rule, and a task pinned to a hive neve
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
 
-1. Points git at `python3 -m scripts.github_app_cli credential` for github.com, which answers with `GITHUB_TOKEN`
-   when the pod has one, or with a GitHub App installation token when `GITHUB_APP_PRIVATE_KEY` is set. In App mode
+1. Points git at `python3 -m scripts.github_app_cli credential` for github.com, which answers with a GitHub
+   App installation token when `GITHUB_APP_PRIVATE_KEY` is set, else with `GITHUB_TOKEN`. In App mode
    the start script caches that token in `github-token` under the agentihooks home, private to the worker user. The
    token never reaches a remote URL or the log.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
