@@ -144,7 +144,12 @@ def _invite(args: argparse.Namespace) -> str:
     )
     redis = redis_client()
     if signer_path := member_swarms.signer_path(os.environ):
-        request = replace(request, signer_path=signer_path, swarms=member_swarms.swarms(redis, args.swarm))
+        request = replace(
+            request,
+            signer_path=signer_path,
+            swarms=member_swarms.swarms(redis, args.swarm),
+            sync=member_swarms.sync_target(os.environ),
+        )
     return invite.invite(redis, bao, request, redis_url(os.environ))
 
 
@@ -208,21 +213,33 @@ def _remove(args: argparse.Namespace) -> list[str]:
         signer=_signer(),
         dry_run=args.dry_run,
         signer_path=member_swarms.signer_path(os.environ),
+        sync=member_swarms.sync_target(os.environ),
     )
     return remove.remove(store, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:
     if args.command == "revoke":
-        from scripts.hive import nats_grant
-
-        redis, signer = redis_client(), _signer()
-        bus = [nats_grant.revoke(redis, signer, args.id)] if signer is not None else []
-        auth.revoke(redis, args.id)
-        return "\n".join([*bus, f"revoked {args.id}"])
+        return _revoke(args.id)
     if args.command == "drain":
         return _drain(args.wait)
     return "\n".join(_remove(args))
+
+
+def _revoke(member: str) -> str:
+    """Unlist the member from the hub signer record, then revoke its bus credential and its Redis user."""
+    from scripts import openbao_kv
+    from scripts.hive import member_swarms, nats_grant
+
+    path = member_swarms.signer_path(os.environ)
+    bao = openbao_kv.from_env(os.environ) if path else None
+    if path and bao is None:
+        raise auth.HiveError(f"no OpenBao client to unlist {member} from {path}")
+    redis, signer = redis_client(), _signer()
+    listed = member_swarms.drop(bao, path, member, member_swarms.sync_target(os.environ)) if bao and path else []
+    bus = [nats_grant.revoke(redis, signer, member)] if signer is not None else []
+    auth.revoke(redis, member)
+    return "\n".join([*listed, *bus, f"revoked {member}"])
 
 
 def _drain(wait_s: int) -> str:

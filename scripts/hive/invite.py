@@ -29,13 +29,21 @@ class Request:
     bus_url: str | None = None
     signer_path: str | None = None
     swarms: tuple[str, ...] = ()
+    sync: str | None = None
 
 
 def default_path(label: str) -> str:
     return f"k8s/agentihooks-hive-{label}"
 
 
-def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redis_url: str) -> str:
+def invite(
+    redis: "Redis",
+    bao: openbao_kv.OpenBao,
+    request: Request,
+    local_redis_url: str,
+    run: member_swarms.Runner | None = None,
+) -> str:
+    """Mint a member, write its credential record and list it in a scoped signer record, resyncing hive join's copy."""
     current = _read(bao, request.path)
     like = _read(bao, request.like) if request.like else {}
     if request.like and not like:
@@ -71,6 +79,8 @@ def invite(redis: "Redis", bao: openbao_kv.OpenBao, request: Request, local_redi
             raise auth.HiveError(f"{exc}; the new member {grant['id']} was not revoked ({revoked})") from None
         raise auth.HiveError(str(exc)) from None
     done = f"invited hive member {grant['id']} as {request.label}; {openbao_kv.summary(request.path, entries, total)}"
+    if scoped and request.sync:
+        done = f"{done}; {member_swarms.sync(request.sync, run)}"
     previous = _env(current.get(CREDENTIAL)).get(HIVE_ID)
     if previous and previous != grant["id"]:
         try:

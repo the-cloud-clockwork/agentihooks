@@ -88,6 +88,7 @@ class Plan:
     signer: "nats_grant.Signer | None" = None
     dry_run: bool = False
     signer_path: str | None = None
+    sync: str | None = None
 
 
 class TaskLedger(Protocol):
@@ -310,9 +311,7 @@ def unlist(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host
         return [f"would unlist {plan.hive} from the hub signer record {plan.signer_path}"]
     if bao is None:
         raise auth.HiveError(f"no OpenBao client to unlist {plan.hive} from {plan.signer_path}")
-    if member_swarms.unassign(bao, plan.signer_path, plan.hive):
-        return [f"unlisted {plan.hive} from the hub signer record {plan.signer_path}"]
-    return [f"the hub signer record {plan.signer_path} lists no member swarms for {plan.hive}"]
+    return member_swarms.drop(bao, plan.signer_path, plan.hive, plan.sync, host.run)
 
 
 def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:

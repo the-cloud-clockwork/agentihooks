@@ -1,6 +1,8 @@
 """The member_swarms entry of the hub NATS signer record: hive invite lists each member it mints, hive scope the rest."""
 
-from collections.abc import Iterable, Mapping
+import subprocess
+import time
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from scripts import openbao_kv
@@ -10,6 +12,11 @@ if TYPE_CHECKING:
     from redis import Redis
 
 FIELD = "member_swarms"
+SYNC_ENV = "AGENTIHOOKS_NATS_SIGNER_SYNC"
+SYNC_DEFAULT = "agentihooks-swarm/agentihooks-swarm-nats-signer"
+SYNC_TIMEOUT_S = 30
+LATER = "hive join sees it at the next refresh"
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 def signer_path(environ: Mapping[str, str]) -> str | None:
@@ -74,6 +81,44 @@ def unassign(bao: openbao_kv.OpenBao, path: str, member: str) -> bool:
     except openbao_kv.OpenBaoError as exc:
         raise auth.HiveError(str(exc)) from None
     return member in dropped
+
+
+def sync_target(environ: Mapping[str, str]) -> str | None:
+    """The namespace/name of the ExternalSecret that mounts the hub signer record into hive join, or None."""
+    if signer_path(environ) is None:
+        return None
+    return environ.get(SYNC_ENV, SYNC_DEFAULT) or None
+
+
+def sync(target: str, run: Runner | None = None, clock: Callable[[], float] = time.time) -> str:
+    """Force the signer ExternalSecret to resync so hive join reads a changed member listing at once."""
+    namespace, _, name = target.partition("/")
+    command = [
+        "kubectl",
+        "annotate",
+        "externalsecret",
+        name,
+        "--namespace",
+        namespace,
+        f"force-sync={int(clock())}",
+        "--overwrite",
+    ]
+    try:
+        done = (run or subprocess.run)(command, capture_output=True, text=True, timeout=SYNC_TIMEOUT_S, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"could not force the sync of {target} ({exc}), so {LATER}"
+    if done.returncode:
+        reason = (done.stderr or "").strip() or f"exit {done.returncode}"
+        return f"could not force the sync of {target} ({reason}), so {LATER}"
+    return f"forced the sync of the signer record {target}, so hive join sees the change at once"
+
+
+def drop(bao: openbao_kv.OpenBao, path: str, member: str, target: str | None, run: Runner | None = None) -> list[str]:
+    """Unlist one member from the signer record and resync the mounted copy when it was listed."""
+    if not unassign(bao, path, member):
+        return [f"the hub signer record {path} lists no member swarms for {member}"]
+    unlisted = f"unlisted {member} from the hub signer record {path}"
+    return [unlisted] if target is None else [unlisted, sync(target, run)]
 
 
 def backfill(redis: "Redis", bao: openbao_kv.OpenBao, path: str, named: Iterable[str]) -> str:
