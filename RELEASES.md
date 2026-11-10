@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.800 · 2026-11-10
+
+### 2026-11-10 · 725ec6c56d38 · #10523 · @agenticore-app
+
+**Admit the hosted only docs sanity reusable workflow in the runner trust gate**
+
+This change updates scripts/ci_runner_trust.py so the runner trust gate explicitly admits calls to agentihooks' docs-sanity.yml@main reusable workflow, since its only job is pinned to ubuntu-latest and needs no runs_on input or private runner guard. Other refs, filenames, or owners remain rejected. This unblocks agentibrain-kernel's lint job, which runs this gate over agentihooks workflows, letting it call the docs sanity workflow as its required public docs check once the callee lands on main. Tests confirm the admitted call passes while @dev refs, renamed callers, and foreign owners stay red.
+
 ## v2.17.799 · 2026-11-10
 
 ### 2026-11-10 · a3f23306a0a4 · #10537 · @nestorcolt
