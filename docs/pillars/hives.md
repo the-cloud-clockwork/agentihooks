@@ -167,15 +167,15 @@ environment:
 
 A named `LEDGER_CA_FILE` that does not exist yet counts as no CA here, even when `ledger-ca.pem` exists, unlike for
 agents, where a missing named file is an error. With the system roots alone, a first refresh succeeds only when the
-endpoint's certificate chains to a system root; an endpoint signed by a private CA needs `LEDGER_CA_PEM` for that
+endpoint's certificate chains to a system root or the endpoint is plain http on loopback; an endpoint signed by a private CA needs `LEDGER_CA_PEM` for that
 first command. A whitespace only `LEDGER_CA_PEM` falls through to the file rows.
 
-Both failures print one message and exit 1, `hive refresh refused: the hive at <url> is unreachable (<reason>)`:
+Both failures print one message and exit 1, `hive <refresh|join> refused: the hive at <url> is unreachable (<reason>)`:
 
 | Reason | Cause |
 |---|---|
 | `<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] ...>` | The chosen trust cannot verify the endpoint's certificate |
-| Any other `<urlopen error ...>` | The endpoint cannot be reached |
+| Any other reason | The endpoint cannot be reached or did not answer in time |
 
 ```bash
 # A first refresh against an endpoint signed by a private CA: trust it for this one command
