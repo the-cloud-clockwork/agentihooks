@@ -43,7 +43,8 @@ def test_tick_passes_claimed_snapshot_to_runner() -> None:
                 task,
             ]
         },
-        "config": SimpleNamespace(repo="/proof/repo"),
+        "store": SimpleNamespace(config={"proof": SimpleNamespace(repo="/proof/repo")}.__getitem__),
+        "slug": "proof",
         "tools": tools.for_effects(frozenset({"host"})),
         "deadline": deadline,
     }
@@ -54,7 +55,7 @@ def test_tick_passes_claimed_snapshot_to_runner() -> None:
     assert tools.host.calls[0].args == ({"job": "workflow", "task": task, "repo": "/proof/repo"},)
     assert tools.host.calls[0].deadline is deadline
     assert found.needs == frozenset({"planning and phase pass", "ledger state", "drained resume"})
-    assert found.reads == pass_domains("doc", "config")
+    assert found.reads == pass_domains("doc", "store", "slug")
     values["deadline"] = Deadline.after(-1)
     with pytest.raises(TimeoutError, match="tool deadline expired"):
         found.call(None, values.__getitem__)
