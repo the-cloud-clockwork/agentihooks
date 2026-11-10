@@ -300,7 +300,9 @@ class HiveLaunch:
             self._pass_hives = (self.placement_cache, placement.for_swarm(loaded_hives(self.store), self.slug))
         return self._pass_hives[1]
 
-    def _record_wait(self, lane: str, task: dict[str, Any], selected: Selection | placement.Wait) -> Selection | placement.Wait:
+    def _record_wait(
+        self, lane: str, task: dict[str, Any], selected: Selection | placement.Wait
+    ) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
         from scripts.swarm.commands import hive_id
 
