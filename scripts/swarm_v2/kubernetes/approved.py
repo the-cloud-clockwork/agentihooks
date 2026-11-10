@@ -5,6 +5,7 @@ from scripts import quota_state, session_bands
 from scripts.account_names import CODEX_TOKEN_PREFIX, codex_token_env
 from scripts.swarm import quota_handoff
 from scripts.swarm.capacity import Account, offered, reserved_accounts
+from scripts.swarm.store import MASTER
 from scripts.swarm_v2.kubernetes.client import ApiRefused, PodApi
 from scripts.swarm_v2.kubernetes.spec import KEY
 from scripts.swarm_v2.quota import UNKNOWN, QuotaObservations
@@ -86,17 +87,23 @@ class AccountRoute:
         held = self.held()
         return [self._row(key, cap, held.get(key, 0), now, None) for key in sorted(self.keys())]
 
-    def seats(self, cap: int, predecessor: tuple[str, str] | None = None) -> list[session_bands.Seat]:
-        rows = reserved_accounts(self.rows(cap, self.quota.clock() / 1000), os.environ)
+    def seats(
+        self, cap: int, predecessor: tuple[str, str] | None = None, lane: str = ""
+    ) -> list[session_bands.Seat]:
+        """Quota seats for ``lane``; every lane but the master sees the reserved master account closed."""
+        rows = self.rows(cap, self.quota.clock() / 1000)
+        rows = rows if lane == MASTER else reserved_accounts(rows, dict(os.environ))
         if predecessor is not None:
             thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
             rows = [row for row in rows if not quota_handoff.exclusion(row, thresholds, predecessor)]
         return offered(rows)
 
-    def choose(self, cap: int, planned: str | None = None, predecessor: tuple[str, str] | None = None) -> str | None:
+    def choose(
+        self, cap: int, planned: str | None = None, predecessor: tuple[str, str] | None = None, lane: str = ""
+    ) -> str | None:
         """A planned account with a free slot is kept; a quota successor never lands on the account handing off or
         on one the handoff thresholds exclude, as the capacity plan for it was made."""
-        seats = self.seats(cap, predecessor)
+        seats = self.seats(cap, predecessor, lane)
         if any(seat.account == planned and seat.free for seat in seats):
             return planned
         seat = session_bands.pick(seats)
@@ -115,9 +122,11 @@ class HarnessRoutes:
     def banded_rows(self, cap: int, now: float) -> list[Account]:
         return [row for route in self.routes.values() for row in route.banded_rows(cap, now)]
 
-    def choose(self, cap: int, planned: str | None, predecessor: tuple[str, str] | None, harness: str) -> str | None:
+    def choose(
+        self, cap: int, planned: str | None, predecessor: tuple[str, str] | None, harness: str, lane: str = ""
+    ) -> str | None:
         route = self.routes.get(harness)
-        return None if route is None else route.choose(cap, planned, predecessor)
+        return None if route is None else route.choose(cap, planned, predecessor, lane)
 
 
 class FleetAccounts:

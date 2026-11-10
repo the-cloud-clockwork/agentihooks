@@ -693,3 +693,23 @@ def test_fleet_launch_picker_cannot_restore_a_reserved_account_as_a_fallback(
     route.keys = lambda: {"reserved-key", "other-key"}
     _observe(store, "other-key")
     assert route.choose(2, planned="reserved-key") == "other-key"
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+def test_fleet_launch_picker_keeps_the_reserved_account_for_the_master_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.routing import reservation
+
+    store, route = _route({"reserved-key"})
+    _observe(store, "reserved-key", week_used=70)
+    held = reservation.Reservation("claude", "reserved-key", 1)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    routes = approved.HarnessRoutes({"claude": route})
+    assert routes.choose(2, None, None, "claude", "master") == "reserved-key"
+    assert routes.choose(2, None, None, "claude", "dispatch") is None

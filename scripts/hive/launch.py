@@ -371,6 +371,7 @@ class HiveLaunch:
                 self._quota_accounts = read(dict(os.environ), now / 1000, refresh=False)
             rows = self._quota_accounts
         rows = [row for row in rows if f"{row.harness}:{row.name}" not in accounts]
+        rows = capacity.unreserved(rows) if lane == "master" else rows
         if lane == "master" and not task.get("route_kind"):
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)
