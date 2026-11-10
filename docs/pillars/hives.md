@@ -854,7 +854,7 @@ For one swarm in local mode, also enable [hive placement](#hive-placement-for-on
 
 Where selection records a fallback reason, the agent's profile decision carries it as `placement_fallback`;
 a task pinned to a UI hive records the pin as its reason. Ranked worker spill also records the preferred hive's
-refusal; see [Headroom](#headroom). Masters keep their separate [placement chain](#master-placement).
+refusal; see [First ranked hive room and spill records](#first-ranked-hive-room-and-spill-records). Masters keep their separate [placement chain](#master-placement).
 
 ### Placement waits
 
@@ -1046,6 +1046,114 @@ or roll its pod, to pick up the publisher.
 | A launch waits with `missing telemetry` while another launch runs on that hive | The hive's agentihooks version | Upgrade and restart the hive service so the 10 second publisher runs. |
 | `headroom=missing` comes and goes on a `live` hive, with readings only as often as its beats | The log for `hive headroom wait failed`, and the hive's agentihooks version: code from before the helper restart loses its headroom thread on the first failed wait until the beat loop reconnects | Upgrade and restart the hive service, or roll its pod. |
 | Room reads 0 with a fresh reading | The refusal detail: `cpu`, `ram` or `max agents` | The named limit is spent; wait for agents to finish or raise `max-agents` when the host has room. |
+
+### First ranked hive room and spill records
+
+A hive that sets `prefer` for a role is admitted for that role by its own room rule, so the hive ranked first keeps
+taking launches until its memory is nearly full rather than stopping at the first limit the general rule reaches.
+Every other hive, and every hive under `placement-mode=round-robin`, keeps the general room above.
+
+**Which hive is first ranked.** Among the live hives that are not draining and take the role, the first ranked hive
+is the one with the lowest `prefer` rank for the role, then the lowest share of its agent ceiling in use, then a lasting
+hive over an ephemeral one, then the hive id. Hives without a rank for the role are never first ranked. When that hive
+takes the launch but a hive listing the task's repo has a lower rank and is not live, is draining or excludes the role,
+the spill record below names that hive instead.
+
+**Its room.** For a hive ranked for the role, the tick computes a second room alongside the general one and placement
+reads that second room for the role:
+
+| Limit | Rule |
+|---|---|
+| Host memory | Refused at or above 80 percent used (`available_mb` at or under 20 percent of `total_mb`). Below that line it fits whole agents at 850 MB each up to the line, and never fewer than one. |
+| Pod memory | The same rule on `pod_available_mb` and `pod_total_mb` when the cgroup sets a memory limit. |
+| Pending launches | Launches reserved on the hive in the last fifteen minutes are subtracted from each memory limit, so they can hold the last agent of room under the line. |
+| Host and pod CPU | The same CPU limits as the general room. |
+| Disk floor, `max-agents` and the local machine cap | Still refuse the hive as in the general room. |
+| Missing reading | No fresh reading, or a reading with no memory fields, gives room 0 with `missing telemetry`. |
+
+The smallest limit wins, as in the general room. The launch reservation reads the same rule, so a hive placement
+admits is not refused again at reservation by a general limit it was spared.
+
+Within one tick pass each launch placed on the first ranked hive spends one agent of that room. Once a pass has spent
+it, the hive's refusal for the rest of the pass reads
+`placement: <n> launches placed on it this pass took its room`, and the next launch goes to the next hive in the order.
+
+Refusals the first ranked room produces, with the measured values in the reading:
+
+```text
+ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent line
+ram: pod 3900 of 19600 MB available, 81 percent used, at or above the 80 percent line
+ram: 2100 of 10000 MB available, 79 percent used, 850 MB per agent with 2 pending launches, fits 0 more under the 80 percent line
+cpu: 15.20 of 16 CPUs used, five minute load 28.70 on 16 CPUs with CPU used at or above the 40 percent swarm share, fits 0 more
+max agents: 6 of 6 agents on the hive, fits 0 more
+missing telemetry: no memory reading
+```
+
+The first room was introduced by [#8595](https://github.com/the-cloud-clockwork/agentihooks/pull/8595) with memory as
+its only measured limit. [#9984](https://github.com/the-cloud-clockwork/agentihooks/pull/9984) added the host and pod
+CPU limits back after a preferred hive with a five minute load of 28.7 on 16 CPUs read room six and took every
+`eng` and `ci` launch.
+
+**The spill record.** When a worker launch for a role some hive ranks lands on another hive, the launch records why
+the first ranked hive did not take it. The agent's profile decision carries `placement_spill`:
+
+```json
+{"placement_spill": {"preferred": "worker-1", "refusal": "ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent line"}}
+```
+
+The hive launcher prints the same fields to stderr, which the tick journal keeps, as one line:
+
+```json
+{"event": "hive_placement_spill", "slug": "my-swarm", "task": "t42", "name": "engineer@my-swarm-0007", "hive": "worker-2", "preferred": "worker-1", "refusal": "ram: 2000 of 10000 MB available, 80 percent used, at or above the 80 percent line"}
+```
+
+`refusal` is the first check the first ranked hive failed:
+
+| Refusal | Meaning |
+|---|---|
+| `<reason>: <detail>`, such as `ram: ...`, `cpu: ...`, `disk: ...`, `max agents: ...`, `placement: ...` or `missing telemetry: ...` | Its first ranked room was 0; the detail is the binding limit and its measured value, as listed above. |
+| `no hive for <role> has room: <hive> <reason>: <detail>` | Placement chose it, and the launch reservation then found its room spent by launches already reserved on it. |
+| `no hive for <role> advertises the <harness> slot <slot>` | It does not advertise the account slot chosen for the launch. |
+| `no hive for <role> lists the repo <repo>` | It does not list the task's repository. |
+| `no hive for <role> holds the <harness> login for <slot>`, or `master login` | It lacks the interactive or master login the launch route needs. |
+| `its heartbeat is older than 90 seconds` | It is not live. |
+| `it is draining` | Its drain is on. |
+| `it excludes <role>` | Its `excluded` list names the lane, the role or the profile. |
+
+No spill is recorded when no hive ranks the role, when the first ranked hive takes the launch, when a reservation
+retry lands back on it, or under round robin placement.
+
+Read the spills of the last hour from the tick journal, and the records the live agents carry, with the Python
+environment agentihooks is installed in, from its checkout:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-1 hour" --no-pager | grep hive_placement_spill
+python -c '
+from scripts.swarm.store import connect
+s, slug = connect(), "my-swarm"
+for a in s.agents(slug):
+    if "placement_spill" in a.profile_decision:
+        print(a.name, a.hive, a.profile_decision["placement_spill"])'
+```
+
+To confirm the first ranked hive takes launches until its memory line, set the rank and watch both its reading and the
+spills while the swarm fills:
+
+```bash
+agentihooks hive set worker-1 prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive set worker-2 prefer=eng:2,ci:2,plan:2,dispatch:2
+agentihooks hive list          # worker-1 available-mb falls as it takes agents
+journalctl --user -t agentihooks-swarm -f --no-pager | grep --line-buffered hive_placement_spill
+```
+
+Each spill line while `worker-1` is under its memory line names the other limit that refused it.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A second hive takes agents while the first ranked hive sits well under 80 percent memory | The spill `refusal` in the tick journal | Act on the named limit: `cpu` means the hive is CPU saturated, `max agents` means raise its `max-agents`, a slot, repo or login refusal means the hive lacks what the launch needs, and `placement` means the pass already filled its room. |
+| A second hive takes agents and no spill line appears | `agentihooks hive show <hive>` for `prefer` on each hive | No hive ranks the role, or the swarm runs `placement-mode=round-robin`; rank the hive for every worker role. |
+| The first ranked hive is refused with `missing telemetry: no memory reading` | `hive list` for `available-mb` on the hive | The hive daemon publishes no memory fields; upgrade and restart its hive service. |
+| The first ranked hive is refused at reservation with `no hive for <role> has room` | The pending launches held on the hive | Expected while other launches hold its last room; the refusal clears as those launches are acknowledged. |
 
 ### Account caps on every hive
 
