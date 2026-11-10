@@ -718,9 +718,11 @@ or roll its pod, to pick up the publisher.
 
 ### Account caps on every hive
 
-Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
+Quota belongs to the account, so every hive reports the same cap for it. See
+[automatic quota refresh](#automatic-quota-refresh) for how a new hive obtains its own reading before its first
+heartbeat. A subscription slot whose own reading is
 missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
-that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+that holds a token but has not obtained its own reading still shows the account's real cap; interactive and
 api slots keep their own.
 
 A hive's subscription cap scales with quota left: the ceiling `AGENTIHOOKS_HIVE_SESSION_CEILING` (default 12) times
@@ -729,6 +731,69 @@ the smaller of the five hour and week percentage left, at least the band in
 account at 96% of both windows left reports 11; one with under 10% of its five hour window left keeps the band's 2;
 under 5% of either window it reports 0. Worker admission under a hive or cluster spawn backend reads every Claude
 row this way, interactive slots included. Launches routed by one machine's own processes keep the band.
+
+### Automatic quota refresh
+
+`agentihooks hive run` reads Claude subscription quota itself. A newly joined worker with no cached observation
+does not need a manual `agentihooks balance` command to make its slots usable. Before the first heartbeat, the
+daemon synchronously probes each configured subscription whose reading is missing or due for refresh. When the
+probe returns usable quota and the account has room, that first heartbeat reports a nonzero subscription `cap`.
+The startup probe must finish before the heartbeat can be published; this is not a fifteen second probe timeout.
+
+After startup, each beat checks whether a refresh is due. The newest cached observation for each account decides
+its age; fresh accounts are left alone. Refresh becomes due once an observation is more than ten minutes old,
+five minutes before the fifteen minute freshness limit. Later probes run on one background thread, so they do
+not hold up the heartbeat. A running refresh is reused, and attempts are spaced at least five minutes apart,
+including after a failed attempt. These timings are fixed; there is no hive setting for the refresh interval.
+
+#### Configure and start
+
+The hive must already be joined and have its normal Redis configuration. Supply subscription credentials to
+the daemon as nonempty `AH_CC_TOKEN_<slug>` environment variables; `<slug>` is the account name shown in its slots.
+Keep its `AGENTIHOOKS_HOME` writable so the quota cache survives between beats. The installed Claude CLI must be
+available to the daemon. With the worker token already supplied securely as `CLAUDE_WORKER_TOKEN`, a foreground
+daemon can be started as follows:
+
+```bash
+AH_CC_TOKEN_lab="$CLAUDE_WORKER_TOKEN" \
+  AGENTIHOOKS_HIVE_SESSION_CEILING=6 \
+  agentihooks hive run
+```
+
+The ceiling limits the cap computed from quota; it does not change the refresh schedule or create quota. For a
+managed daemon, make the same variables available to its service or container, then use `agentihooks hive install`
+on a machine with user services. Shell variables set only in an interactive terminal do not configure an already
+running service. A worker pod runs the same daemon and refreshes its own readings on startup.
+
+From another joined machine, inspect the hive after its first heartbeat:
+
+```bash
+agentihooks hive list
+agentihooks hive show lab-vm
+```
+
+In the JSON record, find the slot with `"harness": "claude"`, `"account": "lab"` and
+`"kind": "subscription"`, and read its `cap`. For example, an account with 96% left in both windows and the
+ceiling above reports `"cap": 6`. This is an account session limit, not a count of free places: existing
+reservations, the hive's `max-agents`, headroom and repo eligibility still govern placement.
+
+#### Limits and troubleshooting
+
+Automatic refresh covers the Claude subscription credentials available to the daemon. With no such credentials,
+there is no Claude subscription to probe. A missing, stale, refused or incomplete quota reading can still leave
+a slot at cap zero, as can an account below the quota floor or a configured ceiling of zero. A successful startup
+does not guarantee that the provider supplies usable quota.
+
+| Symptom | Check | Action |
+|---|---|---|
+| A new hive has no Claude subscription slot | Whether the daemon received a nonempty `AH_CC_TOKEN_<slug>` variable | Supply the account through the service or container environment, then restart the daemon. Never print the token. |
+| A new slot stays at cap zero | The daemon's quota probe errors and whether its account can return quota | Restore account access, Claude CLI availability or provider connectivity. Allow the five minute retry spacing and a following heartbeat for the next result. |
+| A slot becomes zero after previously working | The reading's freshness, quota left and configured ceiling | Restore failed probes when the reading is stale; when quota is spent, wait for its window to reset. Raising the ceiling does not bypass the quota floor. |
+| The first heartbeat has not arrived | The daemon log and its initial quota probe, then Redis connectivity | Resolve the reported startup failure. The initial probe runs before the first Redis connection and heartbeat. |
+
+The regression test `test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start` plants a hive with no
+cache, observes a zero cap before startup, supplies a successful quota probe and verifies a nonzero cap on the
+first beat. It tests daemon startup without requiring a manual balance read or a live provider.
 
 ### Master placement
 
@@ -1605,7 +1670,7 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | A launch waits with "no hive for `<role>` lists the repo `<repo>`" | `agentihooks hive show <id>`, the `repos` list | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the swarm's repo name, or point `HIVE_REPO_ROOT` at the clones. |
 | A launch waits with "no live hive takes" a role | `agentihooks hive list`: `stale` hives, roles | Restart `agentihooks hive run` (`agentihooks hive install` keeps it running), or add the role with `agentihooks hive set`. |
-| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | A `cap` of 0 means the hive has no fresh quota reading for the account; otherwise end a session on that account or wait for its five hour window to recover. |
+| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | For zero capacity, check quota freshness, account access, quota left and the ceiling under [automatic quota refresh](#automatic-quota-refresh). Otherwise end a session on that account or wait for its five hour window to recover. |
 
 ## Related pages
 
