@@ -1,12 +1,14 @@
 """The tick pass fences its runtime at its first site, before any step can spawn through it."""
 
 from contextlib import ExitStack
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from scripts.swarm import cli, controller
 from scripts.swarm.ledger_client import SNAPSHOT_TIMEOUT_S, LedgerClient
+from scripts.tick.adapters.fakes import FakeRuntime, fake_tools
+from scripts.tick.ports.tools import PASS_TOOLS
 
 pytestmark = pytest.mark.unit
 
@@ -26,15 +28,21 @@ def _wrapper(state: dict[str, Any]) -> Any:
 
 @pytest.mark.feature("tick-pass-fence-first-site")
 def test_the_first_pass_site_fences_the_runtime_every_later_step_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    made: list[tuple[Any, ...]] = []
     monkeypatch.setattr(controller, "deployment_for", lambda config, environ: f"deployment for {config}")
-    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: made.append(args) or "fenced")
-    store = _Store()
-    state: dict[str, Any] = {"store": store, "slug": "sw", "runtime": "raw"}
+    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: pytest.fail("fenced outside the runtime port"))
+    tools = fake_tools()
+    port = cast(FakeRuntime, tools.runtime)
+    port.answers["fence"] = "fenced"
+    state: dict[str, Any] = {"store": _Store(), "slug": "sw", "runtime": "raw"}
     assert cli.PASS_SITES[0] == "wrapper probes"
-    assert _wrapper(state).hooks()[cli.PASS_SITES[0]]() is True
+    token = PASS_TOOLS.set(tools)
+    try:
+        assert _wrapper(state).hooks()[cli.PASS_SITES[0]]() is True
+    finally:
+        PASS_TOOLS.reset(token)
     assert state["runtime"] == "fenced"
-    assert made == [(store, "sw", "held", "raw", "deployment for config of sw")]
+    assert [(call.operation, call.args) for call in port.calls] == [("fence", ("held", "deployment for config of sw"))]
+    assert port.calls[0].deadline.remaining > 0
 
 
 @pytest.mark.feature("tick-pass-fence-first-site")

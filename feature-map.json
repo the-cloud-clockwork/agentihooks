@@ -2824,6 +2824,22 @@
         "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
         "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
       ]
+    },
+    {
+      "id": "tick-runtime-port-fence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-fenced-runtime-out",
+      "behaviour": "The tick reaches its fenced runtime only through the Tools runtime port: the port fences the pass runtime to the held lease in a deployment and acts through the fenced runtime after, refuses without a fence or past its deadline, counts as a runtime write, and the ack pass and the master placement take their lease through the coordination port and their fence through the runtime port.",
+      "seam": "scripts.tick.ports.contracts.Runtime.fence, implemented by scripts.tick.adapters.runtime.RouterRuntime",
+      "tests": [
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_fences_its_pass_runtime_and_acts_through_the_fenced_one_after",
+        "tests/tick/test_runtime_port_fence.py::test_a_runtime_port_without_a_fence_refuses_to_fence",
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_refuses_to_fence_past_its_deadline",
+        "tests/tick/test_runtime_port_fence.py::test_fencing_is_a_runtime_write_a_step_must_declare",
+        "tests/tick/test_runtime_port_fence.py::test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease"
+      ]
     }
   ],
   "unmapped_rules": [
