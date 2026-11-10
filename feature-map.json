@@ -3148,10 +3148,11 @@
       "id": "swarm-archive-sweeps-orphaned-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
-      "behaviour": "ExecutionRegistry.archive sweeps every controller-intents row with no matching key in the current executions section on every call, so a pre-existing backlog left behind before swarm-archive-prunes-intents shipped is drained even when nothing new is archived that call.",
+      "behaviour": "ExecutionRegistry.archive sweeps every controller-intents row shaped as an execution admission (its own execution_id field matches its key) that has no matching key in the current executions section, on every call, so a pre-existing backlog left behind before swarm-archive-prunes-intents shipped is drained even when nothing new is archived that call. An intents row of any other shape, such as a generic lease epoch marker, is left untouched.",
       "seam": "ExecutionRegistry.archive sweeps intents orphaned by prior archive calls",
       "tests": [
-        "tests/swarm/test_execution_archive.py::test_archive_sweeps_intents_left_behind_before_the_original_fix"
+        "tests/swarm/test_execution_archive.py::test_archive_sweeps_intents_left_behind_before_the_original_fix",
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_an_intents_entry_that_is_not_an_execution_admission"
       ]
     }
   ],
