@@ -249,9 +249,11 @@ def test_an_agent_that_cannot_reopen_awaits_a_resume_or_fresh_decision(store, re
 
 @pytest.mark.feature("hive-drain-push-resume")
 def test_an_agent_that_handed_off_before_the_restart_gives_its_seat_to_a_successor_without_a_decision(
-    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime]
+    store: RedisStore, rebooted: tuple[FakeLedger, ResumingRuntime], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ledger, runtime = rebooted
+    read = ledger.task
+    monkeypatch.setattr(ledger, "task", lambda slug, task_id: read(slug, task_id) if slug == "sw" else None)
     eng = next(a for a in _local(store).values() if a.lane == "eng")
     store.put_handoff("sw", eng.task, "carry on from the parser", seat=eng.seat)
 
