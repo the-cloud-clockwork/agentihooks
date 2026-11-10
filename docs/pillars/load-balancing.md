@@ -795,6 +795,8 @@ are resolved by account name. If no Claude account qualifies, it considers Codex
 accounts by the same ranking, provided the lane and required harness permit
 Codex and the profile has no required Claude only plugin. With no eligible
 account, successor placement fails; it does not launch on a draining account.
+Under the deployed controller, hive placement applies the same rule to every
+launch: see [closed and draining accounts get no hive agent](hives.md#closed-and-draining-accounts-get-no-hive-agent).
 
 ### Worked example
 

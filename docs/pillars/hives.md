@@ -1251,6 +1251,68 @@ account at 96% of both windows left reports 11; one with under 10% of its five h
 under 5% of either window it reports 0. Worker admission under a hive or cluster spawn backend reads every Claude
 row this way, interactive slots included. Launches routed by one machine's own processes keep the band.
 
+#### Closed and draining accounts get no hive agent
+
+The deployed swarm controller builds its account rows from the approved account keys in its Secret and places hive
+agents only on rows with a free seat. For each key it reads the newer of the published fleet observation and the
+newest reading any live hive publishes for that account. A hive names a slot by its `AH_CC_TOKEN_<slug>` slug, for
+example `claude:lab_one`, and the controller names the same account by its Secret key, `lab-one`; the two are matched
+with `_` and `-` treated as the same character, so a hive's reading reaches the controller's row.
+
+An observed account closes for new hive agents, with state `CLOSED` and cap `0`, when it is draining:
+
+- its week is at or under 10% left, for Claude and Codex alike;
+- for Claude only, its five hour window is at or under 5% left. Codex rows ignore the five hour window and keep their
+  week band.
+
+Both thresholds are fixed in code; there is no setting for them. An observed row also closes when its latest reading
+is `rejected` by the provider, when it is the primary Claude login (rank zero of `AGENTIHOOKS_MASTER_LOGIN_ORDER`)
+with its week at or under `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` left (default 20), or when it is the Claude account
+a live master holds and its week has reached the workers' ceiling (see [reserved
+rows](load-balancing.md#reserved-rows-in-agentihooks-balance)). Any other observed row takes its quota band alone; the
+controller's launch cap does not bound it. A row whose reading is missing, older than fifteen minutes, reported as a
+provider error or without a week value counts as unobserved: it stays `OPEN` at the launch cap with no quota left
+shown, as before.
+
+A closed row holds no free seat, so hive placement skips it. When a task's planned account is closed, the launch takes
+another open Claude account; when every Claude account is closed or full, the task waits with the reason `no Claude
+account has room after hive sessions: <account> <n> sessions of <cap>, ...`; an unobserved account shows its launch
+cap there, and a task pinned to one account ends with `; pinned to <account>`. A quota successor is chosen from the
+same rows, so it never lands on a closed account either. The account opens again on the first reading above both
+thresholds, typically after its week or five hour window resets.
+
+Worked example. Two approved keys, `lab-one` and `lab-two`. A hive publishes `claude:lab_one` with 97% of the week
+used and no five hour reading; `lab-two` has no reading yet:
+
+| Account | Five hour left | Week left | Row | Placement |
+|---|---|---|---|---|
+| `lab-one` | - | 3% | `CLOSED`, cap 0 | None, even when the task was planned there |
+| `lab-two` | - | - | `OPEN`, launch cap | Takes the agent |
+
+With the same hive reading at 89% of the week used, `lab-one` has 11% left and stays `OPEN` at its quota band, cap 6
+with no five hour reading, whatever the launch cap.
+
+Checks:
+
+```bash
+# The hive's own reading for each slot: 7D LEFT at or under 10% means hive placement skips that account
+ssh <hive> agentihooks balance
+
+# Every hive's slots and caps as the swarm sees them
+agentihooks hive show <hive-id>
+```
+
+| Symptom | Check | Action |
+|---|---|---|
+| A task waits with `no Claude account has room after hive sessions` | Each account in the reason with `sessions of 0` | The account is closed: draining, rejected, or reserved for the primary login or a live master. Wait for its window to reset, or add another account to the controller Secret and to a hive. |
+| A hive agent starts on an account that `balance` shows at 3% of its week | Whether the controller runs a release that carries the draining rule, and whether the hive is `live` in `agentihooks hive list` | Roll the controller onto the current release. A reading from a hive that is not live is ignored, so restore its heartbeat. |
+| An account with quota left stays closed | Its five hour left for Claude, and the reading's age | A Claude account at or under 5% of its five hour window is closed until that window resets. A stale reading counts as unobserved and keeps the launch cap rather than closing the row. |
+
+The regression test `test_a_closed_account_a_hive_advertises_gets_no_placement` plants a hive reading with a 97% week
+and no five hour window and checks that the row is `CLOSED` with cap 0, that launch keeps only the open account and
+that a task planned on the closed account is routed to the open one.
+`test_a_hive_reading_with_room_in_its_week_takes_the_week_band` checks the 89% case.
+
 ### Automatic quota refresh
 
 `agentihooks hive run` reads Claude subscription quota itself. A newly joined worker with no cached observation
