@@ -180,13 +180,14 @@ def _create(args: argparse.Namespace) -> str:
     tools = create.Tools(
         redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served(), signer=_signer
     )
-    given = {
+    given: dict[str, Any] = {
         "repo": args.repo,
         "base": args.base,
         "like": args.like,
         "node": args.node,
         "timeout_s": args.timeout,
         "name": args.name,
+        "repos": create.parse_repos(args.repos) if args.repos else None,
     }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
@@ -243,6 +244,8 @@ def _retire(args: argparse.Namespace) -> str:
         return "\n".join([*unlisted, *bus, f"revoked {args.id}"])
     if args.command == "drain":
         return _drain(args.wait)
+    if args.command == "holders":
+        return auth.backfill_holders(redis_client())
     return "\n".join(_remove(args))
 
 
@@ -330,12 +333,16 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
     created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
+    created.add_argument(
+        "--repos", help="comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
+    )
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
     joined.add_argument("invite", type=Path, help="private member invite file shared with Kubernetes workers")
     sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its hive endpoint")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
+    sub.add_parser("holders", help="Write the holder record of every member minted before holder records")
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
@@ -564,7 +571,7 @@ def _run(args: argparse.Namespace) -> int:
                 member_id = join.enroll(args.invite, os.environ) if args.command == "join" else refresh_env(os.environ)
             action = "joined" if args.command == "join" else "refreshed the Redis credential of"
             print(f"{action} hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}")
-        elif args.command in ("revoke", "remove", "drain"):
+        elif args.command in ("revoke", "remove", "drain", "holders"):
             print(_retire(args))
         elif args.command in ("run", "install"):
             return _daemon(args.command)

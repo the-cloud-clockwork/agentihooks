@@ -12,7 +12,7 @@ from scripts import openbao_kv
 from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, nats_grant, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, RESYNC, SIGNER, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, RESYNC, SIGNER, SWARM_REPO, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -194,6 +194,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
         f"hive create {NAME}: merge: merged {PR}",
         f"hive create {NAME}: settings: settings written",
         f"hive create {NAME}: live: hive {member} is live",
+        f"hive create {NAME}: registry: recorded hive {member} as {NAME} with {SWARM_REPO} in the hive registry",
         f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {member}",
         f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive",
     ]

@@ -642,7 +642,7 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
     }
 
 
-STORE_COMMANDS = ["DEL", "GET", "HDEL", "HGET", "HSET", "INCRBY", "LRANGE", "LTRIM", "RPUSH", "SET", "WATCH"]
+STORE_COMMANDS = ["DEL", "GET", "HDEL", "HGET", "HMGET", "HSET", "INCRBY", "LRANGE", "LTRIM", "RPUSH", "SET", "WATCH"]
 
 
 def test_a_pipeline_watch_is_published_as_watch(tmp_path):
