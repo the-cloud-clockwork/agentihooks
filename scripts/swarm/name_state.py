@@ -60,6 +60,14 @@ class NameState:
         """The Redis keys a transaction watches to see a registry key change, its legacy key and the store."""
         return [legacy_key, *([self.shared.watch_key] if self.legacy is not None else [])]
 
+    def revisions(self, *pairs: tuple[str, str]) -> tuple[int, ...]:
+        """The store revisions of registry keys a Redis watch cannot see, 0 for a missing key; empty on the Redis
+        backend, where watched covers them."""
+        if self.legacy is not None:
+            return ()
+        entries = read_many(self.shared, [state_key(kind, part) for kind, part in pairs])
+        return tuple(0 if entry is None else entry.revision for entry in entries)
+
     def views(self, reader: Any) -> tuple[StateStore, Any]:
         if reader is None or self.legacy is None:
             return self.shared, self.legacy
