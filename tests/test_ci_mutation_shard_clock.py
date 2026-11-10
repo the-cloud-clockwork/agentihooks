@@ -30,9 +30,11 @@ def test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_t
     )
     assert probe.reuse_kills(execute, {})("worker", mutant_name=None, tests=[]) == 0
     assert calls == [(None, []), (None, [])]
+    monkeypatch.setenv("MUTANT_UNDER_TEST", "stats")
+    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 0
     monkeypatch.delenv("MUTANT_UNDER_TEST")
     assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 0
-    assert calls == [(None, []), (None, []), (None, [])]
+    assert calls == [(None, []), (None, []), (None, []), (None, [])]
 
 
 @pytest.mark.feature("mutation-shard-probe-kills-own-clock")
@@ -57,11 +59,12 @@ def test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_w
         ran.append(list(args[2]))
         return {"hooks/sample.py": []}, ""
 
-    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 100.0)
+    readings = iter([0.0])
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: next(readings, 391.0))
     monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
-    report = run_gate(tmp_path, {"hooks/sample.py": {2}}, tmp_path / "output", 5, (0, 1), stats)
+    report = run_gate(tmp_path, {"hooks/sample.py": {2}}, tmp_path / "output", 395, (0, 1), stats)
     assert ran == [["hooks/sample.py"]]
     assert report["not_mutated"] == []
-    assert report["shard"]["wall_seconds"] == 0
+    assert report["shard"]["wall_seconds"] == 391
     assert report["shard"]["budget_exhausted"] is False
     assert "over budget" not in capsys.readouterr().out

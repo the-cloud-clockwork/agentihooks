@@ -72,10 +72,15 @@ def mark_probe_results(work: Path, results: dict) -> dict:
 
 
 def reuse_kills(run_tests: Callable[..., int], early: dict[str, str]) -> Callable[..., int]:
-    def run_cached(self, *, mutant_name, tests):
+    def run_cached(self: object, *, mutant_name: str | None, tests: list[str]) -> int:
         if mutant_name is not None and early.get(mutant_name) == "killed":
             return 1
-        if mutant_name is None and not tests and os.environ.get("MUTANT_UNDER_TEST") and "killed" in early.values():
+        if (
+            mutant_name is None
+            and not tests
+            and os.environ.get("MUTANT_UNDER_TEST") == "fail"
+            and "killed" in early.values()
+        ):
             return 1
         return run_tests(self, mutant_name=mutant_name, tests=tests)
 
