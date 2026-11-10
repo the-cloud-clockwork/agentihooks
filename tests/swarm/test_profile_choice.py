@@ -367,6 +367,49 @@ def test_a_bundle_only_profile_a_placement_target_hosts_is_not_refused(monkeypat
         _choose("eng", {}, task, {}, hosted=frozenset({"brain"}))
 
 
+def _overlaid(task: dict, overlays: dict, hosted: frozenset[str]) -> profile_choice.ProfileDecision:
+    """Choose for the eng lane of a swarm whose base roles wear the given default overlays."""
+    config = store.SwarmConfig("sw", "repo", 1, 1, overlays=overlays)
+    return profile_choice.choose(config, "eng", task, {}, hosted)
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+@pytest.mark.parametrize(
+    ("task", "defaults", "held"),
+    [
+        ({**TASK, "profile": "engineer"}, {"engineer": ["frontend"]}, ()),
+        ({**TASK, "profile": "designer", "overlays": ["frontend"]}, {}, ()),
+        ({**TASK, "profile": "designer", "overlays": ["frontend"]}, {}, ("frontend",)),
+    ],
+)
+def test_a_hosted_controller_leaves_overlays_a_target_hive_hosts_to_that_hive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, task: dict, defaults: dict, held: tuple[str, ...]
+) -> None:
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, held))
+    decision = _overlaid(task, defaults, frozenset({"designer", "frontend"}))
+    assert (decision.profile, decision.overlays) == (task["profile"], ())
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_a_controller_still_resolves_the_overlays_it_holds_and_refuses_one_no_hive_hosts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    task, defaults = {**TASK, "profile": "engineer"}, {"engineer": ["frontend"]}
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path / "held", ()))
+    with pytest.raises(profile_choice.ProfileUnresolved) as raised:
+        _overlaid(task, defaults, frozenset({"designer"}))
+    assert str(raised.value) == "task t9 overlays are refused: overlay frontend not found"
+    (tmp_path / "held").mkdir()
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path / "held", ("frontend",)))
+    assert _overlaid(task, defaults, frozenset({"frontend"})).overlays == ("frontend",)
+
+
 def test_runtime_profile_decision_uses_the_supplied_classifier_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

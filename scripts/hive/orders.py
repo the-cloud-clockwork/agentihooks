@@ -3,11 +3,11 @@ import json
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import serena_router_daemon
 from scripts.hive import placement, registry
-from scripts.swarm import launch_check, lease, prompt, reaper
+from scripts.swarm import launch_check, lease, overlays, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -376,7 +376,7 @@ class Consumer:
                 return slot["account"]
         return order.slot
 
-    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
+    def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict[str, Any]) -> Ack:
         if refused := self.front_door_refusal(order, agent):
             return Ack("failed", {}, refused)
         config = self.store.config(order.slug)
@@ -389,12 +389,17 @@ class Consumer:
             "admitted_execution_id": agent.execution_id,
             "launch_until_ms": int(time.time() * 1000) + order.expires_at - ACK_MARGIN_MS - lease.now_ms(self.store),
         }
+        try:
+            worn = overlays.chosen(order.profile, task, config.overlays, ())
+        except ValueError as exc:
+            return Ack("failed", {}, f"overlays: {exc}")
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,
             "account": self.slot_account(order),
             "model": agent.model or config.lanes[order.lane].get("model") or getattr(config, f"{order.harness}_model"),
             "effort": agent.effort or config.effort_min,
+            "overlays": list(worn),
         }
         lease.require_epoch(self.store, order.slug, order.epoch)
         if task.get("workspace"):
