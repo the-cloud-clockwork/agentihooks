@@ -1,0 +1,10 @@
+rules:
+  - id: hive-mcp-without-brain-binding
+    languages: [python]
+    severity: ERROR
+    message: Hive rendering must apply the managed brain binding before registering browser configured servers.
+    paths:
+      include:
+        - /scripts/swarm_v2/worker_home.py
+        - hive-mcp-without-brain-binding.py
+    pattern: $ADAPTER.register_mcp(browser.configure(...))

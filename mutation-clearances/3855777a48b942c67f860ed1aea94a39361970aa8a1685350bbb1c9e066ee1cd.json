@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.xǁCheckǁrun:a91cd7c4d154dad7f54e02e7b96378b52f4bd2862a659a79ba2744d19ecd7dc5": {
+    "reader": "standards_reader",
+    "reason": "When no task is watched both slices of the empty list are empty for any turn, so the loop never runs and nothing the pass returns or writes changes."
+  }
+}

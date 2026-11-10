@@ -1,0 +1,6 @@
+{
+  "scripts/hive/member_swarms.py:scripts.hive.member_swarms.x_sync:c0b486955d38615aae669fc6f2f549909eed084f1678090964e38a5995575973": {
+    "reader": "Standards",
+    "reason": "Valid sync targets have exactly one slash between namespace and name; partition and rpartition return identical components for those valid inputs."
+  }
+}

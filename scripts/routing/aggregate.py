@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,9 @@ from scripts.swarm_v2.runtime.base import LOCAL, RuntimeRouter
 
 if TYPE_CHECKING:
     from redis import Redis
+
+_PASS_SCAN: list[tuple[object, dict[str, dict[str, Any]]]] = []
+_PASS_LOCK = threading.Lock()
 
 
 def enabled(environ: Mapping[str, str] | None = None) -> bool:
@@ -21,7 +25,7 @@ def name(slot: str) -> str:
     return f"{harness}:{account_key(account)}"
 
 
-def read(redis: "Redis", now: float) -> dict[str, dict]:
+def _scan(redis: "Redis", now: float) -> dict[str, dict[str, Any]]:
     from scripts.routing.reservation import LaunchSlots
 
     rows: dict[str, dict[str, Any]] = {}
@@ -54,6 +58,20 @@ def read(redis: "Redis", now: float) -> dict[str, dict]:
         )
         row["sessions"] += count
     return rows
+
+
+def read(redis: "Redis", now: float) -> dict[str, dict[str, Any]]:
+    """Every account's row from the live hive reports, scanned once per tick pass and reused by every later read in
+    that pass, whichever client asks, since a pass reads the one swarm Redis; outside a pass each call scans."""
+    from scripts.tick import pool
+
+    active = pool.active()
+    if active is None:
+        return _scan(redis, now)
+    with _PASS_LOCK:
+        if not _PASS_SCAN or _PASS_SCAN[0][0] is not active:
+            _PASS_SCAN[:] = [(active, _scan(redis, now))]
+        return dict(_PASS_SCAN[0][1])
 
 
 def sessions(redis: "Redis", now: float) -> dict[str, int]:
