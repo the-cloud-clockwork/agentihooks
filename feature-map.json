@@ -3327,6 +3327,8 @@
       "tests": [
         "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
         "tests/profiles/test_hub_import.py::test_settings_remove_absolute_paths_but_keep_environment_references",
+        "tests/profiles/test_hub_import.py::test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls",
+        "tests/profiles/test_hub_import.py::test_restrictions_on_absolute_paths_refuse_the_import",
         "tests/profiles/test_hub_import.py::test_dry_run_reports_the_same_files_without_writing",
         "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
         "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",

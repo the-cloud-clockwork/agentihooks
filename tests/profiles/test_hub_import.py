@@ -65,8 +65,28 @@ def test_settings_remove_absolute_paths_but_keep_environment_references(hub: Pat
         "model": "opus",
         "env": {"KEY": "${DIAGRAM_KEY}"},
         "permissions": {"allow": ["Read"]},
-        "hooks": {"Stop": [{}]},
     }
+
+
+@pytest.mark.feature("hub-import-core")
+def test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls(hub: Path, tmp_path: Path) -> None:
+    env = {"OUT": "file:///home/operator/out", "ROOT": "C:/Users/operator", "DOCS": "https://example.com/a"}
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False)
+    settings = json.loads((out / "profiles/diagram/.claude/settings.overrides.json").read_text())
+    assert settings == {"env": {"DOCS": "https://example.com/a"}}
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize("key", ["deny", "ask"])
+def test_restrictions_on_absolute_paths_refuse_the_import(hub: Path, tmp_path: Path, key: str) -> None:
+    settings = {"permissions": {key: ["Read(/home/operator/.ssh/**)"]}}
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps(settings))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=key):
+        import_hub(hub, out, False)
+    assert not out.exists()
 
 
 @pytest.mark.feature("hub-import-core")
@@ -79,7 +99,7 @@ def test_dry_run_reports_the_same_files_without_writing(hub: Path, tmp_path: Pat
 
 
 @pytest.mark.feature("hub-import-core")
-@pytest.mark.parametrize("name", [".env", ".env.local", "credentials.json", "id_rsa", "key.pem"])
+@pytest.mark.parametrize("name", [".env", ".env.local", "credentials.json", "id_rsa", "key.pem", "prod.env"])
 def test_secret_files_refuse_the_entire_import(hub: Path, tmp_path: Path, name: str) -> None:
     (hub / "agents/diagram/package/.claude/rules" / name).touch()
     out = tmp_path / "bundle"

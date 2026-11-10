@@ -10,7 +10,6 @@ before any file is read for content or written.
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import cast
@@ -37,10 +36,11 @@ SECRET_NAMES = frozenset(
         "id_rsa",
     }
 )
-SECRET_SUFFIXES = (".key", ".p12", ".pem", ".pfx")
+SECRET_SUFFIXES = (".env", ".key", ".p12", ".pem", ".pfx")
+RESTRICTIONS = ("deny", "ask")
 ENV_TEMPLATES = frozenset({"dist", "example", "sample", "template"})
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:\\)")
+ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:[\\/]|file://)")
 _DROP = object()
 
 
@@ -79,9 +79,9 @@ def _refuse_unsafe_files(package: Path) -> None:
     for path in (package.parent, package):
         if path.is_symlink():
             raise ValueError(f"symlink refused: {path}")
-    for root, dirs, files in os.walk(package):
+    for root, dirs, files in package.walk():
         for entry in [*dirs, *files]:
-            path = Path(root) / entry
+            path = root / entry
             if path.is_symlink():
                 raise ValueError(f"symlink refused: {path}")
             if entry in files and _is_secret(entry):
@@ -118,14 +118,20 @@ def _profile(command: dict[str, object], name: str) -> dict[str, object]:
 
 
 def _portable(value: object) -> object:
-    """Drop every string carrying an absolute path, recursing through JSON."""
+    """Drop strings carrying an absolute path, hooks losing their command and containers left empty."""
     if isinstance(value, str):
         return _DROP if ABSOLUTE.search(value) else value
     if isinstance(value, dict):
-        pairs = ((key, _portable(item)) for key, item in cast(dict[str, object], value).items())
-        return {key: item for key, item in pairs if item is not _DROP}
+        source = cast(dict[str, object], value)
+        kept = {
+            key: item for key, item in ((key, _portable(item)) for key, item in source.items()) if item is not _DROP
+        }
+        lost_command = "command" in source and "command" not in kept
+        return _DROP if lost_command or (source and not kept) else kept
     if isinstance(value, list):
-        return [item for item in map(_portable, cast(list[object], value)) if item is not _DROP]
+        items = cast(list[object], value)
+        kept_items = [item for item in map(_portable, items) if item is not _DROP]
+        return _DROP if items and not kept_items else kept_items
     return value
 
 
@@ -138,11 +144,27 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         for path in paths:
             if path.is_file():
                 files[path.relative_to(package).as_posix()] = path.read_bytes()
-    settings = package / SETTINGS
-    if settings.is_file():
-        portable = _portable(json.loads(settings.read_text()))
-        files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
+    settings_path = package / SETTINGS
+    if settings_path.is_file():
+        settings: object = json.loads(settings_path.read_text())
+        _refuse_lost_restrictions(settings, settings_path)
+        portable = _portable(settings)
+        if portable is not _DROP:
+            files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
     return files
+
+
+def _refuse_lost_restrictions(settings: object, path: Path) -> None:
+    """Refuse settings whose deny or ask rules carry an absolute path that import would drop."""
+    permissions = cast(dict[str, object], settings).get("permissions") if isinstance(settings, dict) else None
+    if not isinstance(permissions, dict):
+        return
+    for key in RESTRICTIONS:
+        rules = cast(dict[str, object], permissions).get(key)
+        if isinstance(rules, list) and any(
+            isinstance(rule, str) and ABSOLUTE.search(rule) for rule in cast(list[object], rules)
+        ):
+            raise ValueError(f"{key} rule with an absolute path refused: {path}")
 
 
 def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
