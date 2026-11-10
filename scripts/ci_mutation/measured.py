@@ -322,7 +322,7 @@ def budget_overrun(plan: dict[str, Any], budget: float) -> str:
     slowest: float = max(plan["shard_worker_seconds"])
     workers: int = plan["workers"]
     shard = shard_capacity(workers, budget)
-    if slowest <= shard:
+    if slowest <= 0 or slowest <= shard:
         return ""
     units: dict[str, list[float]] = plan.get("unit_costs", {})
     largest, name = max(

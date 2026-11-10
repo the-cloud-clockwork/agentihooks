@@ -112,7 +112,7 @@ def test_an_unchanged_hive_runs_no_herdr_command(tmp_path):
     ran = len(herdr.commands)
 
     assert running.run_pass() is None
-    assert len(herdr.commands) == ran
+    assert herdr.commands[ran:] == [["herdr", "machine", "list", "--json"]]
 
 
 def test_only_kubernetes_workers_with_a_published_host_key_of_their_generation_are_saved(tmp_path):
@@ -291,6 +291,7 @@ def test_a_resumed_service_carries_the_pass_state_of_the_one_before(tmp_path):
         "due": False,
         "seen": {started[0]: started[1]},
         "synced": 1000.0,
+        "hive_outages": {},
         "jump": {"host": "swarm.example", "port": 2223, "host_public": JUMP_KEY, "user": USER},
     }
 
@@ -298,7 +299,7 @@ def test_a_resumed_service_carries_the_pass_state_of_the_one_before(tmp_path):
     second.resume(json.loads(json.dumps(saved)))
     ran = len(herdr.commands)
     assert second.run_pass() is None
-    assert len(herdr.commands) == ran
+    assert herdr.commands[ran:] == [["herdr", "machine", "list", "--json"]]
     assert second.upkeep.terminal.home.jump == Jump("swarm.example", 2223, JUMP_KEY)
 
     now[0] += RENEW_SECONDS
@@ -321,7 +322,7 @@ def test_a_resumed_state_without_a_jump_keeps_the_client_jump(tmp_path):
 
     assert (running.upkeep.due, running.upkeep.seen, running.synced) == (False, {"x": 2}, 5.0)
     assert running.upkeep.terminal.home == client
-    assert bare.saved() == {"due": True, "seen": {}, "synced": None, "jump": None}
+    assert bare.saved() == {"due": True, "seen": {}, "synced": None, "jump": None, "hive_outages": {}}
 
 
 def test_the_service_runs_herdr_as_the_client_home_by_default(tmp_path, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/herdr/operator_service.py:scripts.swarm_v2.herdr.operator_service.xǁServiceǁrun_pass:9c020a459dc94f0dd8d5f21216e552709c4556092ddf3e6f2c281722fe3dfcd3": {
+    "reader": "standards_reader",
+    "reason": "Changes only when buffered removal log lines reach the operating system, never their content or order within the single threaded process stdout. The hive status probe captures its own output, so nothing else writes to the inherited stream to interleave with these lines, and normal interpreter shutdown flushes stdout, so no line is lost. A captured output test sees identical output with either flush value."
+  }
+}

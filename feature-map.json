@@ -578,7 +578,8 @@
         "tests/tick/steps/test_reap_watch.py::test_an_agent_stuck_on_its_provider_frees_its_seat_and_clears_its_pane",
         "tests/tick/steps/test_reap_watch.py::test_a_freeing_retire_asks_the_hive_report_with_its_store_agent_homes_and_time",
         "tests/tick/steps/test_reap.py::test_reap",
-        "tests/tick/steps/test_reap.py::test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent"
+        "tests/tick/steps/test_reap.py::test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent",
+        "tests/tick/steps/test_reap.py::test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest"
       ]
     },
     {
@@ -1615,6 +1616,37 @@
       ]
     },
     {
+      "id": "herdr-hive-lifecycle",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-herdr-dead-hive-lifecycle",
+      "behaviour": "Operator terminal sync forgets removed hive machines immediately and unreachable registered hives after fifteen minutes of persisted failed connections, including hives that never report, retaining brief restarts and manual machines, clearing host keys and logging the reason. Recovery resets the deadline and explicit removal reaches other clients.",
+      "seam": "operator Service run_pass, hive machine forget, and hive remove unregister",
+      "tests": [
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_removed_and_unplugged_hives_leave_herdr_with_their_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_brief_restart_keeps_the_saved_machine_and_host_key",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_lifecycle_cleanup_runs_even_when_worker_attempts_do_not_change",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_recovered_hive_keeps_its_machine_past_the_first_outage_deadline",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_reaches_another_client_with_a_custom_hive_name",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_dry_run_removal_does_not_retire_another_clients_machine",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_readding_a_removed_name_clears_its_removal_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_unrelated_manual_machine_names_are_never_removed",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_hive_that_never_reports_has_a_bounded_startup_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreadable_catalog_reports_failure_without_removing_machines",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_reachable_hive_is_kept_even_when_its_heartbeat_daemon_is_stale",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_outage_after_a_stale_heartbeat_still_gets_the_full_restart_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_startup_failure_expires_even_when_the_member_has_no_hive_record",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_outage_deadlines_survive_scheduled_service_recreation",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_successful_connection_resets_the_outage_deadline",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_replacing_a_saved_target_starts_a_new_outage_grace",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_a_manually_forgotten_machine_loses_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_explicit_removal_records_the_hive_removed_reason",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_the_status_probe_is_bounded_by_the_herdr_timeout",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unreachable_removal_drops_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_an_unregistered_custom_label_drops_its_outage_state",
+        "tests/test_swarm_v2_herdr_hive_lifecycle.py::test_adding_a_member_name_again_clears_its_removal_record"
+      ]
+    },
+    {
       "id": "inbox-settlement",
       "origin": "inventory",
       "behaviour": "Information closes on receipt while work stays open and reminds its receiver until it is explicitly replied to or closed.",
@@ -2357,6 +2389,18 @@
         "tests/swarm/test_blocker_window.py::test_the_master_keeps_every_tool_while_blockers_sustain",
         "tests/swarm/test_blocker_window.py::test_checked_never_denies_the_master_and_notes_the_notice_kwargs",
         "tests/test_master_coding.py::test_the_shell_guard_leaves_the_master_its_tools_during_a_sustained_blocker"
+      ]
+    },
+    {
+      "id": "stall-blockers-open-master-coding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2437",
+      "behaviour": "An hour with no merge into dev while focused pull requests are open, or a task left in pr an hour past the twenty minutes after its pull request merged, is a sustained blocker that opens the master coding window with no typed phrase; log only by default, recorded under enforce.",
+      "seam": "stall_blockers observe and the blocker window pretool",
+      "tests": [
+        "tests/swarm/test_stall_blockers.py::test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_master_coding_window",
+        "tests/swarm/test_stall_blockers.py::test_a_task_left_in_pr_eighty_minutes_after_its_merge_opens_the_master_coding_window",
+        "tests/swarm/test_stall_blockers.py::test_log_only_by_default_writes_the_gate_log_and_records_no_blocker"
       ]
     },
     {
@@ -3222,6 +3266,23 @@
       "tests": [
         "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
         "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
+      ]
+    },
+    {
+      "id": "tick-runtime-port-fence",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-fenced-runtime-out",
+      "behaviour": "The tick reaches its fenced runtime only through the Tools runtime port: the port fences the pass runtime to the held lease in a deployment and acts through the fenced runtime after, refuses without a fence or past its deadline, counts as a runtime write, and the ack pass and the master placement take their lease through the coordination port and their fence through the runtime port.",
+      "seam": "scripts.tick.ports.contracts.Runtime.fence, implemented by scripts.tick.adapters.runtime.RouterRuntime",
+      "tests": [
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_fences_its_pass_runtime_and_acts_through_the_fenced_one_after",
+        "tests/tick/test_runtime_port_fence.py::test_a_runtime_port_without_a_fence_refuses_to_fence",
+        "tests/tick/test_runtime_port_fence.py::test_the_runtime_port_refuses_to_fence_past_its_deadline",
+        "tests/tick/test_runtime_port_fence.py::test_fencing_is_a_runtime_write_a_step_must_declare",
+        "tests/tick/test_runtime_port_fence.py::test_the_pass_tools_fence_builds_the_controller_fence_of_their_swarm",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
+        "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease",
+        "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
       ]
     }
   ],
