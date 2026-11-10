@@ -106,7 +106,7 @@ def test_last_per_subject_raises_the_create_error_and_unsubscribes() -> None:
 @pytest.mark.feature("bus-state-batch")
 def test_last_per_subject_refuses_a_create_over_the_payload_limit() -> None:
     client = _Client({}, [], max_payload=64)
-    with pytest.raises(PayloadTooLarge):
+    with pytest.raises(PayloadTooLarge, match=r"^\$JS\.API\.CONSUMER\.CREATE\.S: payload"):
         asyncio.run(nats_batch.last_per_subject(_js(client), "S", ["s." + "x" * 80]))
     assert client.requests == []
     assert client.sub.unsubscribed
@@ -116,10 +116,12 @@ def test_last_per_subject_refuses_a_create_over_the_payload_limit() -> None:
 def test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    asked: list[list[str]] = []
+    js = _js(_Client({}, []))
+    asked: list[list[Any]] = []
+    decoded: list[tuple[Any, bytes]] = []
 
-    async def last(js: Any, stream: str, subjects: list[str]) -> dict[str, nats_batch.Last]:
-        asked.append([stream, *subjects])
+    async def last(seen: Any, stream: str, subjects: list[str]) -> dict[str, nats_batch.Last]:
+        asked.append([seen, stream, *subjects])
         return {
             "p.a": nats_batch.Last(b"one", {}, 3),
             "p.gone": nats_batch.Last(b"", {"KV-Operation": "DEL"}, 5),
@@ -128,14 +130,18 @@ def test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none(
     async def chunk(key: str) -> bytes:
         return b""
 
+    async def decode(reader: Any, data: bytes) -> bytes:
+        decoded.append((reader, data))
+        return data.upper()
+
     monkeypatch.setattr(nats_batch, "last_per_subject", last)
+    monkeypatch.setattr(nats_batch.nats_payload, "decode", decode)
     keys = ["a", "missing", "gone", "a"]
-    entries = asyncio.run(
-        nats_batch.read_entries(_js(_Client({}, [])), "S", keys, lambda key: f"p.{key}", chunk, lambda m: m.seq * 10)
-    )
-    entry = StateEntry(key="a", value=b"one", revision=30)
+    entries = asyncio.run(nats_batch.read_entries(js, "S", keys, lambda key: f"p.{key}", chunk, lambda m: m.seq * 10))
+    entry = StateEntry(key="a", value=b"ONE", revision=30)
     assert entries == [entry, None, None, entry]
-    assert asked == [["S", "p.a", "p.missing", "p.gone", "p.a"]]
+    assert asked == [[js, "S", "p.a", "p.missing", "p.gone", "p.a"]]
+    assert decoded == [(chunk, b"one")]
 
 
 def _wiring(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
