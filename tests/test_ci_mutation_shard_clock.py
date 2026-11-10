@@ -1,0 +1,64 @@
+"""A mutation shard answers its forced fail control from recorded probe kills and runs on its own clock."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from scripts.ci_mutation import probe
+from scripts.ci_mutation.runner import run_gate
+from scripts.ci_mutation.stats import SharedStats
+from tests.test_ci_mutation_probe import _plan, _records
+
+
+@pytest.mark.feature("mutation-shard-probe-kills-own-clock")
+def test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The forced fail control passes no mutant and no tests; a probe kill already proves the tests catch a mutant."""
+    calls: list[tuple[str | None, list[str]]] = []
+
+    def execute(worker: str, *, mutant_name: str | None, tests: list[str]) -> int:
+        calls.append((mutant_name, tests))
+        return 0
+
+    monkeypatch.setenv("MUTANT_UNDER_TEST", "fail")
+    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 1
+    assert calls == []
+    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "survived"})("worker", mutant_name=None, tests=[]) == 0
+    assert probe.reuse_kills(execute, {})("worker", mutant_name=None, tests=[]) == 0
+    assert calls == [(None, []), (None, [])]
+    monkeypatch.delenv("MUTANT_UNDER_TEST")
+    assert probe.reuse_kills(execute, {"scripts.a.x_f__mutmut_1": "killed"})("worker", mutant_name=None, tests=[]) == 0
+    assert calls == [(None, []), (None, []), (None, [])]
+
+
+@pytest.mark.feature("mutation-shard-probe-kills-own-clock")
+def test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The probe ran in another job, so its seconds never shorten the shard's budget or its reported wall time."""
+    plan = probe.merge_probes(_plan(), _records(_plan()))
+    folder = tmp_path / "stats"
+    folder.mkdir()
+    (folder / "plan.json").write_text(json.dumps(plan))
+    stats = SharedStats(folder, plan["head"])
+    assert probe.probe_elapsed(stats) == 9
+    source = tmp_path / "hooks/sample.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def f():\n    return 1\n")
+    (tmp_path / ".mutation-selection.json").write_text(json.dumps({"hooks/sample.py": ["tests/test_sample.py"]}))
+    ran: list[list[str]] = []
+
+    def mutate(*args: object, **kwargs: object) -> tuple[dict[str, list[dict[str, str]]], str]:
+        ran.append(list(args[2]))
+        return {"hooks/sample.py": []}, ""
+
+    monkeypatch.setattr("scripts.ci_mutation.runner.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("scripts.ci_mutation.runner.mutate_files", mutate)
+    report = run_gate(tmp_path, {"hooks/sample.py": {2}}, tmp_path / "output", 5, (0, 1), stats)
+    assert ran == [["hooks/sample.py"]]
+    assert report["not_mutated"] == []
+    assert report["shard"]["wall_seconds"] == 0
+    assert report["shard"]["budget_exhausted"] is False
+    assert "over budget" not in capsys.readouterr().out
