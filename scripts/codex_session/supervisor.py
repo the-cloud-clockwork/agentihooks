@@ -272,7 +272,7 @@ def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> N
         protocol.set_thread_name(connection, thread_id, name)
 
 
-def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict:
+def opening_end(connection: protocol.Connection, events: list[dict], deadline: float, clock: Callable) -> dict[str, Any]:
     """The opening turn as it completed; empty once the model answers or the watch ends first."""
     for _ in range(MAX_POLLS):
         while events:

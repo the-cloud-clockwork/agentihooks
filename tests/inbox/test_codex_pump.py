@@ -726,7 +726,9 @@ def test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delive
 @pytest.mark.feature("codex-opening-account-refusal")
 @pytest.mark.parametrize("same_opening", [True, False])
 def test_a_refused_recorded_opening_is_recovered_when_the_pump_starts(rig: Rig, same_opening: bool) -> None:
-    rig.bindings.put(SLUG, replace(rig.record(), active_turn_id="turn-opening"))
+    record = rig.record()
+    assert record is not None
+    rig.bindings.put(SLUG, replace(record, active_turn_id="turn-opening"))
     rig.server.turns.append(
         {"id": "turn-opening" if same_opening else "historical", "status": "failed", "inputs": [], "error": DEACTIVATED}
     )
@@ -734,7 +736,9 @@ def test_a_refused_recorded_opening_is_recovered_when_the_pump_starts(rig: Rig, 
 
     assert rig.run(2) == (codex.REFUSED if same_opening else codex.STOPPED)
     assert rig.store.get(item.id).state == ("pending" if same_opening else "delivered")
-    assert rig.record().state == (DEGRADED if same_opening else CONNECTED)
+    result = rig.record()
+    assert result is not None
+    assert result.state == (DEGRADED if same_opening else CONNECTED)
 
 
 @pytest.mark.feature("codex-pump-account-refusal")
