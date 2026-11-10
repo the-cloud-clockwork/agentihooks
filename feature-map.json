@@ -175,6 +175,19 @@
       ]
     },
     {
+      "id": "hosted-overlay-on-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-hosted-frontend-overlay",
+      "behaviour": "A hosted controller leaves a bundle overlay such as frontend that it does not hold but a placement target hive hosts to that hive, and the hive member resolves the overlays against its own bundle into the launch assignment or fails the order naming the overlay.",
+      "seam": "profile choice on the controller and the hive order launch on the member",
+      "tests": [
+        "tests/swarm/test_profile_choice.py::test_a_hosted_controller_leaves_overlays_a_target_hive_hosts_to_that_hive",
+        "tests/swarm/test_profile_choice.py::test_a_controller_still_resolves_the_overlays_it_holds_and_refuses_one_no_hive_hosts",
+        "tests/hive/test_orders.py::test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment",
+        "tests/hive/test_orders.py::test_a_member_that_cannot_resolve_an_overlay_fails_the_order_without_launching"
+      ]
+    },
+    {
       "id": "hive-drain-launch-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",

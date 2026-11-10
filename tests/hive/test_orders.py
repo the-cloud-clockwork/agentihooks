@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -788,6 +789,34 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
         "model": expected_model,
         "effort": expected_effort,
     }
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ("frontend",)))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    ack = setup.consumer.apply(setup.order)
+    assert ack is not None and ack.status == "live"
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["overlays"] == ["frontend"]
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_a_member_that_cannot_resolve_an_overlay_fails_the_order_without_launching(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ()))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    assert setup.consumer.apply(setup.order) == Ack("failed", {}, "overlays: overlay frontend not found")
+    setup.runtime.spawn.assert_not_called()
 
 
 def test_spawn_without_validation_is_reported_ambiguous(setup):
