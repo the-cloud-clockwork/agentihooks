@@ -403,8 +403,8 @@ process uses `AGENTIHOOKS_SWARM_REDIS_URL` and none of this applies, a process c
 
 1. It reads `hive.env` in the hive home (`AGENTIHOOKS_HOME`, else `~/.agentihooks`). When that file names a Redis
    user other than the one in the process environment, as after `hive create` or a rejoin replaced the member, the
-   process takes `AGENTIHOOKS_HIVE_ID` and `AGENTIHOOKS_HIVE_REDIS_URL` from the file. `hive add` and every refresh
-   write both into the file.
+   process takes `AGENTIHOOKS_HIVE_ID` and `AGENTIHOOKS_HIVE_REDIS_URL` from the file. `hive add` writes both into the
+   new host's file, and every refresh writes both into the refreshing host's file.
 2. It logs in with `AGENTIHOOKS_HIVE_REDIS_URL`.
 3. When Redis refuses that credential, it tries the URL saved in `hive.env`. If that one logs in, the process takes
    the member id saved beside it.
