@@ -22,6 +22,10 @@ agentihooks terminate-agent --list --type any
 
 Use `--type claude` or `--type codex` when requested. Report the table exactly.
 
+The table carries registered sessions and unregistered agent processes. It
+leaves out zombies, sessions recorded in another process namespace and an
+unregistered `claude -p` or `--print` run, which has no session to end.
+
 ## Resolve safely
 
 Run the deterministic dry-run before every termination:

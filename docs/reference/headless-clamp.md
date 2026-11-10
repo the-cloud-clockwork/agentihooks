@@ -154,6 +154,8 @@ without its package resources, so it also lacks `codex-code-mode-host` and the
 bundled `bwrap`; every `code_mode_only` model then fails each `exec` call. The
 canaries ran against the full npm package `@openai/codex@0.162.0-linux-x64`
 (`vendor/x86_64-unknown-linux-musl/bin/codex`), which carries both.
+The swarm worker image installs the host beside `codex`; see
+[Codex code mode host in the worker image](worker-image-codex-code-mode.md).
 
 ## Hooks in each clamp
 
