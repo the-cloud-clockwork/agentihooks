@@ -509,13 +509,13 @@ def test_the_spawn_order_reads_ready_tasks_with_the_pass_rows_doc_and_claims(mon
     monkeypatch.setattr(place.preempt, "yielding", lambda store, slug, doc, key: "dispatched")
     monkeypatch.setattr(tick, "claim_view", lambda slug, store, rows, doc, dispatched: "claims")
     monkeypatch.setattr(tick, "_running", lambda agents, rows, lane: [])
-    monkeypatch.setattr(tick, "ready_in_order", ready)
+    monkeypatch.setattr(tick, "ready_by_lane", ready)
     rows, doc = {"t1": {"id": "t1"}}, {"tasks": {}}
     config: Any = SimpleNamespace()
     store: Any = "store"
     with pytest.raises(_ReadyRead):
         place._spawn_order("sw", config, store, [], rows, doc, SimpleNamespace())
-    assert asked == [("sw", "store", rows, doc, "eng", "dispatched", "claims")]
+    assert asked == [("sw", "store", rows, doc, ["eng"], "dispatched", "claims")]
 
 
 SPAWN_LEFT = "spawn stopped at the pass deadline, {left} of {total} ready tasks left for the next pass"

@@ -1,0 +1,19 @@
+rules:
+  - id: claim-view-live-network-read-on-cache-miss
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step's claim view reader lists live over the network on a cache miss. The "spawn due" step's own
+      capture on 2026-11-09 shows ready_in_order spending 85% or more of even its successful 23-25s runs here, and
+      the step abandoned at its 46s budget while still inside this call; a live GitHub listing is bounded by its
+      own 60s deadline, already larger than the step's whole budget. Serve only the saved cache from a claim
+      view's reader, admitting a cold or failed cache the same way; leave the live listing and its save to the
+      dedicated step that owns that budget.
+    paths:
+      include:
+        - /scripts/swarm/fleet_red.py
+        - /scripts/tick/steps/claims.py
+        - claim-view-live-network-read-on-cache-miss.py
+    pattern: |
+      if $SAVED is None:
+          return read(...)
