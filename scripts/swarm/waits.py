@@ -12,7 +12,7 @@ from collections.abc import Callable
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.hive import scope
-from scripts.inbox.store import CLOSED, InboxError
+from scripts.inbox.store import CLOSED, Gone, InboxError
 from scripts.swarm import idle, merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
 
@@ -197,9 +197,9 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
         state = rows[target].get("state")
         return f"task {target}, now {state}" if state in TASK_ENDS else ""
     try:
-        item = inbox.get(target)
-    except InboxError:
-        return f"message {target}, gone from the inbox"
+        item = inbox.locate(target)
+    except Gone:
+        return "" if scope.member() else f"message {target}, gone from the inbox"
     return f"message {target}, now {item.state}" if item.state in CLOSED else ""
 
 
