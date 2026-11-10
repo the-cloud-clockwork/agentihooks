@@ -103,6 +103,13 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
+def _required(want, task):
+    required = task.get("requires_harness", "")
+    if required and want and want != required:
+        raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
+    return want or required
+
+
 def _prefer(profile, avoid):
     order = profile_choice.preferred(profile)
     if not avoid:
@@ -729,10 +736,7 @@ class HerdrRuntime:
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
-        required = task.get("requires_harness", "")
-        if required and want and want != required:
-            raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
-        want = want or required
+        want = _required(want, task)
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")

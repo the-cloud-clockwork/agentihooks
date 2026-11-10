@@ -66,8 +66,6 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       task folders off every remote hive (task set workstation=yes or no);
                                       --needs CAPS claims it only on a hive declaring every capability in CAPS,
                                       such as headed (task set needs=CAPS);
-                                      --requires-harness claude|codex spawns it only on that harness, waiting
-                                      for a free seat of it (task set requires_harness=claude, codex or empty);
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, then by
                                       critical path; only the master, a planner or the operator sets it;
