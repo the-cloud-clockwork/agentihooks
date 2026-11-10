@@ -1385,8 +1385,10 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
-3. Installs a mounted credential as `hive.env`. With no mounted credential and no `hive.env` yet, it starts sshd
-   and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
+3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
+   ([Operator SSH into a worker hive](#operator-ssh-into-a-worker-hive)). Then it installs a mounted credential as
+   `hive.env`. With no mounted credential and no `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S`
+   (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
@@ -1505,6 +1507,109 @@ lists.
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
+### Operator SSH into a worker hive
+
+`workers.ssh.enabled` runs sshd inside the worker pod, so the operator can open a shell or a herdr session on the
+hive and `agentihooks hive add` can deliver a member credential to it. It is off by default.
+
+```yaml
+workers:
+  ssh:
+    enabled: true
+    port: 2222        # 1024 or higher; sshd runs as the unprivileged worker user
+  credentialSecret:
+    name: worker-hive-join
+    key: invite
+```
+
+The Secret named by `workers.credentialSecret` must then hold two more keys beside the member credential:
+
+| Secret key | Mounted at | Content |
+|---|---|---|
+| `authorized_keys` | `/run/hive-join/ssh/authorized_keys` | The operator public keys allowed to log in, one per line |
+| `host_key` | `/run/hive-join/ssh/host_key` | The sshd private host key, so the host key stays the same across pod restarts |
+
+Deliver them through the same ExternalSecret as the credential. The chart refuses a port below 1024 with
+`workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker`.
+
+**What the pod runs.** The start script installs the host key mode 0600 under `$AGENTIHOOKS_HOME/ssh`, writes
+`$AGENTIHOOKS_HOME/ssh/sshd_config`, checks it with `sshd -t`, and starts `sshd -D -e`, which logs to the pod log at
+`VERBOSE`. Without a mounted host key, outside the chart, it generates an ed25519 host key once and keeps it. The
+configuration:
+
+- listens on `0.0.0.0` at `workers.ssh.port` and allows only the worker user;
+- accepts public keys from the mounted `authorized_keys` only: no password, keyboard interactive or PAM login, no
+  root login;
+- turns off TCP and agent forwarding, gateway ports, tunnels, X11 and user environment files;
+- sets `PATH` to `~/.local/bin`, `/opt/venv/bin` and the system folders, with `NPM_CONFIG_PREFIX` and
+  `AGENTIHOOKS_HOME`, so `agentihooks`, `claude` and the npm tools resolve in an ssh shell;
+- turns `StrictModes` off, because the keys sit on a read-only Secret mount the worker cannot own.
+
+sshd starts before the credential step, so a pod with no mounted credential already serves the keys while it waits
+for `hive add` to deliver `hive.env`. The pod fails before serving any agent when `sshd -t` rejects the configuration
+or host key, or when sshd has exited one second after launch. An sshd that exits later is not restarted: restart the
+pod.
+
+**Container env file.** An ssh shell does not inherit the pod's environment. Each start writes
+`$AGENTIHOOKS_HOME/hive-container.env` (mode 0600), which agentihooks loads with the other `*.env` files in its home,
+so `agentihooks` commands in an ssh shell or herdr pane see the pod's settings. It copies the variables whose names
+start with `AH_`, `AGENTIHOOKS_`, `HIVE_`, `SWARM_`, `LANGFUSE_`, `BRAIN_` or `AMYGDALA_`, plus `KB_ROUTER_TOKEN` and
+`SSL_CERT_FILE`, each value shell quoted. It leaves out `SWARM_SECRET` and `AGENTIHOOKS_LEDGER_AGENT_TOKEN`, values
+with a newline, and values with a single quote or backslash, which python-dotenv cannot read back; each of the last
+kind logs `worker-hive: <name> holds a quote or backslash, which python-dotenv cannot read back; left out`.
+`agentihooks hive setup` never copies this file into the hive settings record.
+
+**Publishing the port.** The chart names the container port `ssh` and creates no Service for it. Publish it from the
+deployment overlay, for example with a LoadBalancer on a LAN address:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentihooks-swarm-worker-hive-ssh
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: agentihooks-swarm
+    app.kubernetes.io/instance: <release>
+    app.kubernetes.io/component: worker-hive     # worker-hive-<name> for a workers.hives entry
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+```
+
+**Workstation setup.** Give the hive an ssh config host with the operator key whose public half is in
+`authorized_keys`:
+
+```text
+Host anton-hive
+  HostName <LoadBalancer address>
+  Port 2222
+  User worker
+  IdentityFile ~/.ssh/<operator key>
+```
+
+Then check the login, save the machine in herdr and open a pane on it:
+
+```bash
+ssh anton-hive agentihooks balance            # the hive's accounts, read through hive-container.env
+herdr machine add --label anton-hive anton-hive
+herdr machine list                            # anton-hive is listed and enabled
+```
+
+`herdr machine add` prepares the remote herdr server over that ssh host before saving the machine, so a saved
+machine has already been reached once. A pane opened on it runs in the pod as the worker user.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| The pod exits at start right after an `sshd -t` error in its log | The `host_key` value in the credential Secret | Store a valid OpenSSH private key under `host_key`. |
+| `Permission denied (publickey)` | The key ssh offers (`ssh -v anton-hive`) against the Secret's `authorized_keys` | Add the operator public key to `authorized_keys` in the Secret's source. sshd reads the mounted file at each login, so the key works once the ExternalSecret and the kubelet have synced it. |
+| `Connection refused` or a timeout | `kubectl get svc` for the ssh Service and its address; the pod's `ssh` port | Publish the port as above, or start the pod with `workers.ssh.enabled`. |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` after a restart | Whether the Secret holds `host_key` | Keep the host key in the Secret so restarts reuse it; then remove the old line with `ssh-keygen -R`. |
+| `agentihooks` is not found, or runs without the hive's accounts, in an ssh shell | That the pod was started by the current start script, and the start log for a `left out` line | Restart the pod on a current image; move a value with a quote or backslash out of a copied variable. |
+| `herdr machine add` fails while `ssh anton-hive` works | Whether `HOME` differs from the passwd home: herdr's health check calls ssh without `-F`, so ssh reads the passwd home's config | Put the host in `~/.ssh/config` of the passwd home. |
 
 ### Worker hive memory and placement
 
