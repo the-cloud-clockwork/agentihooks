@@ -448,8 +448,8 @@ prints each agent's hive in its Hive column, and the ledger page agents table na
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan prefer=master:1
-agentihooks hive set vm  ui=yes excluded=eng,ci,plan prefer=master:2,qa:1,frontend:1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan,dispatch prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,plan,dispatch prefer=master:2,qa:1,frontend:1
 agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
@@ -457,6 +457,60 @@ agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 - QA and frontend work runs on the VM, then on a pod when the VM is gone.
 - Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
   longer excludes that role.
+
+### The dispatcher seat on hives
+
+The dispatcher is one seat per swarm, `dispatcher@<slug>`, in the `dispatch` lane. The tick's dispatch seat step
+starts it while the swarm runs at `autonomy=full` and has an open dispatcher trigger: a Priorities item, an
+uncovered bottleneck share, a red dev run that holds work, or an inbox item for the seat. It ends the seat when the
+triggers close. It spawns through hive placement like the `eng`, `ci` and `plan` lanes: the
+`dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
+`dispatch` or `dispatcher`, ordered as in [Placement](#placement).
+
+Placement does not try headless hives first for the dispatcher: it pools every live hive that takes `dispatch`,
+UI and headless alike, and orders them only by `prefer` rank, room, lasting over ephemeral and hive id. Keeping
+the seat off the workstation takes an exclusion or a rank, as below.
+
+A worker hive pod excludes only `master` by default (`HIVE_EXCLUDED`, chart value `excluded: [master]`), so every
+pod takes the dispatcher. A UI hive excludes nothing by default, so the workstation takes the dispatcher on equal
+terms with the pods. To run the dispatcher only on headless hives, exclude `dispatch` on every UI hive:
+
+```bash
+agentihooks hive set desk ui=yes excluded=eng,ci,plan,dispatch prefer=master:1
+agentihooks hive show desk          # "excluded": ["eng", "ci", "plan", "dispatch"]
+```
+
+To let the workstation take the dispatcher only when no pod can, leave `dispatch` out of its `excluded` list and
+rank the pods instead:
+
+```bash
+agentihooks hive set anton-1 prefer=dispatch:1
+agentihooks hive set anton-2 prefer=dispatch:2
+```
+
+An unranked hive comes after every ranked one, so the workstation takes the seat only when every ranked pod lacks
+the account slot, room, the repo or the login, or is not live. The agent record's profile decision then carries
+`placement_spill` with `preferred`, the first ranked hive, and `refusal`, why it did not take the seat, and the hive
+launcher prints the same fields on stderr as one `hive_placement_spill` JSON line.
+
+The seat starts only when nothing holds it. The tick checks, in order, the controller's placement refusal for the
+`dispatch` lane, a free account slot and the host room guard, and logs the first refusal as the tick's result for
+the seat. When every hive that takes `dispatch` is full the seat waits with
+`the dispatcher waits: no hive for dispatch has room: <hive> <refusal>` and the tick tries again on its next pass.
+A paused swarm starts no dispatcher.
+
+Check where the dispatcher runs:
+
+```bash
+agentihooks swarm <slug> status     # the dispatcher row's Hive column names its hive
+agentihooks hive list               # each hive's excluded list, prefer ranks and agents
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The dispatcher runs on the workstation while pods have room | The workstation does not exclude `dispatch`, and no pod ranks first in `prefer`. | `agentihooks hive set <workstation> excluded=...,dispatch`, or rank the pods with `prefer=dispatch:1`. |
+| The tick reports `the dispatcher waits: no hive for dispatch has room` | Every hive that takes `dispatch` is at its agent ceiling or measured headroom. | Wait for a pod to free a slot, raise `max-agents` on a pod, or add a pod. |
+| A launch waits with `no live hive takes dispatch` | Every live hive excludes `dispatch`, or no hive has a fresh heartbeat. | Remove `dispatch` from a hive's `excluded` list, or restart the stale hive's `agentihooks-hive` service, or roll its pod. |
 
 ## Comparing hive configuration
 
