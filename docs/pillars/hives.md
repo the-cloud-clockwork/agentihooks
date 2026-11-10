@@ -161,21 +161,32 @@ environment:
 | Hive environment | The request trusts |
 |---|---|
 | `LEDGER_CA_PEM` set and not blank | Only that CA |
-| `LEDGER_CA_FILE`, else `ledger-ca.pem` in the hive home, exists | The system roots plus that file |
-| Neither | The system roots alone, so the first refresh can fetch the CA the endpoint serves |
+| `LEDGER_CA_FILE` set and the file exists | The system roots plus that file |
+| `LEDGER_CA_FILE` unset and `ledger-ca.pem` exists in the hive home | The system roots plus that file |
+| None of these | The system roots alone |
 
-A named `LEDGER_CA_FILE` that does not exist yet counts as no CA here, unlike for agents, where a missing named file
-is an error. An endpoint whose certificate the chosen trust cannot verify fails the refresh with
-`CERTIFICATE_VERIFY_FAILED`; an endpoint that cannot be reached fails it with
-`hive refresh refused: the hive at <url> is unreachable (<reason>)`, exit 1.
+A named `LEDGER_CA_FILE` that does not exist yet counts as no CA here, even when `ledger-ca.pem` exists, unlike for
+agents, where a missing named file is an error. With the system roots alone, a first refresh succeeds only when the
+endpoint's certificate chains to a system root; an endpoint signed by a private CA needs `LEDGER_CA_PEM` for that
+first command. A whitespace only `LEDGER_CA_PEM` falls through to the file rows.
+
+Both failures print one message and exit 1, `hive refresh refused: the hive at <url> is unreachable (<reason>)`:
+
+| Reason | Cause |
+|---|---|
+| `<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] ...>` | The chosen trust cannot verify the endpoint's certificate |
+| Any other `<urlopen error ...>` | The endpoint cannot be reached |
 
 ```bash
 # A first refresh against an endpoint signed by a private CA: trust it for this one command
 LEDGER_CA_PEM="$(cat swarm-ca.crt)" agentihooks hive refresh
 
-# Later refreshes trust the ledger-ca.pem the first one wrote
+# Later refreshes trust the file the first one wrote, when the endpoint serves its CA
 agentihooks hive refresh
 ```
+
+The file a refresh writes is `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home, and only when the
+endpoint serves a CA (see [Where the CA comes from](#where-the-ca-comes-from)).
 
 Agents the hive launches inherit the `hive run` environment and resolve the CA file from it: `LEDGER_CA_FILE`, else
 `ledger-ca.pem` in `AGENTIHOOKS_HOME`, else in `~/.agentihooks`. That must name the path `hive add` (the remote login

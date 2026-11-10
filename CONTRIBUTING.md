@@ -75,10 +75,10 @@ Tests run in parallel xdist workers, and each worker keeps one process
 environment for every test it runs. A variable a test leaves behind changes
 every later test on that worker.
 
-Set and remove variables only through `monkeypatch.setenv` and
+Set and remove variables through `monkeypatch.setenv` and
 `monkeypatch.delenv`. A fixture that also restores the whole environment wraps
-its body in an empty `patch.dict(os.environ)` and sets its values through
-`monkeypatch` inside it:
+its body in an empty `patch.dict(os.environ)` and still sets its values through
+`monkeypatch` inside it. An excerpt, imports left out:
 
 ```python
 @pytest.fixture
