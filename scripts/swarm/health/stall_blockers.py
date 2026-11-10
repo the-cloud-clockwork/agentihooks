@@ -25,6 +25,7 @@ MERGED_MS = 20 * 60_000
 MERGE_KEY = "merge-stall"
 KEY = "stall-blockers"
 STALE_MS = 2 * merge_stall_observation.CACHE_MS
+KEEP_MS = blockers.TTL_MS // 2
 SENDER = "swarm"
 
 
@@ -111,7 +112,7 @@ def _apply(
         blockers.clear(store, slug, category)
     if found is None:
         return [f"stall blockers: cleared {category}"] if current is not None else []
-    since = max(found.since, now_ms - blockers.TTL_MS // 2)
+    since = max(found.since, now_ms - KEEP_MS)
     blockers.record(store, slug, category, found.detail, now_ms, since=since)
     return []
 
