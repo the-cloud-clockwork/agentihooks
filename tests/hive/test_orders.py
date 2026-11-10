@@ -118,6 +118,7 @@ def test_order_ack_and_live_execution(setup):
         "account": "account",
         "model": config.codex_model,
         "effort": config.effort_min,
+        "overlays": [],
     }
     assert not setup.redis.xrange(setup.orders.stream("host"))
 
@@ -788,6 +789,7 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
         "account": "account",
         "model": expected_model,
         "effort": expected_effort,
+        "overlays": [],
     }
 
 

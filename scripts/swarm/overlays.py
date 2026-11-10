@@ -2,6 +2,9 @@
 
 import subprocess
 import sys
+from collections.abc import Callable, Collection
+from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -36,13 +39,26 @@ def setting(key: str, value: str, current: dict, offered: list[dict]) -> dict:
     return {r: worn for r, worn in {**current, role: names}.items() if worn}
 
 
-def chosen(profile: str, task: dict, defaults: dict) -> tuple[str, ...]:
+def chosen(
+    profile: str, task: dict[str, Any], defaults: dict[str, list[str]], hosted: Collection[str]
+) -> tuple[str, ...]:
+    """The overlays the profile wears, or none when this host lacks the profile or an overlay a target hive hosts."""
     if "overlays" not in task and not defaults:
         return ()
     installer = _install()
+    resolve = installer._resolve_profile_dir
+    if _remote(profile, hosted, resolve):
+        return ()
     dirs = installer._resolve_profile_chain(profile)
-    names = task["overlays"] if "overlays" in task else defaults.get(profile_chain.role(dirs), [])
-    return tuple(profile_chain.worn(dirs, list(names), installer._resolve_profile_dir))
+    names: list[str] = task["overlays"] if "overlays" in task else defaults.get(profile_chain.role(dirs), [])
+    if any(_remote(name, hosted, resolve) for name in names):
+        return ()
+    return tuple(profile_chain.worn(dirs, list(names), resolve))
+
+
+def _remote(name: str, hosted: Collection[str], resolve: Callable[[str], Path | None]) -> bool:
+    """A placement target hive hosts the profile and this host cannot resolve it, so that hive resolves it."""
+    return name in hosted and resolve(name) is None
 
 
 def available() -> list[dict]:
