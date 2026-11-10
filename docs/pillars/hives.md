@@ -1306,7 +1306,7 @@ instead of being retried inside one command:
 | Client | Connect timeout | Read timeout | Used for |
 |---|---|---|---|
 | Command client | 3 seconds | 5 seconds | Beats, reports and the helper threads' writes. |
-| Wait client | 3 seconds | 15 seconds | The scheduler process timer wait between beats. |
+| Wait client | 3 seconds | 15 seconds | The scheduler process timer waits between beats and in both helper threads. |
 
 Both send TCP keepalives and run a connection health check every 15 seconds.
 
@@ -1315,7 +1315,7 @@ Both send TCP keepalives and run a connection health check every 15 seconds.
 | Symptom | Check | Fix |
 |---|---|---|
 | `hive list` shows a joined hive stale after a Redis rollout | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive Redis connection lost` | Repeated lines with a 30 second delay mean Redis or the network is still unreachable from the hive; fix that and the hive returns on its next beat. No lines and an exited service mean the hive runs code from before [#5168](https://github.com/the-cloud-clockwork/agentihooks/pull/5168); upgrade it and restart the service or roll its pod. |
-| Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | The hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
+| Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | Whether the hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
 | `hive run` exits with a traceback right after Redis returns | The error in the traceback | The error is not a lost connection, so the daemon does not retry it; fix the error it names, such as a Redis user missing a permission. The service restarts the process after 5 seconds. |
 
 ## Failover timing
