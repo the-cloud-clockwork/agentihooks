@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.787 · 2026-11-10
+
+### 2026-11-10 · 050450aafb26 · #10386 · @agenticore-app
+
+**Start the handed tick lane with the pass graph and keep spawn out of site barriers**
+
+This change lets the handed slow lane begin right alongside the critical pass instead of waiting on it, using its own executor so a busy slow lane can't steal workers from critical steps, and fixes site gating so sites wait safely without blocking across sites. It also stops spawn from acting as a false barrier for later sites, while settle still correctly waits on it. Live testing showed this cuts pass p95 from 122.5s and fixes 18 steps that were previously dropped before they even started, closing out issue #10385.
+
 ## v2.17.786 · 2026-11-10
 
 ### 2026-11-10 · c38be736bdbc · #10452 · @nestorcolt
