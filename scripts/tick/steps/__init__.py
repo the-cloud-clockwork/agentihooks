@@ -20,7 +20,21 @@ RAISED = "raised"
 PASS_PREFIX = "pass:"
 HOOK_PREFIX = "hook:"
 BOX_KEYS = frozenset(
-    {"agents", "config", "count", "doc", "finished", "found", "judged", "live", "rows", "sleeping", "stop", "view"}
+    {
+        "agents",
+        "config",
+        "count",
+        "doc",
+        "finished",
+        "found",
+        "judged",
+        "live",
+        "phase changed",
+        "rows",
+        "sleeping",
+        "stop",
+        "view",
+    }
 )
 
 
@@ -84,7 +98,7 @@ def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) ->
     if key == DEADLINE:
         return ctx.deadline
     found = ctx.view.read(PASS, key)
-    if key == BOX:
+    if key == BOX or isinstance(found, PassBox):
         return DeclaredBox(cast(dict[str, Any], found), step, allowed)
     box = ctx.view.read(PASS, BOX)
     if key not in allowed and (key in BOX_KEYS or (isinstance(box, Mapping) and key in box)):

@@ -24,7 +24,7 @@ from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, Left, hook_domains, pass_domains
-from scripts.tick.steps.tasks import PHASES, WriteStep
+from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
@@ -238,13 +238,23 @@ STEPS = (
         "wrapper phases",
         held(_phase_passes),
         reads=hook_domains("doc"),
-        writes=frozenset({PHASES}),
+        writes=frozenset({PHASES}) | pass_domains(PHASE_CHANGED),
     ),
     CallStep(
-        "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
+        "planning after phase",
+        "wrapper phases",
+        held(_planning_after_phase),
+        frozenset({"planning and phase pass"}),
+        pass_domains(PHASE_CHANGED),
     ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged")),
+    CallStep(
+        "intent check",
+        "wrapper intent",
+        held(_intent_check, JUDGING),
+        reads=hook_domains("doc", "config"),
+        writes=pass_domains("judged"),
+    ),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),

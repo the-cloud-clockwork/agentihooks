@@ -261,7 +261,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper probes": (NONE, NONE),
     "wrapper commands": (NONE, NONE),
     "wrapper phases": (NONE, hook_domains("doc")),
-    "wrapper intent": (NONE, NONE),
+    "wrapper intent": (NONE, hook_domains("doc", "config")),
     "wrapper relay": (pass_domains("judged"), hook_domains("view")),
     "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
