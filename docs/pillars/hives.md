@@ -2706,16 +2706,17 @@ With `enabled: true` and at least one worker hive, the chart adds:
 
 | Piece | What it does |
 |---|---|
-| PreSync Job `<fullname>-rollout-acquire` | Takes the Lease `<namespace>/<leaseName>` for the owner `<release namespace>/<release name>`. A Lease held by another owner and not expired is waited on, checked every 5 seconds, for up to 5400 seconds; the Job then fails with `another hive rollout owns the lease; no workload was changed` and the sync changes nothing. A held Lease expires 3600 seconds after its renew time. |
-| PostSync Job `<fullname>-rollout-release` | Frees the Lease only when every worker hive Deployment of the release is serving: replicas above 0, the current generation observed, and updated, ready and available replicas all equal to replicas. Otherwise it fails with `replacement hive is not serving; rollout ownership retained` and retries, up to 3 times. |
-| SyncFail Job `<fullname>-rollout-abandon` | Frees the Lease after a failed sync, when this release still holds it. |
+| PreSync Job `<fullname>-rollout-acquire` | Takes the Lease `<namespace>/<leaseName>` for the owner `<release namespace>/<release name>`. A Lease held by another owner and not expired is waited on, checked every 5 seconds, for up to 5400 seconds; the Job then fails with `another hive rollout owns the lease; no workload was changed` and the sync changes nothing. The Job sets the renew time once and nothing renews it, so a held Lease expires 3600 seconds after it was taken. |
+| PostSync Job `<fullname>-rollout-release` | Frees the Lease only when every worker hive Deployment of the release is serving: replicas above 0, the current generation observed, and updated, ready and available replicas all equal to replicas. Otherwise it fails with `replacement hive is not serving; rollout ownership retained` and retries, up to 3 times. When it still fails, the sync fails. |
+| SyncFail Job `<fullname>-rollout-abandon` | Frees the Lease after a failed sync, a failed PostSync release included, when this release still holds it. The next sync's PreSync takes it again. |
 | Readiness probe | `python3 -m scripts.hive.rollout ready` every 5 seconds: ready while the marker `HIVE_READY_FILE` (`/tmp/hive-ready`) was touched in the last 60 seconds. The start script removes the marker, and `hive run` touches it after each successful heartbeat, so a pod is ready from its first beat and turns unready after 60 seconds without one. |
 | Bounded drain | The preStop drain waits `workers.rollout.drainSeconds` instead of `workers.drainSeconds`, and the grace period is that value plus 30 seconds. A value outside 0 to 1500 fails the render with `workers.rollout.drainSeconds must be between 0 and 1500`. |
-| Sync waves | Each worker hive Deployment of the release gets its own sync wave, 1 for the first and one more for each `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
+| Sync waves | Each worker hive Deployment of the release gets its own sync wave: wave 1 for the first worker hive, then one wave per further `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
 | RBAC | A ServiceAccount `<fullname>-rollout`, a Role in the Lease namespace that may create Leases and get and update the named one, and a Role that may get the release's worker hive Deployments. |
 | `release` stamp | A non empty value is written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. |
 
-The hook Jobs run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
+Each hook Job has 5500 seconds in total, its retries included, which holds the 5400 second acquire wait. The hook Jobs
+run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
 release version such as `2.17.467` nor `dev` fails the render; at `dev` the hooks use `workers.image.tag`.
 
 Hives in separate releases roll in turn when they share one `namespace` and `leaseName`: the second release's
@@ -2727,7 +2728,8 @@ its turn sends each agent one inbox order to hand off, so successors start on th
 The antoncore swarm hives are one ArgoCD Application each, `swarm-hive-001` and `swarm-hive-003`, with values in
 `k8s/values-overlays/<hive>/values.yaml`. Each takes the `agentihooks-swarm` chart from
 `ghcr.io/the-cloud-clockwork/charts` at `targetRevision: '*'`, runs the hive worker image at tag `release` with
-`pullPolicy: Always`, and enables the roll with the chart defaults:
+`pullPolicy: Always`, and sets `workers.rollout.enabled: true` (the chart default is false), keeping the other
+rollout defaults:
 
 ```yaml
 workers:
@@ -2752,11 +2754,12 @@ twice, once for the chart and once for the digest stamp, and
 [#1500](https://github.com/the-cloud-clockwork/antoncore/pull/1500) removed the image updater from the hive
 Applications.
 
-The roll on release v2.17.472, across the three hives antoncore ran then and sampled every 15 seconds, took each
-hive from down to serving again in 53 seconds to 6 minutes 42 seconds, and no sample showed more than one hive pod
-out of Running. 17 of its 104 samples showed two hives not ready, while one replacement pod failed readiness on
-Redis socket timeouts. A replacement pod that cannot reach Redis stays unready, because its readiness marker ages past 60 seconds; the
-PostSync release keeps the Lease and the next hive waits its turn.
+The roll on release v2.17.472, across the three hives antoncore ran then and sampled every 15 seconds, took each hive
+from down to serving again in 53 seconds to 6 minutes 42 seconds, and no sample showed more than one hive pod in a
+state other than Running or Terminating. 17 of its 104 samples showed two hives not ready. In those samples one
+replacement pod failed readiness on Redis socket timeouts. A replacement pod that cannot reach Redis stays unready,
+because its readiness marker ages past 60 seconds. The PostSync release then fails, the SyncFail abandon Job frees the
+Lease and the next hive can take its turn while that hive is still down.
 
 Watch a roll:
 
@@ -2777,7 +2780,7 @@ turn.
 | Symptom | Cause | Fix |
 |---|---|---|
 | A sync fails at PreSync with `another hive rollout owns the lease; no workload was changed` | Another release held the Lease for the whole 5400 second wait. | Read the holder with the `kubectl get lease` command above and fix that release's roll; the next sync retries. |
-| The holder stays on one hive and its `rollout-release` Job fails with `replacement hive is not serving; rollout ownership retained` | The replacement hive pod is not ready: no successful heartbeat in the last 60 seconds, often Redis unreachable from the pod. | Read the pod log for `hive Redis connection lost` (see [Redis restarts](#redis-restarts)), fix the cause; the Lease frees once the pod serves. |
+| A hive's `rollout-release` Job fails with `replacement hive is not serving; rollout ownership retained` and its sync fails | The replacement hive pod is not ready: no successful heartbeat in the last 60 seconds, often Redis unreachable from the pod. The abandon Job frees the Lease, so another hive may roll while this one is down. | Read the pod log for `hive Redis connection lost` (see [Redis restarts](#redis-restarts)) and fix the cause; the next sync retakes the Lease. |
 | The render fails with `workers.rollout.drainSeconds must be between 0 and 1500` | The value is negative or above 1500. | Set a value from 0 to 1500. |
 | The render fails with `appVersion must be a release version such as 2.17.467, or dev for an unreleased chart` | The chart's `appVersion` is neither form. | Package the chart with a release version, or keep `dev`. |
 | Each release rolls a hive twice | A second writer changes the pod template after the chart sync, such as an image updater stamping `workers.rollout.release`. | Remove the second writer, so one sync carries every template change of the release. |
