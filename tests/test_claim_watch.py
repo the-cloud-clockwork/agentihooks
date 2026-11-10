@@ -260,6 +260,15 @@ def test_the_client_reads_the_swarm_redis_with_a_fifty_millisecond_bound_and_no_
 
 
 @pytest.mark.feature("swarm-reopened-claim-loss")
+def test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read(hive: list) -> None:
+    redis, spawn = Pushed(OTHER), Spawn()
+
+    assert claim_watch.check(ENV, redis, 1000.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+    assert claim_watch.check(ENV, redis, 1001.0, spawn) == claim_watch.STOP.format(task="t1", slug="sw", owner=OTHER)
+    assert redis.reads == [KEY]
+
+
+@pytest.mark.feature("swarm-reopened-claim-loss")
 def test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner(hive: list) -> None:
     redis, spawn = Pushed(NAME), Spawn()
 

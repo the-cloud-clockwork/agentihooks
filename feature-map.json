@@ -14,7 +14,8 @@
         "tests/test_claim_watch.py::test_a_reassigned_claim_is_checked_on_the_next_call_despite_a_cached_owner",
         "tests/test_claim_watch.py::test_a_released_claim_exits_on_the_next_call_despite_a_cached_owner",
         "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
-        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session"
+        "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
+        "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
       ]
     },
     {
