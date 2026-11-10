@@ -2021,7 +2021,6 @@ through `workers.envFromSecrets`, maps the `redis_url` property of the member re
 `k8s/agentihooks-swarm-workstation-hive` into two keys:
 
 ```yaml
-# antoncore: k8s/manifests/agentihooks-swarm/workstation-hive.yaml, settings ExternalSecret
 data:
   - secretKey: AGENTIHOOKS_HIVE_REDIS_URL
     remoteRef:
