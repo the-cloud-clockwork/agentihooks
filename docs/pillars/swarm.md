@@ -3132,7 +3132,7 @@ the dashboard's `ledger` variable and the time range.
 The admission and headroom panels draw a point only per metrics pass, so they
 update at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`. The master scale
 panel draws a point each time the master seat count changes, and the freeze
-panel one per freeze set or clear. A gap in a headroom series means the hive
+panel gets one row per freeze set or clear, delivered at the next metrics pass. A gap in a headroom series means the hive
 sent no fresh reading at that pass, or the pod resource was not measured.
 
 | Symptom | Cause and fix |
