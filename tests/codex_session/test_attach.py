@@ -162,14 +162,99 @@ def test_the_parser_needs_the_slug_and_the_agent(argv, capsys):
 
 
 def test_main_reads_the_named_agent_and_runs_the_viewer_by_default(monkeypatch):
-    from types import SimpleNamespace
-
     asked, ran = [], []
     monkeypatch.setattr(attach, "recorded", lambda slug, name: asked.append((slug, name)) or reads(RECORD))
-    monkeypatch.setattr(attach.subprocess, "run", lambda command: ran.append(command) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(attach.subprocess, "Popen", lambda command: ran.append(command) or Viewer([0]))
     assert attach.main(["--slug", "sw", "--agent", "sw-master-1"]) == 0
     assert asked == [("sw", "sw-master-1")]
     assert ran == [attach.viewer_argv("codex", RECORD)]
+
+
+class Viewer:
+    def __init__(self, polls, code=-15):
+        self.polls, self.code, self.returncode, self.signals = list(polls), code, None, []
+
+    def poll(self):
+        if self.returncode is None and self.polls:
+            self.returncode = self.polls.pop(0)
+        return self.returncode
+
+    def terminate(self):
+        self.signals.append("terminate")
+        self.returncode = self.code
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        self.signals.append("kill")
+
+
+def bounded(limit):
+    slept = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        if len(slept) > limit:
+            raise AssertionError("the watch never ended")
+
+    return sleep, slept
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+@pytest.mark.parametrize("state", [EXITED, FAILED])
+def test_a_viewer_whose_server_ended_is_stopped(state):
+    viewer = Viewer([None, None, None])
+    sleep, slept = bounded(5)
+    code = attach.watched(["codex"], reads(RECORD, replace(RECORD, state=state)), lambda command: viewer, sleep)
+    assert (code, viewer.signals, slept) == (-15, ["terminate"], [attach.WATCH_S])
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_a_viewer_on_a_live_server_runs_until_it_closes():
+    viewer = Viewer([None, None, 0])
+    sleep, slept = bounded(5)
+    assert attach.watched(["codex"], reads(RECORD), lambda command: viewer, sleep) == 0
+    assert (viewer.signals, slept) == ([], [attach.WATCH_S, attach.WATCH_S])
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_an_unreadable_store_keeps_the_viewer_running():
+    from redis.exceptions import ConnectionError as RedisDown
+
+    viewer = Viewer([None, None, 0])
+    sleep, _ = bounded(5)
+    outages = [RedisDown("down"), OSError("gone")]
+
+    def read():
+        raise outages.pop(0)
+
+    assert attach.watched(["codex"], read, lambda command: viewer, sleep) == 0
+    assert viewer.signals == []
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_a_viewer_that_ignores_terminate_is_killed():
+    class Stubborn(Viewer):
+        def wait(self, timeout=None):
+            if timeout is not None and "kill" not in self.signals:
+                raise attach.subprocess.TimeoutExpired("codex", timeout)
+            return self.returncode
+
+    viewer = Stubborn([None])
+    sleep, _ = bounded(5)
+    attach.watched(["codex"], reads(replace(RECORD, state=EXITED)), lambda command: viewer, sleep)
+    assert viewer.signals == ["terminate", "kill"]
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_main_ends_the_default_viewer_once_its_server_exits(monkeypatch):
+    viewer = Viewer([None, None, None, None])
+    monkeypatch.setattr(attach, "recorded", lambda slug, name: reads(RECORD, RECORD, replace(RECORD, state=EXITED)))
+    monkeypatch.setattr(attach.subprocess, "Popen", lambda command: viewer)
+    monkeypatch.setattr(attach.time, "sleep", bounded(10)[0])
+    assert attach.main(["--slug", "sw", "--agent", "sw-master-1"]) == 3
+    assert viewer.signals == ["terminate"]
 
 
 def test_recorded_reads_the_named_agents_current_transport(monkeypatch):

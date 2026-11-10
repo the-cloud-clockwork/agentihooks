@@ -3237,6 +3237,20 @@
         "tests/test_ci_mutation_shard_clock.py::test_a_recorded_probe_kill_answers_the_forced_fail_control_without_running_tests",
         "tests/test_ci_mutation_shard_clock.py::test_a_shard_after_a_slow_probe_keeps_its_whole_budget_and_reports_its_own_wall_time"
       ]
+    },
+    {
+      "id": "codex-viewer-ends-with-its-server",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2288",
+      "behaviour": "A native Codex viewer attached to a managed app server execution ends once that execution's transport record reads exited or failed, so the launch pane records its exit instead of sitting on a dead reconnect; an unreadable store leaves the viewer running.",
+      "seam": "scripts.codex_session.attach.watched and the default viewer runner of attach.main",
+      "tests": [
+        "tests/codex_session/test_attach.py::test_a_viewer_whose_server_ended_is_stopped",
+        "tests/codex_session/test_attach.py::test_a_viewer_on_a_live_server_runs_until_it_closes",
+        "tests/codex_session/test_attach.py::test_an_unreadable_store_keeps_the_viewer_running",
+        "tests/codex_session/test_attach.py::test_a_viewer_that_ignores_terminate_is_killed",
+        "tests/codex_session/test_attach.py::test_main_ends_the_default_viewer_once_its_server_exits"
+      ]
     }
   ],
   "unmapped_rules": [
