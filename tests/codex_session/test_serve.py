@@ -603,3 +603,29 @@ def test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary(
     )
     with pytest.raises(ValueError, match="codex-session launch refused: opening refused"):
         init_agent._binding_result({binding.REPORT: str(report)}, 0.1, {})
+
+
+@pytest.mark.feature("codex-opening-account-refusal")
+@pytest.mark.parametrize("pump_code", [4, 1])
+def test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pump_code: int
+) -> None:
+    from scripts.profiles import binding
+
+    _, seen = supervised(monkeypatch, lambda: pytest.fail("a refused pump must stop the server"))
+    report = tmp_path / "profile.json"
+    binding.request(report, "engineer", "codex")
+    spec = SimpleNamespace(
+        slug="sw", cwd=str(tmp_path), environ={binding.REPORT: str(report)}, agent=SimpleNamespace(account="alpha")
+    )
+    monkeypatch.setattr(serve, "prepare", lambda args, flags, environ: spec)
+    seen["pump"].poll = lambda: pump_code
+    seen["pump"].returncode = pump_code
+
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == pump_code
+    data = json.loads(report.read_text())
+    assert data["state"] == ("failed" if pump_code == 4 else "pending")
+    if pump_code == 4:
+        with pytest.raises(ValueError, match="account"):
+            binding.wait(report, 0.1)

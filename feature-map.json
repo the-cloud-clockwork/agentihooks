@@ -2803,7 +2803,9 @@
       "seam": "scripts.codex_session.supervisor.launch opening turn and scripts.codex_session.serve.main binding refusal and account exclusion",
       "tests": [
         "tests/codex_session/test_supervisor.py::test_a_refused_opening_fails_the_canary_before_the_pump_starts",
-        "tests/codex_session/test_serve.py::test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary"
+        "tests/codex_session/test_serve.py::test_an_opening_account_refusal_excludes_its_route_and_fails_the_canary",
+        "tests/codex_session/test_serve.py::test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report",
+        "tests/inbox/test_codex_pump.py::test_a_refused_recorded_opening_is_recovered_when_the_pump_starts"
       ]
     },
     {
