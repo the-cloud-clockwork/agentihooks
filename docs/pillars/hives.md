@@ -169,7 +169,8 @@ password. Both verify the endpoint's certificate the way every ledger client doe
 | On the hive | The refresh trusts |
 |---|---|
 | `LEDGER_CA_PEM` set and not blank | Only that certificate |
-| `LEDGER_CA_FILE` set | The system roots plus that file; a missing file stops the refresh with `LEDGER_CA_FILE names no file: <path>` |
+| `LEDGER_CA_FILE` set and the file exists | The system roots plus that file |
+| `LEDGER_CA_FILE` set and the file is missing | The system roots alone, as in the last row |
 | Neither variable set, `ledger-ca.pem` in the hive home | The system roots plus that file |
 | Neither variable set, no `ledger-ca.pem` yet | The system roots alone |
 
@@ -1492,8 +1493,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
    ([Operator SSH into a worker hive](#operator-ssh-into-a-worker-hive)). Then it installs a mounted credential as
    `hive.env`, unless a saved `hive.env` already holds the same member's refreshed credential
-   ([Member credential across restarts](#member-credential-across-restarts)). With no mounted credential and no `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S`
-   (default 900) seconds, then exits 1 with
+   ([Member credential across restarts](#member-credential-across-restarts)). With no mounted credential and no
+   `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
@@ -1635,10 +1636,14 @@ pod reaches `hive run` without operator action.
 
 ```bash
 # The pod's saved member and the mounted one name the same member
-kubectl exec -n <namespace> <pod> -- bash -c \
-  'key="^AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL="; \
-   cmp -s <(grep "$key" "$HIVE_CREDENTIAL_FILE") <(grep "$key" "$AGENTIHOOKS_HOME/hive.env") \
-     && echo same member || echo different member'
+kubectl exec -n <namespace> <pod> -- bash -c '
+  key="^AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL="
+  if cmp -s <(grep "$key" "$HIVE_CREDENTIAL_FILE") <(grep "$key" "$AGENTIHOOKS_HOME/hive.env"); then
+    echo same member
+  else
+    echo different member
+  fi
+'
 
 # The pod is Running, and on the swarm host its hive shows live
 kubectl get pod -n <namespace> <pod>
