@@ -210,7 +210,7 @@ def test_the_ledger_event_pass_records_the_merge_stall(store: RedisStore) -> Non
     _enforce(store)
     now = _now(store)
     _merged(store, now - 2 * HOUR)
-    doc = {"tasks": [_task("a", "pr-a")], "_meta": {"events": []}}
+    doc = {"tasks": [_task("a", "pr-a")], "_meta": {"rev": 1, "events": []}}
     ledger_events.event_pass(InboxStore(store.redis), store, SLUG, doc, None, now, _pulls(**{"pr-a": _open()}))
     assert list(blockers.active(store, SLUG, now)) == [stall_blockers.MERGE_STALL]
 
