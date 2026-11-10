@@ -2697,6 +2697,7 @@
       "tests": [
         "tests/hive/test_master_placement.py::test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat",
         "tests/hive/test_master_placement.py::test_a_master_waits_when_its_only_login_account_is_closed",
+        "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
         "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
         "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
       ]

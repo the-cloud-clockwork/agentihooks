@@ -232,3 +232,15 @@ def test_a_master_waits_when_its_only_login_account_is_closed() -> None:
     assert placement.place_master("claude", "login", REPO, hives, NOW, closed=frozenset({"login"})) == (
         placement.Wait("no hive for master holds the claude login for login")
     )
+
+
+@pytest.mark.feature("hive-master-closed-account")
+def test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen() -> None:
+    slots = [
+        {"harness": "claude", "account": "closed_key", "kind": "subscription"},
+        {"harness": "claude", "account": "open_key", "kind": "subscription"},
+    ]
+    hives = [hive("only", slots=slots)]
+    assert placement.place_master("claude", "", REPO, hives, NOW, closed=frozenset({"closed-key"})) == (
+        placement.MasterPlacement("only", "open_key", "subscription", False)
+    )
