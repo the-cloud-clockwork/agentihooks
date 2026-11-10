@@ -68,3 +68,29 @@ def test_reap_refuses_a_guarded_ownership_write_without_watching_the_agent(monke
     ]
     assert watched == []
     assert row == {"id": "task", "state": "open", "claimed_by": "", "claim_generation": 1}
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.swarm import tick
+    from scripts.swarm.store import SwarmError
+
+    stale = AgentRecord("stale-eng", "eng", "task-a")
+    fine = AgentRecord("fine-eng", "eng", "task-b")
+    tools = fake_tools()
+    runtime = cast(FakeRuntime, tools.runtime)
+    runtime.answers["live_names"] = set()
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: [stale, fine])
+
+    def fake_reap_agent(judging: Any, agent: AgentRecord) -> list[str]:
+        if agent.name == "stale-eng":
+            raise SwarmError("stale or changed execution identity")
+        return [f"watched {agent.name}"]
+
+    monkeypatch.setattr(tick, "_reap_agent", fake_reap_agent)
+    state = {"slug": "sw", "store": object(), "rows": {}, "now_ms": 7}
+    step = next(step for step in agents.STEPS if step.name == "reap")
+    result = step.run(Context(_View(state), Deadline.after(10), tools))
+    [actions] = [write.value for write in result.writes]
+    assert "watched fine-eng" in actions
+    assert any("stale-eng" in action for action in actions)
