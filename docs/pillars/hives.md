@@ -1136,6 +1136,45 @@ A spoke also ignores a claim or launch held by a hive that is no longer present.
 reactor rebuilds any missing `execution.started` from the swarm's agent records. It ends any execution
 that a hive reports gone. An execution on a lost hive ends with reason `lost`.
 
+#### The hub's lost hive line
+
+Once the index no longer holds the lost hive's executions, the hub prints one line on stderr for each hive it
+judged lost in that poll. The line names the swarm, the hive and every execution it exited, each with its task:
+
+```text
+hub: hive hive-a of swarm rig lost; exited execution execution-a of task task, execution execution-b of task task-b
+```
+
+The hub prints no line when:
+
+- the hive still beats;
+- every start it held for the hive had already exited or been replaced by a newer claim, so the hub dropped the
+  starts without publishing an exit;
+- the index update failed after eight contended attempts, which raises `hive loss index remained contended` instead.
+
+Read the line from the hub's log:
+
+```bash
+kubectl -n <namespace> logs deployment/agentihooks-swarm-hub | grep 'hub: hive '
+```
+
+#### Unplanned loss drill
+
+The drill proves the path above on a live swarm by removing a hive without warning:
+
+1. Pick a live hive that holds claimed tasks: `agentihooks hive list` shows it `live`, and
+   `agentihooks swarm <slug> status` shows its agents on claimed tasks. Note each task and its claimant.
+2. Kill the hive's pod with no drain or handoff: `kubectl -n <namespace> delete pod <hive pod> --grace-period=0 --force`.
+   Record the time.
+3. Within one presence window plus one poll, the hub prints its lost hive line naming every execution of that hive.
+   Record the line with its time.
+4. Each named task reopens with a raised claim generation, and another seat claims it from the next offer. Record
+   each reopen and reclaim time from the task's ledger history.
+5. Watch `agentihooks swarm <slug> status` for fifteen minutes. The drill passes when no claim still names the lost
+   hive's agents and no idle or stale claim finding names its tasks.
+
+Put the commands, the hub line and the timestamps on the task proof.
+
 ### Running a spoke
 
 With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
