@@ -158,9 +158,17 @@ def _selector(runner: object, policy: object) -> bool:
     return isinstance(runner, str) and any(_compact(runner) in selectors(policy, pool) for pool in POOLS)
 
 
+def _hosted_shared(uses: str) -> bool:
+    """Match a hosted only shared workflow, owner and repository without case, path and ref exactly."""
+    parts = uses.split("/", 2)
+    if len(parts) != 3:
+        return False
+    return f"{parts[0].lower()}/{parts[1].lower()}/{parts[2]}" in HOSTED_SHARED
+
+
 def _trusted_runner(job: dict[Any, Any], actors: object) -> bool:
     uses = job.get("uses")
-    if isinstance(uses, str) and uses.lower() in HOSTED_SHARED:
+    if isinstance(uses, str) and _hosted_shared(uses):
         return True
     if uses and uses.lower() != SHARED:
         return False

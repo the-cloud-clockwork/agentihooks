@@ -493,7 +493,8 @@ DOCS_SANITY = "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml
 
 
 def test_hosted_only_docs_sanity_call_passes_without_a_runner_input() -> None:
-    candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": {"uses": DOCS_SANITY, "with": {"paths": "docs"}}}}
+    job = {"uses": DOCS_SANITY, "with": {"paths": "docs"}, "secrets": "inherit"}
+    candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": job}}
     assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
 
 
@@ -503,6 +504,9 @@ def test_hosted_only_docs_sanity_call_passes_without_a_runner_input() -> None:
         "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@dev",
         "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity-check.yml@main",
         "someone/agentihooks/.github/workflows/docs-sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@MAIN",
+        "The-Cloud-Clockwork/agentihooks/.github/workflows/Docs-Sanity.yml@main",
+        "The-Cloud-Clockwork/agentihooks",
     ],
 )
 def test_docs_sanity_lookalike_calls_are_red(uses: str) -> None:
