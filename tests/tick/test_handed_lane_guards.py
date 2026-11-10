@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Barrier, BrokenBarrierError, Event, current_thread
-from time import monotonic, sleep
+from time import sleep
 
 import pytest
 
@@ -80,23 +80,25 @@ def test_the_handed_workers_are_named_and_bounded_by_the_pass_workers() -> None:
         assert [future.result() for future in met] == [False, False]
 
 
-@pytest.mark.wall_clock
 @pytest.mark.feature("swarm-tick-slow-lane-start")
 def test_a_pass_ends_without_waiting_on_its_handed_workers_and_cancels_their_queue() -> None:
-    gate, started = Event(), Event()
+    gate, started, ended = Event(), Event(), Event()
+    released: list[bool] = []
 
     def blocker() -> None:
         started.set()
-        gate.wait(5)
+        released.append(gate.wait(HOOK_S * 5))
+        ended.set()
 
     try:
-        began = monotonic()
         with pool.running(workers=1) as found:
             assert found.handoff is not None
             found.handoff.submit(blocker)
             assert started.wait(5)
             queued = found.handoff.submit(_thread_name)
-        assert monotonic() - began < 2.0
+        gate.set()
+        assert ended.wait(5)
+        assert released == [True]
         assert queued.cancelled()
         with pytest.raises(RuntimeError):
             found.handoff.submit(_thread_name)
