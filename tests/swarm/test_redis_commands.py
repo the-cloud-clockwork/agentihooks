@@ -638,6 +638,17 @@ class Keeper:
 
     def run(self):
         self.hold(connect())
+        Keeper.fixed(connect())
+
+    @staticmethod
+    def fixed(fixed_conn):
+        fixed_conn.zlexcount("z", "-", "+")
+
+
+def stray(store_handle, kept_handle, held_conn):
+    store_handle.append("x")
+    kept_handle.keys()
+    held_conn.unlink("k")
 
 
 def looked():
@@ -663,6 +674,8 @@ def passed(tmp_path: Path) -> code_reach.Program:
         ("scripts.passed:named", {"HEXISTS"}),
         ("scripts.passed:spare_bag", set()),
         ("scripts.passed:Keeper.hold", {"ZCOUNT"}),
+        ("scripts.passed:Keeper.fixed", {"ZLEXCOUNT"}),
+        ("scripts.passed:stray", set()),
     ],
 )
 def test_an_unannotated_parameter_is_typed_from_the_argument_its_caller_passes(
