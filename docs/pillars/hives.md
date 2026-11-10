@@ -1558,7 +1558,8 @@ The tick loads those modules at the start of every pass, in the `start` site che
 later passes find them already loaded and the check costs nothing.
 
 Before this preload, the first pass after a tick process started imported the modules inside the fail over step.
-On a slow runner the import took longer than two seconds, the engine abandoned the step as `late`
+Its budget was then about one second, measured from warm passes. On a contended runner the import outlasted it,
+the engine abandoned the step as `late`
 (see [When a step exceeds its budget](../reference/tick-engine-steps.md#when-a-step-exceeds-its-budget)) and the
 move was dropped for that pass. The swarm master recovery test that moves a master off a lost hive to the hive
 with room failed on its first run for this reason and passed only on a retry.
@@ -1576,8 +1577,9 @@ Check whether the fail over step is late on a running swarm:
 agentihooks swarm rig-grade-swarm tick-report --passes 10
 ```
 
-The `master move fail over` row shows its median and p95 wall time, its late share and its abandoned count. An
-abandoned record means a pass dropped the move; the next pass retries it.
+The step appears in two tables of the report: the step rows give its median and p95 wall time, and the outcome
+columns give its late share and abandoned count. An abandoned record means a pass dropped the move; the next pass
+retries it.
 
 ### Operator master move
 
@@ -1618,7 +1620,7 @@ hive the master already runs on.
   leaves it alone.
 - **The move happened one pass later than expected.** A pass that abandoned `master move fail over` dropped the
   move, and the next pass made it. Read the step's abandoned count with
-  `agentihooks swarm <id> tick-report --passes 10`; see [Master move code preload](#master-move-code-preload).
+  `agentihooks swarm rig-grade-swarm tick-report --passes 10`; see [Master move code preload](#master-move-code-preload).
 - **The successor started on another hive than the one ordered.** The pin applies only to the successor of the
   master the order named. If that master left without the handoff the order asks for, its successor uses normal
   placement. Run `master move` again for the new master.
