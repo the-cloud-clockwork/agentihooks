@@ -388,9 +388,12 @@ granting each key Redis refused until all five passed gave the list.
 | A refused execution record write | The identity conflict counter, kept in `swarm:state:counters:*`. |
 
 The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
-`lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `identity-conflicts`, `execution-publishing`, the
+`lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `execution-publishing`, the
 Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`,
 `stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
+
+The list also keeps `swarm:*:identity-conflicts`, the key the identity conflict counter used before it moved into
+`swarm:state:counters:*`. Code only reads it, as a fallback when the counters record holds no entry.
 
 The member user stays refused on every other swarm key. Writes that fail with `NOPERM` include:
 
