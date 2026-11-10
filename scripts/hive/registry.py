@@ -43,6 +43,7 @@ LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 KEPT = (*UNSET, "ui", "ephemeral")
 MASTER_NAME = "swarm-master"
+DERIVED_MASTER = re.compile(rf"{re.escape(MASTER_NAME)}-[0-9]+")
 AUTO = "auto"
 INDEX = hive_state.LEGACY_INDEX
 
@@ -200,10 +201,31 @@ def _amend(client, hive_id: str, change):
     return hive_state.amend(hive_state.records(client, hive_id), hive_id, change, _legacy(client, hive_id))
 
 
-def _settle(hive_id: str, record: dict) -> dict:
-    """The hive hosting the operator's interface runs the masters and is always named MASTER_NAME."""
-    settled = {**_default(hive_id, record.get("ui", "no")), **record}
-    return {**settled, "name": MASTER_NAME} if settled["ui"] == "yes" else settled
+def _settle(hive_id: str, record: dict[str, Any]) -> dict[str, Any]:
+    """The hive hosting the operator's interface runs the masters and is named MASTER_NAME or a name derived from it."""
+    settled: dict[str, Any] = {**_default(hive_id, record.get("ui", "no")), **record}
+    return {**settled, "name": _read_name(settled)}
+
+
+def _read_name(record: dict[str, Any]) -> str:
+    """The name a record reads as: an interface hive keeps a derived MASTER_NAME, else reads as MASTER_NAME."""
+    name = str(record["name"])
+    if record.get("ui") != "yes" or DERIVED_MASTER.fullmatch(name):
+        return name
+    return MASTER_NAME
+
+
+def _held(client: object, hive_id: str) -> set[str]:
+    """The names every other registered hive reads as."""
+    registered: list[dict[str, Any]] = hives(client)
+    return {str(record["name"]) for record in registered if record["id"] != hive_id}
+
+
+def _unique(name: str, held: set[str]) -> str:
+    """The name itself while no other hive holds it, else the name with the first free numeric suffix from 2."""
+    if name not in held:
+        return name
+    return next(candidate for n in range(2, len(held) + 2) if (candidate := f"{name}-{n}") not in held)
 
 
 @dataclass(frozen=True)
@@ -258,6 +280,7 @@ def update(
     if not pairs:
         raise HiveError("hive set needs at least one setting")
     parsed = parse(pairs)
+    naming = "name" in parsed or "ui" in parsed
 
     def write(stored: dict | None) -> dict:
         stored = stored or {}
@@ -268,6 +291,9 @@ def update(
         }
         _check(_settle(hive_id, {**stored, **fields}))
         merged: dict[str, Any] = {**_seeded(hive_id), **stored, **fields}
+        settled = _read_name(merged)
+        if naming and (derived := _unique(settled, _held(client, hive_id))) != settled:
+            merged["name"] = derived
         if merged.get("max_agents") is None:
             merged.pop("max_agents", None)
         return _drained(merged, stored, drain)

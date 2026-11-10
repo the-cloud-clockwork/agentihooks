@@ -131,6 +131,7 @@ class ExecutionRegistry:
             fencing.hydrate_archive(self.store, doc)
             for key in old:
                 doc["archive"][key] = doc["executions"].pop(key)
+                doc["intents"].pop(key, None)
             for row in doc["archive"].values():
                 row.get("profile_decision", {}).get("validation", {}).pop("source_blobs", None)
             return len(old)
