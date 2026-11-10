@@ -71,6 +71,7 @@ def test_settings_remove_absolute_paths_but_keep_environment_references(hub: Pat
 @pytest.mark.feature("hub-import-core")
 def test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls(hub: Path, tmp_path: Path) -> None:
     env = {"OUT": "file:///home/operator/out", "ROOT": "C:/Users/operator", "DOCS": "https://example.com/a"}
+    env |= {"ONE": "file:/home/operator/x", "SHARE": "\\\\server\\share"}
     (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
     out = tmp_path / "bundle"
     import_hub(hub, out, False)

@@ -40,7 +40,7 @@ SECRET_SUFFIXES = (".env", ".key", ".p12", ".pem", ".pfx")
 RESTRICTIONS = ("deny", "ask")
 ENV_TEMPLATES = frozenset({"dist", "example", "sample", "template"})
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:[\\/]|file://)")
+ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:[\\/]|file:/|\\\\)")
 _DROP = object()
 
 
