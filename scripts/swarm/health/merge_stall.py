@@ -84,11 +84,7 @@ def queue(repo: str, name: str) -> tuple[int, int]:
         pulls = data["pullRequests"]
         nodes = pulls["nodes"]
         merged = max([merged, *(timestamp(node["mergedAt"]) for node in nodes)])
-        if (
-            not pulls["pageInfo"]["hasNextPage"]
-            or not nodes
-            or min(timestamp(node["updatedAt"]) for node in nodes) <= merged
-        ):
+        if not pulls["pageInfo"]["hasNextPage"] or min(timestamp(node["updatedAt"]) for node in nodes) <= merged:
             return length, merged
         cursor = pulls["pageInfo"]["endCursor"]
 

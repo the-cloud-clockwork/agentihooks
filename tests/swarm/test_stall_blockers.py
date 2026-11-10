@@ -184,6 +184,15 @@ def test_a_task_merged_exactly_twenty_minutes_ago_starts_the_category_now(store:
     assert blockers.active(store, SLUG, now)[stall_blockers.MERGED_IN_PR].first_seen == now
 
 
+def test_a_task_out_of_pr_listed_first_leaves_later_merged_tasks_counted(store: RedisStore) -> None:
+    _enforce(store)
+    now = _now(store)
+    tasks = [{"id": "b", "state": "done", "pr_url": "pr-b"}, _task("a", "pr-a")]
+    _observe(store, tasks, _pulls(**{"pr-a": _done(now - 2 * HOUR), "pr-b": _done(now - 2 * HOUR)}), now)
+    found = blockers.active(store, SLUG, now)[stall_blockers.MERGED_IN_PR]
+    assert found.detail == "1 tasks still in pr after their pull request merged, oldest task a"
+
+
 def test_a_done_task_with_a_merged_pull_request_records_nothing(store: RedisStore) -> None:
     _enforce(store)
     now = _now(store)
