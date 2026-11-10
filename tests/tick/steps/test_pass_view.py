@@ -18,6 +18,7 @@ pytestmark = pytest.mark.unit
 def _no_last_views(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Give each test its own record of the last view each swarm completed."""
     monkeypatch.setattr(host, "_LAST_VIEWS", {})
+    monkeypatch.setattr(host, "_VIEW_ORDER", {})
     yield
 
 
@@ -94,6 +95,20 @@ def test_views_are_kept_per_swarm() -> None:
     with pool.running(critical_s=0.0, slow_s=0.0):
         assert host.pass_view("b", _built(second)) is second
         assert host.pass_view("a", Future()) is first
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_an_older_build_ending_last_never_replaces_a_newer_view() -> None:
+    host.pass_view("sw", _built(object()))
+    older: Future[Any] = Future()
+    newer: Future[Any] = Future()
+    old_view, new_view = object(), object()
+    with pool.running(critical_s=0.0, slow_s=0.0):
+        host.pass_view("sw", older)
+        host.pass_view("sw", newer)
+    newer.set_result(new_view)
+    older.set_result(old_view)
+    assert host._LAST_VIEWS == {"sw": new_view}
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")

@@ -5,6 +5,8 @@ import traceback
 from collections.abc import Callable
 from concurrent.futures import Future, wait
 from importlib import import_module
+from itertools import count
+from threading import Lock
 from typing import Any, cast
 
 from scripts.routing.reservation import LaunchSlots
@@ -31,6 +33,9 @@ Get = Callable[[str], Any]
 JUDGING = "judging"
 VIEW_RESERVE_S = 20.0
 _LAST_VIEWS: dict[str, Any] = {}
+_VIEW_ORDER: dict[str, int] = {}
+_BUILDS = count()
+_KEEPING = Lock()
 
 
 def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
@@ -215,23 +220,28 @@ def _tick_view(cli: Any, get: Get) -> None:
 
 def pass_view(slug: str, view: Any) -> Any:
     """Return the pass view of swarm ``slug``: ``view`` itself unless it is a build, the build's view or error when it
-    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed; a late build replaces that
-    last view once it ends, and a swarm with no earlier view waits for its build."""
+    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed in this process; a late
+    build replaces that last view once it ends, and a swarm with no earlier view waits for its build."""
     if not isinstance(view, Future):
         return view
     build = cast(Future[Any], view)
-    build.add_done_callback(lambda built: _keep_view(slug, built))
     earlier = _LAST_VIEWS.get(slug)
+    order = next(_BUILDS)
+    build.add_done_callback(lambda built: _keep_view(slug, built, order))
     if earlier is None:
         return build.result()
     wait((build,), timeout=_view_wait_s())
     return build.result() if build.done() else earlier
 
 
-def _keep_view(slug: str, built: Future[Any]) -> None:
-    """Keep the view ``built`` made as the last view of swarm ``slug`` when the build ended without an error."""
-    if not built.cancelled() and built.exception() is None:
-        _LAST_VIEWS[slug] = built.result()
+def _keep_view(slug: str, built: Future[Any], order: int) -> None:
+    """Keep the view ``built`` made as the last view of swarm ``slug`` when the build ended without an error and no
+    build the swarm started after it, by ``order``, is kept already."""
+    if built.cancelled() or built.exception() is not None:
+        return
+    with _KEEPING:
+        if order >= _VIEW_ORDER.get(slug, -1):
+            _LAST_VIEWS[slug], _VIEW_ORDER[slug] = built.result(), order
 
 
 def _view_wait_s() -> float | None:
