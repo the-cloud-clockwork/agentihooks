@@ -95,7 +95,7 @@ def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
         return found
 
 
-def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+def snapshot(endpoint: str, now: float, fetch: Callable[[], dict], ttl: float = RUN_TTL_S) -> dict:
     entry = home() / f"{_key(f'snapshot {endpoint}')}.json"
     try:
         entry.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
             return fetch()
         try:
             cached = json.loads(entry.read_text())
-            if now - cached["at"] < RUN_TTL_S:
+            if now - cached["at"] < ttl:
                 return cached["snapshot"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
