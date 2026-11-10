@@ -1023,8 +1023,9 @@ def test_a_second_capacity_error_fails_the_launch_naming_it(store, server, clock
 
 @pytest.mark.feature("codex-opening-account-refusal")
 @pytest.mark.parametrize("status", [401, 402, 403])
+@pytest.mark.parametrize("reported", [True, False])
 def test_a_refused_opening_fails_the_canary_before_the_pump_starts(
-    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, status: int
+    store: RedisStore, server: Server, clock: Clock, root: Path, tmp_path: Path, status: int, reported: bool
 ) -> None:
     from scripts.profiles import binding
 
@@ -1033,6 +1034,8 @@ def test_a_refused_opening_fails_the_canary_before_the_pump_starts(
     event["params"]["turn"]["error"]["codexErrorInfo"] = {"httpConnectionFailed": {"httpStatusCode": status}}
     server.turn_events = [[event]]
     spec, report = reported_spec(store, server, tmp_path)
+    if not reported:
+        spec = replace(spec, environ={key: value for key, value in spec.environ.items() if key != binding.REPORT})
 
     failure = failed(store, server, clock, root, spec, "account_refused")
 
@@ -1040,8 +1043,9 @@ def test_a_refused_opening_fails_the_canary_before_the_pump_starts(
     assert len(server.params("turn/start")) == 1
     assert server.processes[-1].poll() is not None
     assert only_record(store).last_error_class == "account_refused"
-    with pytest.raises(ValueError, match=reason):
-        binding.wait(report, 0.1)
+    if reported:
+        with pytest.raises(ValueError, match=reason):
+            binding.wait(report, 0.1)
 
 
 @pytest.mark.parametrize(

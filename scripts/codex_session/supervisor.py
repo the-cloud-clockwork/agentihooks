@@ -288,11 +288,17 @@ def opening_end(connection: protocol.Connection, events: list[dict], deadline: f
 
 
 def open_turn(connection: protocol.Connection, thread_id: str, launch: Launch, deps: Deps) -> str:
+    from scripts.inbox.codex import account_refusal
+
     for _ in range(OPENING_ATTEMPTS):
         events: list[dict] = []
         connection.listener = events.append
         turn_id = protocol.start_turn(connection, thread_id, launch.opening)
         turn = opening_end(connection, events, deps.clock() + OPENING_WATCH_S, deps.clock)
+        if reason := account_refusal(turn):
+            if launch.environ.get(binding.REPORT):
+                binding.refuse(Path(launch.environ[binding.REPORT]), reason)
+            raise LaunchFailure("account_refused", reason)
         error = str((turn.get("error") or {}).get("message"))
         if CAPACITY not in error:
             return turn_id
