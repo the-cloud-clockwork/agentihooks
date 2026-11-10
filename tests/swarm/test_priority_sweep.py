@@ -657,6 +657,7 @@ class TimedLedger(ledger_client.LedgerClient):
         return {}
 
 
+@pytest.mark.wall_clock
 @pytest.mark.feature("priorities-sweep-budget")
 def test_a_thousand_stale_priorities_clear_inside_the_step_floor() -> None:
     import fakeredis
