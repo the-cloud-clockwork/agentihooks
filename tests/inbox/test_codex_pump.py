@@ -739,6 +739,9 @@ def test_a_refused_recorded_opening_is_recovered_when_the_pump_starts(rig: Rig, 
     result = rig.record()
     assert result is not None
     assert result.state == (DEGRADED if same_opening else CONNECTED)
+    assert rig.logged == (
+        [f"codex pump for {ME} degraded: AccountRefused: {DEACTIVATED['message']}"] if same_opening else []
+    )
 
 
 @pytest.mark.feature("codex-pump-account-refusal")

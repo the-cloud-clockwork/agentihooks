@@ -627,5 +627,7 @@ def test_a_pump_refusal_after_the_opening_watch_fails_the_canary_report(
     data = json.loads(report.read_text())
     assert data["state"] == ("failed" if pump_code == 4 else "pending")
     if pump_code == 4:
-        with pytest.raises(ValueError, match="account"):
+        assert data["reason"] == "Codex provider refused the routed account"
+        with pytest.raises(ValueError) as failure:
             binding.wait(report, 0.1)
+        assert str(failure.value) == "Codex provider refused the routed account"
