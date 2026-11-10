@@ -2061,7 +2061,8 @@ When the pod stops, for an image update, a rollout or a node drain, its preStop 
 each agent it hosts one inbox order to hand off, so the agent's successor starts on another hive, and waits until no
 agent it hosts is running. The drain writes its result to the pod log. The grace period is `workers.drainSeconds` plus
 30 seconds, so a Recreate rollout starts the new pod as soon as the old hive's agents hand off, or when the wait runs
-out.
+out. With `workers.rollout.enabled` the drain is bounded by `workers.rollout.drainSeconds` and the hives roll one at a
+time; see [Release roll one hive at a time](#release-roll-one-hive-at-a-time).
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
 whole record from the workstation with one command:
@@ -2684,6 +2685,102 @@ agent limit below its request and a memory value under `workers.resources` are e
 If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
 chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
 releases and give each its own member.
+
+### Release roll one hive at a time
+
+`workers.rollout` makes a release roll take the hives down one at a time, each for a bounded drain, so the swarm keeps
+every other hive serving while one restarts. It is off by default and is an ArgoCD feature: its hooks are ArgoCD sync
+hooks.
+
+```yaml
+workers:
+  rollout:
+    enabled: true                       # default false
+    namespace: default                  # where the shared Lease lives
+    leaseName: agentihooks-hive-rollout # one Lease name for every hive release that must roll in turn
+    drainSeconds: 1200                  # preStop drain while rollout is on, 0 to 1500
+    release: ""                         # optional pod stamp; each new value rolls the hives
+```
+
+With `enabled: true` and at least one worker hive, the chart adds:
+
+| Piece | What it does |
+|---|---|
+| PreSync Job `<fullname>-rollout-acquire` | Takes the Lease `<namespace>/<leaseName>` for the owner `<release namespace>/<release name>`. A Lease held by another owner and not expired is waited on, checked every 5 seconds, for up to 5400 seconds; the Job then fails with `another hive rollout owns the lease; no workload was changed` and the sync changes nothing. A held Lease expires 3600 seconds after its renew time. |
+| PostSync Job `<fullname>-rollout-release` | Frees the Lease only when every worker hive Deployment of the release is serving: replicas above 0, the current generation observed, and updated, ready and available replicas all equal to replicas. Otherwise it fails with `replacement hive is not serving; rollout ownership retained` and retries, up to 3 times. |
+| SyncFail Job `<fullname>-rollout-abandon` | Frees the Lease after a failed sync, when this release still holds it. |
+| Readiness probe | `python3 -m scripts.hive.rollout ready` every 5 seconds: ready while the marker `HIVE_READY_FILE` (`/tmp/hive-ready`) was touched in the last 60 seconds. The start script removes the marker, and `hive run` touches it after each successful heartbeat, so a pod is ready from its first beat and turns unready after 60 seconds without one. |
+| Bounded drain | The preStop drain waits `workers.rollout.drainSeconds` instead of `workers.drainSeconds`, and the grace period is that value plus 30 seconds. A value outside 0 to 1500 fails the render with `workers.rollout.drainSeconds must be between 0 and 1500`. |
+| Sync waves | Each worker hive Deployment of the release gets its own sync wave, 1 for the first and one more for each `workers.hives` entry, so ArgoCD rolls them in order inside one sync. |
+| RBAC | A ServiceAccount `<fullname>-rollout`, a Role in the Lease namespace that may create Leases and get and update the named one, and a Role that may get the release's worker hive Deployments. |
+| `release` stamp | A non empty value is written to the pod annotation `agentihooks.io/release`; changing it changes the pod template and rolls the hives through the Lease. |
+
+The hook Jobs run the hive worker image at the chart's `appVersion` tag. A chart whose `appVersion` is neither a
+release version such as `2.17.467` nor `dev` fails the render; at `dev` the hooks use `workers.image.tag`.
+
+Hives in separate releases roll in turn when they share one `namespace` and `leaseName`: the second release's
+PreSync waits until the first release's PostSync finds its hive serving and frees the Lease. The hive drained during
+its turn sends each agent one inbox order to hand off, so successors start on the hives that are still serving.
+
+#### Antoncore hives
+
+The antoncore swarm hives are one ArgoCD Application each, `swarm-hive-001` and `swarm-hive-003`, with values in
+`k8s/values-overlays/<hive>/values.yaml`. Each takes the `agentihooks-swarm` chart from
+`ghcr.io/the-cloud-clockwork/charts` at `targetRevision: '*'`, runs the hive worker image at tag `release` with
+`pullPolicy: Always`, and enables the roll with the chart defaults:
+
+```yaml
+workers:
+  image:
+    tag: release
+    pullPolicy: Always
+  rollout:
+    enabled: true
+```
+
+ArgoCD syncs each release's chart, and a hive rolls only when that release changes its rendered pod template. Pod
+templates carry no chart version label, so a release that changes only the chart version rolls no hive
+([#10072](https://github.com/the-cloud-clockwork/agentihooks/pull/10072)). A rolled pod pulls the current `:release`
+image. Each roll goes through the shared Lease `default/agentihooks-hive-rollout`, one hive at a time. The overlays
+set no `release` stamp and the Applications carry no image updater annotations, so no second writer changes the
+template after the chart moved; antoncore's `test_hive_release_roll` asserts both, and that a chart version bump
+leaves each hive pod template unchanged.
+
+Antoncore [#1474](https://github.com/the-cloud-clockwork/antoncore/pull/1474) first wrote each release's `:release`
+digest into `workers.rollout.release` through the ArgoCD image updater. On release v2.17.472 that rolled every hive
+twice, once for the chart and once for the digest stamp, and
+[#1500](https://github.com/the-cloud-clockwork/antoncore/pull/1500) removed the image updater from the hive
+Applications.
+
+The roll on release v2.17.472, across the three hives antoncore ran then and sampled every 15 seconds, took each
+hive from down to serving again in 53 seconds to 6 minutes 42 seconds, and no sample showed more than one hive pod
+out of Running. 17 of its 104 samples showed two hives not ready, while one replacement pod failed readiness on
+Redis socket timeouts. A replacement pod that cannot reach Redis stays unready, because its readiness marker ages past 60 seconds; the
+PostSync release keeps the Lease and the next hive waits its turn.
+
+Watch a roll:
+
+```bash
+kubectl get lease agentihooks-hive-rollout -n default -o jsonpath='{.spec.holderIdentity} {.spec.renewTime}{"\n"}'
+for n in 001 003; do
+  kubectl -n swarm-hive-$n get pods -l app.kubernetes.io/component=worker-hive \
+    -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[0].ready}{"\n"}{end}'
+done
+kubectl -n swarm-hive-001 get jobs | grep rollout
+```
+
+An empty holder means no roll is in progress. A holder naming `swarm-hive-<n>/swarm-hive-<n>` means that hive has its
+turn.
+
+#### Release roll troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A sync fails at PreSync with `another hive rollout owns the lease; no workload was changed` | Another release held the Lease for the whole 5400 second wait. | Read the holder with the `kubectl get lease` command above and fix that release's roll; the next sync retries. |
+| The holder stays on one hive and its `rollout-release` Job fails with `replacement hive is not serving; rollout ownership retained` | The replacement hive pod is not ready: no successful heartbeat in the last 60 seconds, often Redis unreachable from the pod. | Read the pod log for `hive Redis connection lost` (see [Redis restarts](#redis-restarts)), fix the cause; the Lease frees once the pod serves. |
+| The render fails with `workers.rollout.drainSeconds must be between 0 and 1500` | The value is negative or above 1500. | Set a value from 0 to 1500. |
+| The render fails with `appVersion must be a release version such as 2.17.467, or dev for an unreleased chart` | The chart's `appVersion` is neither form. | Package the chart with a release version, or keep `dev`. |
+| Each release rolls a hive twice | A second writer changes the pod template after the chart sync, such as an image updater stamping `workers.rollout.release`. | Remove the second writer, so one sync carries every template change of the release. |
 
 ## Ledger Hives panel
 
