@@ -1582,7 +1582,127 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 `mount.path` is an `fsType` filesystem holding `mount.marker`, so an unmounted data disk never gets hive folders on the
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
-lists.
+lists. [Worker hive home volume](#worker-hive-home-volume) gives examples, checks and refusals.
+
+### Worker hive home volume
+
+`/home/worker` holds every repo clone, worktree and scratchpad the hive's agents use, so its disk decides how many
+worktrees fit. `wt.sh new` refuses below `WT_MIN_FREE_GB` free on that disk, and a node root disk with less free space
+than the floor stops every engineer on the hive at its first worktree. Put the home on a data disk with room above the
+floor. Choose one of three forms:
+
+| Form | Set | Home and `/tmp` | Rollout |
+|---|---|---|---|
+| Default | nothing | emptyDir on the node root disk, lost with the pod | RollingUpdate |
+| Hand set source | `workers.homeVolume` | the hostPath or claim you give; `/tmp` stays an emptyDir | Recreate |
+| Per node storage | `workers.node` and `hiveStorage` | `<homes>/<folder>` and `<tmp>/<folder>`, made by a Job before the pod starts | Recreate |
+
+**Hand set hostPath.** Pin the hive to the node that carries the data disk and mount a folder on that disk. Type
+`Directory` makes the kubelet refuse the mount when the folder is missing, so the pod never starts on the root disk of a
+node whose data disk did not mount. Create the folder, owned by uid 10001, on the mounted disk before the rollout:
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null                 # one source only; the chart refuses two
+    hostPath:
+      path: /mnt/data/agentihooks-hive
+      type: Directory
+  nodeSelector:
+    kubernetes.io/hostname: worker-001
+  worktreeMinFreeGb: 50
+```
+
+**Hand set claim.** A `persistentVolumeClaim` keeps the home on whatever disk its storage class provides. It gains
+nothing when the only storage class provisions on the node root disk.
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null
+    persistentVolumeClaim:
+      claimName: swarm-hive-001-home
+```
+
+**Per node storage.** `workers.node` names the node; its `hiveStorage.nodes` entry, else `hiveStorage.default`, gives
+the host folders. The chart pins the pod to that node, mounts `<homes>/<release>` as `/home/worker` and
+`<tmp>/<release>` as `/tmp`, and runs a pre-install and pre-upgrade Job (`<fullname>-storage`, an ArgoCD PreSync hook
+when `workers.rollout.enabled`) on that node that makes both folders for uid 10001 with mode 0750. With `mount` set,
+the Job first checks that `mount.path` is an `fsType` filesystem holding `mount.marker` and fails otherwise, so the sync
+stops before any folder lands on the system drive. Both `homes` and `tmp` must sit under `mount.path`.
+
+```yaml
+workers:
+  node: worker-001
+  hives:
+    - name: b
+      credentialSecret:
+        name: swarm-hive-001-b-join
+        key: credential
+hiveStorage:
+  nodes:
+    worker-001:
+      homes: /mnt/data/agentihooks-hive/homes
+      tmp: /mnt/data/agentihooks-hive/tmp
+      mount:
+        path: /mnt/data
+        fsType: xfs
+        marker: .data-disk          # a file that exists only on the data disk
+```
+
+With release `swarm-hive-001`, the base hive mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001` and entry `b`
+mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001_b`; each `workers.hives` entry gets its own `-storage-<name>`
+Job and inherits `workers.node` unless it sets its own.
+
+**Folders for hand set hives on many nodes.** When several hives set `homeVolume` by hand to folders under one root,
+`hiveStorage.homeFolders` makes those folders on every node it selects, outside the nodes `hiveStorage.nodes` lists,
+with a DaemonSet that keeps running:
+
+```yaml
+hiveStorage:
+  default:
+    homes: /mnt/data/agentihooks-hive
+  homeFolders:
+    hives: [swarm-hive-002, swarm-hive-003]
+    nodeSelector:
+      agentihooks/hive-disk: "true"
+```
+
+**Check before a sync.** Render the release and read the home volume, its strategy and placement:
+
+```bash
+helm template swarm-hive-001 deploy/helm/agentihooks-swarm -f values-hive.yaml \
+  | grep -nE 'type: Recreate|name: home$|hostPath:|path: |kubernetes.io/hostname'
+```
+
+**Check after the rollout.** Read the free space the agents see and the floor they get. `<fullname>` is the release
+name when it contains `agentihooks-swarm`, else `<release>-agentihooks-swarm`:
+
+```bash
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- df -h /home/worker
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- printenv WT_MIN_FREE_GB
+kubectl -n <namespace> logs job/<fullname>-storage
+```
+
+`df` must show the data disk size, not the node root disk, and free space well above `WT_MIN_FREE_GB`. The storage Job
+is deleted once it succeeds, so its log exists only while it fails or runs. One engineer on the hive passing
+`wt.sh new` proves the floor holds.
+
+### Worker hive home volume refusals
+
+The chart refuses these values at render time; the storage Job and the kubelet report the rest on the cluster.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim` | The default `emptyDir: {}` merged with the source you added. | Set `emptyDir: null` beside the hostPath or claim. |
+| `workers.node <node> has no homes: set hiveStorage.nodes.<node>.homes, or hiveStorage.default.homes when the node has no entry` | `workers.node` names a node with no homes folder. | Add `homes` to that node's entry or to `hiveStorage.default`. |
+| `hiveStorage for node <node> names a mount without its fsType and marker` | `mount.path` is set alone. | Give `mount.fsType` and `mount.marker`. |
+| `hiveStorage folder <folder> for node <node> is not under its mount <path>` | `homes` or `tmp` lies outside `mount.path`. | Move the folder under the mount, or fix `mount.path`. |
+| Storage Job log: `<path> on <node> is not the <fsType> disk holding <marker>, so its data disk is not mounted` | The data disk is unmounted, has another filesystem, or lacks the marker. | Mount the disk on the node, or create the marker on it, then sync again. |
+| Pod stays in `ContainerCreating` with a `FailedMount` event naming the home hostPath | A hand set `Directory` hostPath does not exist on the node. | Create the folder on the mounted data disk, owned by uid 10001, or use `hiveStorage` so the Job makes it. |
+| `hiveStorage.homeFolders.hives needs hiveStorage.default.homes` | The DaemonSet has no root to make folders under. | Set `hiveStorage.default.homes`. |
+| `hiveStorage.homeFolders.hives entry "<name>" must be a folder name: lowercase letters, digits and dashes` | An entry holds another character, such as `_`. | Name the hive's home folder, and the entry, without that character. |
+| `wt.sh new` refuses below the free space floor inside the pod | The home disk has less free space than `WT_MIN_FREE_GB`. | Move the home to a larger disk or run `agentihooks gc`; never lower `workers.worktreeMinFreeGb` to pass. |
 
 ### Accounts on a worker pod
 
