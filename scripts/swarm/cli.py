@@ -377,16 +377,16 @@ def _hold_stored(slug: str, exc: OSError) -> None:
     ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
-def _stopped_tick(store, slug, ledger, runtime, held):
+def _stopped_tick(store, slug, ledger, held):
     from scripts.swarm import command_runner, controller
 
-    runtime = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
+    fenced = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
-        return controls + _bin_stop(store, slug, ledger, runtime), {}
+        return controls + _bin_stop(store, slug, ledger, fenced), {}
     doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-    return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
+    return controls + timing.call(tick, slug, store, ledger, fenced, now_ms()), doc
 
 
 def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, config: Any) -> tuple[Future, list[str]]:
@@ -675,7 +675,7 @@ def run_tick(
         run_group("before")
         if store.config(slug).state == "stopped":
             _hold_view(beating, slug, ledger)
-            actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
+            actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}
