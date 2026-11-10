@@ -64,20 +64,19 @@ def test_a_task_requiring_claude_waits_while_no_claude_seat_is_free(tmp_path):
     [
         {"handoff_envelope": {"launch": {"profile": "engineer", "harness": "codex"}}},
         {"launch_assignment": {"profile": "engineer", "harness": "codex", "model": "m", "effort": "high"}},
-        {
-            "launch_assignment": {
-                "profile": "engineer",
-                "harness": "codex",
-                "model": "m",
-                "effort": "high",
-                "account": "cx",
-            },
-            "admitted_execution_id": "e1",
-        },
     ],
 )
 def test_a_task_requiring_claude_drops_a_saved_codex_launch(tmp_path, saved):
     assert _spawned(tmp_path, {"requires_harness": "claude", **saved}, [claude(), codex()]) == ("claude", "cc")
+
+
+@pytest.mark.feature("task-requires-harness")
+def test_an_admitted_codex_relaunch_refuses_a_task_requiring_claude(tmp_path):
+    launch = {"profile": "engineer", "harness": "codex", "model": "m", "effort": "high", "account": "cx"}
+    task = {"requires_harness": "claude", "launch_assignment": launch, "admitted_execution_id": "e1"}
+    with pytest.raises(SpawnError) as refused:
+        _spawned(tmp_path, task, [claude(), codex()])
+    assert refused.value.status == "unsupported"
 
 
 @pytest.mark.feature("task-requires-harness")
