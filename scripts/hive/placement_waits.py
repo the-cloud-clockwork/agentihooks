@@ -1,12 +1,31 @@
 import json
+from typing import TYPE_CHECKING, Any, cast
 
 from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
+if TYPE_CHECKING:
+    from redis import Redis
+    from redis.client import Pipeline
+
 WAIT_MS = 30 * 60_000
 FRESH_MS = 5 * 60_000
 WAITS = "hive-placement-waits"
+TOTALS = "admission-outcome-total"
+ADMITTED = "admitted"
+
+
+def admitted(store: RedisStore, slug: str, count: int = 1) -> None:
+    """Count launches a hive admitted for this swarm; a negative count takes back a launch that failed."""
+    cast("Redis", store.redis).hincrby(store.key(slug, TOTALS), ADMITTED, count)  # pragma: no mutate
+
+
+def _category(reason: str) -> str:
+    """The admission refusal category a new or changed wait counts under."""
+    from scripts.hive import admission
+
+    return admission.category(reason)
 
 
 def read(store: RedisStore, slug: str) -> dict:
@@ -22,11 +41,14 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
             try:
                 pipe.watch(key)
                 raw = pipe.hget(key, task)
-                previous = json.loads(raw) if raw else {}
+                previous: dict[str, Any] = json.loads(raw) if raw else {}
                 started = now
-                if reason and previous.get("reason") == reason and previous.get("lane") == lane:
+                same = previous.get("reason") == reason and previous.get("lane") == lane
+                if reason and same:
                     started = previous["started_at"]
                 pipe.multi()
+                if reason and not same:
+                    cast("Pipeline", pipe).hincrby(store.key(slug, TOTALS), _category(reason))  # pragma: no mutate
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
                     if workstation:

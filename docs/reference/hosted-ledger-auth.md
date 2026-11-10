@@ -113,7 +113,8 @@ The operator opens `https://swarm.example.com/<slug>` in a browser, signs in thr
 | Symptom | Cause | Check |
 |---|---|---|
 | The browser gets `403 forbidden` after the Access login | `SWARM_ACCESS_TEAM` or `SWARM_ACCESS_AUD` is unset or wrong, or the server cannot reach `https://<team domain>/cdn-cgi/access/certs` | Compare the audience tag with the Access application; fetch the certs URL from inside the pod |
-| Any client gets `403 forbidden` with `Host not allowed` | The address the client used is not an allowed host | Add the host to `SWARM_ALLOWED_HOSTS` |
+| Any client gets `403 forbidden` with `Host not allowed` | The address the client used is not an allowed host | Add the host to `SWARM_ALLOWED_HOSTS`; on the `agentihooks-swarm` chart, add it to `ledger.allowedHosts` |
+| Hive agents get `403 forbidden` on every ledger read and write after `ledger.publicUrl` moved to a public route, while browser and workstation clients still work | Hives reach the ledger at an internal address that the chart no longer allows | List that address, with its port, in `ledger.allowedHosts`; see [Host names the ledger answers](../getting-started/kubernetes-quick-start.md#host-names-the-ledger-answers) |
 | An agent gets `403 forbidden` | Token derived for another slug or name, the server has no `SWARM_SECRET`, or the secret was rotated | Re-derive the token from the current secret with the exact slug and `X-Ledger-Agent` value |
 | An agent that worked locally is refused once `SWARM_URL` is set | A page-derived token; remote clients never use it | Set `AGENTIHOOKS_LEDGER_AGENT_TOKEN` or `SWARM_SECRET` |
 | A machine client gets Cloudflare error 1010 | Python's default user agent | Send `User-Agent: agentihooks-swarm`; the agentihooks clients already do |

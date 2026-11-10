@@ -52,6 +52,8 @@ See [automatic hive quota refresh](hives.md#automatic-quota-refresh) for subscri
 
 See [Redis restarts](hives.md#redis-restarts) for how `agentihooks hive run` reconnects after a swarm Redis restart, its backoff, what resumes and troubleshooting.
 
+See [worker hive Redis connection](hives.md#worker-hive-redis-connection) for where a Kubernetes worker hive gets its Redis URL and how to move it to a new swarm Redis through OpenBao.
+
 See [promotion fixer intake](swarm.md#promotion-fixer-intake) for how one swarm per repository files and closes promotion fixer tasks, hands intake over and shows its owner, and [runner outage runs](swarm.md#runner-outage-runs) for the alert raised without a task when failed jobs failed on CI infrastructure, with the jobs that failed for want of a lost unit shard's output in [jobs that failed for want of shard output](swarm.md#jobs-that-failed-for-want-of-shard-output). See [red dev workflows outside the promotion gate](swarm.md#red-dev-workflows-outside-the-promotion-gate) for the Doctor finding raised when any other workflow fails five dev push runs in a row.
 
 See [independent consumer failures beside a lost shard](swarm.md#independent-consumer-failures-beside-a-lost-shard) for mixed Sonar and shard check examples, separate fixer tasks and the fixed folding rules.

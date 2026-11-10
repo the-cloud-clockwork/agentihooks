@@ -589,6 +589,55 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 | `--keep-pane` | Leave the agent's herdr pane open after it exits |
 | `--json` | Print the resolution report as one JSON object |
 
+### Which processes the list shows
+
+`--list`, and every selector match outside `--stand-down`, reads two sources:
+the session registry and the local process table. `--stand-down` matches only
+Codex records, through the stand-down resolver. A process counts as an agent
+when the basename of its command name or of one of its first two arguments is
+`claude` (or the argument ends in `claude-code/cli.js`), or is `codex` or starts
+with `codex-`.
+
+| Source | Shown when | `STATUS` |
+|---|---|---|
+| Registry record | Its status is `alive` or `handed_off`, its recorded PID is a live agent process, and it was recorded in this process namespace or carries no namespace stamp | The record's status |
+| Process table only | An agent process that no shown record names, including one behind a record with any other status, such as `suspect`, or behind a record from another namespace | `unregistered` |
+
+Left out of both:
+
+- Zombie (`Z`) and dying (`X`) processes.
+- Records stamped with another process namespace, such as a session inside a
+  container on the same host: this process table cannot judge their PID. When
+  the local namespace cannot be read, every stamped record counts as foreign.
+- An unregistered `claude` process with `-p` or `--print` anywhere in its
+  arguments. Print mode runs one prompt and exits; it holds no interactive
+  session to end. A print mode process that does have a registry record still
+  lists under that record.
+
+```text
+$ agentihooks terminate-agent --list --type claude
+TYPE    NAME          SESSION_ID  PID   PGID  STATUS        CWD
+claude  eng@abc-0042  3f2c...     4121  4121  alive         /home/me/dev/worktrees/repo/eng-abc-0042
+claude  kept          -           4380  4380  unregistered  -
+```
+
+Two columns can show something other than the raw record:
+
+- A Codex record whose working folder is a Codex memory thread shows the
+  `SESSION_ID` and `CWD` of its process's main conversation, when the same PID
+  has another `alive`, `handed_off` or `superseded` record outside a memory
+  thread. Without one, the memory thread's own values stay.
+- An unregistered process whose parent is also an agent process has an empty
+  `NAME`, printed `-`, unless its command line carries `--name`. The `--name`
+  value shows as given. Two cases show the process's
+  `AGENTIHOOKS_AGENT_NAME` instead: the `--name` value equals that name with
+  `@` written as `-`, or the variable is set and the `--name` value is a master
+  pane title such as `master 2 · rig`.
+
+The real output separates columns with tabs. A `claude -p "hello"` running
+beside the two listed sessions adds no row. Rows sort by type, name,
+session id and PID.
+
 ### Terminate a process
 
 A termination validates the target first: the PID's start time, command and
