@@ -301,6 +301,7 @@ def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyP
     assert len(profiles) == 1
     profile = profiles[0]
     assert profile["step"] == "collect acks"
+    assert isinstance(profile["wall_s"], float)
     assert any("_traced_sort" in line for line in profile["top_cumulative"])
     assert any("_traced_sort" in line for line in profile["top_own"])
 
@@ -318,3 +319,29 @@ def test_within_without_the_env_var_never_calls_the_profiler(monkeypatch: pytest
         assert timing.within(2.5, _traced_sort, [2, 1], name="collect acks") == [1, 2]
     rows = [json.loads(line) for line in output.getvalue().splitlines()]
     assert all(row["event"] != "swarm_tick_step_profile" for row in rows)
+
+
+def test_profiled_steps_is_empty_when_the_env_var_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENTIHOOKS_TICK_PROFILE_STEPS", raising=False)
+    assert timing._profiled_steps() == frozenset()
+
+
+def test_profiled_steps_splits_several_names_on_commas(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_TICK_PROFILE_STEPS", "collect acks, send ready,gather status")
+    assert timing._profiled_steps() == frozenset({"collect acks", "send ready", "gather status"})
+
+
+def test_within_profiles_carry_the_running_pass_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    output = Output()
+    monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setenv("AGENTIHOOKS_TICK_PROFILE_STEPS", "collect acks")
+    token = timing.PASS.set({"pass_id": "p-123"})
+    try:
+        with timing.tick("sw"):
+            assert timing.within(2.5, _traced_sort, [2, 1], name="collect acks") == [1, 2]
+    finally:
+        timing.PASS.reset(token)
+    rows = [json.loads(line) for line in output.getvalue().splitlines()]
+    profiles = [row for row in rows if row["event"] == "swarm_tick_step_profile"]
+    assert len(profiles) == 1
+    assert profiles[0]["pass_id"] == "p-123"
