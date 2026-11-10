@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.796 · 2026-11-10
+
+### 2026-11-10 · c92747fcbd2e · #10528 · @agenticore-app
+
+**Document the ledger ports, adapters and import boundary**
+
+This change adds a new reference page, `docs/reference/ledger-ports.md`, documenting the earlier work that decoupled the ledger package from direct imports of swarm, hive, and hooks internals. It explains the `Swarm`, `Hive`, and `Hooks` interfaces the ledger now owns, their adapters, the composition root wiring, how to bind a fake in tests, how to add a port member, and how the import check guards the boundary, plus troubleshooting guidance. It also adds a reference index row and a changelog fragment, so the decoupling behavior delivered earlier is now discoverable and maintainable rather than only living in code and commit history.
+
 ## v2.17.794 · 2026-11-10
 
 ### 2026-11-10 · 3b2109b8a64d · #10474 · @agenticore-app
