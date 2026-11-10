@@ -36,6 +36,7 @@ def scratch(monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder(scratch: Path) -> None:
+    assert type(storage.default.__wrapped__()) is sqlite.SQLiteLedgerRepository
     repository = storage.build()
 
     assert type(repository) is sqlite.SQLiteLedgerRepository
@@ -76,7 +77,5 @@ def test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database(folder
     assert postgres.url(env) == DATABASE_URL
 
 
-def test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HOME", str(Path.home()))
-
+def test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder() -> None:
     assert postgres.url({postgres.URL: DATABASE_URL, "LEDGER_DIR": "~/scratchpad/agentihooks/proof"}) is None
