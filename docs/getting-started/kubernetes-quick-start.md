@@ -94,6 +94,33 @@ kubectl -n agentihooks port-forward service/agentihooks-swarm-ledger 8765:8765
 
 Then open `http://127.0.0.1:8765/`. Publish the ledger outside the cluster with the chart's `ingress` values or your own route.
 
+### Host names the ledger answers
+
+The ledger refuses every request whose `Host` header it does not list with `403 forbidden` and the message `Host not allowed`. The chart builds that list into `SWARM_ALLOWED_HOSTS` on the ledger StatefulSet from:
+
+| Source | Names added |
+|---|---|
+| The ledger Service | `<fullname>-ledger:<port>`, `<fullname>-ledger.<namespace>:<port>`, `<fullname>-ledger.<namespace>.svc:<port>` and `<fullname>-ledger.<namespace>.svc.cluster.local:<port>` |
+| `ingress.host` | That host, when `ingress.enabled` is true |
+| `ledger.publicUrl` | Its host and port, through `SWARM_PUBLIC_URL`; empty, the chart uses `https://<ingress.host>` with the ingress on and the Service address without it |
+| `ledger.allowedHosts` | Each entry as written; empty by default |
+
+List every other address clients dial in `ledger.allowedHosts`. The common case is a `ledger.publicUrl` set to a public route while hives still reach the ledger at an internal address: without that address in the list, every hive agent is refused on every read and write, while clients on the public route keep working.
+
+```yaml
+ledger:
+  publicUrl: https://swarm.example.com
+  allowedHosts:
+    - swarm-ledger.example.internal:8765
+```
+
+Each entry must equal the `Host` header the client sends: the host name, and the port whenever the client's URL carries one. Each entry is also accepted as a browser origin over `http` and `https`. Check the rendered value before you upgrade:
+
+```bash
+helm template agentihooks-swarm oci://ghcr.io/the-cloud-clockwork/charts/agentihooks-swarm \
+  --version <version> -f values.yaml --show-only templates/ledger.yaml | grep -A1 SWARM_ALLOWED_HOSTS
+```
+
 ## Enroll workers
 
 The hub runs no agents. Each machine or worker pod that runs agents joins as a hive with one invite: issue it with `agentihooks hive invite`, then join a machine with `agentihooks hive join` or install a hive only release of this chart. Follow [Add a hive](add-hive-quick-start.md).
@@ -107,5 +134,6 @@ The hub runs no agents. Each machine or worker pod that runs agents joins as a h
 | The ledger or controller cannot reach Redis | `kubectl -n agentihooks logs statefulset/agentihooks-swarm-ledger`; with `existingSecret`, the Secret name or key does not match, or the URL is unreachable from the namespace |
 | The hub logs bus connection errors | `kubectl -n agentihooks logs deployment/agentihooks-swarm-hub`; with the bundled NATS check its pod is ready, with an external NATS check `hub.bus.url` |
 | `helm test` fails | `kubectl -n agentihooks logs agentihooks-swarm-ledger-healthz`; the ledger did not answer its health route |
+| Hive agents get `403 forbidden` with `Host not allowed` on every ledger call, others still write | The address the hives use is not listed; add it to `ledger.allowedHosts`, see [Host names the ledger answers](#host-names-the-ledger-answers) |
 
 A release name without `agentihooks-swarm` in it prefixes every resource with `<release>-agentihooks-swarm`; a name that contains it is used as is.
