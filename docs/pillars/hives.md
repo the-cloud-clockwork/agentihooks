@@ -160,6 +160,30 @@ client trusts the system roots plus that file, or only `LEDGER_CA_PEM` when that
 [Hosted ledger authentication](../reference/hosted-ledger-auth.md). A hive whose environment sets `LEDGER_CA_PEM`
 ignores the delivered file. Neither variable is written into `hive.env`.
 
+### How refresh trusts the endpoint
+
+`agentihooks hive refresh` posts to the hive URL saved in `hive.env` over https. The same request runs on its own
+when the swarm Redis client finds the hive Redis credential refused: it refreshes the member and retries with the new
+password. Both verify the endpoint's certificate the way every ledger client does:
+
+| On the hive | The refresh trusts |
+|---|---|
+| `LEDGER_CA_PEM` set and not blank | Only that certificate |
+| `LEDGER_CA_FILE` set and the file exists | The system roots plus that file |
+| `LEDGER_CA_FILE` set and the file is missing | The system roots alone, as in the last row |
+| Neither variable set, `ledger-ca.pem` in the hive home | The system roots plus that file |
+| Neither variable set, no `ledger-ca.pem` yet | The system roots alone |
+
+The last row covers a hive's first refresh, which is the one that delivers the CA. An endpoint on a private
+certificate authority therefore needs the CA on the hive before that refresh: a delivered `ledger-ca.pem`, or
+`LEDGER_CA_PEM` set for the command. A Kubernetes worker pod places its mounted `LEDGER_CA_PEM` beside the system
+roots as `ledger-ca.pem` before it joins, so its own refresh trusts the hive endpoint with no manual step.
+
+```bash
+# On a hive whose endpoint uses a private CA that has not delivered ledger-ca.pem yet
+LEDGER_CA_PEM="$(cat ca.crt)" agentihooks hive refresh
+```
+
 ### Checking a hive's CA
 
 ```bash
@@ -184,6 +208,7 @@ curl -sS --cacert "$ca" -o /dev/null -w '%{http_code}\n' https://swarm.example.i
 | `LEDGER_CA_FILE names no file: <path>` | `LEDGER_CA_FILE` is set and the file is missing | Run `agentihooks hive refresh` with the same `LEDGER_CA_FILE`, or unset it to use `ledger-ca.pem` in the home |
 | `the ledger CA file <path> holds no valid certificate: <reason>` | The file exists but holds no certificate the client can load. `hive refresh` stops on the same error before it writes | Remove the file, or set `LEDGER_CA_PEM` for that one command, then run `agentihooks hive refresh` |
 | `hive add refused: ssh exited 1` after the `hive.env` write | The remote shell could not create the CA folder or file | Fix the permissions on the remote home or the `LEDGER_CA_FILE` folder, then `hive add` again |
+| `hive refresh refused: the hive at <url> is unreachable (<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] ...>)` | The hive endpoint's certificate is signed by a CA the refresh does not trust: no `LEDGER_CA_PEM` and no CA file, either because `ledger-ca.pem` is absent from the hive home or because `LEDGER_CA_FILE` names a missing file; or a release from before the refresh trusted the ledger CA, which used the system roots alone | Upgrade the hive to a current release, place the CA (see [How refresh trusts the endpoint](#how-refresh-trusts-the-endpoint)), then run `agentihooks hive refresh` |
 
 ## Repos and checkouts
 
@@ -1770,8 +1795,9 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
 3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
    ([Operator SSH into a worker hive](#operator-ssh-into-a-worker-hive)). Then it installs a mounted credential as
-   `hive.env`. With no mounted credential and no `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S`
-   (default 900) seconds, then exits 1 with
+   `hive.env`, unless a saved `hive.env` already holds the same member's refreshed credential
+   ([Member credential across restarts](#member-credential-across-restarts)). With no mounted credential and no
+   `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
@@ -2059,6 +2085,51 @@ agentihooks hive compare
 
 `hive compare` then lists the pod as `equal`. Host paths are never part of the snapshot, so a different repo root or
 home folder is not a difference.
+
+### Member credential across restarts
+
+`hive.env` lives in the pod's agentihooks home, so it outlives a container restart when the home is on a persistent
+volume. Every `agentihooks hive refresh`, whether run by hand or by the swarm Redis client after a refused login, mints
+a new Redis password, retires the previous one and saves the new Redis URL into `hive.env`. The ledger credential
+in `hive.env` stays the same, so it names the member across refreshes.
+
+At start, before `hive join`, the pod picks its `hive.env` from the mounted credential file (`HIVE_CREDENTIAL_FILE`):
+
+| Saved `hive.env` | Start installs |
+|---|---|
+| None | The mounted credential |
+| Same `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` as the mounted credential | Nothing: the saved file, with the newest refreshed Redis password, stays |
+| A different `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` | The mounted credential, replacing the saved one |
+
+The mounted copy holds the Redis password of the original join, which the first refresh retired. A release from before
+this rule installed the mounted copy on every start, so after any refresh the hive registry update at start failed with
+`AuthenticationError` and the pod crash looped. A pod that mounts a new member, for example after `hive remove` and a
+new invite, still replaces the saved file, because its ledger credential differs.
+
+When the saved Redis password is refused anyway, the swarm Redis client refreshes the member through the hive endpoint
+and retries; with the ledger CA in place (see [How refresh trusts the endpoint](#how-refresh-trusts-the-endpoint)) the
+pod reaches `hive run` without operator action.
+
+```bash
+# The pod's saved member and the mounted one name the same member
+kubectl exec -n <namespace> <pod> -- bash -c '
+  key="^AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL="
+  if cmp -s <(grep "$key" "$HIVE_CREDENTIAL_FILE") <(grep "$key" "$AGENTIHOOKS_HOME/hive.env"); then
+    echo same member
+  else
+    echo different member
+  fi
+'
+
+# The pod is Running, and on the swarm host its hive shows live
+kubectl get pod -n <namespace> <pod>
+agentihooks hive list
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The worker hive pod is in `CrashLoopBackOff` and its log ends in `AuthenticationError: the hive Redis credential was refused and the hive refused a refresh (...)` | The saved Redis password was retired and the automatic refresh failed; the text in brackets names why | Read the bracketed reason. `CERTIFICATE_VERIFY_FAILED` means the refresh does not trust the endpoint's CA: check the pod sets `LEDGER_CA_PEM` from the ledger CA. `the ledger credential belongs to no hive member` means the member was removed: deliver a new credential with `agentihooks hive add` or a new invite |
+| The pod crash loops with `AuthenticationError` after every restart while a refresh by hand works | The pod runs a release from before a restart kept the refreshed `hive.env` | Roll the pod onto a current image |
 
 ### Accounts on a worker pod
 
