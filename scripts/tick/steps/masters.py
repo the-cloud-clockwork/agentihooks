@@ -22,7 +22,9 @@ from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.tick import engine, registry, steps
+from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
+from scripts.tick.ports.contracts import Coordination
 from scripts.tick.step import Domain
 from scripts.tick.steps import CallStep, Left, pass_domains, tasks
 
@@ -441,8 +443,10 @@ def _retire_master(slug: Any, store: Any, runtime: Any, master: Any, now_ms: Any
 def respawn_master(slug: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
     from scripts.swarm import controller
 
+    tools = _master_tools(slug, store, runtime)
+
     def respawn(config: Any, held: Any) -> Any:
-        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
+        fenced = tools.runtime.fence(held, controller.LOCAL, deadline=_lease_deadline())
         live, actions = fenced.live_names(), []
         for agent in store.agents(slug):
             gone = agent.state not in ("finished", "starting") and agent.name not in live
@@ -454,26 +458,28 @@ def respawn_master(slug: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
             or tick._master(slug, config, store, fenced, now_ms)
         )
 
-    return tick._under_tick_lock(slug, store, respawn, "respawn master")
+    return tick._under_tick_lock(slug, store, respawn, "respawn master", tools.coordination)
 
 
 def place_master(slug: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
     from scripts.swarm import controller
 
+    tools = _master_tools(slug, store, runtime)
+
     def place(config: Any, held: Any) -> Any:
-        fenced = controller.FencedRuntime(store, slug, held, runtime, controller.deployment_for(config, os.environ))
+        deployment = controller.deployment_for(config, os.environ)
+        fenced = tools.runtime.fence(held, deployment, deadline=_lease_deadline())
         return tick._master(slug, config, store, fenced, now_ms)
 
-    return tick._under_tick_lock(slug, store, place, "place master")
+    return tick._under_tick_lock(slug, store, place, "place master", tools.coordination)
 
 
-def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any:
+def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str, coordination: Coordination) -> Any:
     from scripts.swarm import controller, lease
-    from scripts.swarm.commands import hive_id
 
     if store.config(slug).state in ("stopping", "stopped"):
         return []
-    held = lease.acquire(store, slug, hive_id())
+    held: Any = coordination.lease(deadline=_lease_deadline())
     if held is None:
         return []
     token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
@@ -487,6 +493,21 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str) -> Any
             return act(config, held)
     finally:
         controller.release_tick_lock(store, slug, token, caller)
+
+
+def _lease_deadline() -> Deadline:
+    """Return the deadline of one lease's life, for the ports a master placement acts through."""
+    from scripts.swarm import lease
+
+    return Deadline.after(lease.ttl_ms() / 1000)
+
+
+def _master_tools(slug: str, store: RedisStore, runtime: Any) -> Any:
+    """Return the port tools a master placement of swarm ``slug`` acts through, as this hive, over ``runtime``."""
+    from scripts.swarm.commands import hive_id
+
+    cli: Any = import_module("scripts.swarm.cli")
+    return cli._pass_tools(store, slug, hive_id(), None, runtime)
 
 
 tick: Any = import_module("scripts.swarm.tick")

@@ -380,9 +380,7 @@ def _hold_stored(slug: str, exc: OSError) -> None:
 def _stopped_tick(store, slug, ledger, runtime, held):
     from scripts.swarm import command_runner, controller
 
-    runtime = controller.FencedRuntime(
-        store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
-    )
+    runtime = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
         return controls + _bin_stop(store, slug, ledger, runtime), {}
@@ -498,10 +496,7 @@ class _Wrapper:
         from scripts.swarm import controller
 
         deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
-        runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
-        self.state["runtime"] = runtime
-        if tools := PASS_TOOLS.get():
-            cast(Any, tools.runtime).legacy = runtime
+        self.state["runtime"] = _fenced(self.held, deployment)
         return True
 
     def _watch(self) -> bool:
@@ -577,6 +572,24 @@ class _PassSpool:
         self._box.append_many(batches, checkpoint)
 
 
+def _fencing(store: RedisStore, slug: str) -> Callable[[object, str, Any], Any]:
+    """Return the fence the runtime port of swarm ``slug`` puts its pass runtime behind: the lease held, in a
+    deployment."""
+
+    def fence(held: object, deployment: str, runtime: Any) -> Any:
+        from scripts.swarm import controller
+
+        return controller.FencedRuntime(store, slug, held, runtime, deployment)
+
+    return fence
+
+
+def _fenced(held: object, deployment: str) -> Any:
+    """Fence the pass runtime to the lease ``held`` through the runtime port of the pass tools and return it."""
+    tools = cast(Tools, PASS_TOOLS.get())
+    return tools.runtime.fence(held, deployment, deadline=Deadline.after(TICK_LOCK_MS / 1000))
+
+
 def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
 
@@ -590,7 +603,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         ledger=ClientLedger(slug, resource_client(slug, service=True)) if ledger is None else PassLedger(slug, ledger),
         coordination=StoreCoordination(store, slug, owner),
         source_control=GitHubSourceControl("", Path.cwd(), "dev"),
-        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime),
+        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime, fencing=_fencing(store, slug)),
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),

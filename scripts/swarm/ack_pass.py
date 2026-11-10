@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from importlib import import_module
 from typing import Any
 
 LOCK = "acks-lock"
@@ -73,8 +74,12 @@ def run(store: Any, slug: str, ledger: Any = None, runtime: Any = None) -> list[
 def _collect(store: Any, slug: str, ledger: Any, runtime: Any) -> list[str]:
     from scripts.swarm import commands, controller, lease, ledger_client, timing
     from scripts.swarm import tick as engine
+    from scripts.tick.deadline import Deadline
 
-    held = lease.acquire(store, slug, commands.hive_id())
+    cli: Any = import_module("scripts.swarm.cli")
+    tools = cli._pass_tools(store, slug, commands.hive_id(), ledger, runtime or _runtime())
+    deadline = Deadline.after(lease.ttl_ms() / 1000)
+    held = tools.coordination.lease(deadline=deadline)
     if held is None or not due(store, slug):
         return []
     config = store.config(slug)
@@ -85,9 +90,7 @@ def _collect(store: Any, slug: str, ledger: Any, runtime: Any) -> list[str]:
             return []
         ledger = ledger or ledger_client.LedgerClient()
         doc = ledger_client.pass_state(ledger, slug)
-        fenced = controller.FencedRuntime(
-            store, slug, held, runtime or _runtime(), controller.deployment_for(config, os.environ)
-        )
+        fenced = tools.runtime.fence(held, controller.deployment_for(config, os.environ), deadline=deadline)
         lease.require(store, slug, held)
         with timing.tick(slug):
             return timing.call(  # pyright: ignore[reportUnknownMemberType]
