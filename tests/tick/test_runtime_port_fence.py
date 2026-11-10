@@ -13,6 +13,7 @@ from scripts.tick.adapters.fakes import FakeCoordination, FakeRuntime, fake_tool
 from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports import UndeclaredEffect
+from scripts.tick.steps import masters
 
 pytestmark = pytest.mark.unit
 
@@ -153,3 +154,12 @@ def test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease
     assert ack_pass.run(store, "sw", ledger="ledger", runtime="runtime") == []
 
     assert cast(FakeRuntime, tools.runtime).calls == []
+
+
+@pytest.mark.feature("tick-runtime-port-fence")
+def test_the_master_placement_ports_run_under_one_lease_life(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lease, "ttl_ms", lambda: 30_000)
+
+    deadline = masters._lease_deadline()  # pyright: ignore[reportPrivateUsage]
+
+    assert abs(deadline.remaining - 30.0) < 0.01
