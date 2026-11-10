@@ -2446,8 +2446,8 @@ While the cluster serves the proof, the script runs the built image as the Pod `
 agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"
 ```
 
-The Pod mounts an empty, memory backed `emptyDir` at `/home/worker` with `fsGroup` 10001, as the chart's worker Pod
-mounts its home volume. A failed init, a missing import such as `No module named 'croniter'`, or a rendered
+The Pod mounts an empty, memory backed `emptyDir` at `/home/worker` with `fsGroup` 10001, so init renders into a
+fresh home the worker user can write. A failed init, a missing import such as `No module named 'croniter'`, or a rendered
 `CLAUDE.md` without the line `<!-- profile: engineer -->` exits non zero; the script waits on that Pod before the
 chart checksum step, so the `kind` job fails and the image is not published. The Pod's output is `init.txt` in the
 `worker-hive-proof` artifact. `test_kind_proof_checks_init_renders_the_engineer_profile_in_a_pod_with_a_memory_home`

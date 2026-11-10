@@ -1956,10 +1956,10 @@ The image fills the venv in two layers:
 | Layer | Dockerfile | Python install |
 |---|---|---|
 | Worker base | `docker/swarm-node/Dockerfile` | `pip install --require-hashes -r requirements.lock` from `docker/swarm-node/requirements.lock`, offline from the downloaded wheels, then the venv is made read only |
-| Hive layer | `deploy/worker/Dockerfile` | the agentihooks wheel built from the checked out source and the pinned `ruff`, both with `--no-deps` |
+| Hive layer | `deploy/worker/Dockerfile` | the agentihooks wheel with `--no-deps`, built from a clone of `AGENTIHOOKS_REF` by default or from the build context with `AGENTIHOOKS_SOURCE=local`, as the kind proof builds it, and the pinned `ruff`, into a build stage venv copied over `/opt/venv`; the build requirements stay in that stage's system Python |
 
-The hive layer installs no dependency of its own, so `requirements.lock` is the only list of packages the pod can
-import. A package that `pyproject.toml` requires and the lock leaves out is missing in the pod while the
+The hive layer resolves no runtime dependency of agentihooks, so `requirements.lock` is the only source of the
+packages agentihooks imports in the pod. A package that `pyproject.toml` requires and the lock leaves out is missing in the pod while the
 workstation has it. Pods built before [pull request #5200](https://github.com/the-cloud-clockwork/agentihooks/pull/5200)
 had this gap: `agentihooks init` in step 4 failed with `ModuleNotFoundError: No module named 'croniter'`, and agents
 in that pod ran without the profile.
@@ -1971,22 +1971,24 @@ Two checks keep the lock and the workstation install equal:
 | `test_base_lock_satisfies_every_requirement_of_the_workstation_install` in `tests/deployment/test_worker_hive_image.py` | the Tests workflow and the merge queue unit suite | a requirement of `[project] dependencies` or the `all` extra has no pinned version in `requirements.lock` that its specifier accepts |
 | Init check in `deploy/worker/kind-proof.sh` | the `kind` job of the Worker hive pod workflow (`hive-worker.yml`) | `agentihooks init --profile engineer` in the built image fails, or its `~/.claude/CLAUDE.md` lacks the line `<!-- profile: engineer -->` |
 
-The init check runs the built image as a Pod with an empty, memory backed `/home/worker` and `fsGroup` 10001, the
-same home the chart's worker Pod mounts, so a file the bare image leaves in the home cannot hide or cause a failure.
+The init check runs the built image as a Pod with an empty, memory backed `/home/worker` and `fsGroup` 10001, so
+init renders into a fresh home writable by the worker user instead of the bare image's home.
 [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) covers the rest of that proof.
 
 To add or raise a dependency:
 
 1. Change `pyproject.toml`.
 2. Regenerate the lock from its existing pins plus the new requirement, so every other entry keeps its version.
-   Delete the old pin line of a package you raise. The lock also pins `setuptools` and `setuptools-scm`, which build
+   Replace `<package>` with the package's name and `<specifier>` with its requirement from `pyproject.toml`, such as
+   `croniter` and `>=6.2.4,<7`; the second grep drops its old pin when it has one. The lock also pins `setuptools` and `setuptools-scm`, which build
    the agentihooks wheel in the base; they stay in the input.
 
    ```bash
    in=~/scratchpad/agentihooks/worker-lock/input.txt
    mkdir -p "$(dirname "$in")"
-   grep -oE '^[A-Za-z0-9._-]+==[^ ]+' docker/swarm-node/requirements.lock > "$in"
-   echo 'croniter>=6.2.4,<7' >> "$in"
+   grep -oE '^[A-Za-z0-9._-]+==[^ ]+' docker/swarm-node/requirements.lock \
+     | grep -viE '^<package>==' > "$in"
+   echo '<package><specifier>' >> "$in"
    uv pip compile "$in" --generate-hashes --python-version 3.12 \
      --python-platform x86_64-unknown-linux-gnu \
      --output-file docker/swarm-node/requirements.lock
