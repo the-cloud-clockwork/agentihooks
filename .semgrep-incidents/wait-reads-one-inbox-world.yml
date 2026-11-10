@@ -1,0 +1,19 @@
+rules:
+  - id: wait-reads-one-inbox-world
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A wait resolver reads an inbox item with get, which reads only the store's own world. On 9 November a reply wait
+      on a message a hive agent sent ended at once as gone from the inbox while the item sat pending in the hive
+      member's world. Read the item with InboxStore.locate, which looks in every world the store reaches.
+    patterns:
+      - pattern-inside: |
+          def $RESOLVE(...):
+              ...
+      - metavariable-regex:
+          metavariable: $RESOLVE
+          regex: .*(resolution|resolve|target_problem).*
+      - pattern: $INBOX.get($ID)
+      - metavariable-regex:
+          metavariable: $INBOX
+          regex: (?i).*inbox.*
