@@ -146,6 +146,7 @@ def check(op):
         check_lists(op)
         check_bools(op)
         check_profile(op)
+        check_requires_harness(op)
         check_urls(op)
         check_rank(op)
         check_difficulty(op)
@@ -175,6 +176,7 @@ def check(op):
     check_applied(fields)
     check_bools(fields)
     check_profile(fields)
+    check_requires_harness(fields)
     check_urls(fields)
     check_rank(fields)
     ledger_kinds.check(fields)
@@ -319,6 +321,9 @@ def check_profile(fields):
         fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
     ):
         raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
+
+
+def check_requires_harness(fields):
     if fields.get("requires_harness", "") not in HARNESSES:
         raise ValueError("requires_harness must be claude or codex, or empty for any harness")
 
@@ -341,6 +346,7 @@ def check_task(task):
     check_applied(task)
     check_urls(task)
     check_profile(task)
+    check_requires_harness(task)
     check_rank(task)
     check_difficulty(task)
     ledger_kinds.check(task)

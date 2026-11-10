@@ -110,6 +110,11 @@ def _required(want, task):
     return want or required
 
 
+def _off_requirement(saved, task):
+    required = task.get("requires_harness", "")
+    return bool(required and saved and saved.get("harness") != required)
+
+
 def _prefer(profile, avoid):
     order = profile_choice.preferred(profile)
     if not avoid:
@@ -761,7 +766,7 @@ class HerdrRuntime:
             and not quota_transfer
             and not admitted
             and (saved["harness"] != want if want else saved["harness"] == avoid)
-        ):
+        ) or _off_requirement(saved, task):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"

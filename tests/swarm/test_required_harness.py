@@ -59,8 +59,24 @@ def test_a_task_requiring_claude_waits_while_no_claude_seat_is_free(tmp_path):
 
 
 @pytest.mark.feature("task-requires-harness")
-def test_a_task_requiring_claude_drops_a_saved_codex_launch(tmp_path):
-    saved = {"launch_assignment": {"harness": "codex", "account": "cx", "profile": "engineer"}}
+@pytest.mark.parametrize(
+    "saved",
+    [
+        {"handoff_envelope": {"launch": {"profile": "engineer", "harness": "codex"}}},
+        {"launch_assignment": {"profile": "engineer", "harness": "codex", "model": "m", "effort": "high"}},
+        {
+            "launch_assignment": {
+                "profile": "engineer",
+                "harness": "codex",
+                "model": "m",
+                "effort": "high",
+                "account": "cx",
+            },
+            "admitted_execution_id": "e1",
+        },
+    ],
+)
+def test_a_task_requiring_claude_drops_a_saved_codex_launch(tmp_path, saved):
     assert _spawned(tmp_path, {"requires_harness": "claude", **saved}, [claude(), codex()]) == ("claude", "cc")
 
 
