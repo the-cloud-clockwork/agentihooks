@@ -11,6 +11,7 @@ FAILURES = "remote-control-failures"
 FALLBACK = "fallback auth"
 GATEWAY = "gateway"
 OFF = "flag"
+TOKEN = "subscription token fallback"
 FAILURES_SAID = (
     "Remote Control failed",
     "Remote Control disconnected",
@@ -49,6 +50,10 @@ def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -
     return {"state": "on", "detail": masters.title(slug, front_door.seat(slug))}
 
 
+def landed(decided: dict, placement: str) -> dict:
+    return {"state": "off", "detail": TOKEN} if decided.get("state") == "on" and placement == "fallback" else decided
+
+
 def arguments(decided: Mapping) -> list[str]:
     if decided.get("state") != "on":
         return []
@@ -57,7 +62,10 @@ def arguments(decided: Mapping) -> list[str]:
 
 def line(agent: Mapping) -> str:
     decided = agent.get("remote_control")
-    return f"Remote Control: {decided['state']} ({decided['detail']})" if decided else ""
+    if not decided:
+        return ""
+    phone = "available" if decided["state"] == "on" else "unavailable"
+    return f"Remote Control: {decided['state']} ({decided['detail']}), phone access {phone}"
 
 
 def failure(message: str) -> bool:

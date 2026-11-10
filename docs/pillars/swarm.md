@@ -321,10 +321,11 @@ recorded launch decision:
 
 | Status or finding | Meaning |
 |---|---|
-| `Remote Control: on (master 1 · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
-| `Remote Control: off (flag)` | The master login option is off. |
-| `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
-| `Remote Control: off (gateway)` | The master uses the API route. |
+| `Remote Control: on (master 1 · <id>), phone access available` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: off (flag), phone access unavailable` | The master login option is off. |
+| `Remote Control: off (fallback auth), phone access unavailable` | The master uses subscription token authentication. |
+| `Remote Control: off (gateway), phone access unavailable` | The master uses the API route. |
+| `Remote Control: off (subscription token fallback), phone access unavailable` | The front door master asked for its native login, but the login chain ended on the subscription token fallback, so it launched without Remote Control. The master card shows the same reason. |
 | `master-fallback-auth/<seat>` | An active master wanted interactive authentication but runs on fallback auth: phone access is lost. Returning to interactive auth removes this finding. |
 | `master-rc/<seat>` | A Remote Control failure notification was recorded since this master started: phone access is lost even if the launch decision was on. A `Remote Control back on` notification clears the recorded failure. |
 

@@ -42,7 +42,7 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => agentRow(r, false)[5])))
             "tag": "span",
             "attrs": {"data-tip": "Remote Control: on (master 1 · sw), phone access available"},
             "kids": [
-                {"label": "remote control on", "tone": "on"},
+                {"label": "phone access available", "tone": "on"},
                 {"tag": "span", "attrs": {"class": "sw-sub", "text": "master 1 · sw"}, "kids": []},
                 "transport",
             ],
@@ -61,10 +61,10 @@ console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
         "tag": "span",
         "attrs": {"data-tip": "Remote Control: off (fallback auth), phone access unavailable"},
         "kids": [
-            {"label": "remote control off", "tone": "off"},
+            {"label": "phone access unavailable", "tone": "off"},
             {
                 "tag": "span",
-                "attrs": {"class": "sw-sub", "text": "phone access unavailable, fallback auth"},
+                "attrs": {"class": "sw-sub", "text": "fallback auth"},
                 "kids": [],
             },
         ],
@@ -78,4 +78,5 @@ const raw = {agents: [{name: 'm', lane: 'master', remote_control: off}]};
 console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
 """)
     assert cell["attrs"] == {"data-tip": "Remote Control: off (subscription token fallback), phone access unavailable"}
-    assert cell["kids"][1]["attrs"]["text"] == "phone access unavailable, subscription token fallback"
+    assert cell["kids"][0] == {"label": "phone access unavailable", "tone": "off"}
+    assert cell["kids"][1]["attrs"]["text"] == "subscription token fallback"
