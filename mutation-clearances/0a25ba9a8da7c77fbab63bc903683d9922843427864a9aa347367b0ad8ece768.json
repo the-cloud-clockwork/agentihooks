@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker/start.py:scripts.swarm_v2.worker.start.x__build:6496238803676891690ce449894ae1963a0af7d9925cd83688fa4d70fb2bd639": {
+    "reader": "Independent Standards",
+    "reason": "typing.cast returns its second argument unchanged and never reads the first, so replacing the cast target type with None gives the same output for every input"
+  }
+}

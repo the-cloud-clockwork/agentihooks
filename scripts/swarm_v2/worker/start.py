@@ -7,13 +7,15 @@ import re
 import sys
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from http.client import HTTPException
 from pathlib import Path
 from subprocess import SubprocessError
+from typing import cast
 from urllib.parse import urlsplit
 
+from scripts.swarm import brain_binding
 from scripts.swarm_v2 import filesystem, supervision_runtime, worker_home, workspaces
 from scripts.swarm_v2.broadcast_bridge import API_URL, AUTHORIZATION, GRANT_NAME, JSON_HEADERS
 from scripts.swarm_v2.checkpoints import runtime as checkpoint_runtime
@@ -205,6 +207,9 @@ def _build(
     bundle: Path | None,
 ) -> dict:
     attempt.parent.mkdir(mode=0o700, exist_ok=True)
+    os.environ[brain_binding.VARIABLE] = json.dumps(
+        cast(Callable[[Mapping[str, str]], dict[str, str]], brain_binding.decide)(os.environ)
+    )
     record = boot(
         worker_home.Request(
             attempt.parent,

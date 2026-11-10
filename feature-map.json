@@ -1394,6 +1394,19 @@
       ]
     },
     {
+      "id": "managed-swarm-brain-rendering",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
+      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
+      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
+      "tests": [
+        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
+        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
+      ]
+    },
+    {
       "id": "hook-redis-reuse",
       "origin": "inventory",
       "behaviour": "A hook process reaches Redis through one client with short timeouts, pinged once, and a slow Redis costs that timeout once; gate shims share the swarm gate config for a few seconds.",
