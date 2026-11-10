@@ -69,6 +69,7 @@ jobs:
 | `exclude` | empty | Space separated globs of files to skip |
 | `tool_repository` | `the-cloud-clockwork/agentihooks` | Repository that carries the scanner |
 | `tool_ref` | `main` | Revision of the scanner to run |
+| `bootstrap_ref` | empty | Revision to take the scanner from only when `tool_ref` does not carry it yet |
 
 Make the check required by adding `docs-sanity / scan` to the branch ruleset's
 required status checks once the workflow has run on one pull request.
@@ -76,7 +77,10 @@ required status checks once the workflow has run on one pull request.
 ## In this repository
 
 `docs-sanity-check.yml` scans `docs`, `evidence`, `changelog.d` and `README.md`
-with the scanner from the tested commit. The dev ruleset requires
+with the scanner from the base branch, so a pull request cannot weaken the
+rules that grade it; only while the base lacks the scanner does it run the
+pull request's own copy. Fork pull requests get no secrets, so only the built
+in rules run for them. The dev ruleset requires
 `docs-sanity / scan`. Workflow, chart and deployment files that must carry real
 addresses are not scanned.
 

@@ -27,6 +27,11 @@ on:
         type: string
         required: false
         default: main
+      bootstrap_ref:
+        description: Revision to take the scanner from only when tool_ref does not carry it yet
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -44,6 +49,16 @@ jobs:
         with:
           repository: ${{ inputs.tool_repository }}
           ref: ${{ inputs.tool_ref }}
+          path: .docs-sanity-tool
+          sparse-checkout: scripts/docs_sanity.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        if: ${{ hashFiles('.docs-sanity-tool/scripts/docs_sanity.py') == '' && inputs.bootstrap_ref != '' }}
+        with:
+          repository: ${{ inputs.tool_repository }}
+          ref: ${{ inputs.bootstrap_ref }}
           path: .docs-sanity-tool
           sparse-checkout: scripts/docs_sanity.py
           sparse-checkout-cone-mode: false

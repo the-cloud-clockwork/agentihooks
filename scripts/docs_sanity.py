@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--keywords-file", help="File holding private keywords, one per line")
     parser.add_argument("--exclude", action="append", default=[], help="Glob of files to skip")
     args = parser.parse_args(argv)
-    missing = [path for path in args.paths if not Path(path).exists()]
+    missing = [path for path in [*args.paths, args.keywords_file] if path and not Path(path).exists()]
     if missing:
         print(f"docs sanity: no such path: {', '.join(missing)}", file=sys.stderr)
         return 2

@@ -15,5 +15,6 @@ jobs:
     with:
       paths: docs evidence changelog.d README.md
       tool_repository: ${{ github.repository }}
-      tool_ref: ${{ github.sha }}
+      tool_ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      bootstrap_ref: ${{ github.sha }}
     secrets: inherit

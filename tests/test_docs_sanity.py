@@ -88,3 +88,4 @@ def test_directories_are_walked_and_excluded_globs_skipped(tmp_path: Path, capsy
 @pytest.mark.feature("docs-sanity-scan")
 def test_a_missing_path_is_a_usage_error(tmp_path: Path) -> None:
     assert docs_sanity.main([str(tmp_path / "absent")]) == 2
+    assert docs_sanity.main(["--keywords-file", str(tmp_path / "absent.txt"), str(tmp_path)]) == 2
