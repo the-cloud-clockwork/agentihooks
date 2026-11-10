@@ -196,7 +196,10 @@ def test_remove_without_an_openbao_client_names_the_hive_and_the_signer_record()
     assert str(error.value) == f"no OpenBao client to unlist m1 from {SIGNER}"
 
 
-def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, monkeypatch):
+def test_the_remove_command_unlists_the_hub_signer_record_create_lists(
+    admin: "Redis",
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
     monkeypatch.setattr(cli, "_signer", lambda: None)
     monkeypatch.setenv(openbao_kv.URL_ENV, BAO_URL)
@@ -205,7 +208,9 @@ def test_the_remove_command_unlists_the_hub_signer_record_create_lists(admin, mo
     seen = []
     monkeypatch.setattr(remove, "remove", lambda store, bao, plan, host: seen.append(plan) or [])
     assert cli.main(["remove", "m1", "--label", "anton-9"]) == 0
-    assert seen == [remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER)]
+    assert seen == [
+        remove.Plan("m1", "anton-9", "k8s/agentihooks-hive-anton-9", signer_path=SIGNER, sync=member_swarms.SYNC_TARGET)
+    ]
 
 
 def test_remove_unlists_the_signer_record_right_after_it_revokes_the_member():

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/health.py:scripts.swarm_v2.api.health.x\u01c1HealthAPI\u01c1__init__:daefd4662d67a9d75835fc6e06e87558619815cf3b358a89d0527216ae946f5c": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its second argument unchanged; replacing the type argument Any with None changes no runtime behavior."
+  }
+}
