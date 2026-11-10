@@ -328,18 +328,23 @@ second: it answers 503 and the slot is free within twice that timeout.
 
 ## Member keys
 
-A member's Redis user `hive-<id>` reads every key under the swarm root and writes only the member's own hive key and
-the keys below it. With the default root `agentihooks` (set by `AGENTIHOOKS_SWARM_KEY_PREFIX`), the member
-`lab-vm` gets these key patterns:
+A member's Redis user `hive-<id>` reads every key under the swarm root. It writes the member's own hive key and the
+keys below it, its own hive and scheduler state records, and the fixed list of swarm and seat keys a worker engineer
+writes, described in [Worker keys](#worker-keys). With the default root `agentihooks` (set by
+`AGENTIHOOKS_SWARM_KEY_PREFIX`), the member `lab-vm` gets these key patterns:
 
 ```text
-%R~agentihooks:*            read every swarm key
-~agentihooks:hive:lab-vm    write the hive record
-~agentihooks:hive:lab-vm:*  write everything below it
+%R~agentihooks:*                                  read every swarm key
+~agentihooks:hive:lab-vm                          write the hive record
+~agentihooks:hive:lab-vm:*                        write everything below it
+~agentihooks:swarm:state:hive-lab-vm:*            write the member's hive state record
+~agentihooks:swarm:state:scheduler-lab-vm:*       write the member's scheduler state record
+~agentihooks:swarm:*:claim:*  ...                 write the worker keys, one pattern each
 ```
 
 Every other write, including another member's keys, the controller's inbox and the launch slot rows, is refused
-by Redis with `NOPERM`. So every piece of state a member process writes lives below its own hive key:
+by Redis with `NOPERM`. Apart from the worker keys, every piece of state a member process writes lives below its
+own hive key:
 
 | State | Where a member keeps it | Who reads it there |
 |---|---|---|
@@ -359,6 +364,83 @@ The controller finds an agent's member from the agent's execution record: the hi
 is in the hive index and holds a member record. An agent on any other host, and every agent in local mode, keeps
 its inbox and session readings in the controller keys under the plain root. Those keys are the same as before
 member scoping, so a local install and a single host install see no change.
+
+### Worker keys
+
+An engineer on a joined hive runs its swarm commands as the member's Redis user. Those commands write swarm and seat
+keys outside the member's hive key, so the member user also writes the patterns listed in
+`scripts.hive.auth.WORKER_KEYS`, each below the swarm root and for every swarm slug. The list holds only keys a traced
+worker command writes: running `swarm status`, `wait`, `ready`, `park` and `done` as a member user on Redis 7 and
+granting each key Redis refused until all five passed gave the list.
+
+| Command | Keys it writes under `<root>:` |
+|---|---|
+| `agentihooks swarm <slug> done` | The task claim `swarm:<slug>:claim:<task>`, released when the task closes. |
+| `done`, `ready`, and `park` when it retires the agent | Agent and execution records `swarm:<slug>:agents`, `executions` and `hosts`, the agent's `desired-routes` and `state-since`, and the seat exit mark `seat-of:<agent>:exit`. |
+| `ready`, and `park` when it hands off | `swarm:<slug>:ready`, `restart-causes`, `transfers`, the handoff text, seat and envelope `handoff:*`, `handoff-seat:*` and `handoff-envelope:*`, and the seat recaps `seat:<seat>:recaps`. |
+| `agentihooks swarm <slug> status` | Finding verdicts `swarm:<slug>:findings`, check state `checks:*`, merge stall state `merge-stall` and `merge-stall-notice`, and `hive-placement-waits`. |
+| `agentihooks swarm <slug> wait` | Nothing extra: wait readings live below the member's own hive key. |
+| `swarm <slug> block` and `swarm <slug> learned` | `swarm:<slug>:dev-red` and the seat's learned notes `seat:<seat>:learned`. |
+| A refused execution record write | The identity conflict counter `swarm:<slug>:identity-conflicts`. |
+
+The rest of the list covers records the same commands write through the execution registry, fencing and gate code:
+`lease-cache`, `swarm:state:fencing:*`, `swarm:*:fence:*`, `swarm:state:counters:*`, `execution-publishing`, the
+Codex `codex-transport`, `codex-endpoints`, `codex-openings` and `codex-viewers`, `prerequisite-waits`,
+`stage-covers`, the task gate lifts `gate-lifts:tasks:*`, `gate-lift-drops` and `ledger-ready`.
+
+The member user stays refused on every other swarm key. Writes that fail with `NOPERM` include:
+
+```text
+agentihooks:swarm:<slug>:config                 swarm settings
+agentihooks:swarm:<slug>:claim-journal:<task>   claim journals
+agentihooks:swarm:<slug>:task-authority:<task>  task authority
+agentihooks:swarm:<slug>:tick-lock              the tick lock
+agentihooks:swarm:<slug>:launches               launch rows
+agentihooks:swarm:<slug>:gate-lifts:agents:*    agent gate lifts
+agentihooks:swarm:<slug>:dev-red-runs           red run history
+agentihooks:swarm:index                         the swarm index
+agentihooks:seat:<seat>:culture                 seat culture
+agentihooks:names:<agent>                       agent names
+agentihooks:inbox:*                             the shared inbox
+agentihooks:hive:<other-id>:*                   another member's keys
+```
+
+#### Applying the grant
+
+No setting turns the worker keys on. Redis applies them to a member user when the user is written:
+
+- `agentihooks hive add` and `agentihooks hive join` write the user with the current list.
+- `agentihooks hive refresh`, run on the member, writes it again with a new password.
+- `agentihooks hive serve`, the hive endpoint, rewrites every indexed member's user with the current list at start
+  and keeps each password, then saves the ACL file.
+
+After an upgrade that changes `WORKER_KEYS`, restart the hive endpoint, or run `hive refresh` on each member. Read the
+patterns a member holds, as an admin user on the swarm Redis:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ACL GETUSER hive-lab-vm
+```
+
+The `keys` field lists the member's own patterns and one `~agentihooks:<pattern>` entry per worker key, such as
+`~agentihooks:swarm:*:claim:*` and `~agentihooks:swarm:*:findings`. Check a write from the member:
+
+```bash
+. ~/.agentihooks/hive.env
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:findings probe '{}'   # (integer) 1
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HDEL agentihooks:swarm:<slug>:findings probe         # (integer) 1
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:config probe 1        # (error) NOPERM ...
+```
+
+#### Limits of the worker keys
+
+- Redis ACLs scope by key pattern, never by swarm, seat or agent. A member user can write the worker keys of every
+  swarm and every agent, not only the agents placed on it.
+- The ledger issues a hive agent token when the agent's record in `swarm:<slug>:agents` names the member as its
+  hive, and records the token from the member's holder record in the hive credential store under `<root>-hive`,
+  which a member user can neither read nor write. Agent records are a worker key, so the hive field check alone no
+  longer stops a member from naming itself on another agent's record.
+- A worker command that writes a key outside the list still fails with `NOPERM`. The list grows only by a change to
+  `WORKER_KEYS` that names the command writing the key.
 
 ### Mail across members
 
@@ -480,7 +562,8 @@ Read the Redis user's key patterns on the swarm Redis, as an admin user:
 redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ACL GETUSER hive-lab-vm
 ```
 
-The `keys` field lists the three patterns above. On the member, a write outside them fails with `NOPERM`; this
+The `keys` field lists the member patterns above and one entry per [worker key](#worker-keys). On the member, a
+write outside them fails with `NOPERM`; this
 probe tries to write a key in the controller's inbox, which the member must not reach:
 
 ```bash
@@ -500,8 +583,9 @@ the member's own keys.
   joined member's inbox as well as the controller's. Mail sent to a seat while it was empty still waits in the
   controller keys until the next tick's [seat mail move](#seat-mail-follows-its-occupant), and master seat mail
   never moves.
-- A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
-  master, done, handoff and seat exits, sit outside its keys and are refused.
+- A member-hosted agent writes outside its hive key only through the [worker keys](#worker-keys): `swarm done`,
+  `ready`, `park`, `wait`, `status`, `block` and `learned` pass, and any other command that writes a swarm key
+  outside that list is refused.
 - A member's master pool, filled while every live master sat on that member, drains only on the next send there.
 - The launch slot lifetime of two ticks assumes a tick finishes within one tick interval.
 - The pane cleanup's alias prompt scan reads only the controller's prompt keys.
@@ -512,7 +596,8 @@ the member's own keys.
 |---|---|---|
 | Mail a member agent sent never reaches the master | No swarm tick has run since the send; the relay runs once per tick. | Check the swarm is started and its controller lease is held: `agentihooks swarm <slug> status`. |
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
-| A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
+| A member process fails a write with `NOPERM` | The process writes a key outside its hive key and outside the [worker keys](#worker-keys), such as a launch slot row or swarm settings. | Expected for controller keys. A worker command refused this way is a bug to file with the command and the key named. |
+| `swarm done` fails with `NoPermissionError` deleting the task claim, or `swarm status` fails with `NoPermissionError` writing a finding verdict | The member's Redis user was written before its hive endpoint ran a release with the worker keys, so `ACL GETUSER hive-<id>` lists no `~<root>:swarm:*:claim:*` or `~<root>:swarm:*:findings` pattern. | Restart the hive endpoint (`agentihooks hive serve`) on a current release, or run `agentihooks hive refresh` on the member; see [Applying the grant](#applying-the-grant). |
 | The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
 | A hive-run dispatcher or lane agent never sees mail sent to its seat while the seat was empty | The item waits in the controller keys until the next tick's exit sweep moves it. | Wait one tick, then run `agentihooks msg inbox` as the occupant on its hive. Mail to a master seat does not move. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
@@ -981,20 +1066,21 @@ full".
 
 ### Who writes placement
 
-A member's Redis user reads agent records and placement but never writes them. Only the controller and the ledger
-server write placement; add, refresh and revoke keep the hive index.
+The controller and the ledger server place agents; add, refresh and revoke keep the hive index. A member's Redis user
+also writes the agent and execution records, claims and seat records its own engineers change when they run
+`swarm done`, `ready`, `park` and `status`; see [Worker keys](#worker-keys).
 
 | Keys under the swarm root | Member Redis user | Written by |
 |---|---|---|
-| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read only | The controller and the ledger server. |
-| Claims, seats, names and placement waits | read only | The controller and the ledger server. |
+| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read and write | The controller and the ledger server; a member's engineers on `done`, `ready` and `park`. |
+| Task claims `swarm:<slug>:claim:*` and placement waits `swarm:<slug>:hive-placement-waits` | read and write | The controller and the ledger server; a member's engineers on `done` and `status`. |
+| Claim journals, task authority, swarm settings and names | read only | The controller and the ledger server. |
 | Launch slot rows `launch-slot:*` | read only | The controller, which reserves, acknowledges and refreshes them. |
 | Hive index `hives` | read only | `hive add` and `hive refresh` add the member; `hive revoke` and a failed add remove it. |
 | The member's own hive record and every key below it | read and write | The member's `hive run` beat and the agents it runs. |
 
-The ledger issues an agent token to a member only for an agent whose record names that member as its hive. A member
-that could write agent records could set that field on another hive's seat and take tokens for it; with agent
-records read only, a member holds tokens only for the agents the controller placed on it.
+The ledger issues an agent token to a member only for an agent whose record names that member as its hive, recorded
+from the member's holder record in the hive credential store, which no member reads or writes.
 
 What a member process does differently:
 
@@ -1012,28 +1098,27 @@ Check a member's scope from the member, with the credentials `hive add` delivere
 
 ```bash
 . ~/.agentihooks/hive.env
-redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HGETALL agentihooks:swarm:<slug>:agents          # allowed
-redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:agents forged '{}'  # (error) NOPERM ...
-redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SADD agentihooks:hives forged                      # (error) NOPERM ...
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HGETALL agentihooks:swarm:<slug>:agents             # allowed
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:config max_eng 99     # (error) NOPERM ...
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SADD agentihooks:hives forged                         # (error) NOPERM ...
 ```
 
-`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after an add. The member's writes to agent
-records, executions, another member's keys, the hive index and a launch slot row are refused. Its beat, an agent
-heartbeat and an inbox send succeed, and the member stays in the hive index. `scripts/packaging/compose-hive-smoke.sh`
-also checks that a member stays indexed after a Redis restart and a refresh.
+`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after an add. The member's writes to swarm
+settings, tasks, another member's keys, the shared inbox, another agent's heartbeat, the hive index and a launch
+slot row are refused. A write to `swarm:<slug>:executions`, its beat, an agent heartbeat and an inbox send succeed,
+and the member stays in the hive index. `scripts/packaging/compose-hive-smoke.sh` also checks that a member stays
+indexed after a Redis restart and a refresh.
 
 Limitations:
 
-- Code on a member host that writes agent records is refused until it routes through the controller or the ledger:
-  the order consumer's runtime binding, remote take master, done, handoff, claim release and seat exits. A
-  distributed launch onto a member fails as `refused` until then.
+- Code on a member host that writes a controller key outside the [worker keys](#worker-keys), such as a launch slot
+  row or swarm settings, is refused until it routes through the controller or the ledger.
 - Redis ACLs scope by key pattern, never by seat or agent name. A member that can write its own agents' keys can
-  also write keys it names for another agent below its own hive key. Token issuance reads only the agent record's
-  hive, which no member can write.
+  also write keys it names for another agent, below its own hive key and in the worker keys, agent records included.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A launch order on a member acknowledges `failed` with `refused` | The launch wrote a key outside the member's keys, such as an agent record. | Expected for member launches that bind the agent record on the member; see the limitations above. |
+| A launch order on a member acknowledges `failed` with `refused` | The launch wrote a key outside the member's keys and the worker keys, such as a launch slot row. | Read the refused key from the member's `hive run` log; a key the launch needs is a bug to file with the key named. |
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
