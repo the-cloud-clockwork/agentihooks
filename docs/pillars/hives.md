@@ -205,10 +205,37 @@ HIVE_REPO_ROOT=/srv/repos agentihooks hive run
 agentihooks hive show lab-vm        # the "repos" list
 ```
 
-Placement drops a hive whose list lacks the task's repo, with "no hive for `<role>` lists the repo `<repo>`"
-("no headless hive for ..." when only headless hives were tried).
-When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
-the first by path when it holds several. A repo given as a path launches in that path.
+### Matching a repo across machines
+
+A swarm may name its repo by a local checkout path even though a worker keeps its clone elsewhere. Launch
+selection reads the local checkout's `origin` and matches that identity against the hive's advertised `repos`.
+This applies to worker and master launch selection. The two machines do not need matching home directories.
+
+For example, these records describe the same repository:
+
+| Machine | Checkout or advertised repo |
+|---|---|
+| Workstation, swarm repo | `/home/me/dev/agentihooks` |
+| Headless worker, checkout | `/home/worker/dev/agentihooks` |
+| Headless worker, advertised origin | `github.com/the-cloud-clockwork/agentihooks` |
+
+If the workstation checkout's origin is `https://github.com/the-cloud-clockwork/agentihooks.git`, the worker
+qualifies through `github.com/the-cloud-clockwork/agentihooks`. Selection sends the matched origin with the launch,
+so the worker resolves its own checkout. When several checkouts share that origin, it uses the first by path.
+A directly matched path needs no origin translation.
+
+```bash
+git -C /home/me/dev/agentihooks remote get-url origin
+agentihooks hive list
+agentihooks hive show <worker-hive-id>
+```
+
+Compare the normalized origin with the worker's `repos` list. An origin match needs a readable local checkout
+and a worker heartbeat advertising that identity. A missing or unreadable origin cannot establish that match;
+check the advertised path as well. A different owner or host is a different origin, even when the repo folder
+has the same name. Placement refuses when no eligible hive lists a matching repo, with
+`no hive for <role> lists the repo <repo>`. Set `HIVE_REPO_ROOT` to the parent of the worker checkouts before
+starting its daemon, and allow its next heartbeat to publish them; listing a repo does not clone it.
 
 `swarm prepare` and `swarm publish` search the same `HIVE_REPO_ROOT` checkouts by repository name when a task
 repository entry is not a directory on this host, such as a path recorded on another host; see
@@ -617,13 +644,12 @@ any hive differs or published nothing.
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that are not draining
-and do not exclude its lane, role or profile,
-then drops, in order, those that do not advertise the account slot the router picked, those with no room under
-their agent ceiling, those that do not list the task's repo, and, for an interactive or master login, those that do
-not hold that login. Each step that empties the list names its reason, and the launch waits with it.
+and do not exclude its lane, role or profile. It checks the selected account slot, admission room, the
+[repository match](#matching-a-repo-across-machines), and any required interactive or master login.
+Each check that empties the candidate list names its reason, and the launch waits with it.
 
-Among the hives left, placement picks the lowest `prefer` rank for the role, then the smallest share of its agent
-ceiling in use, then a lasting hive over an ephemeral one, then the hive id.
+Among eligible worker hives, placement picks the lowest `prefer` rank for the role, then the lowest fraction of
+agent capacity in use, then a lasting hive over an ephemeral one, then the hive id.
 
 `agentihooks swarm <id> set placement-mode=round-robin placement-nodes=N` switches a swarm's worker launches from
 this default, `anton-first`, to round robin for load runs: placement keeps only the first `N` live hives by id
@@ -633,7 +659,61 @@ same tick. When every kept hive is full the launch waits rather than use another
 and `frontend`, and tasks pinned to a hive or to the workstation keep `anton-first`. `placement-mode=anton-first`
 switches back on the next tick.
 
+### Workstation fallback for workers
+
+A headless hive refusing an `eng`, `ci`, `plan` or `dispatch` launch does not prevent an eligible UI hive,
+such as the workstation, from taking it. This covers a missing account slot, a repo mismatch, a missing login,
+no admission room, or no live headless hive. The workstation must pass the same account, repo, role and room
+checks. A fallback never bypasses a task's hive pin or workstation requirement.
+
+Worker selection now ranks eligible headed and headless hives together using `prefer` and utilization. Set a
+lower `prefer` rank for a worker to favor it; being headless alone does not force that worker to win. The engineer,
+cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; frontend and qa profiles keep
+their UI role on any lane.
+
+For a workstation reporting five accounts and a headless worker reporting one, a launch can use the worker's
+account there even though an earlier account candidate could run only on the workstation. The account loop
+prefers a choice without a fallback reason over an earlier choice carrying one. If the worker cannot accept the
+selected account or repo, an eligible workstation remains available.
+
+```bash
+agentihooks hive list
+agentihooks hive set <workstation-hive-id> ui=yes max-agents=5
+agentihooks hive set <worker-hive-id> ui=no prefer=eng:1,ci:1,plan:1,dispatch:1
+agentihooks hive show <worker-hive-id>
+agentihooks hive show <workstation-hive-id>
+```
+
+These commands configure role preference and the workstation ceiling; account slots and repos come from each
+hive's heartbeat. An account count is not an agent ceiling: quota caps and measured headroom still apply.
+For one swarm in local mode, also enable [hive placement](#hive-placement-for-one-swarm-on-a-local-machine).
+
+Where selection records a fallback reason, the agent's profile decision carries it as `placement_fallback`;
+a task pinned to a UI hive records the pin as its reason. Ranked worker spill also records the preferred hive's
+refusal; see [Headroom](#headroom). Masters keep their separate [placement chain](#master-placement).
+
+### Placement waits
+
+A ready task refused during placement appears in tick output as `task <id> waits: <reason>`. For example:
+
+```text
+task example waits: no hive for eng advertises the claude slot worker-account
+task example waits: no hive for eng lists the repo /home/me/dev/agentihooks
+```
+
+The tick reports the tasks it evaluates while filling free launch slots. A task not reached because those slots
+are already filled has no new placement decision in that pass.
+
+| Wait or symptom | Check | Resolution |
+|---|---|---|
+| `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
+| `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
+| `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
+| Headless worker refuses and workstation still receives no launch | Workstation heartbeat, role exclusions, repo, account, headroom and task pin | A fallback needs an eligible workstation; a pin does not spill to another hive. |
+
 ### Placement by role
+
 
 The host kind an agent lands on follows from its placement role. A hive's `ui` setting declares its kind: `ui=yes`
 is a UI hive, such as the workstation that runs the herdr server the operator watches; `ui=no` is a headless hive,
@@ -1385,8 +1465,10 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
-3. Installs a mounted credential as `hive.env`. With no mounted credential and no `hive.env` yet, it starts sshd
-   and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
+3. Writes the container env file `hive-container.env` and, with `workers.ssh.enabled`, starts sshd
+   ([Operator SSH into a worker hive](#operator-ssh-into-a-worker-hive)). Then it installs a mounted credential as
+   `hive.env`. With no mounted credential and no `hive.env` yet, it waits for one, up to `HIVE_DELIVERY_WAIT_S`
+   (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
 5. Sets itself `ui=no ephemeral=yes draining=no excluded=<workers.excluded> master-swarms=<workers.masterSwarms>
@@ -1500,11 +1582,275 @@ and rolls out by Recreate. A pre-install and pre-upgrade Job makes both folders 
 `mount.path` is an `fsType` filesystem holding `mount.marker`, so an unmounted data disk never gets hive folders on the
 system drive. `hiveStorage.homeFolders.hives` lists hives whose `homeVolume` is set by hand under `default.homes`; one
 DaemonSet makes their folders on every node `homeFolders.nodeSelector` selects, except the nodes `hiveStorage.nodes`
-lists.
+lists. [Worker hive home volume](#worker-hive-home-volume) gives examples, checks and refusals.
+
+### Worker hive home volume
+
+`/home/worker` holds every repo clone, worktree and scratchpad the hive's agents use, so its disk decides how many
+worktrees fit. `wt.sh new` refuses below `WT_MIN_FREE_GB` free on that disk, and a node root disk with less free space
+than the floor stops every engineer on the hive at its first worktree. Put the home on a data disk with room above the
+floor. Choose one of three forms:
+
+| Form | Set | Home and `/tmp` | Rollout |
+|---|---|---|---|
+| Default | nothing | emptyDir on the node root disk, lost with the pod | RollingUpdate |
+| Hand set source | `workers.homeVolume` | the hostPath or claim you give; `/tmp` stays an emptyDir | Recreate |
+| Per node storage | `workers.node` and `hiveStorage` | `<homes>/<folder>` and `<tmp>/<folder>`, made by a Job before the pod starts | Recreate |
+
+**Hand set hostPath.** Pin the hive to the node that carries the data disk and mount a folder on that disk. Type
+`Directory` makes the kubelet refuse the mount when the folder is missing, so the pod never starts on the root disk of a
+node whose data disk did not mount. Create the folder, owned by uid 10001, on the mounted disk before the rollout:
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null                 # one source only; the chart refuses two
+    hostPath:
+      path: /mnt/data/agentihooks-hive
+      type: Directory
+  nodeSelector:
+    kubernetes.io/hostname: worker-001
+  worktreeMinFreeGb: 50
+```
+
+**Hand set claim.** A `persistentVolumeClaim` keeps the home on whatever disk its storage class provides. It gains
+nothing when the only storage class provisions on the node root disk.
+
+```yaml
+workers:
+  homeVolume:
+    emptyDir: null
+    persistentVolumeClaim:
+      claimName: swarm-hive-001-home
+```
+
+**Per node storage.** `workers.node` names the node; its `hiveStorage.nodes` entry, else `hiveStorage.default`, gives
+the host folders. The chart pins the pod to that node, mounts `<homes>/<release>` as `/home/worker` and
+`<tmp>/<release>` as `/tmp`, and runs a pre-install and pre-upgrade Job (`<fullname>-storage`, an ArgoCD PreSync hook
+when `workers.rollout.enabled`) on that node that makes both folders for uid 10001 with mode 0750. With `mount` set,
+the Job first checks that `mount.path` is an `fsType` filesystem holding `mount.marker` and fails otherwise, so the sync
+stops before any folder lands on the system drive. Both `homes` and `tmp` must sit under `mount.path`.
+
+```yaml
+workers:
+  node: worker-001
+  hives:
+    - name: b
+      credentialSecret:
+        name: swarm-hive-001-b-join
+        key: credential
+hiveStorage:
+  nodes:
+    worker-001:
+      homes: /mnt/data/agentihooks-hive/homes
+      tmp: /mnt/data/agentihooks-hive/tmp
+      mount:
+        path: /mnt/data
+        fsType: xfs
+        marker: .data-disk          # a file that exists only on the data disk
+```
+
+With release `swarm-hive-001`, the base hive mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001` and entry `b`
+mounts `/mnt/data/agentihooks-hive/homes/swarm-hive-001_b`; each `workers.hives` entry gets its own `-storage-<name>`
+Job and inherits `workers.node` unless it sets its own.
+
+**Folders for hand set hives on many nodes.** When several hives set `homeVolume` by hand to folders under one root,
+`hiveStorage.homeFolders` makes those folders on every node it selects, outside the nodes `hiveStorage.nodes` lists,
+with a DaemonSet that keeps running:
+
+```yaml
+hiveStorage:
+  default:
+    homes: /mnt/data/agentihooks-hive
+  homeFolders:
+    hives: [swarm-hive-002, swarm-hive-003]
+    nodeSelector:
+      agentihooks/hive-disk: "true"
+```
+
+**Check before a sync.** Render the release and read the home volume, its strategy and placement:
+
+```bash
+helm template swarm-hive-001 deploy/helm/agentihooks-swarm -f values-hive.yaml \
+  | grep -nE 'type: Recreate|name: home$|hostPath:|path: |kubernetes.io/hostname'
+```
+
+**Check after the rollout.** Read the free space the agents see and the floor they get. `<fullname>` is the release
+name when it contains `agentihooks-swarm`, else `<release>-agentihooks-swarm`:
+
+```bash
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- df -h /home/worker
+kubectl -n <namespace> exec deploy/<fullname>-worker-hive -- printenv WT_MIN_FREE_GB
+kubectl -n <namespace> logs job/<fullname>-storage
+```
+
+`df` must show the data disk size, not the node root disk, and free space well above `WT_MIN_FREE_GB`. The storage Job
+is deleted once it succeeds, so its log exists only while it fails or runs. One engineer on the hive passing
+`wt.sh new` proves the floor holds.
+
+### Worker hive home volume refusals
+
+The chart refuses these values at render time; the storage Job and the kubelet report the rest on the cluster.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim` | The default `emptyDir: {}` merged with the source you added. | Set `emptyDir: null` beside the hostPath or claim. |
+| `workers.node <node> has no homes: set hiveStorage.nodes.<node>.homes, or hiveStorage.default.homes when the node has no entry` | `workers.node` names a node with no homes folder. | Add `homes` to that node's entry or to `hiveStorage.default`. |
+| `hiveStorage for node <node> names a mount without its fsType and marker` | `mount.path` is set alone. | Give `mount.fsType` and `mount.marker`. |
+| `hiveStorage folder <folder> for node <node> is not under its mount <path>` | `homes` or `tmp` lies outside `mount.path`. | Move the folder under the mount, or fix `mount.path`. |
+| Storage Job log: `<path> on <node> is not the <fsType> disk holding <marker>, so its data disk is not mounted` | The data disk is unmounted, has another filesystem, or lacks the marker. | Mount the disk on the node, or create the marker on it, then sync again. |
+| Pod stays in `ContainerCreating` with a `FailedMount` event naming the home hostPath | A hand set `Directory` hostPath does not exist on the node. | Create the folder on the mounted data disk, owned by uid 10001, or use `hiveStorage` so the Job makes it. |
+| `hiveStorage.homeFolders.hives needs hiveStorage.default.homes` | The DaemonSet has no root to make folders under. | Set `hiveStorage.default.homes`. |
+| `hiveStorage.homeFolders.hives entry "<name>" must be a folder name: lowercase letters, digits and dashes` | An entry holds another character, such as `_`. | Name the hive's home folder, and the entry, without that character. |
+| `wt.sh new` refuses below the free space floor inside the pod | The home disk has less free space than `WT_MIN_FREE_GB`. | Move the home to a larger disk or run `agentihooks gc`; never lower `workers.worktreeMinFreeGb` to pass. |
+
+### Accounts on a worker pod
+
+A worker pod holds every Claude and Codex account the workstation routes, never one account per pod. Its hive reads
+each `AH_CC_TOKEN_<slug>` and `AH_CX_TOKEN_<slug>` in its environment by name and advertises one subscription slot per
+account, so placement and the launch reservation can put an agent of any account on the pod. Give the pod the tokens
+through one Secret in `workers.envFromSecrets` whose keys are the environment variable names. In Anton the
+`<hive>-accounts` ExternalSecret extracts every `AH_CC_TOKEN_*` key from the `agentihooks/claude-creds` record and
+every `AH_CX_TOKEN_*` key from `agentihooks/codex-creds` in OpenBao, and drops any other key:
+
+```yaml
+workers:
+  envFromSecrets:
+    - swarm-hive-001-env
+    - swarm-hive-001-accounts   # every AH_CC_TOKEN_* and AH_CX_TOKEN_* key, named as its variable
+    - swarm-hive-001-settings
+```
+
+A token added to either record reaches the pod at the next ExternalSecret refresh (one hour in Anton) and the next pod
+start, since environment variables are read at container start. `agentihooks hive setup` never writes account tokens
+into the settings record; the accounts records carry them.
+
+The pod holds the tokens but never probes their quota, so its own readings stay missing and its subscription caps
+would read 0. Each beat, a subscription slot with no reading, or an older one, takes the cap and quota reading of the
+newest reading any other live hive published for the same account, usually the workstation's; see
+[Account caps on every hive](#account-caps-on-every-hive). The pod therefore admits up to the account's real cap, and
+the launch reservation still counts the account's sessions across every hive against that one cap.
+
+Check that a pod carries every account and real caps from the workstation:
+
+```bash
+agentihooks hive compare --base <workstation id>   # no "accounts missing AH_CC_TOKEN_<slug>" line for the pod
+agentihooks hive show <pod hive id>                # "slots": one subscription slot per account, each with its cap
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive compare` prints `accounts missing AH_CC_TOKEN_<slug>` or `AH_CX_TOKEN_<slug>` for the pod | The accounts Secret lacks the key: the token is not in the OpenBao record, the key is not prefixed `AH_CC_TOKEN_` or `AH_CX_TOKEN_`, or the pod started before the Secret refreshed. | Add the token to the record under its variable name, wait for the ExternalSecret refresh or force one, then roll the pod. |
+| A pod slot shows `cap` 0 while the workstation shows a cap for that account | No other live hive has published a reading for the account: the workstation is stale or does not hold that token either. | Start or restart the workstation hive so it probes the account; `agentihooks hive list` shows which hives are live. |
+| The pod lists no Codex slot for an account it holds | The Codex router refuses the token: it is not a usable Codex credential, or it expires sooner than the router's minimum token life. | Replace the token in `agentihooks/codex-creds`; see [Codex accounts](load-balancing.md#codex-accounts). |
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
+### Operator SSH into a worker hive
+
+`workers.ssh.enabled` runs sshd inside the worker pod, so the operator can open a shell or a herdr session on the
+hive and `agentihooks hive add` can deliver a member credential to it. It is off by default.
+
+```yaml
+workers:
+  ssh:
+    enabled: true
+    port: 2222        # 1024 or higher; sshd runs as the unprivileged worker user
+  credentialSecret:
+    name: worker-hive-join
+    key: invite
+```
+
+The Secret named by `workers.credentialSecret` must then hold two more keys beside the member credential:
+
+| Secret key | Mounted at | Content |
+|---|---|---|
+| `authorized_keys` | `/run/hive-join/ssh/authorized_keys` | The operator public keys allowed to log in, one per line |
+| `host_key` | `/run/hive-join/ssh/host_key` | The sshd private host key, so the host key stays the same across pod restarts |
+
+Deliver them through the same ExternalSecret as the credential. The chart refuses a port below 1024 with
+`workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker`.
+
+**What the pod runs.** The start script installs the host key mode 0600 under `$AGENTIHOOKS_HOME/ssh`, writes
+`$AGENTIHOOKS_HOME/ssh/sshd_config`, checks it with `sshd -t`, and starts `sshd -D -e`, which logs to the pod log at
+`VERBOSE`. Without a mounted host key, outside the chart, it generates an ed25519 host key once and keeps it. The
+configuration:
+
+- listens on `0.0.0.0` at `workers.ssh.port` and allows only the worker user;
+- accepts public keys from the mounted `authorized_keys` only: no password, keyboard interactive or PAM login, no
+  root login;
+- turns off TCP and agent forwarding, gateway ports, tunnels, X11 and user environment files;
+- sets `PATH` to `~/.local/bin`, `/opt/venv/bin` and the system folders, with `NPM_CONFIG_PREFIX` and
+  `AGENTIHOOKS_HOME`, so `agentihooks` and the npm global tools resolve in an ssh shell, which runs `/bin/bash`, the
+  worker user's login shell in the hive worker image;
+- turns `StrictModes` off, because the keys sit on a read-only Secret mount the worker cannot own.
+
+sshd starts before the credential step, so a pod with no mounted credential already serves the keys while it waits
+for `hive add` to deliver `hive.env`. The pod fails before serving any agent when `sshd -t` rejects the configuration
+or host key, or when sshd has exited one second after launch. An sshd that exits later is not restarted: restart the
+pod.
+
+**Container env file.** An ssh shell does not inherit the pod's environment. Each start writes
+`$AGENTIHOOKS_HOME/hive-container.env` (mode 0600), which agentihooks loads with the other `*.env` files in its home,
+so `agentihooks` commands in an ssh shell or herdr pane see the pod's settings. It copies the variables whose names
+start with `AH_`, `AGENTIHOOKS_`, `HIVE_`, `SWARM_`, `LANGFUSE_`, `BRAIN_` or `AMYGDALA_`, plus `KB_ROUTER_TOKEN` and
+`SSL_CERT_FILE`, each value shell quoted. It leaves out `SWARM_SECRET` and `AGENTIHOOKS_LEDGER_AGENT_TOKEN`, values
+with a newline, and values with a single quote or backslash, which python-dotenv cannot read back; each of the last
+kind logs `worker-hive: <name> holds a quote or backslash, which python-dotenv cannot read back; left out`.
+`agentihooks hive setup` never copies this file into the hive settings record.
+
+**Publishing the port.** The chart names the container port `ssh` and creates no Service for it. Publish it from the
+deployment overlay, for example with a LoadBalancer on a LAN address:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentihooks-swarm-worker-hive-ssh
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: agentihooks-swarm
+    app.kubernetes.io/instance: <release>
+    app.kubernetes.io/component: worker-hive     # worker-hive-<name> for a workers.hives entry
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+```
+
+**Workstation setup.** Give the hive an ssh config host with the operator key whose public half is in
+`authorized_keys`:
+
+```text
+Host anton-hive
+  HostName <LoadBalancer address>
+  Port 2222
+  User worker
+  IdentityFile ~/.ssh/<operator key>
+```
+
+Then check the login, save the machine in herdr and open a pane on it:
+
+```bash
+ssh anton-hive agentihooks balance            # the hive's accounts, read through hive-container.env
+herdr machine add --label anton-hive anton-hive
+herdr machine list                            # anton-hive is listed and enabled
+```
+
+`herdr machine add` prepares the remote herdr server over that ssh host before saving the machine, so a saved
+machine has already been reached once. A pane opened on it runs in the pod as the worker user.
+
+| Symptom | Check | Fix |
+|---|---|---|
+| The pod exits at start right after an `sshd -t` error in its log | The `host_key` value in the credential Secret | Store a valid OpenSSH private key under `host_key`. |
+| `Permission denied (publickey)` | The key ssh offers (`ssh -v anton-hive`) against the Secret's `authorized_keys` | Add the operator public key to `authorized_keys` in the Secret's source. sshd reads the mounted file at each login, so the key works once the ExternalSecret and the kubelet have synced it. |
+| `Connection refused` or a timeout | `kubectl get svc` for the ssh Service and its address; the pod's `ssh` port | Publish the port as above, or start the pod with `workers.ssh.enabled`. |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` after a restart | Whether the Secret holds `host_key` | Keep the host key in the Secret so restarts reuse it; then remove the old line with `ssh-keygen -R`. |
+| `agentihooks` is not found, or runs without the hive's accounts, in an ssh shell | That the pod was started by the current start script, and the start log for a `left out` line | Restart the pod on a current image; move a value with a quote or backslash out of a copied variable. |
+| `herdr machine add` fails while `ssh anton-hive` works | Whether `HOME` differs from the passwd home: herdr's health check calls ssh without `-F`, so ssh reads the passwd home's config | Put the host in `~/.ssh/config` of the passwd home. |
 
 ### Worker hive memory and placement
 
@@ -1851,3 +2197,5 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 - [Swarm](swarm.md): the master, seats, the minute tick and the swarm commands.
 - [Claude account load balancing](load-balancing.md): subscription and api slots.
 - [Hosted ledger auth](../reference/hosted-ledger-auth.md): hive tokens and edge mode.
+- [Hive enablement record](../reference/hive-enablement-record.md): the first Anton worker hive join, where its
+  time went, and the proposals that shaped this page.

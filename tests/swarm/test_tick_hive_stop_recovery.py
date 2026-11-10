@@ -1,6 +1,7 @@
 """Tick regression: a hive stopped with a recovery handoff reopens its agent's task and primes the next engineer."""
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,7 +39,7 @@ def _on_hive(swarm: RedisStore, agent: AgentRecord) -> AgentRecord:
     return swarm.start_execution("sw", replace(agent, hive=HIVE, runtime_target=target), "")
 
 
-def _stop_hive(swarm: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, int]]:
+def _stop_hive(swarm: RedisStore, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[str, str, str, int]]:
     built: list[tuple[str, str, str, int]] = []
 
     def build(given: Any, slug: str, agent: AgentRecord, reason: str, rows: Any, at: int, run: Any) -> dict[str, Any]:
@@ -49,7 +50,7 @@ def _stop_hive(swarm: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[tuple
     registry.update(swarm.redis, HIVE, ["ui=no"])
     swarm.redis.sadd(registry.INDEX, HIVE)
     clock = Clock()
-    host = remove.Host(sleep=clock.sleep, clock=clock, wall=lambda: STOPPED_MS / 1000)
+    host = remove.Host(sleep=clock.sleep, clock=clock, wall=lambda: STOPPED_MS / 1000, worktrees=tmp_path / "trees")
     remove.settle(swarm, HIVE, WAIT_S, host)
     registry.beat(swarm.redis, HIVE, {"heartbeat_at": STOPPED_MS, "beat_at": STOPPED_MS})
     return built
@@ -59,6 +60,7 @@ def _stop_hive(swarm: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[tuple
 def test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_next_engineer(
     store: RedisStore,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(commands, "hive_id", lambda: "controller")
     monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda repo, lives, recorded, heads=None: FRESH)
@@ -66,8 +68,10 @@ def test_a_hive_stopped_with_a_recovery_handoff_reopens_the_task_and_primes_the_
     tick("sw", store, ledger, runtime, now_ms=1_000)
     (first,) = workers(store)
     hosted = _on_hive(store, first)
-    built = _stop_hive(store, monkeypatch)
-    recovery = remove.RECOVERY.format(name=hosted.name, task="t1", hive=HIVE, wait=WAIT_S, folder=folder("sw", "t1"))
+    built = _stop_hive(store, monkeypatch, tmp_path)
+    recovery = remove.RECOVERY.format(
+        name=hosted.name, task="t1", hive=HIVE, wait=WAIT_S, folder=folder("sw", "t1"), pushed=""
+    )
     assert store.handoff("sw", "t1") == recovery
     assert built == [("sw", hosted.name, EXIT, STOPPED_MS)]
 

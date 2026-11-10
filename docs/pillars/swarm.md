@@ -27,7 +27,9 @@ tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a la
 | `master` | The one agent the operator talks to. It troubleshoots with read only diagnostics, plans with the operator and configures the swarm, the ledger and the operator's environment with him through the agentihooks commands and tools. It works no task and never edits code or config files in a repository, commits or merges. |
 
 Agents run on [hives](hives.md), the machines joined to the swarm; [Deployment modes](../reference/deployment-modes.md)
-says where the controller, ledger and Redis run.
+says where the controller, ledger and Redis run. See [repository matching across machines](hives.md#matching-a-repo-across-machines)
+for local checkout paths matched by origin, [workstation fallback](hives.md#workstation-fallback-for-workers) when
+a headless worker refuses, and [placement waits](hives.md#placement-waits) for the tick's refusal messages.
 
 ## Event driven engine
 
