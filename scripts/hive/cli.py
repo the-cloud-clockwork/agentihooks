@@ -182,7 +182,7 @@ def _create(args: argparse.Namespace) -> str:
         "node": args.node,
         "timeout_s": args.timeout,
         "name": args.name,
-        "repos": tuple(filter(None, (repo.strip() for repo in args.repos.split(",")))) if args.repos else None,
+        "repos": create.repos(args.repos) if args.repos else None,
     }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
@@ -313,7 +313,7 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
     created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
     created.add_argument(
-        "--repos", help="comma separated repos the hive works; defaults to the repos of the swarms placing on hives"
+        "--repos", help="comma separated repos the hive works; host/owner/name; defaults to the repos of every swarm"
     )
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")

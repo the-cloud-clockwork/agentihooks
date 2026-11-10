@@ -2569,15 +2569,17 @@
       "id": "hive-create-registers-name-and-repos",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1750",
-      "behaviour": "Hive create records the new hive's name and the repos it was given, defaulting to the repos of the running swarms that place on hives, in the hive registry; every heartbeat keeps those repos listed and hive list prints the name.",
+      "behaviour": "Hive create records the new hive's name and the repos it was given, defaulting to the repos of every swarm it joins, in the hive registry; every heartbeat keeps those repos listed and hive list prints the name.",
       "seam": "scripts.hive.create.create",
       "tests": [
         "tests/hive/test_create.py::test_create_records_the_hive_name_and_the_swarm_repos_and_hive_list_prints_the_name",
         "tests/hive/test_create.py::test_create_records_the_repos_it_was_given_over_the_swarm_repos",
-        "tests/hive/test_create.py::test_the_default_repos_skip_swarms_that_do_not_place_on_hives_and_read_a_path_origin",
+        "tests/hive/test_create.py::test_a_resumed_create_records_the_repos_its_first_run_was_given",
+        "tests/hive/test_create.py::test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin",
         "tests/hive/test_create.py::test_the_dry_run_names_the_registry_record_and_writes_none",
         "tests/hive/test_create.py::test_no_repo_is_named_as_no_repos",
         "tests/hive/test_create.py::test_cli_create_passes_its_repos",
+        "tests/hive/test_create.py::test_cli_create_refuses_a_repo_that_is_not_host_owner_name",
         "tests/hive/test_registry.py::test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones"
       ]
     },

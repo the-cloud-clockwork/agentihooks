@@ -32,6 +32,7 @@ NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 SAVED_MEMBERS = ("member", "resynced", "added")
+REPO_SHAPE = re.compile(r"[a-z0-9.-]+/[a-z0-9._-]+/[a-z0-9._-]+")
 
 
 def report(line: str, clock: Callable[[], float] = time.time) -> None:
@@ -43,6 +44,15 @@ def report(line: str, clock: Callable[[], float] = time.time) -> None:
 def _no_signer() -> "nats_grant.Signer | None":
     """Name no NATS signer, so a resumed create revokes only the Redis side of a saved member."""
     return None
+
+
+def repos(value: str) -> tuple[str, ...]:
+    """Reads a comma separated repo list, each entry the lowercase host/owner/name a hive reports for a checkout."""
+    found = tuple(dict.fromkeys(entry.strip().lower() for entry in value.split(",") if entry.strip()))
+    for repo in found:
+        if not REPO_SHAPE.fullmatch(repo):
+            raise auth.HiveError(f"hive create takes repos as host/owner/name, such as github.com/o/r, not {repo!r}")
+    return found
 
 
 @dataclass(frozen=True)
@@ -124,7 +134,14 @@ def _start(tools: Tools, options: Options) -> dict:
     services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
     lan_ip = create_render.lan_address(services)
     port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
-    return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
+    return {
+        "name": name,
+        "record": invite.default_path(name),
+        "ssh_port": port,
+        "lan_ip": lan_ip,
+        "node": options.node,
+        "repos": list(options.repos),
+    }
 
 
 def _named(tools: Tools, options: Options) -> str:
@@ -370,22 +387,18 @@ def _live(tools: Tools, options: Options) -> str:
 
 
 def _swarm_repos(tools: Tools) -> list[str]:
-    """The repos of every running swarm that places engineers on hives, as origin identities where a path has one."""
+    """The repos of every swarm the new hive joins, as origin identities where a path has one."""
     from scripts.hive.daemon import origin
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(tools.redis)
-    configs = [store.config(slug) for slug in store.slugs()]
-    repos = [
-        origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo
-        for config in configs
-        if config.hive_placement and config.state == "running"
-    ]
+    configs = [store.config(slug) for slug in member_swarms.swarms(tools.redis, ())]
+    repos = [origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo for config in configs]
     return sorted(set(filter(None, repos)))
 
 
 def _registered(tools: Tools, options: Options) -> str:
-    repos = sorted(set(options.repos)) or _swarm_repos(tools)
+    repos = sorted(set(options.repos or tools.state.get("repos", ()))) or _swarm_repos(tools)
     name, listed = tools.state["name"], ", ".join(repos) or "no repos"
     if options.dry_run:
         return f"would record {name} with {listed} in the hive registry"
