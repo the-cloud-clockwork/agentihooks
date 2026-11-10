@@ -589,6 +589,37 @@ agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
 | `--keep-pane` | Leave the agent's herdr pane open after it exits |
 | `--json` | Print the resolution report as one JSON object |
 
+### Which processes the list shows
+
+`--list`, and every selector match, reads two sources: the session registry and
+the local process table. A process counts as an agent when its command name or
+one of its first two arguments is `claude` (or ends in `claude-code/cli.js`) or
+is `codex` or starts with `codex-`.
+
+| Source | Shown when | `STATUS` |
+|---|---|---|
+| Registry record | Its status is `alive` or `handed_off`, its recorded PID is a live agent process, and it was recorded in this process namespace or carries no namespace stamp | The record's status |
+| Process table only | An agent process that no shown record names | `unregistered` |
+
+Left out of both:
+
+- Zombie (`Z`) and dying (`X`) processes.
+- Records stamped with another process namespace, such as a session inside a
+  container on the same host: this process table cannot judge their PID.
+- An unregistered `claude` process started with `-p` or `--print`. Print mode
+  runs one prompt and exits; it holds no interactive session to end. A print
+  mode process that does have a registry record still lists under that record.
+
+```text
+$ agentihooks terminate-agent --list --type claude
+TYPE	NAME	SESSION_ID	PID	PGID	STATUS	CWD
+claude	eng@abc-0042	3f2c...	4121	4121	alive	/home/me/dev/worktrees/repo/eng-abc-0042
+claude	kept	-	4380	4380	unregistered	-
+```
+
+A `claude -p "hello"` running beside them adds no row. Rows sort by type, name,
+session id and PID.
+
 ### Terminate a process
 
 A termination validates the target first: the PID's start time, command and
