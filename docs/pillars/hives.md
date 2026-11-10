@@ -2503,6 +2503,91 @@ A distributed controller can also serve a workstation swarm without worker hives
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
 
+### Worker hive Redis connection
+
+A worker pod's heartbeat, sessions report and agent readings go to the Redis its member URL names. In Anton that URL
+reaches the pod from OpenBao as an environment variable, so a move of the swarm Redis is a change to one OpenBao
+property, never an edit inside the pod.
+
+**Where the URL comes from.** The `agentihooks-swarm-workstation-hive-settings` ExternalSecret, which the pod reads
+through `workers.envFromSecrets`, maps the `redis_url` property of the member record
+`k8s/agentihooks-swarm-workstation-hive` into two keys:
+
+```yaml
+data:
+  - secretKey: AGENTIHOOKS_HIVE_REDIS_URL
+    remoteRef:
+      key: k8s/agentihooks-swarm-workstation-hive
+      property: redis_url
+  - secretKey: AGENTIHOOKS_SWARM_REDIS_URL
+    remoteRef:
+      key: k8s/agentihooks-swarm-workstation-hive
+      property: redis_url
+```
+
+`redis_url` holds the member's own Redis URL on the current swarm Redis: user `hive-<id>`, its password and the Redis
+address. Both keys carry the same value, so a process reaches the same Redis whether it resolves the member URL or the
+plain swarm URL. No agentihooks command writes this property: `hive invite` writes the `credential` property of the
+record, and `hive setup` writes the separate settings record.
+
+**Which URL a process uses.** The swarm Redis client takes `AGENTIHOOKS_HIVE_REDIS_URL` unless the process runs in
+local mode, else `AGENTIHOOKS_SWARM_REDIS_URL`, else `redis://127.0.0.1:6379/0`. The agentihooks env files never
+overwrite a variable already in the process environment, so `hive run` and every process the pod starts use the
+URL from the Secret, ahead of the member file `hive.env`. Two cases change that:
+
+| Case | URL used |
+|---|---|
+| `hive.env` names a different Redis user than the environment, as after a rejoin as another member | the `hive.env` member and URL replace the environment's |
+| Redis refuses the environment's member login | the `hive.env` URL, when it answers; otherwise the client refreshes the member through the hive endpoint, saves the new grant to `hive.env` and uses it |
+| An ssh shell or herdr pane on the pod, which has no pod environment | the env files: `hive-container.env` loads before `hive.env`, so the `hive.env` URL wins |
+
+`hive.env` is rewritten at every pod start, when `hive join` refreshes the member through the hive endpoint, and at
+every `agentihooks hive refresh`. Each refresh creates or resets user `hive-<id>` on the Redis the hive endpoint
+serves and gives it a new password.
+
+**Moving the swarm Redis.** A pod keeps reporting to the Redis its URL names for as long as that Redis accepts the
+login. When the swarm moves and the old Redis stays up, the hive goes `stale` in `hive list` while its pod stays
+`Running` and accepts ssh sessions. Point it at the new Redis through OpenBao:
+
+1. Make sure the hive endpoint serves the new Redis and the member's ledger credential is in the new Redis's hive
+   index. Without the index entry a refresh answers 403 `the ledger credential belongs to no hive member`.
+2. Refresh the member so user `hive-<id>` exists on the new Redis, and copy the refreshed URL into the record without
+   printing it:
+
+   ```bash
+   ssh anton-hive agentihooks hive refresh
+   ssh anton-hive "grep -m1 '^AGENTIHOOKS_HIVE_REDIS_URL=' ~/.agentihooks/hive.env | cut -d= -f2-" \
+     | bao kv patch secret/k8s/agentihooks-swarm-workstation-hive redis_url=-
+   ```
+
+3. Force the settings ExternalSecret to resync instead of waiting out its one hour refresh, then roll the pod, since
+   it reads environment variables only at container start:
+
+   ```bash
+   kubectl -n agentihooks-swarm annotate externalsecret agentihooks-swarm-workstation-hive-settings \
+     "force-sync=$(date +%s)" --overwrite
+   kubectl -n agentihooks-swarm rollout restart deployment/agentihooks-swarm-worker-hive
+   ```
+
+Check the result without printing the URL:
+
+```bash
+kubectl -n agentihooks-swarm get externalsecret agentihooks-swarm-workstation-hive-settings   # STATUS SecretSynced
+agentihooks hive list                                       # the worker hive reads live again
+agentihooks swarm <slug> status                             # an agent placed on the worker hive's id
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ACL GETUSER hive-<id>   # on the new swarm Redis: the user exists
+```
+
+Keep the old Redis running until the hive reads `live` on the new one: the pod keeps reporting to it until the roll,
+so it stays the rollback copy.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `hive list` shows the worker hive `stale` while its pod is `Running` | The member URL still names the old swarm Redis, which accepts the login, so the pod never fails over | Follow the move steps above |
+| After the roll, hive commands fail with `the hive Redis credential was refused and the hive refused a refresh (...)` | The record's password was replaced by a later refresh, or user `hive-<id>` is missing on the new Redis, and the automatic refresh through the hive endpoint failed for the reason in the brackets | Fix that reason (see [Hive endpoint troubleshooting](#hive-endpoint-troubleshooting)), refresh the member and copy the URL again, then resync and roll |
+| `hive refresh` answers 403 `the ledger credential belongs to no hive member` | The new Redis lacks the member's hive index entry | Copy the hive records to the new Redis, or issue a new member with `agentihooks hive invite` |
+| The ExternalSecret reports an error for `redis_url` | The record has no `redis_url` property | Write it as in step 2 |
+
 ### Operator SSH into a worker hive
 
 `workers.ssh.enabled` runs sshd inside the worker pod, so the operator can open a shell or a herdr session on the
