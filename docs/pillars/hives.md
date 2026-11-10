@@ -1112,13 +1112,17 @@ An observed account closes for new hive agents, with state `CLOSED` and cap `0`,
 - for Claude only, its five hour window is at or under 5% left. Codex rows ignore the five hour window and keep their
   week band.
 
-Both thresholds are fixed in code; there is no setting for them. A row whose reading is missing, older than fifteen
-minutes, reported as a provider error or without a week value counts as unobserved: it stays `OPEN` at the launch cap
-with no quota left shown, as before.
+Both thresholds are fixed in code; there is no setting for them. An observed row also closes when its latest reading
+is `rejected` by the provider, or when it is the Claude account reserved for live masters (see
+[reserved rows](load-balancing.md#reserved-rows-in-agentihooks-balance)). Any other observed row takes its quota band
+alone; the controller's launch cap does not bound it. A row whose reading is missing, older than fifteen minutes,
+reported as a provider error or without a week value counts as unobserved: it stays `OPEN` at the launch cap with no
+quota left shown, as before.
 
 A closed row holds no free seat, so hive placement skips it. When a task's planned account is closed, the launch
 takes another open Claude account; when every Claude account is closed or full, the task waits with the reason
-`no Claude account has room after hive sessions: <account> <n> sessions of <cap>, ...`. A quota successor is chosen
+`no Claude account has room after hive sessions: <account> <n> sessions of <cap>, ...`; an unobserved account reads
+`<account> <n> sessions, no fresh quota reading`, and a task pinned to one account ends with `; pinned to <account>`. A quota successor is chosen
 from the same rows, so it never lands on a closed account either. The account opens again on the first reading
 above both thresholds, typically after its week or five hour window resets.
 
@@ -1130,7 +1134,8 @@ used and no five hour reading; `lab-two` has no reading yet:
 | `lab-one` | - | 3% | `CLOSED`, cap 0 | None, even when the task was planned there |
 | `lab-two` | - | - | `OPEN`, launch cap | Takes the agent |
 
-With the same hive reading at 89% of the week used, `lab-one` has 11% left and stays `OPEN` at the launch cap.
+With the same hive reading at 89% of the week used, `lab-one` has 11% left and stays `OPEN` at its quota band, cap 6
+with no five hour reading, whatever the launch cap.
 
 Checks:
 
@@ -1144,13 +1149,14 @@ agentihooks hive show <hive-id>
 
 | Symptom | Check | Action |
 |---|---|---|
-| A task waits with `no Claude account has room after hive sessions` | Each account in the reason with `sessions of 0` | The account is closed or reserved. Wait for its window to reset, or add another account to the controller Secret and to a hive. |
+| A task waits with `no Claude account has room after hive sessions` | Each account in the reason with `sessions of 0` | The account is closed: draining, rejected or reserved for masters. Wait for its window to reset, or add another account to the controller Secret and to a hive. |
 | A hive agent starts on an account that `balance` shows at 3% of its week | Whether the controller runs a release that carries the draining rule, and whether the hive is `live` in `agentihooks hive list` | Roll the controller onto the current release. A reading from a hive that is not live is ignored, so restore its heartbeat. |
 | An account with quota left stays closed | Its five hour left for Claude, and the reading's age | A Claude account at or under 5% of its five hour window is closed until that window resets. A stale reading counts as unobserved and keeps the launch cap rather than closing the row. |
 
 The regression test `test_a_closed_account_a_hive_advertises_gets_no_placement` plants a hive reading with a 97% week
 and no five hour window and checks that the row is `CLOSED` with cap 0, that launch keeps only the open account and
 that a task planned on the closed account is routed to the open one.
+`test_a_hive_reading_with_room_in_its_week_takes_the_week_band` checks the 89% case.
 
 ### Automatic quota refresh
 
