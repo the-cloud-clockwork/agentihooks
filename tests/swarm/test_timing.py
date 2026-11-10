@@ -293,6 +293,7 @@ def _traced_sort(items: list[int]) -> list[int]:
 def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     output = Output()
     monkeypatch.setattr(timing.sys, "stderr", output)
+    monkeypatch.setattr(timing.time, "perf_counter", iter([100.0, 102.5]).__next__)
     monkeypatch.setenv("AGENTIHOOKS_TICK_PROFILE_STEPS", "collect acks")
     with timing.tick("sw"):
         assert timing.within(2.5, _traced_sort, [2, 1], name="collect acks") == [1, 2]
@@ -301,7 +302,7 @@ def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyP
     assert len(profiles) == 1
     profile = profiles[0]
     assert profile["step"] == "collect acks"
-    assert isinstance(profile["wall_s"], float)
+    assert profile["wall_s"] == 2.5
     assert any("_traced_sort" in line for line in profile["top_cumulative"])
     assert any("_traced_sort" in line for line in profile["top_own"])
 
