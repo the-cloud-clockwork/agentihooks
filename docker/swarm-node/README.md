@@ -11,7 +11,8 @@ docker build \
 
 The supported architecture is Linux amd64. `versions.lock` pins the base digest,
 Debian snapshot and shell package versions, native herdr, Claude and Codex release
-checksums, and the hashed Python requirements closure. The agentihooks source
+checksums, the Codex code mode host from the same Codex release (see
+[Codex code mode host in the worker image](../../docs/reference/worker-image-codex-code-mode.md)), and the hashed Python requirements closure. The agentihooks source
 wheel uses version zero with its tested source revision recorded in the manifest.
 Changing requirements also requires updating their checksum in `versions.lock`.
 Template inputs come from the repository's packaged profiles, never a host home
@@ -188,6 +189,8 @@ concurrently; each is checked against its locked sha256 before use. It
 also bootstraps the fixture profiles in `fixtures/profiles` inside fresh
 containers, runs `claude mcp list`, `codex mcp list` and `claude -p` offline,
 and replays a fixture SessionStart event through the rendered Codex hook.
+The startup proof also runs one Codex shell command offline through the code
+mode host and saves its report as `codex-code-mode.json`.
 Both hooks must register exactly one session in the proof working directory;
 Codex registration does not depend on an authenticated model request. The replay
 keeps the first observed matching registry write as its registration timestamp
