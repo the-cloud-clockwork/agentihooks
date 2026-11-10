@@ -584,7 +584,8 @@ description, in both modes.
 | An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
 
 `tests/swarm_ledger/test_plan_read.py` covers the remote read in compose mode with no local ledger folder: the
-three collection reads, the artifact request with its address and timeout, and each refusal above.
+three collection reads, the artifact request with its address and timeout, both 404 errors and a passed on 503. The credential refusal
+comes from the shared remote read retry, outside these tests.
 
 ### Troubleshooting
 
