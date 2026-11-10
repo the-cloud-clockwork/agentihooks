@@ -53,6 +53,7 @@ def summarize(
         "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
         "critical_end_p95_s": p95([row["critical_end_s"] for row in ordered if "critical_end_s" in row]),
         "records": outcomes([row for row in records if row["pass_id"] in identities]),
+        "rows_read_max": max((row["rows_read"] for row in ordered if "rows_read" in row), default=None),
     }
 
 
@@ -135,6 +136,7 @@ def command(store: Any, args: argparse.Namespace) -> None:
     for row in report["lanes"]:
         print(f"Lane {row['lane']}  {row['count']} steps  {row['cpu_share']:.2f}% CPU share")
     print(f"Critical lane end p95: {seconds(report['critical_end_p95_s'])}")
+    print(f"Task rows read per pass, most: {report.get('rows_read_max') or 'n/a'}")
     print("Step  Records  Late share  Abandoned  Held  Skipped  Dropped")
     for row in report["records"]:
         print(

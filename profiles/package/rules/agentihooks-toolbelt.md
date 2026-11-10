@@ -27,6 +27,14 @@ Before the next action:
 Action is the acknowledgment. Quoting or summarizing a block is never a substitute
 for compliance.
 
+## Proven cause before a fix (HARD RULE)
+
+A fix is never written, pushed, queued or merged until its root cause is proven
+with evidence. A scouter agent investigates first against live data and the
+code and marks every claim confirmed, refuted or unproven; only a proven cause
+gets a fix, and only the one change the evidence names. A hypothesis is
+labelled as one and never shipped as a fix.
+
 ## Use `agentihooks`
 
 | Trigger | Action |

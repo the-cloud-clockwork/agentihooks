@@ -5,6 +5,7 @@ from importlib import import_module
 from itertools import combinations
 from math import isfinite
 
+from scripts.tick.pool import RESERVES
 from scripts.tick.step import Step
 
 __all__ = [
@@ -229,10 +230,10 @@ def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, 
     """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
     site that holds steps; steps of groups outside ``sites`` keep their own needs.
 
-    A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane step, and
-    every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later site is no barrier
-    for the sites between: only the steps of the site it names need it too. The barrier holds whatever a step
-    declares, because site hooks and steps read pass values no declaration names.
+    A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane or
+    reserved step, and every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later
+    site is no barrier for the sites between: only the steps of the site it names need it too. The barrier holds
+    whatever a step declares, because site hooks and steps read pass values no declaration names.
     """
     found = _backward(tuple(steps), sites)
     late = _late(found)
@@ -251,9 +252,10 @@ def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, 
 
 
 def _late(steps: tuple[Step, ...]) -> frozenset[str]:
-    """Return the slow lane steps of ``steps`` and every step needing one of them, directly or through another."""
+    """Return the slow lane and reserved steps of ``steps`` and every step needing one of them, directly or through
+    another. A reserved step runs on into the reserve it holds at the end of its lane."""
     late: set[str] = set()
     for step in ordered(steps):
-        if step.lane == SLOW_LANE or step.needs & late:
+        if step.lane == SLOW_LANE or step.name in RESERVES or step.needs & late:
             late.add(step.name)
     return frozenset(late)

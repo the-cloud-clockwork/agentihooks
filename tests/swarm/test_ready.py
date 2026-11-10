@@ -165,7 +165,9 @@ def test_release_keeps_an_open_dependency_wait_after_the_agent_leaves(released, 
     idle.declare_wait(store.redis, "sw", AGENT, NOW + 60_000, "shared repair", NOW, on=on)
     assert release(doc) == 0
     assert ready.record(store, "sw", "t1")["dependency"] == on
-    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(
+        cli.ledger_events, "views", lambda urls, cache=None, ttl=None: {url: ledger.pulls[url] for url in urls}
+    )
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     for minutes in (0, 10, 30, 60):
         monkeypatch.setattr(cli, "now_ms", lambda: NOW + minutes * 60_000)
@@ -375,7 +377,9 @@ def test_repeated_ticks_never_respawn_a_released_task_waiting_on_its_pull_reques
     store, ledger, _, doc = released
     assert release(doc) == 0
     ledger.pulls[URL] = pull
-    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(
+        cli.ledger_events, "views", lambda urls, cache=None, ttl=None: {url: ledger.pulls[url] for url in urls}
+    )
     monkeypatch.setattr(stall_watch, "ntfy", lambda *args: "")
     attempts = []
 
@@ -1576,7 +1580,9 @@ def test_a_watcher_dequeue_writes_its_identity_into_the_queue_journal(env, monke
         return {"resource": dict(raw)}
 
     monkeypatch.setattr(ready.merge_queue, "graphql", graphql)
-    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(
+        cli.ledger_events, "views", lambda urls, cache=None, ttl=None: {url: ledger.pulls[url] for url in urls}
+    )
     monkeypatch.setattr(cli.ledger_events, "view", lambda url, *args, **kwargs: pull_request(raw))
     monkeypatch.setattr(stack, "shell", Shell())
     monkeypatch.setattr(cli, "now_ms", lambda: NOW + 60_000)
@@ -2175,7 +2181,9 @@ def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env,
         return {"resource": dict(raw)}
 
     monkeypatch.setattr(ready.merge_queue, "graphql", graphql)
-    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(
+        cli.ledger_events, "views", lambda urls, cache=None, ttl=None: {url: ledger.pulls[url] for url in urls}
+    )
     monkeypatch.setattr(cli.ledger_events, "view", lambda url, *args, **kwargs: ledger.pulls.get(url))
     monkeypatch.setattr(stack, "shell", Shell())
     for tick_number in (1, 2):

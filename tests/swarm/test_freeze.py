@@ -360,3 +360,24 @@ def test_a_drain_with_nothing_held_keeps_the_plain_notice(store):
     ledger = FrozenLedger([{"id": "t1", "phase": "p1", "state": "done"}], record("plans/b"))
     tick("sw", store, ledger, FakeRuntime(), now_ms=1_000)
     assert ledger.notes == ["The swarm has no task left to start"]
+
+
+@pytest.mark.feature("ledger-stats-admission-batch")
+def test_held_accepts_a_precomputed_admitted_queue_and_skips_recomputing_it(monkeypatch):
+    row, elsewhere = task(phase="p1"), ELSEWHERE
+    found = doc(record("lane:ci", "focus"), tasks=[row, elsewhere])
+    graph = hierarchy.project(found)[0]
+    precomputed = freeze.admitted(found, graph)
+    calls: list[int] = []
+    original = freeze.admitted
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(freeze, "admitted", counting)
+    with_queue = freeze.held(row, found, graph, "", precomputed)
+    assert calls == []
+    without_queue = freeze.held(row, found, graph, "")
+    assert calls == [1]
+    assert with_queue == without_queue is True

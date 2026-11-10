@@ -9,21 +9,29 @@ from scripts.doctor import loop, priming
 from scripts.swarm import notice_text
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
-from scripts.swarm_ledger import ledger_kinds
 from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_ledger.repository.live_rows import FROZEN_IDS, SELECTORS, ancestry, covers
 
 DRAINED = "The swarm has no task left to start"
-SELECTORS = {"lane": lambda task: task.get("lane"), "kind": ledger_kinds.kind}
 WATCHED = "watched_focus"
 
 
-def held(task: dict, doc: dict, graph: dict, fix_phase: str) -> bool:
-    """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task."""
+UNCACHED = object()
+
+
+def held(task: dict, doc: dict, graph: dict, fix_phase: str, admitted_queue: Any = UNCACHED) -> bool:
+    """A freeze, a focus with open work elsewhere or a watched focus keeps a claim off the open task.
+
+    admitted_queue carries a result of ``admitted(doc, graph)`` a caller already computed for this doc and
+    graph, such as one checking every task in one pass, so repeated calls do not each pay to revalidate it.
+    """
     if task.get("state") != "open":
         return False
     records, chain = doc.get("freezes") or [], ancestry(task, graph)
     return (
-        frozen(task, records, chain) or unfocused(task, doc, graph, fix_phase) or outside_watched(task, doc, fix_phase)
+        frozen(task, records, chain)
+        or unfocused(task, doc, graph, fix_phase, admitted_queue)
+        or outside_watched(task, doc, fix_phase)
     )
 
 
@@ -48,13 +56,15 @@ def watched(slug: str, store: RedisStore, ledger: Any, doc: dict[str, Any]) -> d
 
 
 def frozen(task: dict[str, Any], records: list[dict[str, Any]], chain: list[str]) -> bool:
+    if "frozen" in task:
+        return bool(task["frozen"])
     return _nearest(records, "freeze", task, chain) < _nearest(records, "focus", task, chain)
 
 
 def _nearest(records: list[dict[str, Any]], verb: str, task: dict[str, Any], chain: list[str]) -> int:
     nodes, selectors = _targets(records)[verb]
     levels = [level for level, node in enumerate(chain) if node in nodes]
-    if any(SELECTORS[selector](task) == value for selector, value in selectors):  # pyright: ignore[reportUnknownArgumentType]
+    if any(SELECTORS[selector](task) == value for selector, value in selectors):
         levels.append(len(chain))
     return min(levels, default=sys.maxsize)
 
@@ -81,8 +91,10 @@ def _selects(target: str) -> bool:
     return selector in SELECTORS and bool(value)
 
 
-def unfocused(task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str) -> bool:
-    queue = admitted(doc, graph)
+def unfocused(
+    task: dict[str, Any], doc: dict[str, Any], graph: dict[str, Any], fix_phase: str, admitted_queue: Any = UNCACHED
+) -> bool:
+    queue = admitted(doc, graph) if admitted_queue is UNCACHED else admitted_queue
     return queue is not None and task["id"] not in queue and not _fix(task, fix_phase)
 
 
@@ -110,6 +122,7 @@ def _admit(doc: dict[str, Any], graph: dict[str, Any]) -> frozenset[str] | None:
     rows = {task["id"]: task for task in tasks}
     waits_on = _waits(doc, tasks)
     cold: set[str] = _cold(tasks, records, graph) if any(r["verb"] == "freeze" for r in records) else set()
+    cold |= set(doc.get(FROZEN_IDS) or ())
     queue = [
         task["id"]
         for task in tasks
@@ -184,27 +197,6 @@ def exempt(task: dict[str, Any], fix_phase: str) -> bool:
 
 def _fix(task: dict[str, Any], fix_phase: str) -> bool:
     return bool(fix_phase) and task.get("phase") == fix_phase
-
-
-def ancestry(task: dict[str, Any], graph: dict[str, Any]) -> list[str]:
-    chain = [f"tasks/{task['id']}"]
-    roots = [hierarchy.parent("tasks", task)]
-    if task.get("merged_into"):
-        roots.append(f"tasks/{task['merged_into']}")
-    for up in roots:
-        for _ in range(hierarchy.CHAIN - 1):
-            if not up or up in chain:
-                break
-            chain.append(up)
-            up = (graph.get(up) or (None, None))[1]
-    return chain
-
-
-def covers(target: str, task: dict, chain: list) -> bool:
-    selector, _, value = target.partition(":")
-    if selector in SELECTORS and value:
-        return SELECTORS[selector](task) == value
-    return target in chain
 
 
 def marks(doc: dict, graph: dict, fix: str, watched: bool) -> dict:
