@@ -37,9 +37,6 @@ class AttachError(RuntimeError):
 
 
 class ViewerProcess(Protocol):
-    @property
-    def returncode(self) -> int | None: ...
-
     def poll(self) -> int | None: ...
 
     def wait(self, timeout: float | None = None) -> int: ...
@@ -103,12 +100,14 @@ def attach(
 
 
 def server_ended(read: Read) -> bool:
-    """True once the execution's record reads exited or failed; an unreadable store keeps the viewer."""
+    """True once the execution lost its seat or its app-server is gone; an unreadable store keeps the viewer."""
+    from scripts.swarm.live_binding import server_alive
+
     try:
         record = read()
     except Exception:
         return False
-    return record is not None and record.state in (FAILED, EXITED)
+    return record is None or server_alive(record) is False
 
 
 def watched(
@@ -117,7 +116,7 @@ def watched(
     popen: Callable[[list[str]], ViewerProcess] = subprocess.Popen,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
-    """Run the viewer until it closes, or end it once its app-server is recorded gone: Codex keeps a dead reconnect open."""
+    """Run the viewer until it closes, or end it once its app-server is gone: Codex keeps a dead reconnect open."""
     viewer = popen(command)
     while viewer.poll() is None:
         if server_ended(read):

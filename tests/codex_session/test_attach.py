@@ -1,5 +1,6 @@
 import shlex
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from unittest.mock import Mock
 
@@ -161,7 +162,7 @@ def test_the_parser_needs_the_slug_and_the_agent(argv, capsys):
     assert "the following arguments are required" in capsys.readouterr().err
 
 
-def test_main_reads_the_named_agent_and_runs_the_viewer_by_default(monkeypatch):
+def test_main_reads_the_named_agent_and_runs_the_viewer_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     asked, ran = [], []
     monkeypatch.setattr(attach, "recorded", lambda slug, name: asked.append((slug, name)) or reads(RECORD))
     monkeypatch.setattr(attach.subprocess, "Popen", lambda command: ran.append(command) or Viewer([0]))
@@ -193,10 +194,10 @@ class Viewer:
         self.signals.append("kill")
 
 
-def bounded(limit):
-    slept = []
+def bounded(limit: int) -> tuple[Callable[[float], None], list[float]]:
+    slept: list[float] = []
 
-    def sleep(seconds):
+    def sleep(seconds: float) -> None:
         slept.append(seconds)
         if len(slept) > limit:
             raise AssertionError("the watch never ended")
@@ -206,7 +207,7 @@ def bounded(limit):
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
 @pytest.mark.parametrize("state", [EXITED, FAILED])
-def test_a_viewer_whose_server_ended_is_stopped(state):
+def test_a_viewer_whose_server_ended_is_stopped(state: str) -> None:
     viewer = Viewer([None, None, None])
     sleep, slept = bounded(5)
     code = attach.watched(["codex"], reads(RECORD, replace(RECORD, state=state)), lambda command: viewer, sleep)
@@ -214,7 +215,29 @@ def test_a_viewer_whose_server_ended_is_stopped(state):
 
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
-def test_a_viewer_on_a_live_server_runs_until_it_closes():
+def test_a_viewer_whose_seat_moved_on_is_stopped() -> None:
+    viewer = Viewer([None, None, None])
+    sleep, slept = bounded(5)
+    assert attach.watched(["codex"], reads(RECORD, None), lambda command: viewer, sleep) == -15
+    assert (viewer.signals, slept) == (["terminate"], [attach.WATCH_S])
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_a_connected_record_whose_server_process_died_stops_the_viewer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.codex_session import supervisor
+
+    started = {4242: 77, 4343: None}
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: started[pid])
+    live = replace(RECORD, server_pid=4242, server_start_identity=77)
+    viewer = Viewer([None, None, None])
+    sleep, slept = bounded(5)
+    dead = replace(live, server_pid=4343)
+    assert attach.watched(["codex"], reads(live, dead), lambda command: viewer, sleep) == -15
+    assert (viewer.signals, slept) == (["terminate"], [attach.WATCH_S])
+
+
+@pytest.mark.feature("codex-viewer-ends-with-its-server")
+def test_a_viewer_on_a_live_server_runs_until_it_closes() -> None:
     viewer = Viewer([None, None, 0])
     sleep, slept = bounded(5)
     assert attach.watched(["codex"], reads(RECORD), lambda command: viewer, sleep) == 0
@@ -222,12 +245,12 @@ def test_a_viewer_on_a_live_server_runs_until_it_closes():
 
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
-def test_an_unreadable_store_keeps_the_viewer_running():
+def test_an_unreadable_store_keeps_the_viewer_running() -> None:
     viewer = Viewer([None, None, 0])
     sleep, _ = bounded(5)
     outages = [RuntimeError("store down"), OSError("gone")]
 
-    def read():
+    def read() -> TransportRecord | None:
         raise outages.pop(0)
 
     assert attach.watched(["codex"], read, lambda command: viewer, sleep) == 0
@@ -235,7 +258,7 @@ def test_an_unreadable_store_keeps_the_viewer_running():
 
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
-def test_a_viewer_that_ignores_terminate_is_killed():
+def test_a_viewer_that_ignores_terminate_is_killed() -> None:
     class Stubborn(Viewer):
         def wait(self, timeout: float | None = None) -> int:
             if timeout is not None and "kill" not in self.signals:
@@ -249,7 +272,7 @@ def test_a_viewer_that_ignores_terminate_is_killed():
 
 
 @pytest.mark.feature("codex-viewer-ends-with-its-server")
-def test_main_ends_the_default_viewer_once_its_server_exits(monkeypatch):
+def test_main_ends_the_default_viewer_once_its_server_exits(monkeypatch: pytest.MonkeyPatch) -> None:
     viewer = Viewer([None, None, None, None])
     monkeypatch.setattr(attach, "recorded", lambda slug, name: reads(RECORD, RECORD, replace(RECORD, state=EXITED)))
     monkeypatch.setattr(attach.subprocess, "Popen", lambda command: viewer)
