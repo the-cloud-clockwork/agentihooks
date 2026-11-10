@@ -112,9 +112,16 @@ def test_a_hive_agent_loses_an_emptied_claim(monkeypatch: pytest.MonkeyPatch, pl
 def test_an_agent_of_this_hive_keeps_an_emptied_claim(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SWARM_HIVE_ID", "workstation")
     agent = SimpleNamespace(
-        name="a", runtime_backend="local", runtime_target={"host_id": "workstation"}, hive="workstation"
+        name="a",
+        lane="eng",
+        state="working",
+        task="t1",
+        runtime_backend="local",
+        runtime_target={"host_id": "workstation"},
+        hive="workstation",
     )
     assert common._current_owner(agent, {"state": "open", "claimed_by": ""}) is True
+    assert common._ended(agent, {"t1": {"state": "claimed", "claimed_by": "b"}}) is False
 
 
 @pytest.mark.feature("swarm-tick-common-helpers")

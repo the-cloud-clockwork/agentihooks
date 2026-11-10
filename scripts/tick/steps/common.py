@@ -109,7 +109,7 @@ def _ended(agent: Any, rows: dict[str, Any]) -> bool:
         task.get("done")
         or task.get("state") in {"done", "blocked", "handoff"}
         or (task.get("awaiting") == "verify" and not task.get("claimed_by"))
-        or not _current_owner(agent, task)
+        or (not _current_owner(agent, task) and _on_hive(agent))
     )
     return agent.state == "finished" or bool(ended)
 
