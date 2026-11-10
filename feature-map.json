@@ -3356,6 +3356,18 @@
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
       ]
+    },
+    {
+      "id": "ledger-row-diff-keyed-lists",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2476",
+      "behaviour": "The ledger row diff matches list children by their stored path, so a freeze or focus insert, clear or only filter writes the new and removed rows and the position rows of moved siblings, never every row of the list.",
+      "seam": "scripts.swarm_ledger.repository.rows.diff with changes over flatten",
+      "tests": [
+        "tests/swarm_ledger/test_row_diff.py::test_a_top_focus_insert_into_a_large_freeze_list_writes_only_the_new_row_and_the_moved_focus",
+        "tests/swarm_ledger/test_row_diff.py::test_an_only_focus_filter_deletes_only_the_dropped_focus_rows",
+        "tests/swarm_ledger/test_row_diff.py::test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze"
+      ]
     }
   ],
   "unmapped_rules": [
