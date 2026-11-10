@@ -1243,6 +1243,81 @@ newer hive. Deploy the controller first, then the hives.
 | Lines a relaunched agent wrote on its hive are replaced by the controller's copy | The hive's file did not contain the text the controller sent, so the controller's copy won. This happens when the hive file was edited rather than appended to. | Append to `progress.md` and `proof.md` instead of rewriting them. |
 | A file deleted on the hive is still in the controller's folder | The mirror writes the files a hive sends and removes none. | Delete the file in the controller's folder too, or leave it: the next launch carries it again. |
 
+## Redis restarts
+
+`agentihooks hive run` keeps running when the swarm Redis restarts, rolls out or drops the hive's connection. The
+daemon reconnects with a bounded backoff and resumes its heartbeat, registration and launch watch in the same
+process, so a Redis rollout no longer leaves a joined hive down until someone restarts its service or pod.
+
+### What counts as a lost connection
+
+The beat loop treats two redis-py errors as a lost connection:
+
+- `ConnectionError`, which includes `AuthenticationError`;
+- `TimeoutError`.
+
+Either one counts wherever the loop meets it: while connecting, during a beat (heartbeat, registry record, launch
+orders, reports) or during the scheduler process timer wait between beats. Any other error, such as a `NOPERM`
+answer to a member credential or a `ResponseError`, ends `hive run` with a traceback as before. The
+`agentihooks-hive` user service then restarts it after 5 seconds (`Restart=always`), and a worker pod restarts its
+container.
+
+### Reconnect and backoff
+
+On a lost connection the daemon:
+
+1. Stops the connection's helper threads, the headroom publisher and the herdr stats publisher.
+2. Prints `hive Redis connection lost (<error>: <detail>); reconnecting in <n>s` to stderr.
+3. Sleeps the delay for that attempt.
+4. Opens a new pair of clients through the same factory the service started with, then beats at once.
+
+The delays run 1, 2, 4, 8, 16 and 30 seconds, then stay at 30 seconds for as long as Redis stays down. The sequence
+starts again at 1 second only after a reconnected loop completes a full beat and the wait that follows it, so a Redis
+that accepts a connection and drops it during the beat keeps the longer delay.
+
+Each reconnect goes through the same Redis connection code as the first start. When the member's saved Redis
+password is refused, it first tries the password saved in `hive.env` by another process on the host, then refreshes
+the member through the hive endpoint, one refresh per host at a time. A refused refresh surfaces as an
+`AuthenticationError`, so the daemon backs off and tries again instead of exiting.
+
+### What resumes
+
+After a reconnect the first beat runs at once on the new connection:
+
+- the heartbeat and the hive's registry record, so the hive reads `live` again in `hive list`;
+- the order consumer marker and the launch watch, so a launch order queued while Redis was down, or after it came
+  back, is consumed on that beat;
+- the quota, sessions and execution reports, and the headroom reading;
+- both helper threads, started fresh on the new connection.
+
+The process keeps its quota refresh worker, GitHub App token renewal and bundle refresh clocks across the
+reconnect. Lane spokes started by `hive run` talk to NATS, not Redis, and are not restarted by it.
+
+While the daemon backs off, the hive writes nothing to Redis. Its reports expire after 45 seconds and it turns stale
+after the 90 second live window, so placement stops sending it new launches until the first beat after the
+reconnect. What happens to agents already running there follows the hive's lost and fencing rules; see
+[When a hive is lost](#when-a-hive-is-lost) and [Fencing](#fencing).
+
+### Client timeouts
+
+The two clients the daemon opens disable redis-py's own retry, so a lost connection reaches the loop at once
+instead of being retried inside one command:
+
+| Client | Connect timeout | Read timeout | Used for |
+|---|---|---|---|
+| Command client | 3 seconds | 5 seconds | Beats, reports and the helper threads' writes. |
+| Wait client | 3 seconds | 15 seconds | The scheduler process timer waits between beats and in both helper threads. |
+
+Both send TCP keepalives and run a connection health check every 15 seconds.
+
+### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| `hive list` shows a joined hive stale after a Redis rollout | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive Redis connection lost` | Repeated lines with a 30 second delay mean Redis or the network is still unreachable from the hive; fix that and the hive returns on its next beat. No lines and an exited service mean the hive runs code from before [#5168](https://github.com/the-cloud-clockwork/agentihooks/pull/5168); upgrade it and restart the service or roll its pod. |
+| Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | Whether the hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
+| `hive run` exits with a traceback right after Redis returns | The error in the traceback | The error is not a lost connection, so the daemon does not retry it; fix the error it names, such as a Redis user missing a permission. The service restarts the process after 5 seconds. |
+
 ## Failover timing
 
 | Clock | Value | Effect |
@@ -1250,6 +1325,7 @@ newer hive. Deploy the controller first, then the hives.
 | Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
+| Redis reconnect backoff | 1, 2, 4, 8, 16, then 30 seconds | A hive that lost its Redis connection retries at these delays and beats at once when it reconnects; see [Redis restarts](#redis-restarts). |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
 | Controller lease | three ticks, 180 seconds by default | Another controller takes over at a higher epoch once it lapses. |
