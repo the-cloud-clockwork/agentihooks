@@ -105,24 +105,6 @@ def test_an_error_lands_on_the_otel_counter_by_swarm_and_category(store, counted
     assert panic.METRIC == "agentihooks.swarm.errors"
 
 
-def test_within_golden_pass_holds_up_to_the_golden_duration_only():
-    assert panic.within_golden_pass(panic.GOLDEN_PASS_S) is True
-    assert panic.within_golden_pass(panic.GOLDEN_PASS_S - 1) is True
-    assert panic.within_golden_pass(panic.GOLDEN_PASS_S + 1) is False
-
-
-def test_a_wall_time_within_the_golden_pass_duration_counts_no_error(store, counted):
-    panic.count_error(store, SLUG, "SpawnError", 1_000, wall_s=panic.GOLDEN_PASS_S)
-    assert panic.errors_since(store, 0) == 0
-    assert counted == []
-
-
-def test_a_wall_time_past_the_golden_pass_duration_still_counts_an_error(store, counted):
-    panic.count_error(store, SLUG, "SpawnError", 1_000, wall_s=panic.GOLDEN_PASS_S + 1)
-    assert panic.errors_since(store, 0) == 1
-    assert counted == [(panic.METRIC, 1, {"swarm": SLUG, "category": "SpawnError"})]
-
-
 def test_the_counter_reads_errors_in_the_last_hour_by_category(store, counted):
     now = 10 * HOUR
     _errors(store, 2, now - HOUR, "SpawnError")

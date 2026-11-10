@@ -3,11 +3,11 @@ CI cancellation that frees runners for the named fix, and the business-as-usual 
 
 THRESHOLD is three times the busiest measured hour, 19 to 24 tick step failures per hour across the fleet.
 
-A step or a pass that merely runs long, up to the golden pass duration (`GOLDEN_PASS_S`), never reaches either
-counter here: `count_error` only takes a category a caller chose to report, and the one caller wired to a tick
-step (`scripts.swarm.timing.step`) reports only on a raised exception, never on a step recorded late; `count_pass`
-only takes the ``ok`` a caller computed, and that caller (`scripts.swarm.health.spawn_stall.watch`) sets it from
-whether any step raised, never from the pass's wall time.
+A step or a pass that merely runs long, up to the golden pass duration (`scripts.tick.engine.GOLDEN_PASS_S`),
+never reaches either counter here: `count_error` only takes a category a caller chose to report, and the one
+caller wired to a tick step (`scripts.swarm.timing.step`) reports only on a raised exception, never on a step
+recorded late; `count_pass` only takes the ``ok`` a caller computed, and that caller
+(`scripts.swarm.health.spawn_stall.watch`) sets it from whether any step raised, never from the pass's wall time.
 """
 
 import json
@@ -22,7 +22,6 @@ from typing import Any
 
 from scripts.swarm.store import PREFIX, RedisStore, SwarmError
 from scripts.tick.deadline import Deadline
-from scripts.tick.engine import GOLDEN_PASS_S
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeState, RepositoryRun
 
@@ -71,16 +70,8 @@ def _emit(slug: str, category: str) -> None:
     otel.add_counter(METRIC, 1, {"swarm": slug, "category": category})
 
 
-def within_golden_pass(wall_s: float) -> bool:
-    """Return whether a step or pass wall time sits within the golden pass duration, never a panic signal on its own."""
-    return wall_s <= GOLDEN_PASS_S
-
-
-def count_error(store: RedisStore, slug: str, category: str, now_ms: int, wall_s: float | None = None) -> None:
-    """Counts one error in the fleet window and on the OpenTelemetry counter, unless ``wall_s`` is given and sits
-    within the golden pass duration, in which case it is no error."""
-    if wall_s is not None and within_golden_pass(wall_s):
-        return
+def count_error(store: RedisStore, slug: str, category: str, now_ms: int) -> None:
+    """Counts one error in the fleet window and on the OpenTelemetry counter."""
     key = _key("errors")
     _client(store).zadd(key, {f"{category}|{now_ms}|{uuid.uuid4().hex}": now_ms})
     _client(store).zremrangebyscore(key, 0, now_ms - HOUR_MS - 1)
