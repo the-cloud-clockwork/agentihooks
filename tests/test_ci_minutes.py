@@ -343,6 +343,7 @@ def test_a_run_whose_full_job_page_fails_is_read_in_small_pages(monkeypatch: pyt
     calls: list[str] = []
 
     def fake(path: str, key: str) -> list[dict[str, str]]:
+        assert key == "jobs"
         calls.append(path)
         if path.endswith("per_page=100"):
             raise subprocess.CalledProcessError(1, ["gh"])
