@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.profiles.hub_import import import_hub
+from scripts.profiles.hub_import import import_hub, main
 
 
 @pytest.fixture
@@ -135,3 +135,11 @@ def test_symlinks_are_refused_without_following_them(hub: Path, tmp_path: Path) 
     (hub / "agents/diagram/package/.claude/rules/external").symlink_to(tmp_path)
     with pytest.raises(ValueError, match="symlink"):
         import_hub(hub, tmp_path / "bundle", False)
+
+
+@pytest.mark.feature("hub-import-core")
+def test_command_line_prints_the_dry_run_report(hub: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    out = tmp_path / "bundle"
+    assert main([str(hub), str(out), "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out) == import_hub(hub, out, True)
+    assert not out.exists()

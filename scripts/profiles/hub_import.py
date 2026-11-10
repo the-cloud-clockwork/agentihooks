@@ -9,6 +9,7 @@ before any file is read for content or written.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -176,3 +177,21 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
             target = base / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Import a hub checkout into a bundle checkout and print the report as JSON."""
+    parser = argparse.ArgumentParser(prog="python -m scripts.profiles.hub_import")
+    parser.add_argument("src", type=Path)
+    parser.add_argument("out", type=Path)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    src = cast(Path, args.src)
+    out = cast(Path, args.out)
+    dry_run = cast(bool, args.dry_run)
+    print(json.dumps(import_hub(src, out, dry_run), indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

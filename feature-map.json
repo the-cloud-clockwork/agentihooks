@@ -3333,7 +3333,8 @@
         "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
         "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
         "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
-        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them"
+        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them",
+        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report"
       ]
     },
     {
