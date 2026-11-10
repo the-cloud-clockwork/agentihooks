@@ -11,22 +11,22 @@ beside `codex`, taken from the same Codex release and pinned by its own sha256.
 Codex 0.162 runs the shell tool of a `code_mode_only` model through that sibling
 binary, as the
 [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces)
-canaries showed on a bare `codex` install. Without it every `exec` call fails, the agent cannot
-run its profile canary, and the tick logs that the Codex agent reported no
-canary within 90 seconds. The image smoke run proves the host works by running
-one Codex shell command through it with the network disabled.
+canaries showed on a bare `codex` install. Without it every `exec` call fails,
+the agent cannot run its profile canary, and the tick logs that the Codex agent
+reported no canary within 90 seconds. The image smoke run proves the host works
+by running one Codex shell command through it with the network disabled.
 
 ## Why the image needs it
 
 The workstation's standalone Codex install ships the code mode host and its
 other package resources next to `codex`. The worker image used to install only
 the bare `codex` binary from the release archive, so hive pods carried `codex`
-alone and every Codex launch on a hive failed its launch check. The issue
-behind pull request
-[#7131](https://github.com/the-cloud-clockwork/agentihooks/pull/7131) recorded
-this on release 2.17.330: `/usr/local/bin` in the hive worker image
-held only `codex`, agents reported a missing code mode host, and the tick logged
-no canary within 90 seconds. That pull request added the host to the lock and the probe to the smoke run. The same gap on a bare binary
+alone and every Codex launch on a hive failed its launch check. The swarm task
+that asked for the fix recorded this on release 2.17.330: `/usr/local/bin` in
+the hive worker image held only `codex`, agents reported a missing code mode
+host, and the tick logged no canary within 90 seconds. Pull request
+[#7131](https://github.com/the-cloud-clockwork/agentihooks/pull/7131) added the
+host to the lock and the probe to the smoke run. The same gap on a bare binary
 is described for the clamp probe host in
 [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces).
 
@@ -72,7 +72,8 @@ codex-code-mode-host` when the entry:
 - carries its own `version_output`;
 - has an empty or malformed `sha256`, or a `url` that is not `https` or lacks
   the version;
-- has no `companion` key, since an extra tool then has no version output to match.
+- has no `companion` key, since an extra tool then has no version output to
+  match.
 
 `test_committed_lock_installs_the_code_mode_host_beside_codex` holds the
 committed lock to the same release as `codex`: same version, the `codex` asset
