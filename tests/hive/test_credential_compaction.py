@@ -210,12 +210,15 @@ def test_legacy_indexing_bounds_reads_and_skips_tombstones(client: Any, monkeypa
 
 @pytest.mark.feature("hive-credential-compaction")
 def test_retiring_a_legacy_projection_removes_its_hive_token(client: Any) -> None:
+    import json
+    from dataclasses import asdict
+
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     store = RedisStore(client)
     store.create(SwarmConfig("alpha", "/repo", 1, 0))
     name = store.next_name("alpha", "eng")
-    store.put_agent("alpha", AgentRecord(name, "eng", "task", hive="m1"))
+    client.hset(store.key("alpha", "agents"), name, json.dumps(asdict(AgentRecord(name, "eng", "task", hive="m1"))))
     token = auth.issue_agent(client, "m1", "alpha", name)
 
     assert store.drop_agent("alpha", name)
