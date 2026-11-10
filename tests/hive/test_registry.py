@@ -496,3 +496,34 @@ def test_an_existing_swarm_keeps_its_owner(home, monkeypatch):
     held = lease.acquire(store, "sw", socket.gethostname())
     assert lease.acquire(store, "sw", commands.hive_id()) == lease.Lease(held.owner, held.epoch, held.expires_at)
     assert lease.current(store, "sw").owner == socket.gethostname()
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_a_heartbeat_keeps_the_registered_repos_beside_the_reported_ones() -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    registry.register(redis, "member-1", "swarm-hive-007", ["o/antoncore"])
+    registered = registry.show(redis, "member-1")
+    assert registered is not None
+    assert (registered["id"], registered["name"], registered["repos"]) == (
+        "member-1",
+        "swarm-hive-007",
+        ["o/antoncore"],
+    )
+    registry.beat(redis, "member-1", {"repos": ["/home/worker/dev/x", "o/x"], "heartbeat_at": 5})
+
+    record = registry.show(redis, "member-1")
+    assert record is not None
+    assert (record["name"], record["repos"]) == ("swarm-hive-007", ["/home/worker/dev/x", "o/antoncore", "o/x"])
+    assert [found["id"] for found in registry.hives(redis)] == ["member-1"]
+
+
+def test_a_heartbeat_without_registered_repos_writes_the_reported_repos_as_given() -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
+    registry.beat(redis, "member-2", {"repos": ["o/z", "o/a"], "heartbeat_at": 5})
+
+    record = registry.show(redis, "member-2")
+    assert record is not None and record["repos"] == ["o/z", "o/a"]

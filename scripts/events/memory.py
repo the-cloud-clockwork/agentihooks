@@ -230,6 +230,10 @@ class MemoryStateStore:
         with self._runtime.cond:
             return self._current.get(key)
 
+    def get_many(self, keys: list[str]) -> list[StateEntry | None]:
+        with self._runtime.cond:
+            return [self._current.get(key) for key in keys]
+
     def create(self, key: str, value: bytes) -> int:
         with self._runtime.cond:
             self._runtime.require_open()

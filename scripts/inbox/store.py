@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
@@ -454,18 +455,22 @@ class InboxStore:
     def pending_mail(self, me):
         return self._with_seat(me, self.pending_items)
 
-    def _with_seat(self, me, read):
+    def _with_seat(self, me: str, read: Callable[[str], list["Item"]]) -> list["Item"]:
         from redis.exceptions import WatchError
 
         original = me
         for _ in range(MOVE_ATTEMPTS):
             with self.redis.pipeline() as pipe:
                 try:
+                    before = self.names.revisions(("alias", original))
                     pipe.watch(*self.names.watched("alias", original))
                     me = self.names.resolve(original, pipe)
+                    before += self.names.revisions(("aliases-of", me))
                     pipe.watch(*self.names.watched("aliases-of", me))
                     addresses = [me, *self.names.aliases(me, pipe)]
                     seat = self.seats.seat_of(me, pipe)
+                    if self.names.revisions(("alias", original), ("aliases-of", me)) != before:
+                        continue
                     pipe.multi()
                     pipe.ping()
                     pipe.execute()

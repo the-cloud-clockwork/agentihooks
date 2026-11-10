@@ -7,6 +7,7 @@ import subprocess
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 from scripts import herdr_host
 from scripts.handoff import transfers
@@ -14,7 +15,7 @@ from scripts.hive import reports
 from scripts.inbox import exits
 from scripts.inbox.store import InboxStore
 from scripts.swarm import commands, dead_resume, resume, snapshot
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 RECORD = "reboot.json"
 HANDOFF = "master-shutdown-handoff.md"
@@ -131,7 +132,9 @@ def start_server():
     return []
 
 
-def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
+def boot_pass(
+    slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int, current: str | None = None
+) -> list[str]:
     """On the first tick of a new boot, reopen each recorded local agent that lost its process.
 
     The boot counts as handled once the herdr server answered, so a failed start retries on the next tick."""
@@ -152,6 +155,9 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
         return actions
     store.redis.set(key, current)
     for agent in lost:
+        if agent.lane != MASTER and store.handoff(slug, agent.task) and dead_resume._owns(store, slug, agent, ledger):
+            actions.append(_succeed(slug, store, ledger, agent))
+            continue
         routed = agent
         if agent.account and last_quota(agent.harness, agent.account) is not True:
             routed = replace(agent, account="")
@@ -163,6 +169,18 @@ def boot_pass(slug, store, ledger, runtime, now_ms, current=None):
         elif dead_resume._owns(store, slug, routed, ledger):
             actions.append(_await_decision(slug, store, ledger, agent, now_ms))
     return actions
+
+
+def _succeed(slug: str, store: RedisStore, ledger: Any, agent: AgentRecord) -> str:
+    """A lost agent that submitted a handoff gives its task and seat to a successor primed with that handoff."""
+    from scripts.swarm import tick
+
+    rows = {agent.task: ledger.task(slug, agent.task) or {}}
+    action = f"{agent.name} handed off before the restart, so a successor takes its seat" + tick._drop(
+        slug, store, ledger, rows, agent
+    )
+    ledger.notify(slug, f"{action}; no restore decision is needed.")
+    return action
 
 
 def _await_decision(slug, store, ledger, agent, now_ms):
