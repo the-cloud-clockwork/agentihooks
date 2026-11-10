@@ -2374,6 +2374,18 @@
       ]
     },
     {
+      "id": "stall-blockers-open-master-coding",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2437",
+      "behaviour": "An hour with no merge into dev while focused pull requests are open, or a task left in pr an hour past the twenty minutes after its pull request merged, is a sustained blocker that opens the master coding window with no typed phrase; log only by default, recorded under enforce.",
+      "seam": "stall_blockers observe and the blocker window pretool",
+      "tests": [
+        "tests/swarm/test_stall_blockers.py::test_an_hour_without_a_dev_merge_while_a_pull_request_is_open_opens_the_master_coding_window",
+        "tests/swarm/test_stall_blockers.py::test_a_task_left_in_pr_eighty_minutes_after_its_merge_opens_the_master_coding_window",
+        "tests/swarm/test_stall_blockers.py::test_log_only_by_default_writes_the_gate_log_and_records_no_blocker"
+      ]
+    },
+    {
       "id": "panic-fix-branch-pushes",
       "origin": "regression",
       "ordered_at": "2026-11-07",

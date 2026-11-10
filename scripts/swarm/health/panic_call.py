@@ -20,7 +20,7 @@ from scripts.gates import quiet as quiet_gate
 from scripts.inbox.seats import seat_address  # pyright: ignore[reportUnknownVariableType]
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import blockers, timing
-from scripts.swarm.health import early_ends, spawn_stall, urgent_hold
+from scripts.swarm.health import early_ends, spawn_stall, stall_blockers, urgent_hold
 from scripts.swarm.health.findings import limits  # pyright: ignore[reportUnknownVariableType]
 
 HOUR_MS = 3_600_000
@@ -92,7 +92,7 @@ def _steps(store: Any, slug: str, at: int) -> list[Signal]:
             f"{found.count} failures, latest: {found.detail}",
         )
         for category, found in sorted(blockers.active(store, slug, at).items())
-        if category != SPAWN_STALL and at - found.last_seen <= blockers.RECENT_MS
+        if category not in (SPAWN_STALL, *stall_blockers.CATEGORIES) and at - found.last_seen <= blockers.RECENT_MS
     ]
 
 
