@@ -54,6 +54,42 @@ def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) 
     for relative in ("CLAUDE.md", ".claude/skills/render/SKILL.md", ".claude/rules/render.md"):
         assert (profile / relative).read_bytes() == (hub / "agents/diagram/package" / relative).read_bytes()
     assert not (profile / "command.yml").exists()
+    assert (profile / "profile.yml").read_text().startswith("name: diagram\n")
+
+
+@pytest.mark.feature("hub-import-core")
+def test_hooks_with_portable_commands_and_safe_restrictions_are_kept(hub: Path, tmp_path: Path) -> None:
+    stop = [{"type": "command", "command": "python /home/operator/stop.py"}, {"type": "command", "command": "echo"}]
+    settings = {"permissions": {"deny": ["Bash(rm:*)"]}, "hooks": {"Stop": stop}}
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps(settings))
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False)
+    expected = {"permissions": {"deny": ["Bash(rm:*)"]}, "hooks": {"Stop": [{"type": "command", "command": "echo"}]}}
+    text = (out / "profiles/diagram/.claude/settings.overrides.json").read_text()
+    assert text == json.dumps(expected, indent=2) + "\n"
+
+
+@pytest.mark.feature("hub-import-core")
+def test_dotenv_templates_are_copied(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/diagram/package/.claude/rules/.env.example").write_text("KEY=\n")
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False)
+    assert (out / "profiles/diagram/.claude/rules/.env.example").read_text() == "KEY=\n"
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_command_without_a_name_takes_the_agent_folder_name(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/diagram/package/command.yml").write_text(yaml.safe_dump({"description": "Draw diagrams"}))
+    assert import_hub(hub, tmp_path / "bundle", True)["profiles"] == ["diagram"]
+
+
+@pytest.mark.feature("hub-import-core")
+def test_symlinked_agent_folders_are_refused(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/linked").symlink_to(hub / "agents/diagram")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="symlink"):
+        import_hub(hub, out, False)
+    assert not out.exists()
 
 
 @pytest.mark.feature("hub-import-core")

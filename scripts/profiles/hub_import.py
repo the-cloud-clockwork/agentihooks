@@ -13,7 +13,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 import yaml
 
@@ -72,7 +72,7 @@ def _is_secret(name: str) -> bool:
     """Tell whether a file name is on the secret denylist."""
     if name in SECRET_NAMES or name.endswith(SECRET_SUFFIXES):
         return True
-    return name.startswith(".env.") and name.rsplit(".", 1)[-1] not in ENV_TEMPLATES
+    return name.startswith(".env.") and name.removeprefix(".env.") not in ENV_TEMPLATES
 
 
 def _refuse_unsafe_files(package: Path) -> None:
@@ -92,9 +92,9 @@ def _refuse_unsafe_files(package: Path) -> None:
 def _command(package: Path) -> dict[str, object]:
     """Load a package's ``command.yml`` as a mapping."""
     loaded: object = yaml.safe_load((package / "command.yml").read_text()) or {}
-    if not isinstance(loaded, dict):
+    if not _is_mapping(loaded):
         raise ValueError(f"command.yml is not a mapping: {package}")
-    return cast(dict[str, object], loaded)
+    return loaded
 
 
 def _profile_name(command: dict[str, object], default: str) -> str:
@@ -110,9 +110,8 @@ def _profile(command: dict[str, object], name: str) -> dict[str, object]:
     profile: dict[str, object] = {"name": name}
     profile.update({key: command[key] for key in PROFILE_KEYS if key in command})
     claude = command.get("claude")
-    if isinstance(claude, dict):
-        source = cast(dict[str, object], claude)
-        kept = {key: source[key] for key in CLAUDE_KEYS if key in source}
+    if _is_mapping(claude):
+        kept = {key: claude[key] for key in CLAUDE_KEYS if key in claude}
         if kept:
             profile["claude"] = kept
     return profile
@@ -122,18 +121,24 @@ def _portable(value: object) -> object:
     """Drop strings carrying an absolute path, hooks losing their command and containers left empty."""
     if isinstance(value, str):
         return _DROP if ABSOLUTE.search(value) else value
-    if isinstance(value, dict):
-        source = cast(dict[str, object], value)
-        kept = {
-            key: item for key, item in ((key, _portable(item)) for key, item in source.items()) if item is not _DROP
-        }
-        lost_command = "command" in source and "command" not in kept
-        return _DROP if lost_command or (source and not kept) else kept
-    if isinstance(value, list):
-        items = cast(list[object], value)
-        kept_items = [item for item in map(_portable, items) if item is not _DROP]
-        return _DROP if items and not kept_items else kept_items
+    if _is_mapping(value):
+        kept = {key: item for key, item in ((key, _portable(item)) for key, item in value.items()) if item is not _DROP}
+        lost_command = "command" in value and "command" not in kept
+        return _DROP if lost_command or (value and not kept) else kept
+    if _is_list(value):
+        kept_items = [item for item in map(_portable, value) if item is not _DROP]
+        return _DROP if value and not kept_items else kept_items
     return value
+
+
+def _is_mapping(value: object) -> TypeGuard[dict[str, object]]:
+    """Tell whether a parsed JSON or YAML value is a mapping."""
+    return isinstance(value, dict)
+
+
+def _is_list(value: object) -> TypeGuard[list[object]]:
+    """Tell whether a parsed JSON or YAML value is a list."""
+    return isinstance(value, list)
 
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
@@ -157,14 +162,12 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
 
 def _refuse_lost_restrictions(settings: object, path: Path) -> None:
     """Refuse settings whose deny or ask rules carry an absolute path that import would drop."""
-    permissions = cast(dict[str, object], settings).get("permissions") if isinstance(settings, dict) else None
-    if not isinstance(permissions, dict):
+    permissions = settings.get("permissions") if _is_mapping(settings) else None
+    if not _is_mapping(permissions):
         return
     for key in RESTRICTIONS:
-        rules = cast(dict[str, object], permissions).get(key)
-        if isinstance(rules, list) and any(
-            isinstance(rule, str) and ABSOLUTE.search(rule) for rule in cast(list[object], rules)
-        ):
+        rules = permissions.get(key)
+        if _is_list(rules) and any(isinstance(rule, str) and ABSOLUTE.search(rule) for rule in rules):
             raise ValueError(f"{key} rule with an absolute path refused: {path}")
 
 
@@ -172,7 +175,7 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
     """Write every planned profile, refusing one whose folder appeared since planning."""
     for name, files in plans.items():
         base = out / "profiles" / name
-        base.mkdir(parents=True, exist_ok=False)
+        base.mkdir(parents=True)
         for relative, data in files.items():
             target = base / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +184,7 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Import a hub checkout into a bundle checkout and print the report as JSON."""
-    parser = argparse.ArgumentParser(prog="python -m scripts.profiles.hub_import")
+    parser = argparse.ArgumentParser()
     parser.add_argument("src", type=Path)
     parser.add_argument("out", type=Path)
     parser.add_argument("--dry-run", action="store_true")
@@ -189,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     src = cast(Path, args.src)
     out = cast(Path, args.out)
     dry_run = cast(bool, args.dry_run)
-    print(json.dumps(import_hub(src, out, dry_run), indent=2))
+    print(json.dumps(import_hub(src, out, dry_run)))
     return 0
 
 

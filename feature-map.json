@@ -3334,7 +3334,11 @@
         "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
         "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
         "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them",
-        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report"
+        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report",
+        "tests/profiles/test_hub_import.py::test_hooks_with_portable_commands_and_safe_restrictions_are_kept",
+        "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
+        "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
+        "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused"
       ]
     },
     {
