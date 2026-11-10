@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.ledger_knowledge import embedders, service
-from scripts.ledger_knowledge.index import KnowledgeIndex
+from scripts.ledger_knowledge.index import HASH, HashEmbedder, KnowledgeIndex
 from scripts.tick import registry
 from scripts.tick.step import Lane
 from scripts.tick.steps import CallStep, pass_domains
@@ -35,13 +35,14 @@ def _release(path: Path) -> None:
 def _knowledge_warm(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Embed the new and changed items of the swarm's ledger into its knowledge index, so an ask finds it fresh."""
     slug: str = get("slug")
-    choice = embedders.choose(os.environ)
-    path = service.index_path(slug, os.environ, choice.name)
+    if os.environ.get(embedders.PREFIX + "EMBEDDER", HASH) != HASH:
+        return [f"knowledge warm of {slug} skipped: the tick warms only the hash embedder index"]
+    path = service.index_path(slug, os.environ)
     if not _claim(path):
         return [f"knowledge warm of {slug} skipped: an earlier refresh is still running"]
     try:
         document: dict[str, Any] = get("tools").ledger.export(deadline=get("deadline"))
-        counts = service.refresh(KnowledgeIndex(path, choice.embedder), document, int(time.time() * 1000))
+        counts = service.refresh(KnowledgeIndex(path, HashEmbedder()), document, int(time.time() * 1000))
     finally:
         _release(path)
     if not (counts.added or counts.changed or counts.removed):

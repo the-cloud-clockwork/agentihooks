@@ -139,3 +139,13 @@ def test_an_ask_right_after_the_step_ran_answers_without_reading_the_ledger(_hom
 
     answer = service.ask(_index(_home), unread, "Task t2 about knowledge", int(time.time() * 1000))
     assert answer["hits"][0]["ref"] == "tasks/t2"
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_a_semantic_embedder_setting_skips_without_reading_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTIHOOKS_KNOWLEDGE_EMBEDDER", "semantic")
+    values = _values(_document("t1"))
+    assert _step().call(import_module("scripts.swarm.tick"), values.__getitem__) == [
+        f"knowledge warm of {SLUG} skipped: the tick warms only the hash embedder index"
+    ]
+    assert values["fakes"].ledger.calls == []
