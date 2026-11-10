@@ -3,7 +3,6 @@
 import time
 from importlib import import_module
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,7 +18,6 @@ from scripts.tick.steps import CallStep, pass_domains
 pytestmark = pytest.mark.unit
 
 SLUG = "sw"
-CLI = SimpleNamespace(now_ms=lambda: int(time.time() * 1000))
 
 
 def _step() -> CallStep:
@@ -81,11 +79,11 @@ def test_the_step_runs_inside_the_window_an_ask_treats_as_fresh() -> None:
 
 @pytest.mark.feature("tick-knowledge-warm")
 def test_a_task_added_to_the_ledger_is_in_the_index_after_one_run(_home: Path) -> None:
-    assert _step().call(CLI, _values(_document("t1")).__getitem__) == [
+    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
         f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
     ]
-    assert _step().call(CLI, _values(_document("t1")).__getitem__) == []
-    assert _step().call(CLI, _values(_document("t1", "t2")).__getitem__) == [
+    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == []
+    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1", "t2")).__getitem__) == [
         f"knowledge warm of {SLUG}: 1 added, 0 changed, 0 removed"
     ]
     hits = _index(_home).query("Task t2 about knowledge", 1)
@@ -97,7 +95,7 @@ def test_a_task_added_to_the_ledger_is_in_the_index_after_one_run(_home: Path) -
 @pytest.mark.feature("tick-knowledge-warm")
 def test_the_step_reads_the_ledger_export_under_its_deadline() -> None:
     values = _values(_document("t1"))
-    _step().call(CLI, values.__getitem__)
+    _step().call(import_module("scripts.swarm.tick"), values.__getitem__)
     assert [(call.operation, call.deadline) for call in values["fakes"].ledger.calls] == [
         ("export", values["deadline"])
     ]
@@ -110,13 +108,13 @@ def test_a_run_while_an_earlier_refresh_still_runs_skips_without_reading_the_led
     assert knowledge._claim(path) is True
     try:
         values = _values(_document("t1"))
-        assert _step().call(CLI, values.__getitem__) == [
+        assert _step().call(import_module("scripts.swarm.tick"), values.__getitem__) == [
             f"knowledge warm of {SLUG} skipped: an earlier refresh is still running"
         ]
         assert values["fakes"].ledger.calls == []
     finally:
         knowledge._release(path)
-    assert _step().call(CLI, _values(_document("t1")).__getitem__) == [
+    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
         f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
     ]
 
@@ -126,15 +124,15 @@ def test_a_failed_refresh_releases_the_index_for_the_next_run(_home: Path) -> No
     values = _values(_document("t1"))
     values["deadline"] = Deadline.after(-1)
     with pytest.raises(TimeoutError, match="tool deadline expired"):
-        _step().call(CLI, values.__getitem__)
-    assert _step().call(CLI, _values(_document("t1")).__getitem__) == [
+        _step().call(import_module("scripts.swarm.tick"), values.__getitem__)
+    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
         f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
     ]
 
 
 @pytest.mark.feature("tick-knowledge-warm")
 def test_an_ask_right_after_the_step_ran_answers_without_reading_the_ledger(_home: Path) -> None:
-    _step().call(CLI, _values(_document("t1", "t2")).__getitem__)
+    _step().call(import_module("scripts.swarm.tick"), _values(_document("t1", "t2")).__getitem__)
 
     def unread() -> dict[str, Any]:
         raise AssertionError("ask refreshed a warm index")

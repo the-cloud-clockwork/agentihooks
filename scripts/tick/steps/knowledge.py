@@ -2,6 +2,7 @@
 
 import os
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ def _release(path: Path) -> None:
         _RUNNING.discard(path)
 
 
-def _knowledge_warm(cli: Any, get: Callable[[str], Any]) -> list[str]:
+def _knowledge_warm(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Embed the new and changed items of the swarm's ledger into its knowledge index, so an ask finds it fresh."""
     slug: str = get("slug")
     choice = embedders.choose(os.environ)
@@ -40,7 +41,7 @@ def _knowledge_warm(cli: Any, get: Callable[[str], Any]) -> list[str]:
         return [f"knowledge warm of {slug} skipped: an earlier refresh is still running"]
     try:
         document: dict[str, Any] = get("tools").ledger.export(deadline=get("deadline"))
-        counts = service.refresh(KnowledgeIndex(path, choice.embedder), document, cli.now_ms())
+        counts = service.refresh(KnowledgeIndex(path, choice.embedder), document, int(time.time() * 1000))
     finally:
         _release(path)
     if not (counts.added or counts.changed or counts.removed):
