@@ -19,22 +19,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PRIVATE_NETWORKS = tuple(
-    ipaddress.ip_network(network)
-    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")
+    ipaddress.IPv4Network((bytes(start), prefix))
+    for start, prefix in (
+        ((10, 0, 0, 0), 8),
+        ((172, 16, 0, 0), 12),
+        ((192, 168, 0, 0), 16),
+        ((100, 64, 0, 0), 10),
+        ((169, 254, 0, 0), 16),
+    )
 )
-IPV4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?![\w.]*\d)")
-EMAIL = re.compile(r"(?<![\w.+:/-])([A-Za-z0-9._%+-]+)@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})\b")
+NOT_ADDRESS = re.compile(r"[^0-9.]+")
+NOT_HOST = re.compile(r"[^\w.-]+")
+LOCAL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._%+-")
+DOMAIN_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-")
 EXAMPLE_DOMAINS = re.compile(r"(?:^|\.)(?:example\.(?:com|org|net)|example|test|invalid|localhost)$", re.IGNORECASE)
 NOREPLY = re.compile(r"(?:^|[.+-])no-?reply$", re.IGNORECASE)
 HOST_SUFFIXES = ("lan", "local", "internal", "intranet", "corp", "localdomain", "home.arpa", "ts.net")
-PRIVATE_HOST = re.compile(
-    r"(?<![\w.-])((?:[A-Za-z0-9-]+\.)+(?:" + "|".join(re.escape(s) for s in HOST_SUFFIXES) + r"))(?![\w-]|\.\w)",
-    re.IGNORECASE,
-)
-PUBLIC_HOST = re.compile(
-    r"(?:^|\.)(?:example\.(?:" + "|".join(re.escape(s) for s in HOST_SUFFIXES) + r")|cluster\.local)$",
-    re.IGNORECASE,
-)
 TOKENS = {
     "github-token": re.compile(r"\b(?:(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
     "aws-access-key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
@@ -58,9 +58,12 @@ class Hit:
 
 def private_ipv4(text: str) -> bool:
     """Return whether the text holds an IPv4 address in a private, shared or link local range."""
-    for match in IPV4.finditer(text):
+    for token in NOT_ADDRESS.split(text):
+        parts = token.strip(".").split(".")
+        if len(parts) != 4 or not all(part.isdigit() and len(part) <= 3 for part in parts):
+            continue
         try:
-            address = ipaddress.ip_address(match.group(1))
+            address = ipaddress.IPv4Address(".".join(parts))
         except ValueError:
             continue
         if any(address in network for network in PRIVATE_NETWORKS):
@@ -70,19 +73,38 @@ def private_ipv4(text: str) -> bool:
 
 def real_email(text: str) -> bool:
     """Return whether the text holds an email address outside reserved example domains and no reply mailboxes."""
-    for match in EMAIL.finditer(text):
-        local, domain = match.group(1), match.group(2)
-        if EXAMPLE_DOMAINS.search(domain) or NOREPLY.search(local) or domain.lower().endswith("noreply.github.com"):
-            continue
-        if local == "git":
-            continue
-        return True
-    return False
+    return any(_real_address(text, at) for at, char in enumerate(text) if char == "@")
+
+
+def _real_address(text: str, at: int) -> bool:
+    """Return whether the address around the at sign at this index is a real looking email."""
+    start = at
+    while start > 0 and text[start - 1] in LOCAL_CHARS:
+        start -= 1
+    end = at + 1
+    while end < len(text) and text[end] in DOMAIN_CHARS:
+        end += 1
+    local, domain = text[start:at], text[at + 1 : end].rstrip(".")
+    tld = domain.rpartition(".")[2]
+    if not local or "." not in domain or len(tld) < 2 or not tld.isalpha():
+        return False
+    if start > 0 and text[start - 1] in ":/":
+        return False
+    exempt = EXAMPLE_DOMAINS.search(domain) or NOREPLY.search(local) or domain.lower().endswith("noreply.github.com")
+    return not exempt and local != "git"
 
 
 def private_host(text: str) -> bool:
-    """Return whether the text names a host under a private or internal suffix."""
-    return any(not PUBLIC_HOST.search(match.group(1)) for match in PRIVATE_HOST.finditer(text))
+    """Return whether the text names a host under a private or internal suffix; dot files are not hosts."""
+    for token in NOT_HOST.split(text):
+        host = token.rstrip(".-").lower()
+        suffix = next((s for s in HOST_SUFFIXES if host.endswith("." + s)), None)
+        if suffix is None or host.startswith((".", "-")):
+            continue
+        if ("." + host).endswith((".example." + suffix, ".cluster.local")):
+            continue
+        return True
+    return False
 
 
 def line_rules(text: str, keywords: Iterable[str]) -> list[str]:

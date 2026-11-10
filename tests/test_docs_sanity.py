@@ -90,6 +90,9 @@ def test_directories_are_walked_and_excluded_globs_skipped(tmp_path: Path, capsy
 def test_an_example_label_passes_only_right_before_the_private_suffix() -> None:
     assert docs_sanity.line_rules("swarm.example.internal", ()) == []
     assert docs_sanity.line_rules("db.example.corp.lan", ()) == ["private-host"]
+    assert docs_sanity.line_rules("example.internal and nats.nats.svc.cluster.local", ()) == []
+    assert docs_sanity.line_rules("a dot file named .settings.local, a module x.local_entry", ()) == []
+    assert docs_sanity.line_rules("reach buildbox.lan.", ()) == ["private-host"]
 
 
 @pytest.mark.feature("docs-sanity-scan")
