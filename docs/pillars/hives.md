@@ -571,10 +571,11 @@ Pinned and gated tasks narrow the hives before the role rule runs:
 - A task with `needs` places only on hives that declare every capability; see
   [Capabilities and task needs](#capabilities-and-task-needs).
 
-The fallback reasons an agent record carries in its profile decision, for worker roles and for a master launch
+The fallback reasons an agent record carries in its profile decision apply to worker roles and to a master launch
 whose task sets `route_kind`, the account route the launch must use, such as `interactive`. A default master launch
 goes through [Master placement](#master-placement) and records `master_placement` with `hive` and `headless`
-instead of either field; `headless` reads `false` on every master placed today.
+instead of either field. `headless` is always `false`, even for a master on a headless hive; read the hive's `ui`
+setting with `agentihooks hive show <hive>` to tell its kind.
 
 | Field | Written when |
 |---|---|
