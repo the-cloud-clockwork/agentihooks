@@ -11,11 +11,12 @@ The ledger package, `scripts.swarm_ledger`, reaches the swarm (`scripts.swarm`, 
 (`scripts.hive`) and the hooks (`hooks`) only through three interfaces it owns: `Swarm`, `Hive` and `Hooks` in
 `scripts.swarm_ledger.ports`. Adapters under `scripts.swarm_ledger.adapters` implement them, and the composition root
 `scripts.swarm_ledger.composition` binds them when a ledger entry point starts. A unit test refuses any ledger module
-outside the adapters that imports one of those packages. Every ledger command, route and hook answers as it did before
-the split.
+outside the adapters that imports one of those packages.
 
 1. TOC
 {:toc}
+
+---
 
 ## Layout
 
@@ -44,7 +45,8 @@ The swarm adapter also hands out `context_view`, which the brain context route r
 list it, so a fake swarm bound in a test needs it only when the test reaches that route.
 
 Adapter properties import on read, so importing the ledger package loads none of the swarm, hive or hooks modules
-until a ledger call needs one.
+until a ledger call needs one. The one exception is `adapters.hive_ledger`, which the ledger CLI module imports at
+module level and which loads `scripts.swarm.hive_ledger` with it.
 
 ## Binding
 
@@ -55,7 +57,7 @@ When a port is read and its name is missing from `BOUND`, the accessor fills eve
 `composition.adapters()` and keeps any port already bound. A test that binds only `hooks` still gets the real swarm
 and hive adapters.
 
-Every ledger entry point calls `composition.wire()` before it runs:
+These entry points call `composition.wire()` before they run:
 
 | Entry point | Where it wires |
 |---|---|
@@ -64,8 +66,14 @@ Every ledger entry point calls `composition.wire()` before it runs:
 | The duplicate finder subprocess | `ledger_duplicates` `__main__` block |
 | The hosted ledger storage migration | `storage_migration.hosted` `__main__` block |
 
-API modules under `scripts.swarm_ledger.api` build their request schemas from port constants when they are imported.
-A new entry point that serves the API calls `composition.wire()` before it imports those modules.
+Other `__main__` blocks in the package, such as `chat_ledger`, `watch_ledger`, `ledger_health` and the storage
+migration's `__main__`, do not wire. Run through `agentihooks ledger` they are wired by `run()`; run directly they read
+ports through the fallback above and get the real adapters.
+
+Some API modules under `scripts.swarm_ledger.api` copy port members into module constants when they are imported:
+`api.hives` keeps `registry`, `HiveError` and `SwarmError`, `api.proofs` keeps `naming` and `templates`. A module
+imported before a `bind()` keeps the members it copied, and the later binding does not replace them. A test that binds
+a fake for those members binds it before the API module is first imported.
 
 ## Binding a fake in a test
 
@@ -136,10 +144,14 @@ The check reads:
 - `importlib.import_module("...")` and `__import__("...")` calls with a constant name.
 
 Lookalike names pass: `scripts.swarmish` and `hookshot` are not foreign, and `scripts.swarm_ledger` imports are
-always allowed. A second test requires `swarm.py`, `hive.py` and `hooks.py` in `adapters`, each importing its
-package.
+always allowed. A second test requires `swarm.py`, `hive.py` and `hooks.py` in `adapters`, each importing a swarm,
+hive or hooks package.
 
-The check runs in the unit suite in CI. Local test runs are blocked by default; push and read the result on the pull
+The detector reuses the `dotted` and `imported` helpers from `tests/swarm_ledger/test_storage_composition.py`; a
+change to what counts as an import is made there. `from scripts import swarm` is detected as well, since `from`
+imports are read as the module plus each imported name.
+
+The check runs in the test suite in CI. Local test runs are blocked by default; push and read the result on the pull
 request.
 
 ## Troubleshooting
@@ -150,4 +162,4 @@ request.
 | `AttributeError` on a member of a bound fake in a test | The stand-in lacks an attribute the code path reads | Add that attribute to the stand-in, or leave the port unbound to use the real adapter |
 | A test sees the real adapter after `bind` | `BOUND` was not reset, or the value was read through another port | Use the `unbound` fixture and bind the port the code path reads |
 | `isinstance(adapter, ports.Swarm)` is false | The adapter lacks a member listed in the protocol | Add the property to the adapter class |
-| A new script entry point behaves differently from `agentihooks ledger` | It imports API modules or reads ports before `composition.wire()` | Call `composition.wire()` first in its `__main__` block |
+| A test's fake is ignored by an API route | The API module copied the port member into a constant when it was first imported, before the test bound the fake | Bind the fake before the API module is first imported, or patch the module constant |
