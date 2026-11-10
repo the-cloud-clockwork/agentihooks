@@ -603,7 +603,7 @@ def _stopped(signum: int, frame: object) -> None:
     """Let a running pass finish on the first stop signal; exit at once between passes or on a second signal."""
     if RUNNING.is_set() and not DRAINING.is_set():
         DRAINING.set()
-        print(f"controller: stop signal {signum}, finishing the running pass before exit", file=sys.stderr, flush=True)
+        os.write(2, f"controller: stop signal {signum}, finishing the running pass before exit\n".encode())
         return
     _halt()
 
