@@ -5216,6 +5216,121 @@ served in Anton or stopped removes it with the waits and waker units; see
 per swarm: while another hive holds a swarm's lease, a workstation tick of that swarm returns `the swarm belongs
 to another hive`.
 
+#### Heartbeat and episode records
+
+The tick and the watcher keep two records per swarm in the swarm Redis, under the key root
+`AGENTIHOOKS_SWARM_KEY_PREFIX` (default `agentihooks`). Every time is epoch milliseconds.
+
+| Key | Written by | Holds |
+|---|---|---|
+| `<root>:swarm:<slug>:tick-heartbeat` | the tick's closing lane, once per completed pass | `at`, when the pass ended; `observed`, when each input was last observed (`host room`, `quota`, `ledger revision`), `null` when never observed; `rev`, the ledger revision the pass read |
+| `<root>:swarm:<slug>:tick-watch` | the watcher, while an episode is open | `since`, when the episode began; `told`, every seat alerted in it. Deleted when the resolved or unwatched notice is sent |
+
+```json
+{"at": 1794273600000,
+ "observed": {"host room": 1794273590000, "quota": 1794273410000, "ledger revision": 1794273600000},
+ "rev": 48213}
+```
+
+`ledger revision` keeps its observed time while `rev` holds the same value, and moves to the pass end when `rev`
+changes. The watcher judges a heartbeat with the 10 minute limit, measuring nothing from before its own start:
+
+| Evidence in the alert | Condition |
+|---|---|
+| `no tick pass has completed for N minutes, the last ended at HH:MM UTC` | `at` is 10 minutes or more in the past |
+| `the host room it decides on was N minutes old at its last pass` (likewise `quota`, `ledger revision`) | that input was observed 10 minutes or more before `at` |
+| `no tick pass has completed in the N minutes since the watch began` | the swarm has no heartbeat and the watcher started 10 minutes or more ago |
+
+The ledger gone and ledger binned marks (`<root>:swarm:<slug>:ledger-gone`, `<root>:swarm:<slug>:ledger-binned`)
+and an open ledger outage stop the repair; the first pass that reads the ledger again deletes the marks.
+
+#### Alert and resolved notices
+
+Each notice is an information inbox item from `swarm` that closes on receipt. Its item id is derived from the swarm,
+the episode start, the seat and the notice kind, so a resend in the same episode is dropped as a duplicate. The
+recipients are the front door master seat and the seat (or the name, for an agent without a seat) of every agent
+that is not finished.
+
+```text
+The tick of swarm <slug> is stale: <evidence>. Until it recovers no swarm alert, nudge, merge or spawn happens;
+keep working your own task and do not wait on the tick. The watchdog restarts the tick, and a resolved notice
+follows when a fresh pass completes.
+
+The tick of swarm <slug> runs again: a fresh pass completed at <HH:MM UTC>, ending the stale stretch since <HH:MM UTC>.
+
+Swarm <slug> stopped at <HH:MM UTC>, so its tick, stale since <HH:MM UTC>, is no longer watched.
+```
+
+Every pass of an open episode also records a `stale tick` blocker for the swarm, with the evidence as its detail,
+and adds one `stale tick` error to the fleet panic counter (see `agentihooks swarm <id> panic` in
+[Commands](#commands)). Both deployments send the same alert text; in a cluster the repair is the master placement alone. A seat answers an
+alert by continuing its own task.
+
+#### Running the watcher
+
+Starting a swarm (`agentihooks swarm <id> start`, or taking or launching its master on a stopped swarm) writes and
+enables the unit with the other swarm services:
+
+```ini
+[Unit]
+Description=agentihooks stale tick watcher, apart from the tick it watches
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.agentihooks/.env
+ExecStart="<agentihooks>" swarm tick-watch
+Restart=always
+RestartSec=5
+NotifyAccess=main
+WatchdogSec=600
+```
+
+The watcher takes no arguments. Its behaviour follows the deployment: with `AGENTIHOOKS_DEPLOYMENT` set to `local`, or
+unset with no `LEDGER_URL`, it restarts the scheduler and respawns the master; otherwise it places the master through the
+cluster deployment. It reads the swarm Redis from the same environment as the tick.
+
+- **Cadence.** Every 60 seconds it checks every swarm in the store, each on its own thread with a 120 second bound.
+  A check still running at its bound stays on its thread and the watcher moves on; a fifth blocked check of one
+  swarm exits the watcher with `the pass of <slug> stayed blocked through 5 passes; the watcher exits`, and systemd
+  starts it again 5 seconds later.
+- **Unit watchdog.** The watcher sends `WATCHDOG=1` to systemd before each round, after each swarm and every 30
+  seconds while a check runs. With `WatchdogSec=600`, systemd kills and restarts a watcher that sends nothing for
+  10 minutes.
+- **Repair bounds.** The scheduler restart runs within 95 seconds and gives a running supervisor 90 seconds to
+  stop; the master respawn or placement gets what remains of 100 seconds. A step past its bound reports
+  `left <step> running after N seconds` and finishes on its own thread.
+
+Check the watcher and read what it did:
+
+```bash
+systemctl --user status agentihooks-tick-watch
+journalctl --user -u agentihooks-tick-watch --since "1 hour ago" --no-pager
+```
+
+| Journal line | Meaning |
+|---|---|
+| `<slug>: told <seat> the tick is stale` | An alert went to that seat |
+| `<slug>: repairing the stale tick on: <evidence>` | A repair starts for that evidence |
+| `restarting the scheduler: <delivery evidence>` | The scheduler supervisor is being stopped and the tick registered again |
+| `<slug>: restarted the scheduler tick` | The tick is registered again from the installed agentihooks |
+| `<slug>: told <seat> the tick runs again` | A resolved notice went to that seat |
+| `<slug>: told <seat> the tick is no longer watched` | The swarm stopped during the episode |
+
+#### Troubleshooting the stale watcher
+
+| Symptom | Cause and action |
+|---|---|
+| The tick stopped and no seat got an alert | Fewer than 10 minutes have passed since the last completed pass, the watcher is not running, or the swarm is stopped. Read `systemctl --user status agentihooks-tick-watch`; a workstation whose swarms are all served in Anton or stopped has no watcher unit. Only running, paused, stopping and drained swarms are judged. |
+| `left the scheduler alone: a swarm tick is still running` | A tick pass holds the tick lock, which proves the scheduler delivers. The watcher tries the restart again once 10 minutes have passed since that attempt and respawns or places the master on every check meanwhile; a pass that never ends is stopped at its 450 second deadline. |
+| `restarted the scheduler, but the tick did not register` | The supervisor stopped but the tick did not register again. Read the scheduler journal (`journalctl --user -u agentihooks-scheduler`), then run `agentihooks swarm <id> start` to enable the swarm services again. |
+| Alerts continue and no repair line appears | The swarm's ledger is gone, binned or in an open ledger outage. Restore the ledger; the next pass that reads it clears the gone and binned marks, and an outage closes when its observer finds no more evidence. |
+| A repair line appears but the scheduler is not restarted | The watcher restarted the scheduler less than 10 minutes ago for some swarm on the machine; it restarts at most once per 10 minutes and only respawns or places the master in between. |
+| The evidence names an input, such as `the quota it decides on was 14 minutes old` | Passes complete, but that input stopped refreshing: the quota prober for `quota`, ledger writes that do not land for `ledger revision`, the capacity decision for `host room`. Fix the source of that input; the episode resolves at the first pass where it is fresh. |
+| An alert arrives at once after the watcher restarts | The heartbeat was already older than 10 minutes when the watcher started; a restarted watcher judges an existing heartbeat from its own time. |
+| `the pass of <slug> stayed blocked through 5 passes; the watcher exits` | One swarm's check hung five times, usually on Redis or a herdr read. systemd restarts the watcher; read the lines before it for the step that hung. |
+
 ### Controller lease during long steps
 
 A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and a pass is
