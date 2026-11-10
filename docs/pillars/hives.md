@@ -1188,6 +1188,7 @@ The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (de
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
 below the request, and memory set under `workers.resources`. `workers.nodeSelector`, `workers.affinity` and
 `workers.tolerations` place the pod; by default it schedules on any node and never uses the host network.
+[Worker hive memory and placement](#worker-hive-memory-and-placement) gives examples.
 
 `workers.homeVolume` is the volume source of `/home/worker`, which holds the repo clones, worktrees and scratchpad. It
 defaults to an emptyDir on the node root disk; a `hostPath` of type `Directory` on a data disk, or a
@@ -1213,6 +1214,86 @@ lists.
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
 [Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
+### Worker hive memory and placement
+
+Every worker hive pod in a cluster uses the same placement: no node pin and no host network. The scheduler places
+the pod on any node whose free memory covers the pod's request, and the hive reaches the swarm over the network the
+node already has, so a new node joins the pool with no chart change.
+
+**Memory per agent.** The chart computes the container's memory from two values and the agent count:
+
+```yaml
+workers:
+  maxAgents: 4
+  memoryPerAgentMi:
+    request: 700    # MiB the scheduler reserves per agent
+    limit: 2048     # MiB the pod may use per agent before the kernel kills it
+  resources:        # CPU and ephemeral storage only; memory here is refused
+    requests:
+      cpu: 100m
+```
+
+| `workers.maxAgents` | Memory request | Memory limit |
+|---|---|---|
+| 1 | `700Mi` | `2048Mi` |
+| 3 | `2100Mi` | `6144Mi` |
+| 4 | `2800Mi` | `8192Mi` |
+| 8 | `5600Mi` | `16384Mi` |
+
+Each `workers.hives` entry computes its own memory from its own `maxAgents`, or the inherited one. A
+`memoryPerAgentMi` set on an entry replaces the whole map, so give both `request` and `limit`. Raise `request` when
+agents on the hive measure above 700 MiB each, so the scheduler stops placing more agents on a node than it can hold;
+raise `limit` when the pod log shows agents killed for memory while the node has room.
+
+Inside the pod, admission counts the pod's memory limit as one more limit, at 850 MB per agent of the room the limit
+leaves ([Headroom](#headroom)); `hive list` prints it as `pod-limit-mb`. A launch refused with a `ram` detail that
+names the pod, `pod <n> of <total> MB available`, means the agents already running use the pod limit: raise
+`memoryPerAgentMi.limit`, or lower `maxAgents`.
+
+**What pins a pod.** A hive pod is held to particular nodes only by these keys:
+
+| Key | Effect |
+|---|---|
+| `workers.node` | Adds `kubernetes.io/hostname: <node>` to the pod's `nodeSelector` and mounts that node's `hiveStorage` folders. |
+| `workers.nodeSelector` | Copied into the pod's `nodeSelector`. |
+| `workers.affinity` | Copied into the pod's `affinity`. |
+
+With all three empty, the defaults, the rendered pod has no `nodeSelector`, `affinity`, `nodeName` or `hostNetwork`.
+`workers.tolerations` only lets the pod onto tainted nodes; it never limits where it goes. Check a values file for
+pins before installing it:
+
+```bash
+helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml \
+  | grep -nE '^ +(nodeSelector|affinity|nodeName|hostNetwork):'
+```
+
+No output means every worker hive in the release can schedule on any node. The chart's other components set their
+own affinity in their own values keys; a match the grep shows outside a `-worker-hive` Deployment is theirs.
+
+**Raising agents step by step.** Raise `maxAgents` on one hive at a time, so each step proves the new agents launch
+before the next one:
+
+1. Check the node room. The new request is `maxAgents` times `memoryPerAgentMi.request`; at least one node must have
+   that much allocatable memory free:
+
+   ```bash
+   kubectl describe nodes | grep -A8 'Allocated resources'
+   ```
+
+2. Set the new `workers.maxAgents` (or the entry's `maxAgents`) in the release values and deliver it through the
+   values repository, as every other chart change. The Deployment rolls the pod; its preStop drains the old hive first
+   (see the drain above).
+3. Confirm the pod scheduled and the hive took the new cap. A pod held `Pending` with `Insufficient memory` in
+   `kubectl describe pod` means no node has room for the new request: lower `maxAgents` or add a node.
+
+   ```bash
+   agentihooks hive list
+   # anton-2  live  ui=no  workers=0 of 4 (cap 4)  excluded=master  ...  pod-limit-mb=8192  pending=0
+   ```
+
+4. Confirm agents use the room: within the next ticks `workers=<n> of <maxAgents>` rises as placement sends the hive
+   agents, and each new agent claims its task on the ledger. Then take the next step.
 
 ### Scaling worker hives
 
@@ -1269,8 +1350,10 @@ and a refusal from the table below stops the render instead:
 helm template proof deploy/helm/agentihooks-swarm -f my-hives.yaml | grep -E '^  name: .*-worker-hive'
 ```
 
-`deploy/worker/chart-proof.sh` renders one replica and asserts that a missing credential and `workers.replicas=2` with
-one credential are both refused.
+`deploy/worker/chart-proof.sh`, run by the `contracts` job of the Worker hive pod workflow, renders one replica at
+`maxAgents` 3 and asserts its `2100Mi` request, `6144Mi` limit and that the pod has no `nodeSelector`, `affinity`,
+`nodeName` or `hostNetwork`. It also asserts that a missing credential, `workers.replicas=2` with one credential, a per
+agent limit below its request and a memory value under `workers.resources` are each refused.
 
 ### Scaling refusals
 
@@ -1282,6 +1365,9 @@ one credential are both refused.
 | `workers.hives name "<name>" must be a lowercase DNS label of at most 20 characters` | The name has upper case, dots or underscores, starts or ends with a dash, or is longer than 20 characters. | Use lowercase letters, digits and inner dashes. |
 | `workers.hives name <name> appears twice` | Two entries share a name. | Rename one. |
 | `workers.hives <name> shares its home volume with another hive; give it its own homeVolume` | The entry's hostPath or claim home is the same path or claim as another hive's. | Give the entry its own `homeVolume`; `workers.node` alone does not clear this check, which runs on the inherited `homeVolume`. |
+| `workers.maxAgents must be positive` | `workers.maxAgents`, or an entry's `maxAgents`, is 0 or below. | Set it to the number of agents the hive may run, 1 or more. |
+| `workers.memoryPerAgentMi needs a positive request and a limit no lower than it` | `memoryPerAgentMi.request` is below 1, or `.limit` is below `.request`. An entry that sets only one of the two keys drops the other. | Set both keys, with `limit` at or above `request`. |
+| `set worker hive memory with workers.memoryPerAgentMi, not workers.resources` | `workers.resources.requests.memory` or `.limits.memory` is set. | Remove the memory key from `resources` and size memory per agent with `memoryPerAgentMi`. |
 
 If `agentihooks hive list` shows fewer hives than worker pods, two pods mount the same credential through a path the
 chart does not check, such as two releases pointed at one Secret. Compare `credentialSecret.name` across the
