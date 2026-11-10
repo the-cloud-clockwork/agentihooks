@@ -362,7 +362,12 @@ class HiveLaunch:
             return self._record_wait(lane, task, refused)
         listed = tuple(hives)
         hives = [hive for hive in hosting(hives, profile, advertised) if placement.hosts(lane, hive, (profile,))]
-        harness = saved.get("harness") or chosen.get("agent") or "auto"
+        required = task.get("requires_harness", "")
+        pinned = chosen.get("agent") or "auto"
+        if required and pinned not in ("auto", required):
+            wait = placement.Wait(f"lane harness {pinned} cannot run a task that requires {required}", role)
+            return self._record_wait(lane, task, wait)
+        harness = required or saved.get("harness") or chosen.get("agent") or "auto"
         auto = harness == "auto"
         if auto:
             harness = getattr(self.herdr, "_quota_tasks", {}).get(task["id"]) or "claude"

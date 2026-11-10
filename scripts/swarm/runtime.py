@@ -458,7 +458,9 @@ class HerdrRuntime:
                     or profile_choice.DEFAULT_PROFILES[lane]
                 )
                 requested = _set(chosen.get("agent"))
-                if requested:
+                if task.get("requires_harness"):
+                    options.append((task["requires_harness"],))
+                elif requested:
                     options.append((requested,))
                 elif plugins.claude_only(profile):
                     options.append(("claude",))
@@ -727,6 +729,10 @@ class HerdrRuntime:
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
+        required = task.get("requires_harness", "")
+        if required and want and want != required:
+            raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
+        want = want or required
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")

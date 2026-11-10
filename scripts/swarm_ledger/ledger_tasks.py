@@ -52,12 +52,14 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
+    "requires_harness",
     "needs",
     "doc_items",
     "watchdog",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
+HARNESSES = ("", "claude", "codex")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -317,6 +319,8 @@ def check_profile(fields):
         fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
     ):
         raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
+    if fields.get("requires_harness", "") not in HARNESSES:
+        raise ValueError("requires_harness must be claude or codex, or empty for any harness")
 
 
 def check_urls(fields):
@@ -396,6 +400,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        "requires_harness",
         "needs",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):
