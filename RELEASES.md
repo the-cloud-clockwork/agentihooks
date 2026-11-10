@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.790 · 2026-11-10
+
+### 2026-11-10 · d81e8386cf38 · #10443 · @agenticore-app
+
+**Document hive settings API with the excluded list**
+
+This change updates the hive settings documentation to match the already-shipped exclusion-list behavior from PR #5309: the GET/PATCH examples, field tables, and curl samples now reflect `excluded` and `max_agents` (integer or `auto`) instead of the retired `roles` field, which is explicitly marked as refused. It also adds worked examples for setting, clearing, and auto-resetting these fields, documents the default placement rules for headless (`ui=no`) versus headed (`ui=yes`) hives, and explains migration for hives still using the old `roles` field. This keeps the docs accurate and prevents confusion for operators configuring hive placement.
+
 ## v2.17.789 · 2026-11-10
 
 ### 2026-11-10 · c236b2942905 · #10458 · @nestorcolt
