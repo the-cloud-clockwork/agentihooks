@@ -332,7 +332,7 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
     return rows
 
 
-def placement_counts(redis: Any, agents: list[dict]) -> dict:
+def placement_counts(redis: Any, agents: list[dict[str, Any]]) -> dict[str, int]:
     from scripts.swarm.commands import hive_id
 
     headed = [hive["id"] for hive in registry.hives(redis) if hive.get("ui") == placement.YES]
