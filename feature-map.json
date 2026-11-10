@@ -175,6 +175,19 @@
       ]
     },
     {
+      "id": "hosted-overlay-on-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-hosted-frontend-overlay",
+      "behaviour": "A hosted controller leaves a bundle overlay such as frontend that it does not hold but a placement target hive hosts to that hive, and the hive member resolves the overlays against its own bundle into the launch assignment or fails the order naming the overlay.",
+      "seam": "profile choice on the controller and the hive order launch on the member",
+      "tests": [
+        "tests/swarm/test_profile_choice.py::test_a_hosted_controller_leaves_overlays_a_target_hive_hosts_to_that_hive",
+        "tests/swarm/test_profile_choice.py::test_a_controller_still_resolves_the_overlays_it_holds_and_refuses_one_no_hive_hosts",
+        "tests/hive/test_orders.py::test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment",
+        "tests/hive/test_orders.py::test_a_member_that_cannot_resolve_an_overlay_fails_the_order_without_launching"
+      ]
+    },
+    {
       "id": "hive-drain-launch-placement",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1736",
@@ -3126,7 +3139,7 @@
       "id": "swarm-intent-check-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
-      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, rewrites no verdict file for a pull that stays a draft, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read whose batches run at the same time, makes no per task GitHub read for an unchanged or draft pull, rewrites no verdict file for a pull that stays a draft, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
       "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
       "tests": [
         "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
@@ -3139,6 +3152,8 @@
         "tests/gates/test_intent_budget.py::test_a_draft_pull_that_turns_ready_is_marked_running_and_judged",
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_its_batches_at_the_same_time",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_each_batch_in_the_callers_context",
         "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
         "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
         "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
@@ -3285,6 +3300,22 @@
         "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_takes_its_lease_and_fence_through_the_port_tools",
         "tests/tick/test_runtime_port_fence.py::test_the_ack_pass_collects_nothing_when_the_coordination_port_holds_no_lease",
         "tests/tick/test_runtime_port_fence.py::test_the_master_placement_ports_run_under_one_lease_life"
+      ]
+    },
+    {
+      "id": "codex-viewer-ends-with-its-server",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2288",
+      "behaviour": "A native Codex viewer attached to a managed app server execution ends once that execution's transport record reads exited or failed, its recorded server process is gone, or the execution no longer holds its seat, so the launch pane records its exit instead of sitting on a dead reconnect; an unreadable store leaves the viewer running.",
+      "seam": "scripts.codex_session.attach.watched and the default viewer runner of attach.main",
+      "tests": [
+        "tests/codex_session/test_attach.py::test_a_viewer_whose_server_ended_is_stopped",
+        "tests/codex_session/test_attach.py::test_a_viewer_on_a_live_server_runs_until_it_closes",
+        "tests/codex_session/test_attach.py::test_an_unreadable_store_keeps_the_viewer_running",
+        "tests/codex_session/test_attach.py::test_a_viewer_that_ignores_terminate_is_killed",
+        "tests/codex_session/test_attach.py::test_main_ends_the_default_viewer_once_its_server_exits",
+        "tests/codex_session/test_attach.py::test_a_viewer_whose_seat_moved_on_is_stopped",
+        "tests/codex_session/test_attach.py::test_a_connected_record_whose_server_process_died_stops_the_viewer"
       ]
     }
   ],
