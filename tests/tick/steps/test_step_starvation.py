@@ -158,6 +158,28 @@ def test_the_registered_step_records_runs_and_alarms_with_each_step_window(
     assert len(items(store)) == 1
 
 
+@pytest.mark.feature("tick-step-starvation")
+def test_a_configured_cadence_floors_every_windows_lane_not_only_the_slow_one(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cadence above a critical step's floor raises its window too; a slow step's window is unaffected."""
+    import_module("scripts.tick.steps.report")
+    monkeypatch.setenv(engine.CADENCE_ENV, "2")
+    monkeypatch.setattr(cli, "now_ms", lambda: START + 5 * MINUTE)
+    store.redis.set(
+        store.key(SLUG, step_starvation.KEY), json.dumps({"cursor": f"{START}-0", "steps": {}, "windows": {}})
+    )
+    for index in range(1, 5):
+        journal(store, START + index * MINUTE, WAITS, engine.LATE, abandoned=True)
+    found = next(step for step in registry.steps() if step.name == "step starvation")
+    state = {"store": store, "slug": SLUG, "box": {}}
+    with pool.running(critical_s=1.0, slow_s=1.0):
+        engine.run_graph((found,), Context(_GraphView(state, {}), Deadline.after(5.0)))
+    saved = step_starvation.read(store, SLUG)
+    assert saved["windows"][WAITS] == 120.0
+    assert saved["windows"]["doc report"] == 600.0
+
+
 def counted_reads(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     reads: list[str] = []
     real = store.redis.get

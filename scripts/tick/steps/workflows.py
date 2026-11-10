@@ -18,7 +18,7 @@ def _workflow_runner(tick: Any, get: Callable[[str], Any]) -> list[str]:
             or not task.get("claimed_by")
         ):
             continue
-        request = {"job": "workflow", "task": task, "repo": get("config").repo}
+        request = {"job": "workflow", "task": task, "repo": get("store").config(get("slug")).repo}
         if get("tools").host.run(request, deadline=get("deadline")):
             actions.append(f"workflow {task['id']} started")
     return actions
@@ -30,7 +30,7 @@ registry.register(
         "wrapper phases",
         _workflow_runner,
         needs=frozenset({"planning and phase pass", "ledger state", "drained resume"}),
-        reads=pass_domains("doc", "config"),
+        reads=pass_domains("doc", "store", "slug"),
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"host"}),
