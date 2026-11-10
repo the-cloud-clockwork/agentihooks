@@ -13,10 +13,10 @@ from scripts.tick.step import Context, Domain, Lane, Result
 
 pytestmark = pytest.mark.unit
 
-CRITICAL_S = 2.0
-SLOW_S = 1.8
-OVERRUN_S = 4.0
-BUSY_S = 2.5
+CRITICAL_S = 1.0
+SLOW_S = 0.9
+OVERRUN_S = 1.5
+BUSY_S = 1.2
 
 
 class View:
