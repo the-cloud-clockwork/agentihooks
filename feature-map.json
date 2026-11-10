@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "fleet-worker-reserved-master-ceiling",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
+      "behaviour": "Hosted fleet worker rows apply the same live master reservation ceilings as the quota hook so dispatcher and worker lane choices fall through to Codex or name the refused account.",
+      "seam": "FleetAccounts through HerdrRuntime worker account selection and Reservation ceiling",
+      "tests": [
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_rows_match_the_quota_hooks_reserved_ceiling",
+        "tests/test_swarm_v2_approved_accounts.py::test_fleet_worker_choice_falls_through_reserved_claude_to_codex_or_names_its_refusal"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",

@@ -612,3 +612,63 @@ def test_harness_routes_pass_the_clock_the_planned_account_and_the_quota_predece
     assert routes.choose(2, "bkey", None, "claude") == "bkey"
     assert routes.choose(2, None, ("claude", "akey"), "claude") == claude.choose(2, None, ("claude", "akey"))
     assert routes.choose(2, None, ("claude", "akey"), "claude") != "akey"
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+@pytest.mark.parametrize("masters", [1, 2, 3])
+@pytest.mark.parametrize("at_ceiling", [False, True])
+def test_fleet_worker_rows_match_the_quota_hooks_reserved_ceiling(
+    monkeypatch: pytest.MonkeyPatch, masters: int, at_ceiling: bool
+) -> None:
+    from hooks.context import quota_policy
+    from scripts.routing import reservation
+
+    store, route = _route({"reserved-key", "other-key"})
+    held = reservation.Reservation("claude", "reserved-key", masters)
+    limit = quota_policy._own_ceiling(held, "reserved-key", False)
+    used = limit if at_ceiling else limit - 1
+    _observe(store, "reserved-key", week_used=used)
+    _observe(store, "other-key", week_used=used)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    rows = approved.FleetAccounts(route, 2)({}, NOW_MS / 1000, refresh=False)
+    own = next(row for row in rows if row.name == "reserved-key")
+    other = next(row for row in rows if row.name == "other-key")
+    assert (own.cap == 0) is at_ceiling
+    assert own.reserved == (held.reason if at_ceiling else "")
+    assert other.cap > 0
+    assert capacity.unreserved(rows)[1].cap > 0
+
+
+@pytest.mark.feature("fleet-worker-reserved-master-ceiling")
+@pytest.mark.parametrize("lane", ["dispatch", "eng", "ci", "plan"])
+def test_fleet_worker_choice_falls_through_reserved_claude_to_codex_or_names_its_refusal(
+    monkeypatch: pytest.MonkeyPatch, lane: str
+) -> None:
+    from scripts.routing import reservation
+    from scripts.swarm.runtime import SpawnError
+
+    store, route = _route({"reserved-key"})
+    _observe(store, "reserved-key", week_used=70)
+    codex = approved.AccountRoute(lambda: {"codex-key"}, route.quota, lambda: {}, "codex")
+    routes = approved.HarnessRoutes({"claude": route, "codex": codex})
+    held = reservation.Reservation("claude", "reserved-key", 1)
+
+    def current(harness: str, environ: dict[str, str]) -> reservation.Reservation | None:
+        return held if harness == "claude" else None
+
+    monkeypatch.setattr(reservation, "current", current)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    runtime = HerdrRuntime()
+    runtime.quota_accounts = approved.FleetAccounts(routes, 2)
+    assert runtime._rotation("", {})[0] == "codex"
+    assert runtime._quota_choice("claude", "rotation", False, lane)[0] == "codex"
+    assert runtime._quota_account("codex", None, None, lane).name == "codex-key"
+    routes.routes.pop("codex")
+    runtime._quota_accounts = runtime.quota_accounts({}, NOW_MS / 1000, refresh=False)
+    with pytest.raises(SpawnError, match="reserved-key"):
+        runtime._quota_choice("claude", "rotation", False, lane)
