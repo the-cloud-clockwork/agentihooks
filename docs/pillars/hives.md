@@ -117,8 +117,9 @@ agentihooks hive list                                 # the hive shows live once
   has been reached once. herdr has no `machine status` command; `machine list` and a `pane run` that answers are
   the check.
 - A pane on a worker pod runs as the worker user, so `pane run` prints the pod hostname.
-- `hive.env` holds the four `AGENTIHOOKS_HIVE_` keys, plus `AGENTIHOOKS_BUS_` lines when the member is minted with
-  NATS credentials. The `AGENTIHOOKS_HIVE_ID` value is the member id `hive add` printed.
+- The `hive.env` that `hive add` delivers holds exactly the four `AGENTIHOOKS_HIVE_` keys and no `AGENTIHOOKS_BUS_`
+  lines; bus credentials arrive only through a later `hive refresh` against a hub that signs them. The
+  `AGENTIHOOKS_HIVE_ID` value is the member id `hive add` printed.
 - The hive appears in `hive list` only after `agentihooks hive run` (or the worker pod's start script) beats with
   the delivered credential.
 
@@ -141,7 +142,8 @@ hosted endpoint a worker pod names with the chart's `workers.hiveUrl`; neither m
 `agentihooks hive invite` and `agentihooks hive join` today are a different path that came later: `hive invite`
 writes a member credential into an OpenBao record for a hive brought up from an empty namespace, and `hive join`
 reads that invite file and posts to `/hive/refresh`. Neither restores a join endpoint. See
-[Reproducible hive](../reference/reproducible-hive.md) and the [add a hive quick start](../getting-started/add-hive-quick-start.md).
+[Reproducible hive](../reference/reproducible-hive.md) and the
+[add a hive quick start](../getting-started/add-hive-quick-start.md).
 
 ### Hive add troubleshooting
 
