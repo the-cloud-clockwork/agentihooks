@@ -275,7 +275,9 @@ def test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses(
         refusal(401),
     ]
 
-    def changes(self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...]) -> dict[str, Any]:
+    def changes(
+        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+    ) -> dict[str, Any]:
         reply = replies.pop(0)
         if isinstance(reply, OSError):
             raise reply

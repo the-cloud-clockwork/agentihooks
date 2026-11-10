@@ -831,6 +831,14 @@ def _drafted(record):
     return bool(record) and record["verdict"] == PENDING and record["reason"] == DRAFT
 
 
+def _drafted_as(record: dict[str, Any] | None, task: dict[str, Any]) -> bool:
+    """Return whether ``record`` already holds the draft verdict a pass writes for ``task``, so the pass leaves it."""
+    if not _drafted(record):
+        return False
+    kept = {key: value for key, value in record.items() if key not in ("verdict", "reason", "at")}
+    return kept == {"phase": task.get("phase"), **_split_fields(task, task["pr_url"])}
+
+
 @dataclass(frozen=True)
 class _Judgment:
     pr: dict | None
@@ -919,12 +927,13 @@ class Check:
         if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
             return []
         unmoved = self._unmoved(task, _fingerprint(doc, task))
-        quick = unmoved is not None or (self.draft is not None and self.draft(task["pr_url"]))
+        drafting = unmoved is None and self.draft is not None and self.draft(task["pr_url"])
+        quick = unmoved is not None or drafting
         held = self.judging is not None and self.judging.holds((self.slug, task["id"]), self._key(doc, task))
         counted = not quick and not held
         if counted and self.limit is not None and sum(queued[-1] for queued in tasks) >= self.limit:
             return []
-        if _drafted(record):
+        if _drafted(record) and not drafting:
             verdicts.write(
                 task["id"],
                 PENDING,
@@ -1039,6 +1048,8 @@ class Check:
     def _check(self, task, judgment, verdicts):
         previous, pr = judgment.previous, judgment.pr
         if judgment.state is None and previous is None:
+            if _drafted_as(verdicts.read(task["id"]), task):
+                return []
             verdicts.write(
                 task["id"], PENDING, DRAFT, self.now_ms, phase=task.get("phase"), **_split_fields(task, task["pr_url"])
             )

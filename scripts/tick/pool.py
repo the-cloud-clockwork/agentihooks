@@ -51,6 +51,12 @@ RESERVES: Mapping[str, float] = MappingProxyType({"spawn": SPAWN_RESERVE_S})
 
 _GATES = {name: BoundedSemaphore(cap) for name, cap in LIMITS.items()}
 
+
+def _handoff(workers: int) -> ThreadPoolExecutor:
+    """Return the workers of a pass's handed off steps, as many as the pass's step workers."""
+    return ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-handed")
+
+
 Item = TypeVar("Item")
 Found = TypeVar("Found")
 
@@ -74,21 +80,38 @@ class Pass:
     handed: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
     gone: set[str] = field(default_factory=set[str], compare=False)
     guard: Lock = field(default_factory=Lock, compare=False)
+    tracked: set[str] = field(default_factory=set[str], compare=False)
+    handoff: ThreadPoolExecutor | None = field(default=None, compare=False)
+
+    def executor(self, name: str) -> ThreadPoolExecutor:
+        """Return the workers step ``name`` runs on: the handed off steps' own when the pass has them, else the pass's
+        step workers, so the handed lane never takes a worker from the rest of the pass."""
+        return self.handoff if self.handoff is not None and self.handed_of((name,)) else self.steps
 
     def hand(self, names: Iterable[str]) -> None:
         """Mark each step in ``names`` handed off to run on after its group, pending until ``end`` marks it."""
         with self.guard:
             self.handed.update((name, Event()) for name in names)
 
+    def track(self, names: Iterable[str]) -> None:
+        """Mark each step in ``names``, run by its own group, awaited by that group's handed off steps until ``end``
+        marks it; a tracked step is neither handed off nor pending."""
+        with self.guard:
+            fresh = [name for name in names if name not in self.handed]
+            self.handed.update((name, Event()) for name in fresh)
+            self.tracked.update(fresh)
+
     def pending(self) -> frozenset[str]:
         """Return the handed off steps not yet marked ended."""
         with self.guard:
-            return frozenset(name for name, event in self.handed.items() if not event.is_set())
+            return frozenset(
+                name for name, event in self.handed.items() if not event.is_set() and name not in self.tracked
+            )
 
     def handed_of(self, names: Iterable[str]) -> frozenset[str]:
         """Return the steps in ``names`` that a group of this pass handed off."""
         with self.guard:
-            return frozenset(name for name in names if name in self.handed)
+            return frozenset(name for name in names if name in self.handed and name not in self.tracked)
 
     def settled(self, names: Iterable[str]) -> bool:
         """Return whether every handed off step in ``names`` was marked ended, dropped or not."""
@@ -202,6 +225,7 @@ def running(
         ThreadPoolExecutor(max_workers=workers, thread_name_prefix="tick-fan-out"),
         closing_s,
         reserved(critical_s) if reserves is None else reserves,
+        handoff=_handoff(workers),
     )
     token = _ACTIVE.set(current)
     beat = _Beat(heartbeat, critical_s) if heartbeat is not None and current.parallel else None
@@ -212,6 +236,8 @@ def running(
         for thread in current.later:
             thread.join(max(current.slow.remaining, closing) + LATER_GRACE_S)
         current.steps.shutdown(wait=False, cancel_futures=True)
+        if current.handoff is not None:
+            current.handoff.shutdown(wait=False, cancel_futures=True)
         current.fans.shutdown(wait=False, cancel_futures=True)
         _ACTIVE.reset(token)
         if beat is not None:

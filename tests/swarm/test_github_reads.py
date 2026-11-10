@@ -202,6 +202,21 @@ def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch
     assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
 
 
+def test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    calls = []
+
+    def fetch():
+        calls.append(1)
+        return {"pull": "steady"}
+
+    assert github_reads.snapshot("ttl-case", 1_000, fetch, ttl=180) == {"pull": "steady"}
+    assert github_reads.snapshot("ttl-case", 1_000 + github_reads.RUN_TTL_S + 1, fetch, ttl=180) == {"pull": "steady"}
+    assert len(calls) == 1
+    assert github_reads.snapshot("ttl-case", 1_000 + 181, fetch, ttl=180) == {"pull": "steady"}
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize("kind", ["job_log", "snapshot"])
 def test_retained_readers_share_the_lock_with_an_existing_process(kind, monkeypatch, tmp_path):
     import fcntl

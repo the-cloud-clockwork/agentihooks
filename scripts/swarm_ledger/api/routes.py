@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
 
+from ..repository import live_rows
 from ..repository.fragments import Fragment, exported, members
 from ..repository.rows import children, encode
 from . import resources, schemas, task_list
@@ -219,7 +220,9 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         parts = tuple(sorted(payload.get("parts", ())))
-        generation, body = services.repository.export_since(slug, payload["since"], export_text, export_changes, parts)
+        generation, body = services.repository.export_since(
+            slug, payload["since"], export_text, export_changes, parts, scope_of(payload)
+        )
         body = body if isinstance(body, bytes) else body.encode()
         return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
     schemas.validate({"type": "object", "maxProperties": 0}, payload)
@@ -231,10 +234,18 @@ def export(handler: object, services: Services, slug: str, path: str, payload: d
     return handler.send_export(services.repository.export_since(slug, 0, export_text, export_changes)[1])
 
 
+def scope_of(payload: dict[str, Any]) -> live_rows.Scope | None:
+    if "closed" not in payload and "frozen" not in payload:
+        return None
+    return live_rows.Scope(payload.get("closed", False), payload.get("frozen", False))
+
+
 SINCE_SCHEMA = {
     "type": "object",
     "properties": {
         "since": {"type": "integer", "minimum": 0},
+        "closed": {"type": "boolean"},
+        "frozen": {"type": "boolean"},
         "parts": {
             "type": "array",
             "minItems": 1,
@@ -249,14 +260,18 @@ HIDDEN_META = ("seeds", "api_operations")
 HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 
 
-def export_text(fragments: Fragment, parts: tuple[str, ...] = ()) -> bytes:
+def export_text(fragments: Fragment, parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None) -> bytes:
     """The export of the stored ledger, only its top level parts named in parts when there are any."""
     meta = members({key: part for key, part in fragments.parts["_meta"].parts.items() if key not in HIDDEN_META})
+    scoped: dict[str, bytes] = {} if answer is None else {"tasks": encode(answer.rows).encode()}
+    named: dict[str, Fragment] = fragments.parts  # pyright: ignore[reportAssignmentType]
     body = b",".join(
-        encode(key).encode() + b":" + (meta if key == "_meta" else exported(part))
-        for key, part in fragments.parts.items()
+        encode(key).encode() + b":" + (meta if key == "_meta" else scoped.get(key) or exported(part))
+        for key, part in named.items()
         if not parts or key in parts
     )
+    if answer is not None and (not parts or "tasks" in parts):
+        body += b"," + encode(live_rows.FROZEN_IDS).encode() + b":" + encode(answer.frozen_ids).encode()
     return b'{"data":{' + body + b"}}"
 
 
@@ -273,18 +288,24 @@ def identities(items: list) -> list:
     return [encode(parts[-1]) for _, parts, *_ in children(items, [], None)]
 
 
-def export_changes(state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = ()) -> str | None:
+def export_changes(
+    state: dict[str, Any], paths: set[str], parts: tuple[str, ...] = (), answer: live_rows.Answer | None = None
+) -> str | None:
     """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
     changed item its item identities in order with every changed item; only the top level parts named in
     parts when there are any."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
     units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    if answer is not None:
+        if any(live_rows.reshapes(json.loads(path)) for path in paths):
+            return None
+        view["tasks"] = answer.rows
     named = {encode(part) for part in parts}
     units = {unit for unit in units if not named or not unit or unit[0] in named}
     if () in units:
         return None
     kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]
-    changes = {"set": [], "drop": [], "lists": {}}
+    changes: dict[str, Any] = {"set": [], "drop": [], "lists": {}}
     for unit in sorted(kept):
         path, parent = [json.loads(part) for part in unit], view
         for part in path[:-1]:
@@ -299,6 +320,8 @@ def export_changes(state: dict[str, Any], paths: set[str], parts: tuple[str, ...
             changes["set"].append([path, parent[path[-1]]])
         else:
             changes["drop"].append(path)
+    if answer is not None and (not named or encode("tasks") in named):
+        changes["set"].append([[live_rows.FROZEN_IDS], answer.frozen_ids])
     return json.dumps({"changes": changes})
 
 
