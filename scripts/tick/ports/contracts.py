@@ -235,6 +235,8 @@ class Runtime(Protocol):
 
     def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool: ...
 
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any: ...
+
 
 @runtime_checkable
 class Processes(Protocol):
