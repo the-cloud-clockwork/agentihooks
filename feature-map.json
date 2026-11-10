@@ -3109,6 +3109,7 @@
         "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
         "tests/gates/test_intent_budget.py::test_pull_texts_reads_its_batches_at_the_same_time",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_each_batch_in_the_callers_context",
         "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
         "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
         "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",

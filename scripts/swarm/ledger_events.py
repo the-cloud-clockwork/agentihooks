@@ -505,7 +505,7 @@ def pull_texts(urls: list[str], source: SourceControl | None = None) -> dict[str
         return {}
     port = source or stack.login_source_control()
     batches = [unique[start : start + 20] for start in range(0, len(unique), 20)]
-    with ThreadPoolExecutor(max_workers=pool.LIMITS["github"]) as workers:
+    with ThreadPoolExecutor() as workers:
         reads = [workers.submit(copy_context().run, _pull_batch, batch, port) for batch in batches]
         return {url: pull for read in reads for url, pull in read.result().items()}
 
