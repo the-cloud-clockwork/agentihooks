@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-label-reserves-identifier",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
+      "behaviour": "Machine label reservations retain both the registered hive identifier and its settled name, including interface hives named swarm-master.",
+      "seam": "scripts.hive.machine.held_names with registry interface records",
+      "tests": [
+        "tests/hive/test_machine_names.py::test_an_interface_hive_reserves_its_settled_name_and_identifier"
+      ]
+    },
+    {
       "id": "swarm-spawn-order-once-per-pass",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
@@ -83,6 +93,22 @@
       "tests": [
         "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
         "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "inbox-alias-store-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
+      "behaviour": "On the bus state backend a mailbox read compares the names store revisions of the aliases it resolved before committing its snapshot, and a seen mark compares them after its write, retrying when an alias moved meanwhile and refusing when it never settles.",
+      "seam": "InboxStore.mailbox and SeenMarks.mark on the bus state backend",
+      "tests": [
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
       ]
     },
     {
@@ -1469,6 +1495,18 @@
       ]
     },
     {
+      "id": "reply-wait-reads-every-inbox-world",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2152",
+      "behaviour": "A swarm wait on a reply reads its item by id from every inbox world the tick reaches, holds while the item is pending in a hive member's world, holds on a member scoped tick that cannot see the item's world, and ends only when the item is replied, closed or gone from every world.",
+      "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
+      "tests": [
+        "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply",
+        "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
+        "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
+      ]
+    },
+    {
       "id": "inbox-redelivery",
       "origin": "inventory",
       "behaviour": "An item delivered and never confirmed returns to pending after the redelivery window with the same id, for whichever transport claims next; a confirmed item is never redelivered.",
@@ -2733,6 +2771,20 @@
       ]
     },
     {
+      "id": "hive-master-closed-account",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
+      "behaviour": "Hive master placement never chooses a Claude account its capacity rows mark closed, whether through the hive master login, the native interactive login or a subscription slot.",
+      "seam": "placement.place_master closed account keys and HiveLaunch master selection",
+      "tests": [
+        "tests/hive/test_master_placement.py::test_a_closed_account_is_never_chosen_for_a_master_or_native_login_seat",
+        "tests/hive/test_master_placement.py::test_a_master_waits_when_its_only_login_account_is_closed",
+        "tests/hive/test_master_placement.py::test_a_closed_slot_is_skipped_and_the_next_open_slot_on_the_same_hive_is_chosen",
+        "tests/hive/test_master_fallback_launch.py::test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_skips_a_native_login_whose_claude_account_is_closed"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",
@@ -2789,6 +2841,19 @@
         "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
         "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
         "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
+      "id": "hive-signer-membership-sync",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2194",
+      "behaviour": "Invite refreshes the mounted signer after adding a member; revoke and remove unlist the member and refresh the signer without waiting for the hourly secret sync.",
+      "seam": "hive invite, revoke and remove signer member listing",
+      "tests": [
+        "tests/hive/test_signer_sync.py::test_an_invited_member_joins_at_once_through_the_mounted_signer",
+        "tests/hive/test_signer_sync.py::test_hive_revoke_drops_the_member_from_the_signer_listing_and_syncs",
+        "tests/hive/test_signer_sync.py::test_hive_remove_syncs_the_signer_record_after_it_unlists",
+        "tests/hive/test_signer_sync.py::test_the_invite_command_passes_the_signer_sync_target"
       ]
     },
     {
@@ -2851,6 +2916,32 @@
       "tests": [
         "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
         "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
+      ]
+    },
+    {
+      "id": "tick-step-starvation",
+      "origin": "inventory",
+      "behaviour": "The closing step step starvation records each tick step's last completed run from the pass records; a step that ran without completing for three windows of its budgets.FLOORS interval sends the master seat one urgent inbox item and swarm status lists a step starvation finding naming the step, its last completion and the passes since.",
+      "seam": "scripts.swarm.health.step_starvation.step and findings, registered as tick step step starvation",
+      "tests": [
+        "tests/tick/steps/test_step_starvation.py::test_step_starvation",
+        "tests/tick/steps/test_step_starvation.py::test_a_pass_history_where_waits_end_never_completes_alarms_the_master_once",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_lists_the_starved_step_with_its_last_completion_and_passes_since",
+        "tests/tick/steps/test_step_starvation.py::test_a_step_one_millisecond_short_of_three_windows_is_not_starved",
+        "tests/tick/steps/test_step_starvation.py::test_a_completed_run_clears_the_starvation_and_rested_rows_never_start_it",
+        "tests/tick/steps/test_step_starvation.py::test_failed_held_cut_and_dropped_runs_are_misses",
+        "tests/tick/steps/test_step_starvation.py::test_the_registered_step_records_runs_and_alarms_with_each_step_window",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_reads_the_starvation_state_once_per_tick_pass",
+        "tests/tick/steps/test_step_starvation.py::test_inside_one_reap_the_ledger_probe_alert_is_read_once_per_swarm",
+        "tests/tick/steps/test_step_starvation.py::test_finding_times_read_in_utc_whatever_the_host_zone",
+        "tests/tick/steps/test_step_starvation.py::test_one_tick_pass_keeps_the_read_of_every_swarm_it_asked",
+        "tests/tick/steps/test_step_starvation.py::test_a_swarm_with_nothing_saved_has_no_starvation",
+        "tests/tick/steps/test_step_starvation.py::test_swarm_status_findings_list_the_starved_step_at_the_status_clock",
+        "tests/tick/steps/test_step_starvation.py::test_the_alarm_item_carries_its_id_ref_and_every_evidence_line",
+        "tests/tick/steps/test_step_starvation.py::test_a_step_already_alarmed_never_hides_the_next_starved_step",
+        "tests/tick/steps/test_step_starvation.py::test_reading_again_with_no_new_records_counts_nothing_twice",
+        "tests/tick/steps/test_step_starvation.py::test_one_read_takes_only_the_newest_records_up_to_its_limit",
+        "tests/tick/steps/test_step_starvation.py::test_a_stream_entry_id_reads_as_its_millisecond_and_sequence"
       ]
     }
   ],

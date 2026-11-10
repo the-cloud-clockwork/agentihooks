@@ -149,6 +149,7 @@ FLOORS: dict[str, Timing] = {
     "hive sweep": Timing(LIGHT_S, SLOW_S),
     "workflow runner": Timing(LIGHT_S, CRITICAL_S),
     "doc items map": Timing(LIGHT_S, CRITICAL_S),
+    "step starvation": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

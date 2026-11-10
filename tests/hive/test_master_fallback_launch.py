@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -430,6 +431,39 @@ def test_master_waits_when_its_only_private_login_probe_is_revoked(setup, monkey
     result = balancer.revoked_result("work_login", 100)
     monkeypatch.setattr(balancer, "cached_observations", lambda **_: [(100, result)])
     assert setup.launcher.select(setup.config, "master", task) == placement.Wait("no live hive takes master")
+
+
+@pytest.mark.feature("hive-master-closed-account")
+@pytest.mark.parametrize(("state", "expected"), [("CLOSED", "fallback"), ("OPEN", "remote")])
+def test_the_front_door_master_skips_a_master_login_its_capacity_rows_mark_closed(
+    setup: Any, state: str, expected: str
+) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, id="fallback", master_login={}, excluded=[], ui="yes", prefer={"master": 9})
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account("claude", "login", state, 0, 80, 3, 6 if state == "OPEN" else 0),
+    ]
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert selected.hive == expected
+    assert selected.account.name == ("account" if state == "CLOSED" else "login")
+
+
+@pytest.mark.feature("hive-master-closed-account")
+@pytest.mark.parametrize(("harness", "chosen"), [("claude", "account"), ("codex", "native")])
+def test_a_master_skips_a_native_login_whose_claude_account_is_closed(setup: Any, harness: str, chosen: str) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [
+        Account("claude", "account", "room", 0, 80, 80, 6),
+        Account(harness, "native", "CLOSED", 0, 80, 3, 0),
+    ]
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
+    assert setup.launcher.select(setup.config, "master", task).account.name == chosen
 
 
 @pytest.mark.parametrize("login", [{}, {"claude": ""}])

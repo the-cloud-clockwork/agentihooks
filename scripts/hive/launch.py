@@ -12,6 +12,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts.hive import admission, ceiling, headroom, orders, placement, placement_waits, registry
 from scripts.hive import config as hive_config
 from scripts.hive.orders import STALE_EPOCH, Ack, CommandOrder, LaunchOrder, Orders
+from scripts.quota_state import CLOSED
 from scripts.routing.reservation import LaunchSlots
 from scripts.routing.slots import account_key
 from scripts.swarm import capacity, lease, profile_choice
@@ -434,7 +435,19 @@ class HiveLaunch:
             spill=choice.spill or placement.unhosted(role, list(placing.listed), placing.now, placing.aliases),
         )
 
-    def _master_selection(self, config, decision, hives, now, rows, front):
+    def _master_selection(
+        self,
+        config: SwarmConfig,
+        decision: Any,
+        hives: list[dict[str, Any]],
+        now: int,
+        rows: list[capacity.Account],
+        front: bool,
+    ) -> Selection | placement.Wait:
+        """Place a master on a hive, refusing every Claude account its capacity rows mark closed."""
+        closed = frozenset(
+            placement.account_key(row.name) for row in rows if row.harness == "claude" and row.state == CLOSED
+        )
         accounts = {
             placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
         }
@@ -442,7 +455,7 @@ class HiveLaunch:
             {**hive, "slots": [slot for slot in hive["slots"] if placement.account_key(slot["account"]) in accounts]}
             for hive in _master_logins(hives, front)
         ]
-        selected = placement.place_master("claude", "", config.repo, available, now, front)
+        selected = placement.place_master("claude", "", config.repo, available, now, front, closed)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
         if selected.route_kind == placement.MASTER_LOGIN:
