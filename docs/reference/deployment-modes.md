@@ -580,7 +580,8 @@ description, in both modes.
 |---|---|
 | `no ledger <slug>` | The hosted ledger answered 404 for one of the three collections: it holds no ledger by that name |
 | `no stored artifact <file id>` | The hosted ledger holds the ledger but answered 404 for the plan file |
-| An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 403 or 503; the error is not rewritten |
+| `the ledger server refused the credential` | A collection read was answered 403 with the server's credential refusal |
+| An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
 
 `tests/swarm_ledger/test_plan_read.py` covers the remote read in compose mode with no local ledger folder: the
 three collection reads, the artifact request with its address and timeout, and each refusal above.
@@ -599,7 +600,7 @@ three collection reads, the artifact request with its address and timeout, and e
 | Hive agents fail `ledger_join` and `ledger_write` launch checks while the hive controller reaches the hosted ledger | The agent's rendered `settings.json` holds a different `AGENTIHOOKS_HOSTED_LEDGER_URL` than the hive's environment: the hive runs a release before v2.17.330, or the controller process lacks the variable | Set the variable in `hive.env` or the worker pod's environment, run agentihooks v2.17.330 or later (the first release with the rule) on the hive, and restart the controller; the next launch rerenders the home |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
 | `agentihooks plan read` on a hive prints `no ledger <slug>` | The hive is a remote client and the hosted ledger holds no ledger by that name, or `SWARM_URL` points at another ledger server | Pass `--slug` with the swarm's ledger, or set the hub address the swarm's ledger lives on |
-| `agentihooks plan read` on a hive prints `no stored artifact <file id>` | The phase or task names a plan artifact the hosted ledger does not serve | Publish the plan to that ledger again with `publish-plan`; the task description is the spec until then |
+| `agentihooks plan read` on a hive prints `no stored artifact <file id>` | The phase or task names a plan artifact the hosted ledger does not serve | Publish the plan to that ledger again with `publish-plan`; the command exits with this error until then, so work from the task description |
 
 ## Regulated site recipe
 
