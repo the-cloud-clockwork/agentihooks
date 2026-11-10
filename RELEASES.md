@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.799 · 2026-11-10
+
+### 2026-11-10 · a3f23306a0a4 · #10537 · @nestorcolt
+
+**End a Codex viewer once its app server exits**
+
+This change fixes a hang where a Codex viewer stuck on "Reconnect failed" after its app server died, since the launcher never returned and session_exit never ran. Now `attach.watched` wraps the viewer and polls `attach.server_ended` every WATCH_S seconds, terminating it if the transport record shows exited or failed, if the recorded server pid is no longer alive, or if the execution has lost its seat; an unreadable store is treated conservatively and leaves the viewer running. `attach.main` now uses this as its default runner, ensuring dead app servers reliably release their viewers instead of leaving zombie sessions.
+
+### 2026-11-10 · 6685a6180f80 · #10538 · @agenticore-app
+
+**Read the intent check pull request batches at the same time**
+
+This change speeds up the intent check step by running the batched pull request reads in `ledger_events.pull_texts` concurrently instead of sequentially, within the existing GitHub pool limit, while properly carrying context into each worker. Previously each 20-pull GraphQL batch ran one after another, adding up to a median 3.4 s; local testing on 29 watched pulls shows this drops from roughly 3.2-3.3 s sequential to about 1.7-2.0 s in parallel, directly reducing the intent check step's overall runtime and improving tick reliability.
+
+### 2026-11-10 · 48bb2beed421 · #10535 · @agenticore-app
+
+**Resolve bundle overlays on the target hive instead of the hosted controller**
+
+This change fixes launches that previously failed when a hosted controller held only package roles but a bundle overlay, like frontend, belonged to the placement target hive rather than the controller. Instead of rejecting the order with an overlay-not-found error, the controller now proceeds without resolving overlays, and the hive member resolves the task's overlays (or its base role's default) against its own bundle, attaching them to the launch assignment so the agent launches correctly dressed. If the hive itself cannot resolve an overlay, the order still fails cleanly before launch, preserving safety while fixing the false-negative failures.
+
 ## v2.17.797 · 2026-11-10
 
 ### 2026-11-10 · 0c8dbac66380 · #10355 · @agenticore-app
