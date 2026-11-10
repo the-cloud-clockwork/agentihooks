@@ -4,6 +4,7 @@ import signal
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,6 +26,7 @@ class Service:
 
     def __init__(self) -> None:
         self.runtime = None
+        self.controller = SimpleNamespace(require=lambda *args: None)
         self.ticks = 0
         self.stopped = 0
 
