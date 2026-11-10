@@ -2,10 +2,12 @@
 
 from collections.abc import Iterator
 from concurrent.futures import Future
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from scripts.swarm import cli
 from scripts.tick import pool
 from scripts.tick.steps import host
 
@@ -47,6 +49,8 @@ def test_a_late_build_yields_the_last_view_and_becomes_the_next_fallback() -> No
     host.pass_view("sw", _built(earlier))
     building: Future[Any] = Future()
     with pool.running(critical_s=host.VIEW_RESERVE_S + 0.05, slow_s=60.0):
+        bound = host._view_wait_s()
+        assert bound is not None and bound <= 0.05
         assert host.pass_view("sw", building) is earlier
     assert host._LAST_VIEWS == {"sw": earlier}
     building.set_result(late)
@@ -58,6 +62,7 @@ def test_the_wait_is_bounded_by_the_slow_lane_when_it_ends_first() -> None:
     earlier = object()
     host.pass_view("sw", _built(earlier))
     with pool.running(critical_s=60.0, slow_s=host.VIEW_RESERVE_S - 1.0):
+        assert host._view_wait_s() == 0.0
         assert host.pass_view("sw", Future()) is earlier
 
 
@@ -67,6 +72,7 @@ def test_a_failed_late_build_keeps_the_last_view() -> None:
     host.pass_view("sw", _built(earlier))
     building: Future[Any] = Future()
     with pool.running(critical_s=0.0, slow_s=0.0):
+        assert host._view_wait_s() == 0.0
         assert host.pass_view("sw", building) is earlier
     building.set_exception(RuntimeError("github down"))
     assert host._LAST_VIEWS == {"sw": earlier}
@@ -88,3 +94,41 @@ def test_views_are_kept_per_swarm() -> None:
     with pool.running(critical_s=0.0, slow_s=0.0):
         assert host.pass_view("b", _built(second)) is second
         assert host.pass_view("a", Future()) is first
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_a_build_that_raises_its_own_timeout_in_time_raises_it() -> None:
+    host.pass_view("sw", _built(object()))
+    failed: Future[Any] = Future()
+    failed.set_exception(TimeoutError("ledger read timed out"))
+    with pool.running(critical_s=60.0, slow_s=60.0), pytest.raises(TimeoutError, match="ledger read timed out"):
+        host.pass_view("sw", failed)
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_the_wait_has_no_bound_outside_a_pass() -> None:
+    assert host._view_wait_s() is None
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_the_relay_hook_takes_the_view_through_pass_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, Any]] = []
+    fitted = object()
+
+    def fit(slug: str, view: Any) -> Any:
+        seen.append((slug, view))
+        return fitted
+
+    monkeypatch.setattr(host, "pass_view", fit)
+    building: Future[Any] = Future()
+    wrapper = SimpleNamespace(
+        ticks=SimpleNamespace(close=lambda: None),
+        judging={"judged": (building, ["checked"])},
+        box={},
+        slug="sw",
+        checked=[],
+    )
+    assert cli._Wrapper._judged(wrapper) is True  # pyright: ignore[reportArgumentType]
+    assert seen == [("sw", building)]
+    assert wrapper.box == {"view": fitted}
+    assert wrapper.checked == ["checked"]

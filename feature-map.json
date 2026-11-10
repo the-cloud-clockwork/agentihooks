@@ -988,7 +988,10 @@
         "tests/tick/steps/test_pass_view.py::test_the_wait_is_bounded_by_the_slow_lane_when_it_ends_first",
         "tests/tick/steps/test_pass_view.py::test_a_failed_late_build_keeps_the_last_view",
         "tests/tick/steps/test_pass_view.py::test_a_swarm_with_no_earlier_view_waits_for_its_build",
-        "tests/tick/steps/test_pass_view.py::test_views_are_kept_per_swarm"
+        "tests/tick/steps/test_pass_view.py::test_views_are_kept_per_swarm",
+        "tests/tick/steps/test_pass_view.py::test_a_build_that_raises_its_own_timeout_in_time_raises_it",
+        "tests/tick/steps/test_pass_view.py::test_the_wait_has_no_bound_outside_a_pass",
+        "tests/tick/steps/test_pass_view.py::test_the_relay_hook_takes_the_view_through_pass_view"
       ]
     },
     {

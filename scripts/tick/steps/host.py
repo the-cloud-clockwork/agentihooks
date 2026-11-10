@@ -3,7 +3,7 @@
 import sys
 import traceback
 from collections.abc import Callable
-from concurrent.futures import Future
+from concurrent.futures import Future, wait
 from importlib import import_module
 from typing import Any, cast
 
@@ -29,7 +29,7 @@ from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
-VIEW_RESERVE_S = 15.0
+VIEW_RESERVE_S = 20.0
 _LAST_VIEWS: dict[str, Any] = {}
 
 
@@ -214,8 +214,8 @@ def _tick_view(cli: Any, get: Get) -> None:
 
 
 def pass_view(slug: str, view: Any) -> Any:
-    """Return the pass view of swarm ``slug``: ``view`` itself unless it is a build, the build's view when it ends
-    while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed; a late build replaces that
+    """Return the pass view of swarm ``slug``: ``view`` itself unless it is a build, the build's view or error when it
+    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed; a late build replaces that
     last view once it ends, and a swarm with no earlier view waits for its build."""
     if not isinstance(view, Future):
         return view
@@ -224,10 +224,8 @@ def pass_view(slug: str, view: Any) -> Any:
     earlier = _LAST_VIEWS.get(slug)
     if earlier is None:
         return build.result()
-    try:
-        return build.result(timeout=_view_wait_s())
-    except TimeoutError:
-        return earlier
+    wait((build,), timeout=_view_wait_s())
+    return build.result() if build.done() else earlier
 
 
 def _keep_view(slug: str, built: Future[Any]) -> None:
