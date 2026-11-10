@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import Future
+from threading import Timer
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,7 @@ from scripts.tick import pool
 from scripts.tick.steps import host
 
 pytestmark = pytest.mark.unit
+OVERWAIT_S = 1.0
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +29,16 @@ def _built(value: Any) -> Future[Any]:
     done: Future[Any] = Future()
     done.set_result(value)
     return done
+
+
+def _pending() -> Future[Any]:
+    """Return a view build still running that ends on its own with a fresh view after ``OVERWAIT_S`` unless a test
+    ended it first, so a wait past its bound returns that view and fails the test instead of hanging it."""
+    build: Future[Any] = Future()
+    timer = Timer(OVERWAIT_S, lambda: build.done() or build.set_result(object()))
+    timer.daemon = True
+    timer.start()
+    return build
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
@@ -48,7 +60,7 @@ def test_a_view_that_is_no_future_is_returned_as_is() -> None:
 def test_a_late_build_yields_the_last_view_and_becomes_the_next_fallback() -> None:
     earlier, late = object(), object()
     host.pass_view("sw", _built(earlier))
-    building: Future[Any] = Future()
+    building = _pending()
     with pool.running(critical_s=host.VIEW_RESERVE_S + 0.05, slow_s=60.0):
         bound = host._view_wait_s()
         assert bound is not None and bound <= 0.05
@@ -64,14 +76,14 @@ def test_the_wait_is_bounded_by_the_slow_lane_when_it_ends_first() -> None:
     host.pass_view("sw", _built(earlier))
     with pool.running(critical_s=60.0, slow_s=host.VIEW_RESERVE_S - 1.0):
         assert host._view_wait_s() == 0.0
-        assert host.pass_view("sw", Future()) is earlier
+        assert host.pass_view("sw", _pending()) is earlier
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
 def test_a_failed_late_build_keeps_the_last_view() -> None:
     earlier = object()
     host.pass_view("sw", _built(earlier))
-    building: Future[Any] = Future()
+    building = _pending()
     with pool.running(critical_s=0.0, slow_s=0.0):
         assert host._view_wait_s() == 0.0
         assert host.pass_view("sw", building) is earlier
@@ -82,7 +94,7 @@ def test_a_failed_late_build_keeps_the_last_view() -> None:
 @pytest.mark.feature("swarm-tick-view-lane-fit")
 def test_a_swarm_with_no_earlier_view_waits_for_its_build() -> None:
     view = object()
-    building: Future[Any] = Future()
+    building = _pending()
     with pool.running(critical_s=0.0, slow_s=0.0):
         building.set_result(view)
         assert host.pass_view("other", building) is view
@@ -94,14 +106,13 @@ def test_views_are_kept_per_swarm() -> None:
     host.pass_view("a", _built(first))
     with pool.running(critical_s=0.0, slow_s=0.0):
         assert host.pass_view("b", _built(second)) is second
-        assert host.pass_view("a", Future()) is first
+        assert host.pass_view("a", _pending()) is first
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
 def test_an_older_build_ending_last_never_replaces_a_newer_view() -> None:
     host.pass_view("sw", _built(object()))
-    older: Future[Any] = Future()
-    newer: Future[Any] = Future()
+    older, newer = _pending(), _pending()
     old_view, new_view = object(), object()
     with pool.running(critical_s=0.0, slow_s=0.0):
         host.pass_view("sw", older)
@@ -135,7 +146,7 @@ def test_the_relay_hook_takes_the_view_through_pass_view(monkeypatch: pytest.Mon
         return fitted
 
     monkeypatch.setattr(host, "pass_view", fit)
-    building: Future[Any] = Future()
+    building = _pending()
     wrapper = SimpleNamespace(
         ticks=SimpleNamespace(close=lambda: None),
         judging={"judged": (building, ["checked"])},
