@@ -833,7 +833,7 @@ def _drafted(record):
 
 def _drafted_as(record: dict[str, Any] | None, task: dict[str, Any]) -> bool:
     """Return whether ``record`` already holds the draft verdict a pass writes for ``task``, so the pass leaves it."""
-    if record is None or not _drafted(record):
+    if not _drafted(record):
         return False
     kept = {key: value for key, value in record.items() if key not in ("verdict", "reason", "at")}
     return kept == {"phase": task.get("phase"), **_split_fields(task, task["pr_url"])}
@@ -927,7 +927,7 @@ class Check:
         if self.mode != "coach" and judged and _same_phase(record, task) and not moved:
             return []
         unmoved = self._unmoved(task, _fingerprint(doc, task))
-        drafting = self.draft is not None and self.draft(task["pr_url"])
+        drafting = unmoved is None and self.draft is not None and self.draft(task["pr_url"])
         quick = unmoved is not None or drafting
         held = self.judging is not None and self.judging.holds((self.slug, task["id"]), self._key(doc, task))
         counted = not quick and not held

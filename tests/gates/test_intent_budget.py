@@ -315,15 +315,24 @@ def test_a_later_pass_over_draft_pulls_rewrites_no_verdict(tmp_path: Any, monkey
 
 
 @pytest.mark.feature("swarm-intent-check-budget")
-def test_a_draft_pull_that_turns_ready_is_marked_running_and_judged(tmp_path: Any) -> None:
+def test_a_draft_pull_that_turns_ready_is_marked_running_and_judged(tmp_path: Any, monkeypatch: Any) -> None:
     doc = {**_doc(), "tasks": _doc()["tasks"][:1]}
     pulls, _ = _pulls(doc, draft=True)
     _check("observe", pulls, [], tmp_path).run(doc)
+    writes: list[tuple[str, str, str]] = []
+    write = Verdicts.write
+
+    def recorded(self: Verdicts, subject: str, verdict: str, reason: str, *args: Any, **fields: Any) -> dict:
+        writes.append((subject, verdict, reason))
+        return write(self, subject, verdict, reason, *args, **fields)
+
+    monkeypatch.setattr(Verdicts, "write", recorded)
     ready, _ = _pulls(doc, draft=False)
     calls: list[str] = []
     _check("observe", ready, calls, tmp_path, now=NOW + intent.TURN_MS).run(doc)
     record = Verdicts(SLUG, "intent", tmp_path).read("t0")
     assert "ask" in calls
+    assert writes[:1] == [("t0", intent.PENDING, intent.RUNNING)]
     assert record and record["reason"] != intent.DRAFT
 
 
