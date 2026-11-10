@@ -203,7 +203,8 @@ agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
 
 - `SWARM_URL` names one hosted ledger per process. In a session bound to one swarm, a remote call for another swarm's ledger still goes to `SWARM_URL`, even when `LEDGER_URL` is set.
 - The service token headers are sent only when both parts are set. One part alone sends neither, so the request reaches Access without a service token.
-- The client trusts the system roots for `https`, plus `LEDGER_CA_FILE`, or only `LEDGER_CA_PEM` when that is set.
+- The client trusts the system roots for `https`, plus `LEDGER_CA_FILE`, or only `LEDGER_CA_PEM` when that is set. A hive installs `LEDGER_CA_FILE` from its hive endpoint on `hive add` and `hive refresh`; see
+  [Ledger CA on a hive](../pillars/hives.md#ledger-ca-on-a-hive).
 
 ### Client troubleshooting
 

@@ -6,7 +6,10 @@ The map is read from dev and from the merged pull request head, so a feature map
 import json
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
+from scripts import feature_map
 from scripts.gates.enforcement import FEATURE
 from scripts.swarm_ledger import ledger_kinds
 
@@ -47,11 +50,13 @@ def refs(head: str) -> list[str]:
     return [BASE, *([head] if head else [])]
 
 
-def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> dict | None:
+def read_map(
+    ref: str, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run, path: str = MAP
+) -> dict[str, Any] | None:
     """The feature map at a revision on GitHub, or None when it cannot be read."""
     try:
         done = run(
-            ["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{REPO}/contents/{MAP}?ref={ref}"],
+            ["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{REPO}/contents/{path}?ref={ref}"],
             capture_output=True,
             text=True,
             timeout=20,
@@ -59,12 +64,26 @@ def read_map(ref: str, run: Callable[..., subprocess.CompletedProcess] = subproc
     except (OSError, subprocess.SubprocessError):
         return None
     if done.returncode != 0:
-        return None
+        return {} if path != MAP and "HTTP 404" in done.stderr else None
     try:
         found = json.loads(done.stdout)
     except ValueError:
         return None
     return found if isinstance(found, dict) else None
+
+
+def read_feature(ref: str, feature: str) -> dict[str, Any] | None:
+    """Read one requested fragment while preserving completion against legacy revisions."""
+    data = read_map(ref)
+    if data is None or not data.get("fragments") or any(entry.get("id") == feature for entry in _features(data)):
+        return data
+    path = feature_map.entry_path(Path(MAP), feature).as_posix()
+    entry = read_map(ref, path=path)
+    if entry == {}:
+        return data
+    if entry is None or entry.get("id") != feature:
+        return None
+    return {"features": [entry]}
 
 
 def _features(found: dict) -> list[dict]:

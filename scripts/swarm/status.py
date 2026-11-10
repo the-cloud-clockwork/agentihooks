@@ -51,6 +51,7 @@ from scripts.swarm.health import (
     quiet_hives,
     spawn_stall,
     standing,
+    step_starvation,
     urgent_hold,
     verdicts,
 )
@@ -146,6 +147,7 @@ def findings(
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + step_starvation.findings(store, slug, now_ms())
         + night_watch.findings(store, slug)
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
