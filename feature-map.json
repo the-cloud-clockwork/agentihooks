@@ -3320,7 +3320,7 @@
     },
     {
       "id": "hub-import-core",
-      "origin": "operator",
+      "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
       "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
       "seam": "scripts.profiles.hub_import.import_hub",

@@ -3,9 +3,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from scripts.profiles.hub_import import import_hub
 
-pytestmark = pytest.mark.feature("hub-import-core")
+from scripts.profiles.hub_import import import_hub
 
 
 @pytest.fixture
@@ -40,6 +39,7 @@ def hub(tmp_path: Path) -> Path:
     return root
 
 
+@pytest.mark.feature("hub-import-core")
 def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False)
@@ -56,6 +56,7 @@ def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) 
     assert not (profile / "command.yml").exists()
 
 
+@pytest.mark.feature("hub-import-core")
 def test_settings_remove_absolute_paths_but_keep_environment_references(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     import_hub(hub, out, False)
@@ -68,6 +69,7 @@ def test_settings_remove_absolute_paths_but_keep_environment_references(hub: Pat
     }
 
 
+@pytest.mark.feature("hub-import-core")
 def test_dry_run_reports_the_same_files_without_writing(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     preview = import_hub(hub, out, True)
@@ -76,6 +78,7 @@ def test_dry_run_reports_the_same_files_without_writing(hub: Path, tmp_path: Pat
     assert preview | {"dry_run": False} == actual
 
 
+@pytest.mark.feature("hub-import-core")
 @pytest.mark.parametrize("name", [".env", ".env.local", "credentials.json", "id_rsa", "key.pem"])
 def test_secret_files_refuse_the_entire_import(hub: Path, tmp_path: Path, name: str) -> None:
     (hub / "agents/diagram/package/.claude/rules" / name).touch()
@@ -85,6 +88,7 @@ def test_secret_files_refuse_the_entire_import(hub: Path, tmp_path: Path, name: 
     assert not out.exists()
 
 
+@pytest.mark.feature("hub-import-core")
 def test_taken_profile_names_are_never_overwritten(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     existing = out / "profiles/diagram"
@@ -96,6 +100,7 @@ def test_taken_profile_names_are_never_overwritten(hub: Path, tmp_path: Path) ->
     assert list(existing.iterdir()) == [existing / "CLAUDE.md"]
 
 
+@pytest.mark.feature("hub-import-core")
 @pytest.mark.parametrize("name", ["../escape", "/escape", "..", ""])
 def test_unsafe_profile_names_are_refused(hub: Path, tmp_path: Path, name: str) -> None:
     command = hub / "agents/diagram/package/command.yml"
@@ -104,6 +109,7 @@ def test_unsafe_profile_names_are_refused(hub: Path, tmp_path: Path, name: str) 
         import_hub(hub, tmp_path / "bundle", False)
 
 
+@pytest.mark.feature("hub-import-core")
 def test_symlinks_are_refused_without_following_them(hub: Path, tmp_path: Path) -> None:
     (hub / "agents/diagram/package/.claude/rules/external").symlink_to(tmp_path)
     with pytest.raises(ValueError, match="symlink"):
