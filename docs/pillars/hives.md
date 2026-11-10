@@ -1543,7 +1543,8 @@ configuration:
   root login;
 - turns off TCP and agent forwarding, gateway ports, tunnels, X11 and user environment files;
 - sets `PATH` to `~/.local/bin`, `/opt/venv/bin` and the system folders, with `NPM_CONFIG_PREFIX` and
-  `AGENTIHOOKS_HOME`, so `agentihooks`, `claude` and the npm tools resolve in an ssh shell;
+  `AGENTIHOOKS_HOME`, so `agentihooks` and the npm global tools resolve in an ssh shell, which runs `/bin/bash`, the
+  worker user's login shell in the hive worker image;
 - turns `StrictModes` off, because the keys sit on a read-only Secret mount the worker cannot own.
 
 sshd starts before the credential step, so a pod with no mounted credential already serves the keys while it waits
