@@ -2719,16 +2719,17 @@ node's memory. Size it from the node's budget and the agents' measured use, in t
    ```
 
    The limit is the bound, not the request: the chart multiplies both into the pod only, and no agent has a memory
-   cgroup of its own. A pod that passes its limit is killed by the kernel inside the pod cgroup, which ends every
-   agent on that hive.
+   cgroup of its own. Past the pod limit the kernel OOM killer ends a process in the pod cgroup; when that is the
+   hive's main process, the container restarts and every agent on the hive ends.
 
 4. Check CPU against the pod's CPU limit. Inside the pod, admission refuses a launch unless 0.5 CPU fits under 80
-   percent of the pod's CPU limit, measured on the pod's load ([Headroom](#headroom)). `maxAgents` agents run at once
-   only while they average about 0.8 times the CPU limit divided by `maxAgents`. A higher `maxAgents` with too
-   small a CPU limit leaves the hive at a ceiling below its cap, with launches refused for `cpu`.
+   percent of the pod's CPU limit, measured on the pod's load ([Headroom](#headroom)). Launches stop once pod load
+   nears that line, so the hive reaches `maxAgents` only while its agents average about 0.8 times the CPU limit
+   divided by `maxAgents`. A higher `maxAgents` with too small a CPU limit leaves the hive at a ceiling below its
+   cap, with launches refused for `cpu`.
 
 5. Render the values and read the pod's memory, then deliver them through the values repository and confirm the new
-   cap and pod limit, as in [Raising agents step by step](#worker-hive-memory-and-placement).
+   cap and pod limit, as in the raising steps of [Worker hive memory and placement](#worker-hive-memory-and-placement).
 
 **Worked example: a stable hive on a 92 GiB node.** One node runs a stable hive, a small dev hive and the swarm's
 services. Measured before the raise:
@@ -2739,6 +2740,7 @@ services. Measured before the raise:
 | Requests of pods other than the two hives | 23876 MiB, kept as a 24576 MiB (24 GiB) service reserve |
 | Stable hive pod (`kubectl top pods`) | 12103 MiB with 16 agents, about 756 MiB per agent |
 | Dev hive limit | 8184 MiB |
+| Stable hive pod CPU limit (`workers.resources.limits.cpu`) | 7 CPU |
 
 The stable hive went from 28 agents at 1024 MiB request and 2048 MiB limit to 48 agents at 1024 MiB request and 1280
 MiB limit. The lower per agent limit still leaves 1.7 times the measured mean, and pays for twenty more agents in the
@@ -2759,7 +2761,8 @@ workers:
 | Pod memory limit | `57344Mi` | `61440Mi` |
 | Hive limits plus reserve | 57344 + 8184 + 24576 = 90104 MiB | 61440 + 8184 + 24576 = 94200 MiB |
 
-94200 MiB fits the node's 94322 MiB allocatable. The render shows the new pod memory, limit first, then request:
+94200 MiB fits the node's 94322 MiB allocatable. The render shows the new pod memory, limit first, then request; a
+`-storage` Job, when the hive renders one, follows with its own `64Mi` and `16Mi`:
 
 ```bash
 helm template proof deploy/helm/agentihooks-swarm -f stable-hive.yaml -s templates/worker-hive.yaml \
@@ -2776,8 +2779,9 @@ agentihooks hive list   # tab separated; headroom fields abridged
 ```
 
 Pod memory admission does not hold this hive below 48: 48 agents at the measured 756 MiB use about 36300 MiB, under
-the 80 percent line of 61440 MiB. CPU does: with a 7 CPU pod limit, 48 agents run at once only while they average about
-0.12 CPU each, so raise the CPU limit with `maxAgents` when `hive list` shows a ceiling below the cap.
+the 80 percent line of 61440 MiB. CPU can: launches stop once pod load reaches 80 percent of the 7 CPU limit, which at
+48 agents is an average of about 0.12 CPU each, so raise the CPU limit with `maxAgents` when `hive list` shows a
+ceiling below the cap.
 
 **Hold the budget in a test.** When the values live in a repository with a test suite, record the measured
 allocatable and service reserve there and assert the budget, so a later raise that no longer fits the node fails in
