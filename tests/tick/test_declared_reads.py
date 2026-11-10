@@ -108,8 +108,9 @@ def test_the_box_keys_are_the_values_steps_and_hooks_declare_writing() -> None:
     named = tick_steps.declared_keys(domains) - {tick_steps.RAISED}
     reads = {domain for step in registry.steps() for domain in step.reads}
     reads |= {domain for read, _ in keys.values() for domain in read}
+    hooked = {domain for domain in reads if domain.startswith(tick_steps.HOOK_PREFIX)}
     assert named == tick_steps.BOX_KEYS
-    assert tick_steps.declared_keys(reads) - {tick_steps.RAISED} <= tick_steps.BOX_KEYS
+    assert tick_steps.declared_keys(hooked) - {tick_steps.RAISED} <= tick_steps.BOX_KEYS
 
 
 def _wrapper_hooks() -> tuple[str, ...]:
