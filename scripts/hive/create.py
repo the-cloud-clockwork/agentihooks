@@ -35,6 +35,7 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"
 RESERVED = f"{auth.PREFIX}:create:name"
 RESERVE_S = 3600
 SAVED_MEMBERS = ("member", "resynced", "added")
+REPO_SHAPE = re.compile(r"[a-z0-9.-]+/[a-z0-9._-]+/[a-z0-9._-]+")
 
 
 def report(line: str, clock: Callable[[], float] = time.time) -> None:
@@ -48,6 +49,15 @@ def _no_signer() -> "nats_grant.Signer | None":
     return None
 
 
+def parse_repos(value: str) -> tuple[str, ...]:
+    """Reads a comma separated repo list, each entry the lowercase host/owner/name a hive reports for a checkout."""
+    found = tuple(dict.fromkeys(entry.strip().lower() for entry in value.split(",") if entry.strip()))
+    for repo in found:
+        if not REPO_SHAPE.fullmatch(repo):
+            raise auth.HiveError(f"hive create takes repos as host/owner/name, such as github.com/o/r, not {repo!r}")
+    return found
+
+
 @dataclass(frozen=True)
 class Options:
     repo: str = "the-cloud-clockwork/antoncore"
@@ -57,6 +67,7 @@ class Options:
     timeout_s: int = 1800
     dry_run: bool = False
     name: str | None = None
+    repos: tuple[str, ...] = ()
 
 
 @dataclass
@@ -140,7 +151,7 @@ def _start(tools: Tools, options: Options) -> dict[str, Any]:
         _release(tools, {"name": name, **reserved})
         raise
     found = {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip}
-    return {**found, "node": options.node, **reserved}
+    return {**found, "node": options.node, "repos": list(options.repos), **reserved}
 
 
 def _token(tools: Tools) -> str:
@@ -434,6 +445,27 @@ def _live(tools: Tools, options: Options) -> str:
     return f"hive {member} is live"
 
 
+def _swarm_repos(tools: Tools) -> list[str]:
+    """The repos of every swarm the new hive joins, as origin identities where a path has one."""
+    from scripts.hive.daemon import origin
+    from scripts.swarm.store import RedisStore
+
+    store: Any = RedisStore(tools.redis)
+    configs = [store.config(slug) for slug in store.slugs()]
+    repos = [origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo for config in configs]
+    return sorted(set(filter(None, repos)))
+
+
+def _registered(tools: Tools, options: Options) -> str:
+    repos = sorted(set(options.repos or tools.state.get("repos", ()))) or _swarm_repos(tools)
+    name, listed = tools.state["name"], ", ".join(repos) or "no repos"
+    if options.dry_run:
+        return f"would record {name} with {listed} in the hive registry"
+    member = _member(tools)[invite.HIVE_ID]
+    registry.register(tools.redis, member, name, repos)
+    return f"recorded hive {member} as {name} with {listed} in the hive registry"
+
+
 def _target(state: Mapping) -> str:
     return f"ssh://{SSH_USER}@{state['lan_ip']}:{state['ssh_port']}"
 
@@ -499,6 +531,7 @@ STEPS = (
     ("merge", _merged),
     ("settings", _settings),
     ("live", _live),
+    ("registry", _registered),
     ("herdr", _herdr),
     ("engineer", _engineer),
 )

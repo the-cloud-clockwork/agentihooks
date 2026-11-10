@@ -37,6 +37,7 @@ def pending():
         world.store.put_agent(slug, AgentRecord("coordinator", "master", ""))
         world.store.redis.hset(f"{auth.PREFIX}:member:fixture", mapping={"host": "fixture", "ledger": "fixture"})
         world.store.redis.set(f"{auth.PREFIX}:ledger:fixture", "fixture")
+        auth.hive_state.amend(auth._store(world.store.redis), "holder.fixture", lambda _: "fixture")
         token = auth.issue_agent(world.store.redis, "fixture", slug, "coordinator")
         service = ControlService(
             world.store,

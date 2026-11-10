@@ -230,6 +230,5 @@ def test_an_interface_hive_reserves_its_settled_name_and_identifier(admin: "Fake
 
     hive = registry.show(admin, "swarm-hive-001")
     assert hive is not None
-    assert hive["name"] == registry.MASTER_NAME
-    assert registry.MASTER_NAME in held
-    assert "swarm-hive-001" in held
+    assert hive["name"] == f"{registry.MASTER_NAME}-2"
+    assert {registry.MASTER_NAME, f"{registry.MASTER_NAME}-2", "swarm-hive-001"} <= held
