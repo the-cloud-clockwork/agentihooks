@@ -209,7 +209,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.sites import TICK_SITES, TickSites, run_sites
+from scripts.tick.sites import TICK_HOOK_KEYS, TICK_SHUT_KEYS, TICK_SITES, TickSites, run_sites
 from scripts.tick.step import Domain
 from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
@@ -255,7 +255,6 @@ WRAPPER_PREFIX = (
     "wrapper reboot",
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
-INTENT_JOINS = {"wrapper intent": "wrapper relay"}
 NONE: frozenset[Domain] = frozenset()
 WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper probes": (NONE, NONE),
@@ -266,7 +265,10 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
+PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
+PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -487,7 +489,8 @@ class _Wrapper:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
         commands once the ledger was binned or gone, and as the tick's sites say."""
         stopped = step.group != "wrapper probes" and "stop" in self.box
-        return stopped or self.ended is not None or self.ticks.shut(step)
+        ended = self.ended is not None and step.group not in ENDS_AFTER
+        return stopped or ended or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
@@ -680,9 +683,9 @@ def run_tick(
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
         _hold_view(beating, slug, ledger)
-        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
+        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
-            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
+            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
         finally:
             wrapper.watching.close()
         doc, view = box.get("doc", doc), box.get("view")

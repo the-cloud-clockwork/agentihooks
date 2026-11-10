@@ -255,7 +255,7 @@ def test_the_intent_site_joins_the_wrapper_at_the_relay(
             assert {other.name for other in intent if _crossed(other, step)} <= step.needs
         elif step.group in ("wrapper reboot", "start"):
             assert not {other.name for other in intent} & step.needs
-    assert cli.INTENT_JOINS == {"wrapper intent": "wrapper relay"}
+    assert cli.PASS_HOOK_KEYS["wrapper relay"] == cli.WRAPPER_HOOK_KEYS["wrapper relay"]
 
 
 @pytest.mark.feature("swarm-tick-declared-effects")

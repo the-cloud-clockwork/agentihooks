@@ -1,4 +1,4 @@
-"""The flat pass graph: barrier edges from the group site table and one schedule for every step of a pass."""
+"""The flat pass graph: declared value edges across the group site table and one schedule for every step of a pass."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -49,7 +49,7 @@ def _needs(steps: tuple[Stepping, ...]) -> dict[str, frozenset[str]]:
     return {step.name: step.needs for step in steps}
 
 
-def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> None:
+def test_site_edges_make_each_step_need_the_earlier_steps_whose_values_it_uses() -> None:
     steps = (
         Step("a1", "a", writes=SHARED),
         Step("a2", "a", reads=SHARED),
@@ -61,7 +61,7 @@ def test_site_edges_make_each_step_need_every_step_of_the_previous_site() -> Non
         "a1": frozenset(),
         "a2": frozenset(),
         "b1": frozenset({"a1", "a2"}),
-        "c1": frozenset({"b1"}),
+        "c1": frozenset({"a1", "b1"}),
     }
 
 
@@ -81,15 +81,15 @@ def test_site_edges_drop_a_need_on_a_step_of_a_later_site_and_keep_one_outside_t
     assert _needs(edged) == {"a1": frozenset({"x1"}), "b1": frozenset({"a1", "x1"}), "x1": frozenset()}
 
 
-def test_site_edges_hold_every_site_joining_the_same_later_site() -> None:
+def test_site_edges_hold_the_steps_of_a_hooked_site_on_the_writers_its_hook_reads() -> None:
     first, second = Domain("pass:first"), Domain("pass:second")
     steps = (
         Step("a1", "a", writes=frozenset({first})),
         Step("b1", "b", writes=frozenset({second})),
-        Step("c1", "c", reads=frozenset({first, second})),
+        Step("c1", "c"),
     )
-    edged = registry.site_edges(steps, ("a", "b", "c"), {"a": "c", "b": "c"})
-    assert _needs(edged) == {"a1": frozenset(), "b1": frozenset(), "c1": frozenset({"a1", "b1"})}
+    edged = registry.site_edges(steps, ("a", "b", "c"), {"c": (frozenset({first}), frozenset())})
+    assert _needs(edged) == {"a1": frozenset(), "b1": frozenset(), "c1": frozenset({"a1"})}
 
 
 def test_a_handed_off_step_runs_when_the_gate_given_it_and_the_records_opens_it_and_it_does_not_rest() -> None:

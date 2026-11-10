@@ -286,8 +286,10 @@ def tick(slug: str, store: RedisStore, ledger: Any, runtime: Any, now_ms: int) -
         box: dict[str, Any] = steps.PassBox()
         state: dict[str, Any] = {"slug": slug, "store": store, "ledger": ledger, "runtime": runtime, "box": box}
         sites = tick_sites.TickSites(state, box, task_steps.appliers(state), lambda: now_ms)
-        gate = engine.SiteGate(sites.hooks(), sites.shut)
-        records = tick_sites.run_sites(tick_sites.TICK_SITES, state, box, gate, sites.apply)
+        gate = engine.SiteGate(sites.hooks(), sites.shut, sites=tick_sites.TICK_SITES)
+        records = tick_sites.run_sites(
+            tick_sites.TICK_SITES, state, box, gate, sites.apply, tick_sites.TICK_HOOK_KEYS, tick_sites.TICK_SHUT_KEYS
+        )
         observe_steps.raise_held(box)
         return [] if sites.left else steps.actions(records)
     finally:

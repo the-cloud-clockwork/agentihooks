@@ -317,7 +317,8 @@ def _shut(gate: Gate | None, step: Step, records: Mapping[str, StepRecord]) -> f
 class SiteGate:
     """Open or shut each step of a pass graph as it becomes ready.
 
-    A site's hook runs once, when the site's first step is ready, and shuts the whole site when it answers false;
+    A site's hook runs once, when the first step of its site or of a later site in ``sites`` is ready, so a step
+    never runs before the hooks of the sites before its own, and shuts its own site when it answers false;
     ``shut`` shuts single steps and is asked before and after the hook. ``seen`` holds the records of the steps that
     ended, on either thread, before the latest step became ready. The handed lane and the rest of the graph ask it
     from their own threads; a site's hook runs once, outside the guard.
@@ -329,25 +330,37 @@ class SiteGate:
     opened: dict[str, bool] = field(default_factory=dict[str, bool])
     guard: Lock = field(default_factory=Lock, compare=False)
     opening: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
+    sites: tuple[str, ...] = ()
 
     def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
-        """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step; a
-        step of a site whose hook runs on another thread of the pass waits for it at most its own budget, never past
-        its lane, and stays shut when the hook did not answer by then; steps of other sites never wait, and outside a
-        pass the hook has always answered before the next step asks."""
+        """Return whether ``step`` runs, first running the hooks of the earlier ``sites`` not yet run, then its own
+        site's hook when it is the site's first ready step; a step whose hooks run on another thread of the pass
+        waits for them at most its own budget, never past its lane, and stays shut when one did not answer by then;
+        outside a pass a hook has always answered before the next step asks."""
         with self.guard:
             self.seen.update(records)
-            if self.shut(step):
-                return False
-            first = step.group not in self.opening
-            opening = self.opening.setdefault(step.group, Event())
-        if first:
-            self._open(step.group, opening)
-        found = pool.active()
-        if found is not None and not opening.wait(min(step.budget_s, found.lane(step.lane).remaining)):
+        if not all(self._answered(group, step) for group in self._hooked(step.group)):
             return False
         with self.guard:
             return bool(self.opened.get(step.group)) and not self.shut(step)
+
+    def _hooked(self, group: str) -> tuple[str, ...]:
+        """Return the hooked sites before site ``group`` in ``sites``, then ``group`` itself."""
+        earlier = self.sites[: self.sites.index(group)] if group in self.sites else ()
+        return (*(site for site in earlier if site in self.hooks), group)
+
+    def _answered(self, group: str, step: Step) -> bool:
+        """Return whether the hook of site ``group`` answered for ``step``, running it when ``step`` asks first; a
+        shut ``step`` runs no hook."""
+        with self.guard:
+            if self.shut(step):
+                return False
+            first = group not in self.opening
+            opening = self.opening.setdefault(group, Event())
+        if first:
+            self._open(group, opening)
+        found = pool.active()
+        return found is None or opening.wait(min(step.budget_s, found.lane(step.lane).remaining))
 
     def _open(self, group: str, opening: Event) -> None:
         """Run the hook of site ``group`` and keep its answer, then release the steps waiting on it."""

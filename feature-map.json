@@ -428,6 +428,23 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-edges",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2467",
+      "behaviour": "A tick pass orders each step of a site only after the steps of earlier sites that write a value it reads or writes, read a value it writes, or write a value a site hook up to its own reads or writes, the values its shut check reads included; the gate runs the hooks of earlier sites before a later step, so a step declaring nothing no longer waits for the whole site before it.",
+      "seam": "scripts.tick.registry.site_edges with the site hook and shut keys, and scripts.tick.engine.SiteGate over the site order",
+      "tests": [
+        "tests/tick/test_declared_edges.py::test_a_step_waits_only_for_the_earlier_steps_whose_values_it_uses",
+        "tests/tick/test_declared_edges.py::test_a_hooked_site_and_every_later_site_wait_for_the_writers_of_the_hook_values",
+        "tests/tick/test_declared_edges.py::test_the_values_a_site_shut_check_reads_order_its_steps_after_their_writer",
+        "tests/tick/test_declared_edges.py::test_a_slow_lane_writer_is_no_edge_of_a_later_site",
+        "tests/tick/test_declared_edges.py::test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_not_use",
+        "tests/tick/test_declared_edges.py::test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step",
+        "tests/tick/test_declared_edges.py::test_a_shut_step_runs_no_hook_of_an_earlier_site",
+        "tests/tick/test_declared_edges.py::test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it"
+      ]
+    },
+    {
       "id": "swarm-tick-step-isolation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
@@ -438,8 +455,6 @@
         "tests/tick/test_step_isolation.py::test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step",
         "tests/tick/test_step_isolation.py::test_notice_and_watch_steps_declare_the_slow_lane",
         "tests/tick/test_step_isolation.py::test_pass_lanes_are_sized_for_the_minute",
-        "tests/tick/test_step_isolation.py::test_site_edges_keep_every_barrier_step_whatever_the_steps_declare",
-        "tests/tick/test_step_isolation.py::test_a_step_declaring_nothing_still_waits_for_the_site_before_it",
         "tests/tick/test_step_isolation.py::test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read",
         "tests/tick/test_step_isolation.py::test_the_quiet_pass_waits_for_the_steps_of_the_sites_before_it",
         "tests/tick/test_step_isolation.py::test_site_barriers_of_the_pass_graph_hold_no_critical_step_on_a_slow_step",
@@ -783,7 +798,7 @@
         "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
         "tests/tick/test_spawn_room.py::test_spawn_starts_when_its_needs_are_cut_while_a_step_it_does_not_need_still_runs",
         "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
-        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
+        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_site_edge",
         "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
         "tests/tick/test_spawn_room.py::test_a_shorter_critical_lane_reserves_the_same_share_for_spawn",
         "tests/tick/test_spawn_room.py::test_a_lane_less_its_reserve_keeps_the_lane_clock",
