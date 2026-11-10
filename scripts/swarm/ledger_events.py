@@ -488,6 +488,34 @@ def views(
     return found
 
 
+PULL_TEXT = "resource(url:$url){...on PullRequest{headRefOid title body state isDraft}}"
+
+
+def pull_texts(urls: list[str], source: SourceControl | None = None) -> dict[str, dict[str, Any]]:
+    """Return the head, title, body, state and draft flag of each pull request in ``urls``, read in batches of
+    twenty, leaving out every pull request a read did not return."""
+    unique = list(dict.fromkeys(urls))
+    if not unique:
+        return {}
+    port = source or stack.login_source_control()
+    found: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(unique), 20):
+        batch = unique[start : start + 20]
+        fields = [f"p{i}:" + PULL_TEXT.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
+        data = _graphql("{" + " ".join(fields) + "}", port)
+        for i, url in enumerate(batch):
+            raw = data.get(f"p{i}")
+            if raw and raw.get("headRefOid"):
+                found[url] = {
+                    "head": raw["headRefOid"],
+                    "title": raw.get("title") or "",
+                    "body": raw.get("body") or "",
+                    "state": raw.get("state") or "",
+                    "draft": bool(raw.get("isDraft")),
+                }
+    return found
+
+
 def _graphql(query: str, source: SourceControl, **variables: str) -> dict[str, Any]:
     try:
         with pool.limit("github"):

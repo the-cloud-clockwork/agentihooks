@@ -1,6 +1,23 @@
 {
   "features": [
     {
+      "id": "swarm-spawn-order-once-per-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-spawn-order-budget",
+      "behaviour": "A spawn pass builds one claim view and one launch order for every lane, and the readiness check indexes the ledger's freeze and focus targets once per freeze list instead of scanning every record per task, so a pass over the replayed rig-grade-swarm ledger of 997 open tasks and 1322 freeze records stays under a tenth of the spawn floor.",
+      "seam": "scripts.tick.steps.place._spawn_order over the pass rows and ledger document",
+      "tests": [
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_computes_its_claim_order_once_for_every_lane",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_orders_claims_once",
+        "tests/swarm/test_spawn_order_budget.py::test_a_spawn_pass_over_the_replayed_ledger_finishes_inside_a_tenth_of_the_spawn_floor",
+        "tests/swarm/test_spawn_order_budget.py::test_the_indexed_freeze_targets_find_the_level_a_full_scan_finds",
+        "tests/swarm/test_spawn_order_budget.py::test_the_freeze_index_is_built_once_per_freeze_list",
+        "tests/swarm/test_spawn_order_budget.py::test_the_readiness_hold_keeps_the_fix_phase_and_open_dependencies",
+        "tests/swarm/test_spawn_order_budget.py::test_ready_by_lane_passes_one_claim_view_and_its_pass_inputs_to_every_lane",
+        "tests/tick/steps/test_claim_order.py::test_ready_by_lane_orders_every_lane_from_one_claim_view"
+      ]
+    },
+    {
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
@@ -51,6 +68,22 @@
       "tests": [
         "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
         "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "inbox-alias-store-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
+      "behaviour": "On the bus state backend a mailbox read compares the names store revisions of the aliases it resolved before committing its snapshot, and a seen mark compares them after its write, retrying when an alias moved meanwhile and refusing when it never settles.",
+      "seam": "InboxStore.mailbox and SeenMarks.mark on the bus state backend",
+      "tests": [
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
+        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
+        "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
       ]
     },
     {
@@ -1377,19 +1410,16 @@
       ]
     },
     {
-      "id": "inbox-alias-store-revision",
+      "id": "managed-swarm-brain-rendering",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
-      "behaviour": "On the bus state backend a mailbox read compares the names store revisions of the aliases it resolved before committing its snapshot, and a seen mark compares them after its write, retrying when an alias moved meanwhile and refusing when it never settles.",
-      "seam": "InboxStore.mailbox and SeenMarks.mark on the bus state backend",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2180",
+      "behaviour": "Standalone roles retain their kernel brain even with inherited swarm overlays; managed workstation and isolated hive renders select the swarm overlay and bound search server, with no search server when binding is refused.",
+      "seam": "profiles.render._chain and swarm_v2.worker_home child_environment and materialize",
       "tests": [
-        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_the_alias_moves_on_the_bus_meanwhile",
-        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_retries_when_an_alias_joins_its_owner_on_the_bus_meanwhile",
-        "tests/inbox/test_alias_store_revision.py::test_a_mailbox_read_refuses_when_the_alias_never_settles_on_the_bus",
-        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_meanwhile",
-        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
-        "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
-        "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
+        "tests/test_profile_render_swarm_brain.py::test_an_inherited_swarm_overlay_is_absent_outside_a_managed_launch",
+        "tests/test_worker_home.py::test_the_isolated_hive_render_carries_a_managed_binding_without_credentials",
+        "tests/test_worker_home.py::test_hive_materialization_uses_the_managed_brain_for_each_harness",
+        "tests/test_swarm_v2_worker_start.py::test_the_hive_start_decides_the_managed_brain_before_rendering"
       ]
     },
     {
@@ -2677,6 +2707,22 @@
       ]
     },
     {
+      "id": "controller-busy-node-probes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2429",
+      "behaviour": "The controller uses shallow kubelet HTTP startup and liveness probes, Redis bounded readiness, a loopback Host header and a schedulable 250m CPU reservation.",
+      "seam": "Controller Helm probes and the open health readiness route",
+      "tests": [
+        "tests/test_swarm_chart_controller_probes.py::test_controller_api_probes_use_kubelet_http",
+        "tests/test_swarm_chart_controller_probes.py::test_controller_reserves_its_measured_cpu",
+        "tests/test_swarm_chart_controller_probes.py::test_api_disabled_controller_keeps_its_lease_probe",
+        "tests/test_swarm_chart_controller_probes.py::test_kind_checks_the_rendered_http_probes",
+        "tests/test_swarm_v2_readiness.py::test_readiness_is_open_and_reports_redis_without_deep_diagnostics",
+        "tests/test_swarm_v2_readiness.py::test_readiness_redis_uses_bounded_sockets_without_retries",
+        "tests/test_swarm_v2_readiness.py::test_readiness_deadline_covers_stalled_setup_without_spawning_more_checks"
+      ]
+    },
+    {
       "id": "hive-join-heartbeat-keeps-passed-grade",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1831",
@@ -2716,14 +2762,96 @@
       "id": "tick-step-budget-from-start",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-step-abandon-before-run",
-      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success.",
-      "seam": "engine.run_step and engine._eager lane expiry, timing.within outcome",
+      "behaviour": "A tick step's budget clock starts when its run starts: a step still waiting to start at its lane end is skipped and never starts, a step running at its lane end is recorded cut with its wall from its own start and journals no abandon event, and only a run past its own budget is recorded abandoned, journals swarm_tick_step_abandoned and reports outcome abandoned, never success. A step that needs a handed off step of an earlier group that never ends inside the lane is skipped and never runs. A step with no earlier group to wait on, or whose earlier group already ended, is still skipped and never runs when its own lane already expired or the start gate is closed.",
+      "seam": "engine.run_step, engine._after and engine._eager lane expiry, timing.within outcome",
       "tests": [
         "tests/tick/test_step_budget_clock.py::test_a_step_still_queued_behind_a_slow_sibling_at_its_lane_end_is_skipped_and_never_starts",
         "tests/tick/test_step_budget_clock.py::test_a_step_that_waits_behind_a_slow_sibling_and_then_runs_quickly_is_not_abandoned",
         "tests/tick/test_step_budget_clock.py::test_a_step_whose_own_run_overruns_its_budget_is_abandoned_and_never_reports_success",
         "tests/tick/test_step_budget_clock.py::test_a_step_that_ends_inside_its_budget_reports_success_and_no_abandon",
-        "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs"
+        "tests/tick/test_step_budget_clock.py::test_a_kept_step_whose_start_the_pass_end_closed_is_skipped_and_never_runs",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_a_handed_off_step_of_an_earlier_group_it_needs_never_ends",
+        "tests/tick/test_step_budget_clock.py::test_a_step_is_skipped_and_never_runs_when_its_lane_already_expired_with_no_earlier_group"
+      ]
+    },
+    {
+      "id": "codex-pump-account-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-hive-wake",
+      "behaviour": "A Codex turn that the provider fails live with an account refusal (HTTP 401, 402 or 403, or unauthorized) ends the push pump with AccountRefused and exit status 4; codex session serve then stops the app server, so the seat is relaunched, and records the routed account as expired, so codex_router.account_cap gives it no seats at once. An old refused turn in a resumed thread leaves a fresh pump delivering. A usage read answered 402 deactivated_workspace is also an expired reading.",
+      "seam": "scripts.inbox.codex Pump.step, ThreadState.observe and main exit status; scripts.codex_session.serve close_refused with codex_router.account_cap; scripts.codex_usage.read",
+      "tests": [
+        "tests/inbox/test_codex_pump.py::test_a_turn_the_provider_refused_for_the_account_ends_the_pump_degraded",
+        "tests/inbox/test_codex_pump.py::test_a_refused_turn_already_in_the_thread_history_leaves_a_fresh_pump_delivering",
+        "tests/inbox/test_codex_pump.py::test_only_a_failed_turn_with_an_account_status_reads_as_an_account_refusal",
+        "tests/inbox/test_codex_pump.py::test_a_live_completion_records_the_refusal_and_a_later_clean_completion_keeps_it",
+        "tests/inbox/test_codex_pump.py::test_a_refreshed_thread_never_records_a_refusal",
+        "tests/test_codex_usage.py::test_a_deactivated_workspace_reads_as_expired",
+        "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
+        "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
+        "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
+      "id": "swarm-intent-check-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-intent-check-budget",
+      "behaviour": "The intent check reads the heads, text, merged and draft flags of every watched pull request in one batched read, makes no per task GitHub read for an unchanged or draft pull, judges at most a fixed number of changed pulls per pass in a turn that rotates each minute, on workers that outlive the pass in a controller that keeps running passes, so a later pass settles each finished judgment, while a single pass process judges inside its pass, and builds the pass view beside the step, where the relay site takes it as it did before, so thirty tasks in pr stay inside its eight second budget.",
+      "seam": "scripts.swarm.cli._intent_pass and scripts.gates.intent.Check",
+      "tests": [
+        "tests/gates/test_intent_budget.py::test_thirty_unchanged_coached_pulls_make_one_batched_read_and_no_judgment",
+        "tests/gates/test_intent_budget.py::test_thirty_changed_pulls_judge_at_most_the_pass_limit_and_the_rest_later",
+        "tests/gates/test_intent_budget.py::test_a_changed_pull_is_judged_off_the_pass_and_settled_by_a_later_pass",
+        "tests/gates/test_intent_budget.py::test_only_a_process_that_keeps_running_passes_judges_off_the_pass",
+        "tests/gates/test_intent_budget.py::test_thirty_draft_pulls_are_recorded_draft_without_a_pull_request_view",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_before_the_pass_view_is_built",
+        "tests/gates/test_intent_budget.py::test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_head",
+        "tests/gates/test_intent_budget.py::test_pulls_reads_an_unbatched_url_alone_once",
+        "tests/gates/test_intent_budget.py::test_a_judgment_is_held_at_its_key_and_a_new_key_cancels_a_waiting_one",
+        "tests/gates/test_intent_budget.py::test_a_judgment_key_is_the_task_inputs_and_its_pull_head_and_text",
+        "tests/gates/test_intent_budget.py::test_off_pass_judging_runs_on_two_workers_and_a_held_judgment_leaves_room_for_another",
+        "tests/gates/test_intent_budget.py::test_a_judgment_made_at_an_old_head_is_never_settled",
+        "tests/gates/test_intent_budget.py::test_watched_urls_reads_each_watched_pull_and_the_pending_pulls_both_verdict_stores_name",
+        "tests/gates/test_intent_budget.py::test_a_pass_cancels_the_judgment_of_a_task_it_no_longer_watches",
+        "tests/gates/test_intent_budget.py::test_each_minute_judges_the_changed_pulls_from_its_own_turn",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_returns_while_its_view_is_still_building",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_wires_one_pull_reader_and_the_tick_judging_into_its_check",
+        "tests/swarm/test_intent_pass.py::test_the_intent_pass_builds_its_view_timed_inside_the_callers_context",
+        "tests/gates/test_intent_budget.py::test_a_kept_judging_settles_draft_pulls_inside_the_pass"
+      ]
+    },
+    {
+      "id": "ledger-workflow-task-fields",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2428",
+      "behaviour": "Ledger task add accepts workflow and case strings through the API for a master identity, and initial ledger content preserves workflow task kind and inputs.",
+      "seam": "task_add API schema and HTTP mutation; new_ledger.build_doc seed tasks",
+      "tests": [
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_task_add_schema_accepts_workflow_and_case_as_strings",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_a_master_adds_a_workflow_task_through_the_api",
+        "tests/swarm_ledger/test_workflow_task_fields.py::test_initial_content_preserves_workflow_task_fields"
+      ]
+    },
+    {
+      "id": "controller-quota-read-once",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "The controller scans the hive quota reports once per tick pass and every later quota or reservation read in that pass reuses the scan; outside a pass each read scans.",
+      "seam": "aggregate.read under the tick pass, reached by capacity.accounts, capacity.hive_accounts and reservation.current",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_one_pass_makes_one_hive_quota_read_for_every_account",
+        "tests/swarm/test_quota_pass_read.py::test_reads_outside_a_pass_stay_fresh"
+      ]
+    },
+    {
+      "id": "controller-hive-refusal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/dapp3-quota-read-once",
+      "behaviour": "A hive publishes a provider refusal with its Claude quota reading and the controller closes that account.",
+      "seam": "hive daemon subscription quota report and capacity.accounts over hive reports",
+      "tests": [
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_reading_marked_refused_closes_that_account_in_the_controller",
+        "tests/swarm/test_quota_pass_read.py::test_a_hive_publishes_a_provider_refusal_with_its_claude_reading"
       ]
     }
   ],

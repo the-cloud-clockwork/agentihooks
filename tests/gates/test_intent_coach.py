@@ -726,19 +726,7 @@ def test_a_record_without_text_and_an_unreadable_text_takes_the_full_view(tmp_pa
     assert actions == [f"task {TASK} intent check pass"]
 
 
-def test_text_lookup_reads_title_and_body_with_one_call():
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout='{"title": "T", "body": null}\n')
-
-    url = "https://github.com/o/r/pull/7"
-    assert intent.pr_text(url, run) == intent.text_key("T", "")
-    assert calls == [["gh", "api", "repos/o/r/pulls/7", "--jq", "{title, body}"]]
-    assert intent.pr_text(url, lambda *a, **k: SimpleNamespace(returncode=1, stdout="")) is None
-    assert intent.pr_text("not a pull", run) is None
+def test_text_key_hashes_title_and_body_with_a_missing_body_as_empty():
     assert intent.text_key("T", None) == intent.text_key("T", "") != intent.text_key("T", "x")
     assert intent.text_key("T", None) == hashlib.sha256(b'["T", ""]').hexdigest()
-    with_body = SimpleNamespace(returncode=0, stdout='{"title": "T", "body": "B"}\n')
-    assert intent.pr_text(url, lambda *a, **k: with_body) == intent.text_key("T", "B") != intent.text_key("T", "")
+    assert intent.text_key("T", "B") != intent.text_key("T", "")

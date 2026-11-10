@@ -542,6 +542,15 @@ def _swarm_codes_in_order(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _intent_judged_in_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tick passes judge intent inside the pass, so a test reads the verdict its pass made and no judgment outlives
+    its test; tests of judging off the pass hand their check a Judging of their own."""
+    from scripts.gates import intent
+
+    monkeypatch.setattr(intent, "TICK_JUDGING", None)
+
+
+@pytest.fixture(autouse=True)
 def _swarm_runs_as_installed(monkeypatch):
     from scripts.swarm import timer
 
