@@ -3,6 +3,7 @@
 # pyright: reportUnusedFunction=false
 
 import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
@@ -16,6 +17,7 @@ from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
 
 Get = Callable[[str], Any]
+_IDENTITY_CONFLICT = "stale or changed execution identity"
 
 
 def _reap(
@@ -47,8 +49,15 @@ def _reap(
         for index in indexes:
             if deadline is not None and deadline.expired:
                 break
-            with tick.timing.acting(agents[index].name):
-                judged.append((index, tick._reap_agent(judging, agents[index])))
+            agent = agents[index]
+            with tick.timing.acting(agent.name):
+                try:
+                    judged.append((index, tick._reap_agent(judging, agent)))
+                except tick.SwarmError as exc:
+                    if _IDENTITY_CONFLICT not in str(exc):
+                        raise
+                    print(f"reap skipped {agent.name}, its execution identity changed mid pass: {exc}", file=sys.stderr)
+                    judged.append((index, [f"skipped {agent.name}, its execution identity changed mid pass"]))
         return judged
 
     with tick.ledger_probe.read_once():
