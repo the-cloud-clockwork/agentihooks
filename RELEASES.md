@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.786 · 2026-11-10
+
+### 2026-11-10 · c38be736bdbc · #10452 · @nestorcolt
+
+**Fix O(n^2) admitted-focus recomputation behind slow time_left writes**
+
+This change fixes the real cause of slow `time_left` writes on large ledgers: `ledger_stats.frozen()` was recomputing the admitted-task set once per pending task and rescanning all waiting tasks every propagation pass, producing quadratic blowup (3.3s at 5000 tasks, confirmed by profiling), not the storage-layer slowness originally suspected. It now computes the admitted set once and stops the dependency loop as soon as nothing new is added, cutting the same workload to 80ms (41x) with identical results, verified by new deterministic call-count tests.
+
 ## v2.17.780 · 2026-11-10
 
 ### 2026-11-10 · ee32580eb0da · #10319 · @agenticore-app
