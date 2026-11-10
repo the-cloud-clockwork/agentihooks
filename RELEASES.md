@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.797 · 2026-11-10
+
+### 2026-11-10 · 0c8dbac66380 · #10355 · @agenticore-app
+
+**Count a merge stall and merged tasks left in pr as swarm blockers**
+
+This change adds two new swarm blocker categories: a one-hour merge stall with no dev merge, and a task left in a pull request twenty minutes after it merged with no wait excusing it. Both feed into a new `stall-blockers` gate, defaulting to observe-only logging, so these stalled states now trigger the master coding window automatically instead of going unnoticed. Enforcement can follow once observed data is reviewed, closing a gap where real work stoppages weren't recognized as blockers.
+
+### 2026-11-10 · 0642edb5db4a · #10522 · @agenticore-app
+
+**Document plan read through the hosted ledger on a remote hive**
+
+This change is documentation only, adding a new section to the deployment modes reference that explains how plan read behaves when run from a remote client: it covers which ledger address and credentials get used, local versus remote read sources, a worked hive example, the no-plan-lines output, the two rewritten error messages plus passed-through HTTP errors, and the tests backing that behavior. It also adds two troubleshooting rows for the "no ledger" and "no stored artifact" errors and a changelog fragment, so operators can diagnose remote plan-read issues without digging through code.
+
 ## v2.17.796 · 2026-11-10
 
 ### 2026-11-10 · c92747fcbd2e · #10528 · @agenticore-app
