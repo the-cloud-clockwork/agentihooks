@@ -1358,6 +1358,50 @@ instead of being retried inside one command:
 
 Both send TCP keepalives and run a connection health check every 15 seconds.
 
+### A dead connection never stalls the beat
+
+A Redis connection can die without closing: the TCP socket stays established, the peer stops answering and the
+bytes the hive sent sit unacknowledged in the socket's send queue. This happens after a workstation reboot, a network
+change or a Redis host that stops answering without resetting its connections. Before pull request
+[#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475) the wait between beats used a client with no
+read timeout, so the single beat thread waited on that socket forever. The service stayed active, logged nothing and
+published no beat, every hive read stale and the tick spawned nothing until someone restarted the service.
+
+Every Redis call the daemon makes now ends in bounded time:
+
+- A beat command that gets no answer raises `TimeoutError` after the command client's 5 second read timeout.
+- The wait between beats raises `TimeoutError` after the wait client's 15 second read timeout, one beat interval.
+- A connection that sat idle for longer than 15 seconds is checked with a `PING` before its next command, so a
+  connection that died while idle fails on that check instead of on a later read.
+- A connection attempt to an unreachable host fails after 3 seconds.
+
+The beat loop treats that `TimeoutError` as a lost connection. It prints the reconnect line, backs off, opens a new
+pair of clients and beats at once, as in [Reconnect and backoff](#reconnect-and-backoff). The tests for this drive a
+real TCP socket that accepts the connection and never answers, once during a beat and once during the wait, and
+assert the reconnected beat lands within one beat interval.
+
+The scheduled waits stay shorter than the read timeout they run under, so a healthy wake always arrives before the
+socket times out and a read timeout always means a dead connection:
+
+| Wait | Scheduled delay | Wait timeout | Read timeout it runs under |
+|---|---|---|---|
+| Between beats | 15 seconds minus the beat's run time or minus 2 seconds, whichever is shorter | At most 14 seconds | 15 seconds |
+| Headroom thread | 10 seconds | 12 seconds | 15 seconds |
+| Herdr stats thread | 10 seconds | 12 seconds | 15 seconds |
+
+The 2 second slack is `WAKE_SLACK_S` in `scripts.hive.daemon`. The timeouts, the health check interval and the slack
+are constants in the daemon, not settings: they follow `BEAT_SECONDS`, so the stall detection always fits one beat
+interval.
+
+To see whether a running hive sits on a dead connection, list its Redis sockets with their send queues:
+
+```bash
+ss -tnp | grep -E "python|agentihooks"
+```
+
+An established connection to the Redis port whose `Send-Q` stays above 0 across several runs is not being answered.
+On current code the daemon drops it within 15 seconds and the journal shows the reconnect.
+
 ### Troubleshooting
 
 | Symptom | Check | Fix |
@@ -1365,6 +1409,8 @@ Both send TCP keepalives and run a connection health check every 15 seconds.
 | `hive list` shows a joined hive stale after a Redis rollout | `journalctl --user -u agentihooks-hive`, or the pod log, for `hive Redis connection lost` | Repeated lines with a 30 second delay mean Redis or the network is still unreachable from the hive; fix that and the hive returns on its next beat. No lines and an exited service mean the hive runs code from before [#5168](https://github.com/the-cloud-clockwork/agentihooks/pull/5168); upgrade it and restart the service or roll its pod. |
 | Every reconnect logs `AuthenticationError` with `the hive refused a refresh` | Whether the hive endpoint is reachable and the member is still enrolled | Rejoin the hive with a new invite when the member was revoked; see [Adding a machine to a hive](#adding-a-machine-to-a-hive). |
 | `hive run` exits with a traceback right after Redis returns | The error in the traceback | The error is not a lost connection, so the daemon does not retry it; fix the error it names, such as a Redis user missing a permission. The service restarts the process after 5 seconds. |
+| A hive reads stale while its service is active, the journal shows no `hive Redis connection lost` line, and `ss -tnp` shows its Redis connection established with a `Send-Q` above 0 | The hive's agentihooks version | The hive runs code from before [#5475](https://github.com/the-cloud-clockwork/agentihooks/pull/5475), whose wait between beats has no read timeout. Restart the service to recover at once, then upgrade the hive. See [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
+| The journal shows `hive Redis connection lost (TimeoutError: ...)` every few beats and the hive flaps between live and stale | Redis latency from the hive, for example `redis-cli --latency` against the same address | Redis or the path to it accepts connections but does not answer within the 5 second command or 15 second wait read timeout. Fix the Redis load or the network path; the daemon reconnects on its own each time. |
 
 ## Failover timing
 
@@ -1373,6 +1419,7 @@ Both send TCP keepalives and run a connection health check every 15 seconds.
 | Hive heartbeat | every 15 seconds | Quota and the other reports expire after 45 seconds without a beat. The sessions report lives as long as the hive reads live; see [Sessions report and the account cap](#sessions-report-and-the-account-cap). |
 | Headroom | every 10 seconds and every beat | A reading older than 30 seconds counts as missing and the hive's room reads 0; see [Headroom](#headroom). |
 | Live window | 90 seconds | A hive past it is stale and gets no new launches. |
+| Redis read timeouts | 5 seconds per command, 15 seconds per wait | A Redis connection that stops answering raises and reconnects within one beat interval; see [A dead connection never stalls the beat](#a-dead-connection-never-stalls-the-beat). |
 | Redis reconnect backoff | 1, 2, 4, 8, 16, then 30 seconds | A hive that lost its Redis connection retries at these delays and beats at once when it reconnects; see [Redis restarts](#redis-restarts). |
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
