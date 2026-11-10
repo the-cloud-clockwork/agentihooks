@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/profile_choice.py:scripts.swarm.profile_choice.x_choose:0b231a6053b58d0bc72a413541a8c62f24ea82cb7f22567201e28fe2567901f3": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: overlays.chosen returns () whenever the task has no overlays key and defaults is falsy, so the getattr fallback of {} and None both take that early return, and when the task carries overlays the defaults value is never read."
+  }
+}
