@@ -224,6 +224,36 @@ qualifies through `github.com/the-cloud-clockwork/agentihooks`. Selection sends 
 so the worker resolves its own checkout. When several checkouts share that origin, it uses the first by path.
 A directly matched path needs no origin translation.
 
+### Launch directory on a hive chosen by origin
+
+A hive chosen by origin launches the agent in its own checkout with that origin, never in the swarm's
+workstation path. Worker and master launches follow the same rule:
+
+1. Selection marks a hive that qualifies only through the origin identity and carries that identity with the
+   launch as the `hive_origin` field of the launch order.
+2. The hive's order consumer launches with `hive_origin` as the repo.
+3. The hive resolves the repo to the first checkout under `HIVE_REPO_ROOT`, by path, whose `origin` matches,
+   and passes it to `init-agent --dir`.
+
+A hive that lists the swarm path itself gets no `hive_origin` field and launches in that path unchanged.
+
+With the records in the table above, an engineer placed on the headless worker launches with
+`--dir /home/worker/dev/agentihooks`, never `/home/me/dev/agentihooks`. No setting selects the launch
+directory; it follows from `HIVE_REPO_ROOT` and the checkouts' `origin` remotes on the hive.
+
+```bash
+# On the hive: each direct child checkout and its origin
+for d in "${HIVE_REPO_ROOT:-$HOME/dev}"/*/; do
+  printf '%s %s\n' "$d" "$(git -C "$d" remote get-url origin 2>/dev/null)"
+done
+
+# After the launch: the agent and its task
+agentihooks swarm <slug> status
+```
+
+When the hive has no checkout with the carried origin, the repo stays the origin identity and `init-agent`
+refuses the launch with `directory does not exist: <path>`. The task then shows a failed launch.
+
 ```bash
 git -C /home/me/dev/agentihooks remote get-url origin
 agentihooks hive list
@@ -707,6 +737,7 @@ are already filled has no new placement decision in that pass.
 | Wait or symptom | Check | Resolution |
 |---|---|---|
 | `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| Launch on a hive refused with `directory does not exist` | The hive's checkouts under `HIVE_REPO_ROOT` and their `origin` remotes | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the advertised identity, or restart `hive run` with `HIVE_REPO_ROOT` at the clones' parent. A hive still on a release before the launch directory fix launches in the swarm's workstation path; upgrade it. See [Launch directory on a hive chosen by origin](#launch-directory-on-a-hive-chosen-by-origin). |
 | `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
 | `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
 | `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
