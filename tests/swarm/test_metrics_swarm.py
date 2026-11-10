@@ -864,8 +864,15 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         box.close()
 
 
-def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch):
-    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import registry
+
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "agentihooks-swarm")
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    registry.update(redis, "root", ["ui=yes"])
+    registry.update(redis, "hive-a", ["max-agents=4"])
     agents = [
         {"runtime_backend": "local", "runtime_target": {"host_id": "root"}},
         {"runtime_backend": "local", "runtime_target": {}},
@@ -874,7 +881,7 @@ def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch
         {"runtime_backend": "local", "runtime_target": {"host_id": "hive-a"}},
         {"runtime_backend": "kubernetes", "runtime_target": {"host_id": "root"}},
     ]
-    counts = metrics_swarm.placement_counts(agents)
+    counts = metrics_swarm.placement_counts(redis, agents)
     assert counts == {"workstation_agents": 4, "hive_agents": 2}
     host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 6), counts)
     assert [host[key] for key in ("workstation_agents", "hive_agents")] == [4, 2]
