@@ -9,24 +9,25 @@ nav_order: 78
 The swarm worker image installs `codex-code-mode-host` in `/usr/local/bin`
 beside `codex`, taken from the same Codex release and pinned by its own sha256.
 Codex 0.162 runs the shell tool of a `code_mode_only` model through that sibling
-binary, as the [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces)
-canaries showed on a bare `codex` install. Without it every `exec` call fails, the agent cannot run its profile
-canary, and the tick logs that the Codex agent reported no canary within 90
-seconds. The image smoke run proves the host works by running one Codex shell
-command through it with the network disabled.
+binary, as the
+[Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces)
+canaries showed on a bare `codex` install. Without it every `exec` call fails, the agent cannot
+run its profile canary, and the tick logs that the Codex agent reported no
+canary within 90 seconds. The image smoke run proves the host works by running
+one Codex shell command through it with the network disabled.
 
 ## Why the image needs it
 
 The workstation's standalone Codex install ships the code mode host and its
 other package resources next to `codex`. The worker image used to install only
 the bare `codex` binary from the release archive, so hive pods carried `codex`
-alone and every Codex launch on a hive failed its launch check. The swarm
-recorded this on release 2.17.330: `/usr/local/bin` in the hive worker image
+alone and every Codex launch on a hive failed its launch check. The issue
+behind pull request
+[#7131](https://github.com/the-cloud-clockwork/agentihooks/pull/7131) recorded
+this on release 2.17.330: `/usr/local/bin` in the hive worker image
 held only `codex`, agents reported a missing code mode host, and the tick logged
-no canary within 90 seconds. Pull request
-[#7131](https://github.com/the-cloud-clockwork/agentihooks/pull/7131) added the
-host to the lock and the probe to the smoke run. The same gap on a bare binary is
-described for the clamp probe host in
+no canary within 90 seconds. That pull request added the host to the lock and the probe to the smoke run. The same gap on a bare binary
+is described for the clamp probe host in
 [Headless clamps](headless-clamp.md#codex-read-only-needs-user-namespaces).
 
 ## The lock entry
@@ -63,13 +64,14 @@ A companion entry carries no `version_output`: the host prints no version, so
 its version is read from the companion's `version_output` instead.
 
 `worker_image.py` `load_lock` checks the three base tools first and then every
-extra entry in name order. It refuses the lock with
-`invalid artifact lock: codex-code-mode-host` when the entry:
+extra entry in name order. It refuses the lock with `invalid artifact lock:
+codex-code-mode-host` when the entry:
 
 - names a `version` other than the one in the `codex` `version_output`;
 - names a `companion` that is not a base tool, or names itself;
 - carries its own `version_output`;
-- has an empty or malformed `sha256`, or a `url` that is not `https` or lacks the version;
+- has an empty or malformed `sha256`, or a `url` that is not `https` or lacks
+  the version;
 - has no `companion` key, since an extra tool then has no version output to match.
 
 `test_committed_lock_installs_the_code_mode_host_beside_codex` holds the
@@ -100,9 +102,10 @@ locked version and the checksum of the installed file:
 codex-code-mode-host 0.162.0 sha256:<sha256 of /usr/local/bin/codex-code-mode-host>
 ```
 
-`declared.tools` lists `codex-code-mode-host` with its version. The image's default
-`report` command, which each startup container runs, recomputes both and refuses an image whose installed host
-differs from its manifest with `installed inventory differs from build manifest`.
+`declared.tools` lists `codex-code-mode-host` with its version. The image's
+default `report` command, which each startup container runs, recomputes both and
+refuses an image whose installed host differs from its manifest with `installed
+inventory differs from build manifest`.
 
 ## Smoke step
 
@@ -150,10 +153,10 @@ which the smoke run saves as `codex-code-mode.json` in the evidence folder:
 | `code_mode_errors` | Empty: no error event whose message mentions `Code Mode` |
 | `host_output` | `true`: the marker came back in the tool output |
 
-Any failing value prints the report first, then exits 1 with
-`Codex shell command through the code mode host failed:` followed by the last
-2000 characters of Codex stderr. The smoke run stops, and the saved report shows
-which condition failed.
+Any failing value prints the report first, then exits 1 with `Codex shell
+command through the code mode host failed:` followed by the last 2000 characters
+of Codex stderr. The smoke run stops, and the saved report shows which condition
+failed.
 
 ## Reading the evidence in CI
 
@@ -175,8 +178,8 @@ jq '.manifest.observed.tools["codex-code-mode-host"]' worker-evidence/first.json
 
 ## Moving to a new Codex release
 
-Update both entries together; the lock refuses a host whose version differs
-from `codex`.
+Update both entries together; the lock refuses a host whose version differs from
+`codex`.
 
 ```bash
 v=0.163.0
