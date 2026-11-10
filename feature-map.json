@@ -3074,6 +3074,18 @@
         "tests/tick/steps/test_step_starvation.py::test_one_read_takes_only_the_newest_records_up_to_its_limit",
         "tests/tick/steps/test_step_starvation.py::test_a_stream_entry_id_reads_as_its_millisecond_and_sequence"
       ]
+    },
+    {
+      "id": "priorities-sweep-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-priorities-sweep-budget",
+      "behaviour": "The priorities sweep tick step clears every stale priority of a pass in bounded batched ledger writes, so a thousand stale priorities finish under the step floor budget.",
+      "seam": "scripts.swarm.priority_sweep.priority_pass and LedgerClient.clear_priorities",
+      "tests": [
+        "tests/swarm/test_priority_sweep.py::test_a_thousand_stale_priorities_clear_inside_the_step_floor",
+        "tests/swarm/test_priority_sweep.py::test_the_sweep_clears_its_stale_priorities_in_one_batch",
+        "tests/swarm/test_ledger_client_priorities.py::test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches"
+      ]
     }
   ],
   "unmapped_rules": [
