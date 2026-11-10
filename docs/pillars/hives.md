@@ -241,6 +241,41 @@ starting its daemon, and allow its next heartbeat to publish them; listing a rep
 repository entry is not a directory on this host, such as a path recorded on another host; see
 [Repositories recorded on another host](swarm.md#repositories-recorded-on-another-host).
 
+### Launch directory on a hive chosen by origin
+
+A hive chosen by origin launches the agent in its own checkout with that origin, never in the swarm's
+workstation path. Worker and master launches follow the same rule:
+
+1. Selection marks a hive that qualifies only through the origin identity and carries that identity with the
+   launch as the `hive_origin` field of the launch order.
+2. The hive's order consumer launches with `hive_origin` as the repo.
+3. The hive resolves the repo to the first checkout under `HIVE_REPO_ROOT`, by path, whose `origin` matches,
+   and passes it to `init-agent --dir`.
+
+A hive that lists the swarm path itself gets no `hive_origin` field and launches in that path unchanged.
+
+With the records in [Matching a repo across machines](#matching-a-repo-across-machines), an engineer placed on
+the headless worker launches with `--dir /home/worker/dev/agentihooks`, never `/home/me/dev/agentihooks`. No
+setting selects the launch directory; it follows from `HIVE_REPO_ROOT` and the checkouts' `origin` remotes on
+the hive.
+
+```bash
+# On the hive: each direct child checkout and its origin remote
+for d in "${HIVE_REPO_ROOT:-$HOME/dev}"/*/; do
+  [[ -e "$d/.git" ]] || continue
+  printf '%s %s\n' "$d" "$(git -C "$d" remote get-url origin 2>/dev/null)"
+done
+```
+
+The loop lists the direct children of `HIVE_REPO_ROOT`. The hive also scans one level into each child that is
+not a checkout, and compares each remote after normalizing it to lowercase `host/owner/name`, so
+`https://github.com/the-cloud-clockwork/agentihooks.git` matches `github.com/the-cloud-clockwork/agentihooks`.
+
+When the hive has no checkout with the carried origin, it passes the origin identity itself to
+`init-agent --dir`, which refuses the launch with `directory does not exist: <path>`. `<path>` is the identity
+joined to the `init-agent` base directory (`RUN_CLAUDE_BASE_DIR`, else `~/dev` when it exists, else `$HOME`),
+such as `/home/worker/dev/github.com/the-cloud-clockwork/agentihooks`.
+
 ## Hive endpoint limits
 
 `agentihooks hive serve` answers `POST /hive/refresh` (a ledger credential for a new Redis password) on one thread
@@ -707,6 +742,7 @@ are already filled has no new placement decision in that pass.
 | Wait or symptom | Check | Resolution |
 |---|---|---|
 | `lists the repo` despite matching repository names | Local `origin` and the target hive's advertised `repos` | Confirm the host and owner match, the checkout lies under `HIVE_REPO_ROOT`, and the hive has published a new heartbeat. |
+| Launch on a hive refused with `directory does not exist` | The hive's checkouts under `HIVE_REPO_ROOT` and their `origin` remotes | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the advertised identity, or restart `hive run` with `HIVE_REPO_ROOT` at the clones' parent. See [Launch directory on a hive chosen by origin](#launch-directory-on-a-hive-chosen-by-origin). |
 | `advertises the ... slot` | `slots` in each hive's `hive show` record | The chosen harness and account must be advertised by an eligible hive, including the workstation. |
 | `holds the ... login` | The selected account's login on the candidate hive | Use a hive holding that login; subscription availability alone does not supply an interactive login. |
 | `has room`, possibly followed by CPU or RAM detail | `hive list` headroom, `max-agents`, and the workstation's local cap | Free capacity or adjust the relevant cap only when the host has room. |
