@@ -680,4 +680,6 @@ def test_a_thousand_stale_priorities_clear_inside_the_step_floor():
 def test_the_sweep_clears_its_stale_priorities_in_one_batch():
     tasks = [{"id": "t1", "state": "done"}, {"id": "t2", "done": True}]
     _, calls = dict_pass([row("tasks/t1"), row("tasks/t2")], tasks=tasks)
-    assert calls == [("clear_priorities", "d", [("p-tasks/t1", "its item is done"), ("p-tasks/t2", "its item is done")])]
+    assert calls == [
+        ("clear_priorities", "d", [("p-tasks/t1", "its item is done"), ("p-tasks/t2", "its item is done")])
+    ]
