@@ -325,7 +325,7 @@ members post `hive refresh` to is the chart's `hive-join` Deployment. The antonc
 hive:
   join:
     enabled: true
-    memberRedisUrl: rediss://swarm-internal.homeofanton.com:6379/0
+    memberRedisUrl: rediss://swarm-internal.example.com:6379/0
     tlsSecretName: agentihooks-swarm-redis-tls
     serveLedgerCa: false        # hives keep trusting the workstation ledger's CA
     natsSigner:
@@ -333,7 +333,7 @@ hive:
 ```
 
 The antoncore manifest `k8s/manifests/agentihooks-swarm/services.yaml` publishes it on the LAN as the
-LoadBalancer `agentihooks-swarm-hive-join-lan`, port `join` 8770, on the shared MetalLB address `10.10.30.207`
+LoadBalancer `agentihooks-swarm-hive-join-lan`, port `join` 8770, on the shared MetalLB address `192.0.2.207`
 that [Swarm LAN services](swarm-lan-services.md) describes. That address and port form the `--url` given to
 `hive add`.
 
@@ -370,12 +370,12 @@ Read the live endpoint without credentials:
 kubectl -n agentihooks-swarm get deploy -l app.kubernetes.io/component=hive-join
 kubectl -n agentihooks-swarm get service agentihooks-swarm-hive-join-lan \
   -o jsonpath='{.status.loadBalancer.ingress[*].ip}{" "}{.spec.ports[?(@.name=="join")].port}{"\n"}'
-# 10.10.30.207 8770
+# 192.0.2.207 8770
 ```
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `hive refresh refused: the hive at <url> is unreachable` from an Anton hive | The `hive-join` Deployment is not running, or the LAN Service holds no `10.10.30.207` ingress | Run the two commands above; for the address, follow [Inspect service ownership](swarm-lan-services.md#inspect-service-ownership). Change the endpoint through the antoncore overlay and its GitOps delivery |
+| `hive refresh refused: the hive at <url> is unreachable` from an Anton hive | The `hive-join` Deployment is not running, or the LAN Service holds no `192.0.2.207` ingress | Run the two commands above; for the address, follow [Inspect service ownership](swarm-lan-services.md#inspect-service-ownership). Change the endpoint through the antoncore overlay and its GitOps delivery |
 | A change to `hive.join` values in antoncore passes `ci-validate` and still breaks refresh | No antoncore check renders the `hive-join` Deployment | Read the rendered Deployment with `helm template` against the overlay before merging, and run the agentihooks helm kind smoke for template changes |
 | A search for the hive join render checker in antoncore finds nothing | It was deleted in antoncore pull request 1002 | Use the checkers in the table above; none replaces it |
 
@@ -455,13 +455,13 @@ In this example a worker hive reaches the hosted ledger over its internal name w
 address. In the hive's environment:
 
 ```bash
-AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.homeofanton.com:8765
+AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.example.com:8765
 ```
 
 In the bundle's `profiles/<profile>/.claude/settings.overrides.json`:
 
 ```json
-{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.homeofanton.com"}}
+{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.example.com"}}
 ```
 
 Agents launched on that hive start with the internal address. A workstation tick whose env file leaves the variable
@@ -529,7 +529,7 @@ A workstation that reaches the hosted ledger for its own swarm only.
 ```bash
 AGENTIHOOKS_DEPLOYMENT=local
 AGENTIHOOKS_SWARM=rig-grade-swarm
-SWARM_URL=https://swarm.homeofanton.com
+SWARM_URL=https://swarm.example.com
 ```
 
 To see which way a shell resolves, from an agentihooks checkout:
@@ -584,7 +584,7 @@ In `.env` next to `compose.yaml`:
 
 ```bash
 AGENTIHOOKS_DEPLOYMENT=compose
-SWARM_BIND=10.20.0.5                                  # the private interface, never 0.0.0.0 on a public host
+SWARM_BIND=198.51.100.5                               # the private interface, never 0.0.0.0 on a public host
 SWARM_PUBLIC_URL=http://swarm.example.internal:8765
 SWARM_ALLOWED_HOSTS=swarm.example.internal:8765
 SWARM_REDIS_PASSWORD=<from your secret store>

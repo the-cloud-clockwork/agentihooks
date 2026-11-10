@@ -1,0 +1,19 @@
+name: Docs sanity check
+
+on:
+  pull_request:
+    branches: [dev]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-sanity:
+    uses: ./.github/workflows/docs-sanity.yml
+    with:
+      paths: docs evidence changelog.d README.md
+      tool_repository: ${{ github.repository }}
+      tool_ref: ${{ github.sha }}
+    secrets: inherit

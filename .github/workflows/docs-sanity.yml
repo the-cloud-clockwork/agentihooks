@@ -1,0 +1,66 @@
+name: Docs sanity
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: Space separated files and directories of the calling repository to scan
+        type: string
+        required: true
+      keywords_from:
+        description: Name of the caller's repository secret holding private keywords, one per line or comma separated; the caller passes its secrets with inherit
+        type: string
+        required: false
+        default: DOCS_SANITY_KEYWORDS
+      exclude:
+        description: Space separated globs of files to skip
+        type: string
+        required: false
+        default: ""
+      tool_repository:
+        description: Repository that carries the scanner script
+        type: string
+        required: false
+        default: the-cloud-clockwork/agentihooks
+      tool_ref:
+        description: Revision of the scanner repository to run
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool_repository }}
+          ref: ${{ inputs.tool_ref }}
+          path: .docs-sanity-tool
+          sparse-checkout: scripts/docs_sanity.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Scan for internal addresses, identifiers and private keywords
+        env:
+          DOCS_SANITY_KEYWORDS: ${{ secrets[inputs.keywords_from] }}
+          PATHS: ${{ inputs.paths }}
+          EXCLUDE: ${{ inputs.exclude }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCS_SANITY_KEYWORDS:-}" ]]; then
+            echo "::notice::No private keywords are set; only the built in rules run."
+          fi
+          read -r -a paths <<< "$PATHS"
+          args=(--keywords-env DOCS_SANITY_KEYWORDS)
+          read -r -a excludes <<< "$EXCLUDE"
+          for glob in "${excludes[@]}"; do args+=(--exclude "$glob"); done
+          python3 -I .docs-sanity-tool/scripts/docs_sanity.py "${args[@]}" "${paths[@]}"
