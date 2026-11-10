@@ -5,10 +5,16 @@ import pytest
 
 from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.repository import postgres, sqlite
-from tests.swarm_ledger.test_sqlite import CONTENT
 
 DATABASE_URL = "postgresql://ledger@live/ledger"
 SLUG = "scratch-proof"
+CONTENT = {
+    "title": "Scratch",
+    "overview": "o",
+    "sources": [],
+    "phases": [{"title": "One", "description": "d"}],
+    "tasks": [{"title": "first", "phase": "p1", "lane": "eng"}],
+}
 
 
 def refuse_shared(*_args, **_kwargs):
@@ -60,10 +66,12 @@ def test_a_scratch_folder_uses_the_shared_database_only_when_asked() -> None:
 
 @pytest.mark.parametrize(
     "folder",
-    ["/data", str(Path.home() / "development-ledger"), str(Path.home() / "scratchpad-ledger"), None],
+    ["/data", "~/development-ledger", "~/scratchpad-ledger", "~/scratchpad/x/../../development-ledger", None],
 )
 def test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database(folder: str | None) -> None:
-    env = {postgres.URL: DATABASE_URL} if folder is None else {postgres.URL: DATABASE_URL, "LEDGER_DIR": folder}
+    env = {postgres.URL: DATABASE_URL}
+    if folder is not None:
+        env["LEDGER_DIR"] = folder.replace("~", str(Path.home()), 1)
 
     assert postgres.url(env) == DATABASE_URL
 
