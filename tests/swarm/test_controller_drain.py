@@ -40,10 +40,13 @@ class Rig:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.installed: list[tuple[int, Any]] = []
+        self.handlers: dict[int, Any] = {}
         self.events: list[str] = []
         self.service = Service()
         self.startup: Callable[[], None] = lambda: None
         monkeypatch.setattr(tick_stop, "STOP", threading.Event())
+        monkeypatch.setattr(controller, "RUNNING", threading.Event(), raising=False)
+        monkeypatch.setattr(controller, "DRAINING", threading.Event(), raising=False)
         monkeypatch.setattr(tick_stop, "_HELD", {})
         monkeypatch.setattr(operator_env, "fill", lambda env: None)
         monkeypatch.setattr(operator_env, "classifier", lambda env: [])
@@ -55,6 +58,7 @@ class Rig:
 
     def install(self, number: int, handler: Any) -> str:
         self.installed.append((number, handler))
+        self.handlers.setdefault(number, handler)
         return f"previous {int(number)}"
 
     def proofs(self, *args: Any) -> None:
@@ -64,8 +68,7 @@ class Rig:
         self.events.append("proofs")
 
     def deliver(self, number: int) -> None:
-        handlers = dict(self.installed[:2])
-        handlers[number](number, None)
+        self.handlers[number](number, None)
 
     def run(self) -> int | str | None:
         with pytest.raises(SystemExit) as stopped:
@@ -179,4 +182,7 @@ def test_the_controller_grace_period_outlasts_the_golden_pass_with_margin() -> N
     template = (CHART / "templates/controller.yaml").read_text()
 
     assert values["terminationGracePeriodSeconds"] >= 2 * GOLDEN_PASS_S
-    assert "terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}" in template
+    assert (
+        "terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 300 }}"
+        in template
+    )

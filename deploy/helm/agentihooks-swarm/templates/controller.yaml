@@ -162,7 +162,7 @@ spec:
       {{- end }}
       automountServiceAccountToken: {{ not (empty $workers.apiUrl) }}
       {{- include "swarm.podSecurityContext" . | nindent 6 }}
-      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 300 }}
       {{- with .Values.controller.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

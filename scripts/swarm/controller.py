@@ -630,10 +630,14 @@ def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm:
     RUNNING.set()
     try:
         _pass(store, service, proof_swarm)
+    except Exception as exc:
+        if not DRAINING.is_set():
+            raise
+        print(f"controller: the last pass before exit ended: {exc}", file=sys.stderr, flush=True)
     finally:
         RUNNING.clear()
-        if DRAINING.is_set():
-            _halt()
+    if DRAINING.is_set():
+        _halt()
 
 
 def _reached(outage: redis_grace.Outage) -> RedisStore:
