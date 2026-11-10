@@ -467,6 +467,10 @@ triggers close. It spawns through hive placement like the `eng`, `ci` and `plan`
 `dispatcher` profile places as the `dispatch` worker role, so it lands on any live hive that does not exclude
 `dispatch` or `dispatcher`, ordered as in [Placement](#placement).
 
+Placement does not try headless hives first for the dispatcher: it pools every live hive that takes `dispatch`,
+UI and headless alike, and orders them only by `prefer` rank, room, lasting over ephemeral and hive id. Keeping
+the seat off the workstation takes an exclusion or a rank, as below.
+
 A worker hive pod excludes only `master` by default (`HIVE_EXCLUDED`, chart value `excluded: [master]`), so every
 pod takes the dispatcher. A UI hive excludes nothing by default, so the workstation takes the dispatcher on equal
 terms with the pods. To run the dispatcher only on headless hives, exclude `dispatch` on every UI hive:
@@ -506,7 +510,7 @@ agentihooks hive list               # each hive's excluded list, prefer ranks an
 |---|---|---|
 | The dispatcher runs on the workstation while pods have room | The workstation does not exclude `dispatch`, and no pod ranks first in `prefer`. | `agentihooks hive set <workstation> excluded=...,dispatch`, or rank the pods with `prefer=dispatch:1`. |
 | The tick reports `the dispatcher waits: no hive for dispatch has room` | Every hive that takes `dispatch` is at its agent ceiling or measured headroom. | Wait for a pod to free a slot, raise `max-agents` on a pod, or add a pod. |
-| A launch waits with `no live hive takes dispatch` | Every live hive excludes `dispatch`, or no hive has a fresh heartbeat. | Remove `dispatch` from a hive's `excluded` list, or restart `agentihooks hive run` on a stale hive. |
+| A launch waits with `no live hive takes dispatch` | Every live hive excludes `dispatch`, or no hive has a fresh heartbeat. | Remove `dispatch` from a hive's `excluded` list, or restart the stale hive's `agentihooks-hive` service, or roll its pod. |
 
 ## Comparing hive configuration
 
