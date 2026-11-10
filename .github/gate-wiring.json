@@ -29,10 +29,6 @@
     "gate-protected.yml/grade": {
       "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
       "owner": "ci-2@rig-grade-swarm"
-    },
-    "docs-sanity-check.yml/docs-sanity": {
-      "reason": "Scans the public docs, evidence, changelog fragments and README with the project agnostic docs sanity workflow; the dev ruleset requires its own check, docs-sanity / scan, on pull requests and the merge queue.",
-      "owner": "eng-12@rig-grade-swarm"
     }
   }
 }

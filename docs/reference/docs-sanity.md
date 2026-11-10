@@ -76,13 +76,15 @@ required status checks once the workflow has run on one pull request.
 
 ## In this repository
 
-`docs-sanity-check.yml` scans `docs`, `evidence`, `changelog.d` and `README.md`
-with the scanner from the base branch, so a pull request cannot weaken the
-rules that grade it; only while the base lacks the scanner does it run the
-pull request's own copy. Fork pull requests get no secrets, so only the built
-in rules run for them. The dev ruleset requires
-`docs-sanity / scan`. Workflow, chart and deployment files that must carry real
-addresses are not scanned.
+The lint job of the Tests workflow scans `docs`, `evidence`, `changelog.d` and
+`README.md` on every pull request into dev, with the private keywords from the
+`DOCS_SANITY_KEYWORDS` secret. It runs the scanner from the protected grader
+checkout of the base branch, so a pull request cannot weaken the rules that
+grade it; only while the base lacks the scanner does it run the pull request's
+own copy. A red scan turns the lint job red, which `Gate — Required`, the
+check the dev ruleset requires, refuses. Fork pull requests get no secrets, so
+only the built in rules run for them. Workflow, chart and deployment files
+that must carry real addresses are not scanned.
 
 ## Troubleshooting
 

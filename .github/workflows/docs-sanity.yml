@@ -38,6 +38,9 @@ permissions:
 
 jobs:
   scan:
+    concurrency:
+      group: ${{ github.workflow == 'Docs sanity' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('docs-sanity-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Docs sanity' && 'max' || 'single' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
