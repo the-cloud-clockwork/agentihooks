@@ -13,7 +13,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import TypeGuard, cast
+from typing import TypeGuard
 
 import yaml
 
@@ -185,14 +185,11 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
 def main(argv: list[str] | None = None) -> int:
     """Import a hub checkout into a bundle checkout and print the report as JSON."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("src", type=Path)
-    parser.add_argument("out", type=Path)
+    parser.add_argument("src")
+    parser.add_argument("out")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    src = cast(Path, args.src)
-    out = cast(Path, args.out)
-    dry_run = cast(bool, args.dry_run)
-    print(json.dumps(import_hub(src, out, dry_run)))
+    print(json.dumps(import_hub(Path(args.src), Path(args.out), args.dry_run is True)))
     return 0
 
 
