@@ -5,7 +5,7 @@ from functools import partial
 from importlib import import_module
 from typing import Any, TypedDict, Unpack, cast
 
-from scripts.tick import registry
+from scripts.tick import hook_reads, registry
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import budgets
@@ -234,6 +234,21 @@ class PassBox(dict[str, Any]):
     def __missing__(self, key: str) -> Any:
         """Raise ``Left`` naming the value no step stored."""
         raise Left(key)
+
+    def __getitem__(self, key: str) -> Any:
+        """Return the value under ``key`` once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return the value under ``key``, else ``default``, once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        """Return whether the box holds ``key`` once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().__contains__(key)
 
 
 def note_left(box: object, records: Iterable[StepRecord]) -> None:

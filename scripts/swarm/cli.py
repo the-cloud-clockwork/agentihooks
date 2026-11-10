@@ -193,7 +193,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import engine, pool
+from scripts.tick import engine, hook_reads, pool
 from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
@@ -267,6 +267,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper metrics": (NONE, hook_domains("count")),
 }
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -481,7 +482,7 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
-        return {site: found[site] for site in WRAPPER_HOOK_KEYS}
+        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
