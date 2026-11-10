@@ -1992,6 +1992,41 @@ agentihooks swarm rig-grade-swarm set master-move-grace=600
 A hive that pauses longer than the grace, such as a laptop asleep, loses its master; a shorter grace replaces a
 lost master sooner. The default is 300 seconds.
 
+#### Master move code preload
+
+The `master move fail over` step runs in the tick's `observe` group with a waiting budget floor of two seconds
+(`budgets.FLOORS` in `scripts.tick.steps.budgets`). The move reads the live hives through the hive launch code, so
+it needs three modules: `scripts.hive.launch`, `scripts.hive.daemon` and `scripts.swarm.local_slots`. The tick
+names them in `MASTER_MOVE_MODULES` in `scripts.swarm.tick`.
+
+The tick loads those modules at the start of every pass, in the `start` site check of `TickSites`
+(`scripts.tick.sites`), before any step runs and outside every step budget. Once a tick process has imported them,
+later passes find them already loaded and the check costs nothing.
+
+Before this preload, the first pass after a tick process started imported the modules inside the fail over step.
+Its budget was then about one second, measured from warm passes. On a contended runner the import outlasted it.
+The engine abandoned the step as `late`
+(see [When a step exceeds its budget](../reference/tick-engine-steps.md#when-a-step-exceeds-its-budget)) and the
+move was dropped for that pass. The swarm master recovery test that moves a master off a lost hive to the hive
+with room failed on its first run for this reason and passed only on a retry.
+
+Nothing is configured for the preload. A change that makes the move use another module that the tick does not
+already import adds it to `MASTER_MOVE_MODULES` in the same pull request. Its guard is the test
+`test_the_tick_loads_the_hive_launch_code_before_the_fail_over_step_starts` in
+`tests/swarm/test_master_recovery.py`, which removes the modules, runs one tick on a lost master hive and asserts
+every module is loaded when `master move fail over` starts. The tests in that file also raise every tick step's budget
+floor to at least 30 seconds, so a slow runner cannot abandon a step mid test.
+
+Check whether the fail over step is late on a running swarm:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 10
+```
+
+The step appears in two tables of the report: the step rows give its median and p95 wall time, and the outcome
+columns give its late share and abandoned count. An abandoned record means a pass dropped the move; the next pass
+retries it.
+
 ### Operator master move
 
 ```bash
@@ -2029,6 +2064,9 @@ hive the master already runs on.
   `agentihooks hive list`. A hive that never beat, or whose record was removed, never moves its master, and the move
   waits the full grace plus up to one tick. While the runtime still reports the master's session live, the tick
   leaves it alone.
+- **The move happened one pass later than expected.** A pass that abandoned `master move fail over` dropped the
+  move, and the next pass made it. Read the step's abandoned count with
+  `agentihooks swarm rig-grade-swarm tick-report --passes 10`; see [Master move code preload](#master-move-code-preload).
 - **The successor started on another hive than the one ordered.** The pin applies only to the successor of the
   master the order named. If that master left without the handoff the order asks for, its successor uses normal
   placement. Run `master move` again for the new master.
