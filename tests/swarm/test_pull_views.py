@@ -402,6 +402,24 @@ def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypat
     assert fallback == ["other"]
 
 
+def test_tick_view_batches_claimed_pull_requests_with_the_tick_view_ttl(monkeypatch):
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    inbox = InboxStore(store.redis)
+    doc = {"tasks": [{"id": "t1", "state": "pr", "pr_url": "a"}]}
+    ttls = []
+    monkeypatch.setattr(
+        ledger_events, "views", lambda urls, cache=None, ttl=None: ttls.append(ttl) or dict.fromkeys(urls)
+    )
+    ledger_events.tick_view(inbox, store, "sw", doc)
+    assert ttls == [ledger_events.TICK_VIEW_TTL_S]
+
+
 def test_a_later_tick_snapshot_fetches_only_pull_requests_the_earlier_one_did_not(monkeypatch):
     import fakeredis
 
