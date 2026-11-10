@@ -1461,8 +1461,10 @@ Masters, qa and frontend keep the UI host rule, and a task pinned to a hive neve
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
 
-1. Points git at `GITHUB_PERSONAL_ACCESS_TOKEN` for github.com through a credential helper that reads the variable
-   when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
+1. Points git at `python3 -m scripts.github_app_cli credential` for github.com, which answers with `GITHUB_TOKEN`
+   when the pod has one, or with a GitHub App installation token when `GITHUB_APP_PRIVATE_KEY` is set. In App mode
+   the start script caches that token in `github-token` under the agentihooks home, private to the worker user. The
+   token never reaches a remote URL or the log.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
 3. Installs a mounted credential as `hive.env`. With no mounted credential and no `hive.env` yet, it starts sshd
@@ -1592,17 +1594,10 @@ as the same `https` address, so the pod clones it with the GitHub token. A bundl
 refused with `the linked bundle at <path> is not on a branch`. The pod reads the keys through
 `workers.envFromSecrets`; chart values never set them.
 
-At each start the pod's start script:
-
-1. Clones `HIVE_BUNDLE_URL` at `HIVE_BUNDLE_REF` (default `dev`) to `agentihooks-bundle` under its repo root, beside
-   the agentihooks checkout. A clone a persistent home kept is fast forwarded from the origin instead; a failed fast
-   forward logs `worker-hive: bundle fast forward failed; init runs on the kept clone`.
-2. Runs `agentihooks init --bundle <clone>`, which links the bundle and renders its rules, skills, MCP servers and
-   the `agenti` alias. Init takes no `--profile`: each agent's role renders when the agent is spawned.
-3. Runs `agentihooks deps ensure`, which installs the bundle's declared tools as the workstation does.
-
-git reads the token from `GITHUB_PERSONAL_ACCESS_TOKEN` through a credential helper only when it asks, so the token is
-never written to a file, a remote URL or the log.
+The pod uses them in steps 2 and 4 of [Worker hives in Kubernetes](#worker-hives-in-kubernetes). `HIVE_BUNDLE_REF`
+defaults to `dev`. A clone a persistent home kept is fast forwarded from the origin instead of cloned again; a failed
+fast forward logs `worker-hive: bundle fast forward failed; init runs on the kept clone`. `agentihooks init --bundle
+<clone>` links the bundle and renders its rules, skills, MCP servers and the `agenti` alias.
 
 | Situation | Log line | Result |
 |---|---|---|
