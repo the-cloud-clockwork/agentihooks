@@ -2758,8 +2758,8 @@ The roll on release v2.17.472, across the three hives antoncore ran then and sam
 from down to serving again in 53 seconds to 6 minutes 42 seconds, and no sample showed more than one hive pod in a
 state other than Running or Terminating. 17 of its 104 samples showed two hives not ready. In those samples one
 replacement pod failed readiness on Redis socket timeouts. A replacement pod that cannot reach Redis stays unready,
-because its readiness marker ages past 60 seconds. The PostSync release then fails, the SyncFail abandon Job frees the
-Lease and the next hive can take its turn while that hive is still down.
+because its readiness marker ages past 60 seconds. If its release Job then fails, the abandon Job frees the Lease and
+the next hive can take its turn while that hive is still down.
 
 Watch a roll:
 
