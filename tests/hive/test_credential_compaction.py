@@ -12,7 +12,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "redis")
     monkeypatch.setenv("AGENTIHOOKS_AUTH_LEGACY", "on")
-    monkeypatch.setattr(auth, "_LEDGER_OF", {})
     redis = fakeredis.FakeRedis(decode_responses=True)
     store = hive_state.credentials(redis, auth.PREFIX)
     hive_state.amend(store, "member.m1", lambda _: {"name": "hive", "ledger": "d", "agents": {}})
