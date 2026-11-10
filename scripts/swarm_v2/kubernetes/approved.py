@@ -87,9 +87,7 @@ class AccountRoute:
         held = self.held()
         return [self._row(key, cap, held.get(key, 0), now, None) for key in sorted(self.keys())]
 
-    def seats(
-        self, cap: int, predecessor: tuple[str, str] | None = None, lane: str = ""
-    ) -> list[session_bands.Seat]:
+    def seats(self, cap: int, predecessor: tuple[str, str] | None = None, lane: str = "") -> list[session_bands.Seat]:
         """Quota seats for ``lane``; every lane but the master sees the reserved master account closed."""
         rows = self.rows(cap, self.quota.clock() / 1000)
         rows = rows if lane == MASTER else reserved_accounts(rows, dict(os.environ))

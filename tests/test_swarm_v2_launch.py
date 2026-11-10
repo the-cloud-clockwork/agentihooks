@@ -887,7 +887,9 @@ def test_a_tick_spawn_hands_its_route_the_planned_account_and_the_quota_handoff_
     world, envelope, assignment, predecessor
 ):
     asked = []
-    world.launcher.accounts = lambda cap, planned, left, harness, lane: asked.append((cap, planned, left)) or "routed-key"
+    world.launcher.accounts = lambda cap, planned, left, harness, lane: (
+        asked.append((cap, planned, left)) or "routed-key"
+    )
     world.launcher.planned = {"task": "planned-key"}.get
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
     task = {"id": "task", "seat": FIRST, "handoff_envelope": envelope, "launch_assignment": assignment}
@@ -1125,7 +1127,9 @@ def test_a_tick_spawn_whose_grant_is_not_handed_fails_with_the_reason_and_record
 
 
 @pytest.mark.parametrize(
-    "chooser", [None, lambda cap, planned, predecessor, harness, lane: None], ids=["reservation full", "no account with room"]
+    "chooser",
+    [None, lambda cap, planned, predecessor, harness, lane: None],
+    ids=["reservation full", "no account with room"],
 )
 def test_a_tick_spawn_on_a_full_account_waits_and_records_no_launch_failure(world, chooser):
     world.launch(FIRST)
