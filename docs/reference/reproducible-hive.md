@@ -85,6 +85,99 @@ agentihooks hive remove <name>
 A refusal prints `hive remove refused: <reason>` and exits 1. `--label`, `--path`, `--repo` and `--base` override the
 herdr label and manifest name, the OpenBao record, the GitOps repository and its branch.
 
+## Invite a member by hand
+
+`hive create` runs its invite step through `agentihooks hive invite`. Run it alone to put a new member credential into
+the OpenBao record of a hive whose GitOps values are already synced, for example to replace a revoked member:
+
+```bash
+agentihooks hive invite <label> --like k8s/agentihooks-swarm-workstation-hive
+```
+
+It needs `OPENBAO_URL` and `OPENBAO_TOKEN` and reaches the swarm Redis this workstation uses. It mints one member named
+`<label>` and merges these keys into the record:
+
+| Key | Value |
+|---|---|
+| `credential` | the member's `hive.env`: hive URL, hive id, Redis credential, and `AGENTIHOOKS_SWARM_URL` when a ledger address is known; with a NATS address also `AGENTIHOOKS_BUS=nats` and `AGENTIHOOKS_BUS_URL` |
+| `swarm_url` | the ledger address the hive reaches |
+| `ca_pem` | the ledger CA |
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--path` | `k8s/agentihooks-hive-<label>` | the record under the `secret` mount that the hive's ExternalSecrets read |
+| `--like` | none | a working hive's record; the hive URL, Redis URL, NATS address, ledger address and CA are copied from it |
+| `--url` | from `--like` | the hive endpoint the new hive reaches for `hive refresh`; required without `--like` |
+| `--redis-url` | from `--like`, else this workstation's | the Redis URL the new hive connects to |
+| `--swarm-url` | from `--like` | the ledger address the new hive reaches |
+| `--bus-url` | from `--like`, else the hub signer record | the NATS address the new hive reaches |
+| `--swarm` | every swarm | a swarm the member's bus credential reaches; repeat for several. Applies only when `AGENTIHOOKS_NATS_SIGNER` names the hub signer record |
+
+With `AGENTIHOOKS_NATS_SIGNER` set, the new member is listed in that signer record, the credential carries
+`AGENTIHOOKS_BUS_SCOPED=1`, and the signer is synced to `AGENTIHOOKS_NATS_SIGNER_SYNC` (default
+`agentihooks-swarm/agentihooks-swarm-nats-signer`).
+
+Success prints `invited hive member <id> as <label>; OpenBao secret/<path>: wrote <keys> (<n> keys total)`, with key
+names only. A rerun on the same record revokes the member the record held before and adds `revoked the previous member
+<id>`. When the OpenBao write fails the new member is revoked and the command exits with the error. A `--like` record
+that is empty or missing, or no hive URL from `--url` or `--like`, refuses before any member is minted.
+
+The pod reads the new credential only after its ExternalSecrets sync and the worker hive Deployment restarts:
+
+```bash
+kubectl -n <namespace> annotate externalsecret --all force-sync=$(date +%s) --overwrite
+kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/component=worker-hive
+```
+
+## Time a run from zero to a healthy engineer
+
+`scripts/packaging/hive-reproduce.sh` runs the invite path against a namespace ArgoCD already synced and records the
+wall time of every step up to the first healthy engineer. Run it on the workstation from an agentihooks checkout, with
+the same settings as `hive invite` and `kubectl` reaching the cluster:
+
+```bash
+scripts/packaging/hive-reproduce.sh <label> [<namespace>]
+```
+
+`<namespace>` defaults to `agentihooks-hive-<label>`; pass the hive name for a hive `hive create` made, whose namespace
+is its name. It refuses at once unless a swarm has `hive-placement=on`, and fails if the namespace does not exist.
+
+| Step | Done when |
+|---|---|
+| `namespace` | the namespace lists at least `HIVE_EXTERNAL_SECRETS` ExternalSecrets |
+| `invite` | `hive invite <label> --path <record> --like <like record>` printed a member id |
+| `secrets synced` | after a forced sync, every ExternalSecret in the namespace is Ready |
+| `pod ready` | after a rollout restart, the worker hive pod is Ready |
+| `heartbeat` | the member's hive registry record is live |
+| `engineer working` | an agent that is not a master works on the member's hive |
+| `join report` | a join report on the hive grades `complete` or `partial` |
+
+Each step prints `hive-reproduce: <step> after <seconds>s: <detail>`. At the end it prints a table of every step with
+its UTC time, the seconds it took and the seconds since the start, and the final line `healthy engineer after
+<seconds>s`. A step past its limit prints `timed out: <reason>`, the table so far, `failed at <step>`, and exits 1.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `HIVE_RECORD` | `k8s/agentihooks-hive-<label>` | the OpenBao record the invite writes |
+| `HIVE_LIKE` | `k8s/agentihooks-swarm-workstation-hive` | the record the invite copies |
+| `HIVE_EXTERNAL_SECRETS` | `4` | the ExternalSecrets the namespace must hold and sync |
+| `HIVE_STEP_TIMEOUT_S` | `900` | the limit of every step but `engineer working` |
+| `HIVE_ENGINEER_TIMEOUT_S` | `1800` | the limit of `engineer working` |
+| `HIVE_TIMING_FILE` | none | a file each run appends to: one line with the UTC time, the label and the outcome, then the step table |
+| `HIVE_PYTHON` | `python3` | the interpreter that reads the swarm Redis; it must import agentihooks |
+| `HIVE_KEEP` | `no` | `yes` keeps the invited member when the script exits |
+| `HIVE_REMOVE_WAIT_S` | `300` | the `--wait` passed to `hive remove` |
+
+When the script exits, on success or failure, it runs `hive remove <member> --label <label> --path <record>` on the
+member it invited, unless `HIVE_KEEP=yes`. A failed remove prints the command to run by hand. Set `HIVE_KEEP=yes` to
+keep the hive after a timing run:
+
+```bash
+HIVE_KEEP=yes HIVE_TIMING_FILE=~/hive-timing.log scripts/packaging/hive-reproduce.sh swarm-hive-002 swarm-hive-002
+```
+
+Record the final `healthy engineer after <seconds>s` line and its step table as the wall time of the run.
+
 ## Check by hand
 
 ```bash
