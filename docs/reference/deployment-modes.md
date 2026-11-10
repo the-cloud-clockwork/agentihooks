@@ -580,7 +580,7 @@ description, in both modes.
 |---|---|
 | `no ledger <slug>` | The hosted ledger answered 404 for one of the three collections: it holds no ledger by that name |
 | `no stored artifact <file id>` | The hosted ledger holds the ledger but answered 404 for the plan file |
-| `the ledger server refused the credential` | A collection read was answered 403 with the server's credential refusal |
+| `unauthenticated: the ledger server refused the credential` | A collection read was answered 403 with the server's credential refusal |
 | An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
 
 `tests/swarm_ledger/test_plan_read.py` covers the remote read in compose mode with no local ledger folder: the
