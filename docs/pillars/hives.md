@@ -2259,8 +2259,8 @@ agent limit below its request and a memory value under `workers.resources` are e
 A release's worker hive capacity is the sum of each pod's `maxAgents`: the base hive's when `workers.replicas` is 1,
 plus every `workers.hives` entry's own or inherited value. Placement holds each hive to its own ceiling, so the swarm
 runs at most that sum of agents on the release's pods. The swarm's lane caps bound it too: a swarm set to
-`max-eng-agents=4 max-ci-agents=2` launches at most six lane agents however much hive room there is. A target total, such as twenty agents, is a split of that sum
-across hives, each with its own member credential.
+`max-eng-agents=4 max-ci-agents=2` launches at most six eng and ci agents however much hive room there is. A target
+total, such as twenty agents, is a split of that sum across hives, each with its own member credential.
 
 **Sizing the split.** Every pod's memory request is its `maxAgents` times `memoryPerAgentMi.request`, and each pod
 must fit on one node. Fewer, larger hives need nodes with more free memory; more, smaller hives spread over smaller
@@ -2342,7 +2342,8 @@ For each stage:
    # <hive-c>  live  ui=no  workers=0 of 4 (cap 4)  excluded=master  ...
    ```
 
-5. Raise the lane caps when the swarm's caps sit below the new capacity, so placement has agents to send:
+5. Raise the lane caps when the swarm's caps sit below the new capacity, so placement has agents to send. For stage 3,
+   14 eng and 6 ci agents fill the 20:
 
    ```bash
    agentihooks swarm <slug> set max-eng-agents=14 max-ci-agents=6
