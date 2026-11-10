@@ -3155,6 +3155,28 @@
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
       ]
+    },
+    {
+      "id": "swarm-tick-slow-lane-start",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-slow-lane-runs",
+      "behaviour": "The handed slow lane starts with the pass graph, each handed step once the critical steps it needs end, so a critical step overrunning its lane leaves every other handed step running inside the slow lane on its own workers, and a reserved step such as spawn holds no later site behind it.",
+      "seam": "scripts.tick.engine run_graph with scripts.tick.pool.Pass tracking, and scripts.tick.registry.site_edges over the pass sites of scripts.swarm.cli",
+      "tests": [
+        "tests/tick/test_slow_lane_start.py::test_a_critical_overrun_leaves_every_handed_step_running_inside_the_slow_lane",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_needing_a_lost_critical_step_is_still_dropped",
+        "tests/tick/test_slow_lane_start.py::test_a_busy_handed_lane_leaves_the_critical_steps_their_workers",
+        "tests/tick/test_slow_lane_start.py::test_spawn_holds_no_later_site_behind_its_reserve",
+        "tests/tick/test_slow_lane_start.py::test_a_handed_step_waiting_on_a_critical_need_holds_no_handed_worker",
+        "tests/tick/test_slow_lane_start.py::test_a_kept_handed_step_runs_on_the_handed_workers",
+        "tests/tick/test_handed_lane_guards.py::test_the_handed_workers_are_named_and_bounded_by_the_pass_workers",
+        "tests/tick/test_handed_lane_guards.py::test_a_pass_ends_without_waiting_on_its_handed_workers_and_cancels_their_queue",
+        "tests/tick/test_handed_lane_guards.py::test_a_handed_step_waits_for_a_site_hook_running_on_the_critical_thread_past_the_critical_lane",
+        "tests/tick/test_handed_lane_guards.py::test_a_step_waits_for_its_site_hook_no_longer_than_its_own_budget",
+        "tests/tick/test_handed_lane_guards.py::test_a_site_whose_hook_says_no_rests_its_steps",
+        "tests/tick/test_handed_lane_guards.py::test_the_gate_rests_a_handed_step_it_shuts",
+        "tests/tick/test_handed_lane_guards.py::test_a_handed_step_needing_a_step_an_earlier_group_ran_starts_at_once"
+      ]
     }
   ],
   "unmapped_rules": [
