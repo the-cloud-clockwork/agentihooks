@@ -2576,6 +2576,7 @@
         "tests/hive/test_create.py::test_create_records_the_repos_it_was_given_over_the_swarm_repos",
         "tests/hive/test_create.py::test_a_resumed_create_records_the_repos_its_first_run_was_given",
         "tests/hive/test_create.py::test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_origin",
+        "tests/hive/test_create.py::test_no_swarm_gives_no_default_repo",
         "tests/hive/test_create.py::test_the_dry_run_names_the_registry_record_and_writes_none",
         "tests/hive/test_create.py::test_no_repo_is_named_as_no_repos",
         "tests/hive/test_create.py::test_cli_create_passes_its_repos",

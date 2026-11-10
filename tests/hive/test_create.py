@@ -1068,11 +1068,11 @@ def test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_o
     world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     configs = {
-        "hosted": SimpleNamespace(hive_placement=True, state="running", repo="x/hosted"),
-        "path": SimpleNamespace(hive_placement=True, state="running", repo="/srv/checkout"),
-        "unknown": SimpleNamespace(hive_placement=True, state="running", repo="/srv/none"),
-        "off": SimpleNamespace(hive_placement=False, state="running", repo="x/off"),
-        "stopped": SimpleNamespace(hive_placement=True, state="stopped", repo="x/stopped"),
+        "hosted": SimpleNamespace(repo="x/hosted"),
+        "path": SimpleNamespace(repo="/srv/checkout"),
+        "unknown": SimpleNamespace(repo="/srv/none"),
+        "off": SimpleNamespace(repo="x/off"),
+        "stopped": SimpleNamespace(repo="x/stopped"),
     }
 
     class Configured(Store):
@@ -1088,6 +1088,16 @@ def test_the_default_repos_are_every_joined_swarm_repo_with_a_path_read_as_its_o
     monkeypatch.setattr(swarm_store, "RedisStore", Configured)
     monkeypatch.setattr("scripts.hive.daemon.origin", origin)
     assert create._swarm_repos(world.tools) == ["github.com/o/checkout", "x/hosted", "x/off", "x/stopped"]
+
+
+@pytest.mark.feature("hive-create-registers-name-and-repos")
+def test_no_swarm_gives_no_default_repo(world: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Empty(Store):
+        def slugs(self) -> list[str]:
+            return []
+
+    monkeypatch.setattr(swarm_store, "RedisStore", Empty)
+    assert create._swarm_repos(world.tools) == []
 
 
 @pytest.mark.feature("hive-create-registers-name-and-repos")

@@ -182,7 +182,7 @@ def _create(args: argparse.Namespace) -> str:
         "node": args.node,
         "timeout_s": args.timeout,
         "name": args.name,
-        "repos": create.repos(args.repos) if args.repos else None,
+        "repos": create.parse_repos(args.repos) if args.repos else None,
     }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)

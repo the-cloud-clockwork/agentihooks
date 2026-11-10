@@ -46,7 +46,7 @@ def _no_signer() -> "nats_grant.Signer | None":
     return None
 
 
-def repos(value: str) -> tuple[str, ...]:
+def parse_repos(value: str) -> tuple[str, ...]:
     """Reads a comma separated repo list, each entry the lowercase host/owner/name a hive reports for a checkout."""
     found = tuple(dict.fromkeys(entry.strip().lower() for entry in value.split(",") if entry.strip()))
     for repo in found:
@@ -392,7 +392,7 @@ def _swarm_repos(tools: Tools) -> list[str]:
     from scripts.swarm.store import RedisStore
 
     store = RedisStore(tools.redis)
-    configs = [store.config(slug) for slug in member_swarms.swarms(tools.redis, ())]
+    configs = [store.config(slug) for slug in store.slugs()]
     repos = [origin(Path(config.repo)) if Path(config.repo).is_absolute() else config.repo for config in configs]
     return sorted(set(filter(None, repos)))
 
