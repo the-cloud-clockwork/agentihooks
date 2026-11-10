@@ -59,9 +59,9 @@ agentihooks hive install          # user service that runs agentihooks hive run
   own Redis user: `AGENTIHOOKS_HIVE_ID`, `AGENTIHOOKS_HIVE_URL`, `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` and
   `AGENTIHOOKS_HIVE_REDIS_URL`. `agentihooks hive refresh` posts to the URL saved there. The hive URL must be https
   unless it is loopback.
-- When the hive endpoint trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive refresh`
-  writes it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home.
-  A grant without one leaves that file as it is. The Helm hive endpoint reads the CA from the ledger TLS secret.
+- When the hive serves a ledger CA, `hive add` delivers it beside `hive.env` and `hive refresh` rewrites it, so
+  agents the new machine launches trust a ledger on a private certificate authority with no manual step; see
+  [Ledger CA on a hive](#ledger-ca-on-a-hive).
 - The hive endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
   The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
   and `--tls-key`, and refuses to serve on a non-loopback address without them. It serves only
@@ -98,6 +98,92 @@ A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver it
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes). A pod can instead mount a credential that
 `agentihooks hive invite <label>` writes into OpenBao, which brings a new hive up from an empty namespace; see
 [Reproducible hive](../reference/reproducible-hive.md).
+
+## Ledger CA on a hive
+
+A hosted ledger signed by a private certificate authority is reachable only by clients that trust that CA. A hive
+installs the CA into its own home when it joins and on every refresh, so a master or engineer the hive launches
+passes its ledger join and launch check without anyone copying the certificate by hand.
+
+### Where the CA comes from
+
+The UI hive and the hive endpoint hand out the CA they trust themselves:
+
+1. `LEDGER_CA_PEM`, when set and not blank.
+2. Otherwise the file `LEDGER_CA_FILE` names, else `ledger-ca.pem` in their agentihooks home. `agentihooks init`
+   writes that file from OpenBao `k8s/agentihooks-swarm-ledger-ca`, field `ca.crt`, when `OPENBAO_URL` and
+   `OPENBAO_TOKEN` are set.
+
+The value is served only when it parses as a PEM certificate and carries no `PRIVATE KEY` block. Anything else
+counts as no CA, and nothing is delivered. The endpoint reads its CA once, when `hive serve` starts: after changing
+the CA source, restart `hive serve`, or roll the `hive-join` pod on Helm. While `hive.join.serveLedgerCa` is `true`
+(the default), the Helm `hive-join` deployment sets `LEDGER_CA_PEM` from the `ca.crt` key of
+`ledger.tls.secretName`. Set it to `false` for hives that trust another ledger's CA.
+
+```yaml
+# values.yaml: the hive endpoint serves the ledger CA from this secret
+ledger:
+  tls:
+    secretName: agentihooks-swarm-ledger-tls   # must hold ca.crt
+hive:
+  join:
+    serveLedgerCa: true
+```
+
+```bash
+# A workstation UI hive serving its own CA file
+LEDGER_CA_FILE=~/.agentihooks/ledger-ca.pem agentihooks hive serve \
+  --tls-cert swarm.crt --tls-key swarm.key
+```
+
+### Where the hive writes it
+
+| Step | What it writes | Target file |
+|---|---|---|
+| `hive add` | The UI hive's served CA, over the same `ssh -o BatchMode=yes` session family that delivers `hive.env`, after `hive.env` lands | `$LEDGER_CA_FILE` in the remote shell when set, else `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/ledger-ca.pem` |
+| `hive refresh` | The `ledger_ca` field of the endpoint's answer | `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home (`AGENTIHOOKS_HOME`, else `~/.agentihooks`) |
+
+- Both writes stage a new file beside the target and rename it into place, so a reader never sees half a
+  certificate. Missing parent folders are created.
+- A refresh answer without a valid `ledger_ca` leaves the existing file as it is: an endpoint that stops serving the
+  CA never removes one a hive already holds.
+- `hive add` for a label that already has a member delivers nothing, the CA included. Repair a missing CA with
+  `agentihooks hive refresh` on that machine.
+- A failed CA delivery is a failed `hive add`: the minted member is revoked and the command exits 1 with
+  `hive add refused: ssh exited <code>: <stderr>`. The `hive.env` written just before stays on the machine with the
+  revoked credential until the next `hive add` replaces it.
+
+Agents the hive launches inherit the `hive run` environment and resolve the CA file from it: `LEDGER_CA_FILE`, else
+`ledger-ca.pem` in `AGENTIHOOKS_HOME`, else in `~/.agentihooks`. That must name the path `hive add` (the remote login
+shell) and `hive refresh` wrote to; with neither variable set anywhere, all three agree on the default. Every ledger
+client trusts the system roots plus that file, or only `LEDGER_CA_PEM` when that is set; see
+[Hosted ledger authentication](../reference/hosted-ledger-auth.md). A hive whose environment sets `LEDGER_CA_PEM`
+ignores the delivered file. Neither variable is written into `hive.env`.
+
+### Checking a hive's CA
+
+```bash
+# On the hive: the file agents trust, and the certificate it holds
+ca="${LEDGER_CA_FILE:-${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/ledger-ca.pem}"
+openssl x509 -in "$ca" -noout -subject -enddate
+
+# Rewrite it from the hive endpoint
+agentihooks hive refresh
+
+# The ledger's certificate verifies against it
+curl -sS --cacert "$ca" -o /dev/null -w '%{http_code}\n' https://swarm.example.internal/healthz
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A master or engineer launched on the hive fails its ledger join with `certificate verify failed` | No `ledger-ca.pem` in the hive home: the hive joined before its UI hive or endpoint served a CA | Serve the CA there (see [Where the CA comes from](#where-the-ca-comes-from)), then run `agentihooks hive refresh` on the hive |
+| `hive refresh` succeeds but the file stays absent or stale | The endpoint serves no valid CA: `LEDGER_CA_PEM` and its CA file are both unset, empty, not a certificate or carry a private key; or the endpoint started before its CA source changed; or `hive.join.serveLedgerCa` is `false` | Fix the endpoint's CA source and restart `hive serve` or roll the `hive-join` pod; on Helm, check `ledger.tls.secretName` names a secret with `ca.crt` |
+| Agents still fail after the file is correct | The `hive run` environment sets `LEDGER_CA_PEM` to another CA, or `LEDGER_CA_FILE` to another path than the hive wrote | Unset the stray variable, or set it to the same value where `hive refresh` and `hive run` both read it, then restart the hive service |
+| `LEDGER_CA_FILE names no file: <path>` | `LEDGER_CA_FILE` is set and the file is missing | Run `agentihooks hive refresh` with the same `LEDGER_CA_FILE`, or unset it to use `ledger-ca.pem` in the home |
+| `the ledger CA file <path> holds no valid certificate: <reason>` | The file exists but holds no certificate the client can load. `hive refresh` stops on the same error before it writes | Remove the file, or set `LEDGER_CA_PEM` for that one command, then run `agentihooks hive refresh` |
+| `hive add refused: ssh exited 1` after the `hive.env` write | The remote shell could not create the CA folder or file | Fix the permissions on the remote home or the `LEDGER_CA_FILE` folder, then `hive add` again |
 
 ## Repos and checkouts
 
