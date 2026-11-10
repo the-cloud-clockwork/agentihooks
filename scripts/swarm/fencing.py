@@ -518,13 +518,10 @@ def read_lease(store: Any, slug: str) -> dict[str, Any] | None:
     states = _states(store)
     if not isinstance(states, RedisStateStore):
         return None
-    with store.redis.pipeline() as pipe:
-        pipe.hmget(RedisRecords(store.redis).key(slug, META), LAYOUT, "lease")
-        pipe.get(_lease_cache_key(store, slug))
-        pipe.get(states.revision_key)
-        (layout, lease), raw, revision = pipe.execute()
+    layout, lease = store.redis.hmget(RedisRecords(store.redis).key(slug, META), LAYOUT, "lease")
     if layout is not None and json.loads(layout)["v"] == RECORDS:
         return {"lease": None if lease is None else json.loads(lease)["v"]}
+    raw, revision = store.redis.mget(_lease_cache_key(store, slug), states.revision_key)
     if raw is None or revision is None:
         return None
     cached = json.loads(raw)
