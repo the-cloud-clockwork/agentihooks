@@ -305,7 +305,13 @@ STEPS = (
     CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
     CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
     CallStep(
-        "status publish", CLOSING_GROUP, held(_status_publish), FOUND, pass_domains("found", "view"), lane=CLOSING
+        "status publish",
+        CLOSING_GROUP,
+        held(_status_publish),
+        FOUND,
+        pass_domains("found", "view"),
+        lane=CLOSING,
+        kept=True,
     ),
 )
 
