@@ -44,7 +44,10 @@ template: `.env.example` stays readable.
   underscore or hyphen is skipped.
 - **Internal errors.** When the guard itself fails, the hook refuses the call
   if the tool input contains a credential file name under the same rule, and
-  lets it through otherwise.
+  lets it through otherwise. If the guard module cannot even be loaded, the
+  hook falls back to its own simpler name list, which has no boundary after
+  the shell and credential store names: an input such as `auth.netrc_path` is
+  then refused.
 
 ## What is refused
 
