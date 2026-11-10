@@ -345,7 +345,9 @@
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
         "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on",
-        "tests/tick/test_offline_view.py::test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once"
+        "tests/tick/test_offline_view.py::test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once",
+        "tests/tick/test_offline_view.py::test_a_refusal_or_other_failure_leaves_the_held_view_online",
+        "tests/tick/test_offline_view.py::test_a_timeout_without_a_held_view_marks_nothing"
       ]
     },
     {

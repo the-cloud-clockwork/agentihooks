@@ -417,3 +417,31 @@ def test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once(
         with pytest.raises(LedgerOffline, match="last good view"):
             getattr(client, then)("sw")
     assert len(calls) == 1
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+@pytest.mark.parametrize(
+    "failure",
+    [refusal(503), ValueError("bad reply"), None],
+    ids=["refusal", "other failure", "no cause"],
+)
+def test_a_refusal_or_other_failure_leaves_the_held_view_online(
+    failure: BaseException | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import service
+
+    ledger = SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", lambda *_args, **_kwargs: {"generation": 3, "data": STATE})
+    with view.holding():
+        view.start("sw", False)
+        view.stopped(failure)
+        assert (view.offline(), view.slow()) == (False, False)
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_timeout_without_a_held_view_marks_nothing() -> None:
+    with view.holding():
+        view.stopped(TimeoutError("timed out"))
+        assert (view.offline(), view.slow(), view.current()) == (False, False, None)
