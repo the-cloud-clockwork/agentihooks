@@ -114,7 +114,7 @@ def server_ended(read: Read) -> bool:
 def watched(
     command: list[str],
     read: Read,
-    popen: Callable[[list[str]], "ViewerProcess"] = subprocess.Popen,
+    popen: Callable[[list[str]], ViewerProcess] = subprocess.Popen,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Run the viewer until it closes, or end it once its app-server is recorded gone: Codex keeps a dead reconnect open."""

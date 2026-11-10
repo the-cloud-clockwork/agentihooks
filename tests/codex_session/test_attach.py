@@ -165,6 +165,7 @@ def test_main_reads_the_named_agent_and_runs_the_viewer_by_default(monkeypatch):
     asked, ran = [], []
     monkeypatch.setattr(attach, "recorded", lambda slug, name: asked.append((slug, name)) or reads(RECORD))
     monkeypatch.setattr(attach.subprocess, "Popen", lambda command: ran.append(command) or Viewer([0]))
+    monkeypatch.setattr(attach.time, "sleep", bounded(3)[0])
     assert attach.main(["--slug", "sw", "--agent", "sw-master-1"]) == 0
     assert asked == [("sw", "sw-master-1")]
     assert ran == [attach.viewer_argv("codex", RECORD)]
