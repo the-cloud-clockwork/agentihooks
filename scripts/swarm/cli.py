@@ -67,7 +67,7 @@ from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
@@ -377,7 +377,7 @@ def _hold_stored(slug: str, exc: OSError) -> None:
     ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
-def _stopped_tick(store, slug, ledger, held):
+def _stopped_tick(store: RedisStore, slug: str, ledger: Any, held: Any) -> tuple[list[str], dict[str, Any]]:
     from scripts.swarm import command_runner, controller
 
     fenced = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
@@ -586,7 +586,7 @@ def _fencing(store: RedisStore, slug: str) -> Callable[[object, str, Any], Any]:
 
 def _fenced(held: object, deployment: str) -> Any:
     """Fence the pass runtime to the lease ``held`` through the runtime port of the pass tools and return it."""
-    tools = cast(Tools, PASS_TOOLS.get())
+    tools: Any = PASS_TOOLS.get()
     return tools.runtime.fence(held, deployment, deadline=Deadline.after(TICK_LOCK_MS / 1000))
 
 
