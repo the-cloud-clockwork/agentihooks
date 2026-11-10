@@ -521,6 +521,19 @@ the refused forms, what still passes, configuration and troubleshooting.
 
 ---
 
+## Credential file names in commands
+
+The credential guard refuses a `Bash` command that reads a dotenv file, a shell
+startup or history file, or a credential store, including a read inside an
+interpreter one-liner. A credential file name counts only when no letter,
+digit, underscore or hyphen follows it, so `python3 -c "auth.env_text(record)"`
+runs while `python3 -c "print(open('auth.env').read())"` is refused. See
+[Credential file names in commands](../reference/credential-guard-file-names.md)
+for the names, where the guard looks for them, examples, configuration and
+troubleshooting.
+
+---
+
 ## All guardrails at a glance
 
 | # | Guardrail | Hook event | Default | Block or warn | Config key |
