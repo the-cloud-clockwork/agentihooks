@@ -166,14 +166,14 @@ orphan and left out of every row.
 
 The scale proof runs the swarm at six, then ten, then fifteen agents on the workstation and pastes one report over
 60 passes per stage on the task. The master judges each report against the stage table. The goal is fifteen agents
-with every pass under one minute.
+with every pass under the golden pass duration (`scripts.tick.engine.GOLDEN_PASS_S`, 100 seconds).
 
 | Rollout stage | `STAGE_TARGETS` pass p95 target | Held when |
 |---|---|---|
 | `S1` (default) | 384 s | the p95 of the last 10 passes is above 384 s |
 | `S2` | 240 s | above 240 s |
 | `S3` | 120 s | above 120 s |
-| `S4` | 60 s | above 60 s; the stage the fifteen agent goal needs |
+| `S4` | 100 s | above 100 s; the golden pass duration, the stage the fifteen agent goal needs |
 
 Run one stage:
 
@@ -183,10 +183,10 @@ agentihooks swarm <id> tick-report --passes 60                # once 60 passes r
 ```
 
 Read the `Pass p95` line against the stage target and the step rows against their budgets. The report prints the
-p95, not the slowest pass, so the slowest pass under one minute at fifteen agents is proven only when the pass p95
-is well under 60 seconds and no step row's p95 approaches it; read single pass wall times from the `tick:passes`
-stream when the p95 is close. Set `AGENTIHOOKS_TICK_STAGE` to the stage the passes meet, so the pass budget hold
-guards it.
+p95, not the slowest pass, so the slowest pass under the golden pass duration at fifteen agents is proven only when
+the pass p95 is well under 100 seconds and no step row's p95 approaches it; read single pass wall times from the
+`tick:passes` stream when the p95 is close. Set `AGENTIHOOKS_TICK_STAGE` to the stage the passes meet, so the pass
+budget hold guards it.
 
 What the scale proof task delivered: two cuts that took the slowest repeated work out of each pass.
 

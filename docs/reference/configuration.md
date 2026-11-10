@@ -460,12 +460,13 @@ See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every proces
 See [The minute tick](../pillars/swarm.md#the-minute-tick) and [Tick report](tick-report.md). Each tick pass reads
 `AGENTIHOOKS_TICK_STAGE` from the environment of the process that runs `agentihooks swarm tick`, so set it in
 `~/.agentihooks/.env` on the machine whose scheduler ticks. `AGENTIHOOKS_TICK_CADENCE` is validated by
-`scripts.tick.engine.cadence_s`, which no pass calls yet.
+`scripts.tick.engine.cadence_s`, which every pass reads: `resting` uses it to decide which slow lane steps rest,
+and the step starvation step floors every step's alarm window to it, critical and wide lanes included.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTIHOOKS_TICK_CADENCE` | `1` | Slow lane cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks a guard: from six minutes the delivery guard and heartbeat limit, from eight the stale watcher as well; the lease TTL check does not depend on the cadence. No pass reads it yet, so it changes nothing today; the scheduler cron stays every minute |
-| `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 60 seconds, matched exactly, so `s2` is refused. Any other value makes `update_pass_budget` raise `KeyError` inside the tick pass, before the observe group runs |
+| `AGENTIHOOKS_TICK_CADENCE` | `1` | Tick cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks a guard: from six minutes the delivery guard and heartbeat limit, from eight the stale watcher as well; the lease TTL check does not depend on the cadence. It does not change how often a pass runs — the scheduler cron stays every minute, and a controller install's own per-pass wait stays `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` — only how far `resting` and the step starvation step's alarm windows stretch past a pass |
+| `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 100 seconds (the golden pass duration, `scripts.tick.engine.GOLDEN_PASS_S`), matched exactly, so `s2` is refused. Any other value makes `update_pass_budget` raise `KeyError` inside the tick pass, before the observe group runs |
 
 Set the stage by adding or editing one `AGENTIHOOKS_TICK_STAGE=S2` line in `~/.agentihooks/.env`; keep a single line
 per key. Check a cadence from the repository root with the workspace Python:
