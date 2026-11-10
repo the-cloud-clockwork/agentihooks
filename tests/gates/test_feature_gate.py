@@ -233,6 +233,16 @@ def test_a_task_without_a_pull_request_reads_only_the_dev_map(ops):
     assert ledger.rows["t1"]["state"] == "done"
 
 
+def test_done_reads_the_named_feature_at_dev_and_the_merged_head(ops, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, ledger, _, _ = ops
+    enforce(store)
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(feature, "read_feature", lambda ref, wanted: calls.append((ref, wanted)) or MAPPED)
+    assert run("sw", "done", *PROOF, "--feature", "f1") == 0
+    assert calls == [("dev", "f1"), ("h1", "f1")]
+    assert ledger.rows["t1"]["state"] == "done"
+
+
 def test_completion_fetches_only_the_requested_feature_fragment(monkeypatch: pytest.MonkeyPatch) -> None:
     import hashlib
 

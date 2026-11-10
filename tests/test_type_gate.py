@@ -609,6 +609,44 @@ def test_type_refresh_preserves_disjoint_legacy_and_fragment_owners(
     assert type_gate.load(root) == {}
 
 
+def test_type_refresh_writes_exact_records_and_drops_stale_and_duplicate_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _tree(tmp_path, {}, {"hooks/a.py": 2, "hooks/gone.py": 1})
+    records = root / "tests/type-baseline"
+    (records / "hooks").mkdir(parents=True)
+    (records / "hooks/a.py.json").write_text("2\n")
+    (records / "hooks/b.py.json").write_text("5\n")
+    (records / "hooks/old.py.json").write_text("4\n")
+    os.utime(records / "hooks/b.py.json", ns=(1_000_000_000, 1_000_000_000))
+    measured = {"hooks/a.py": 1, "hooks/b.py": 5, "pkg/deep/c.py": 3}
+    monkeypatch.setattr(type_gate, "measure", lambda _: measured)
+    type_gate.write(root)
+    assert (root / type_gate.BASELINE).read_text() == '{\n  "hooks/a.py": 1\n}\n'
+    assert sorted(path.relative_to(records).as_posix() for path in records.rglob("*.json")) == [
+        "hooks/b.py.json",
+        "pkg/deep/c.py.json",
+    ]
+    assert (records / "hooks/b.py.json").read_text() == "5\n"
+    assert (records / "hooks/b.py.json").stat().st_mtime_ns == 1_000_000_000
+    assert (records / "pkg/deep/c.py.json").read_text() == "3\n"
+    measured["hooks/b.py"] = 4
+    type_gate.write(root)
+    assert (records / "hooks/b.py.json").read_text() == "4\n"
+    assert type_gate.load(root) == {"hooks/a.py": 1, "hooks/b.py": 4, "pkg/deep/c.py": 3}
+
+
+def test_type_records_accept_a_zero_count_and_refuse_a_non_python_source(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {}, {})
+    records = root / "tests/type-baseline/hooks"
+    records.mkdir(parents=True)
+    (records / "a.py.json").write_text("0\n")
+    assert type_gate.load(root) == {"hooks/a.py": 0}
+    (records / "a.txt.json").write_text("1\n")
+    with pytest.raises(ValueError, match="invalid type count"):
+        type_gate.load(root)
+
+
 @pytest.mark.parametrize("order", [("left", "right"), ("right", "left")])
 @pytest.mark.feature("independent-ci-records")
 def test_independent_source_branches_merge_their_records_in_either_order(

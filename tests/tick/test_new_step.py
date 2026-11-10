@@ -112,6 +112,8 @@ def test_scaffold_writes_its_feature_fragment_without_touching_the_shared_map(tr
     entries = import_module("scripts.feature_map").load(map_path)["features"]
     assert len(entries) == 1
     assert entries[0]["tests"] == ["tests/tick/steps/test_probe_widgets.py::test_probe_widgets"]
+    fragment = import_module("scripts.feature_map").entry_path(map_path, entries[0]["id"])
+    assert fragment.read_text() == json.dumps(entries[0], indent=2) + "\n"
     assert import_module("scripts.tick.new_step").check(tree, STEP)["feature entry"]
 
 
