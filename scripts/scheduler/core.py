@@ -31,7 +31,10 @@ def abandoned(entry: dict[str, Any], now: float) -> bool:
     """A process timer no waiter holds: finished or never started, and due ABANDONED_S or more before now."""
     due = entry.get("due")
     return (
-        entry["owner"] == PROCESS_OWNER and entry["state"] in ABANDONED and due is not None and now - due >= ABANDONED_S
+        entry.get("owner") == PROCESS_OWNER
+        and entry.get("state") in ABANDONED
+        and due is not None
+        and now - due >= ABANDONED_S
     )
 
 
@@ -239,28 +242,28 @@ class Scheduler:
         if delay is not None and delay < 0:
             raise ValueError("delay must not be negative")
         due = at if at is not None else now + delay
-        return self._new(Schedule("timer", owner, payload, due, delay))
+        return self._new(Schedule("timer", owner, payload, due, delay), now)
 
     def stopwatch(self, *, owner: str, payload: str, limit: float, now: float | None = None) -> Entry:
         now = time.time() if now is None else now
         if limit < 0:
             raise ValueError("limit must not be negative")
-        return self._new(Schedule("stopwatch", owner, payload, now + limit, limit))
+        return self._new(Schedule("stopwatch", owner, payload, now + limit, limit), now)
 
     def interval(self, *, owner: str, payload: str, every: float, now: float | None = None) -> Entry:
         now = time.time() if now is None else now
         if every <= 0:
             raise ValueError("an interval must be positive")
-        return self._new(Schedule("interval", owner, payload, now + every, every))
+        return self._new(Schedule("interval", owner, payload, now + every, every), now)
 
     def cron(
         self, *, owner: str, payload: str, expression: str, timezone: str = "UTC", now: float | None = None
     ) -> Entry:
         now = time.time() if now is None else now
         due = next_due(expression, timezone, now)
-        return self._new(Schedule("cron", owner, payload, due, None, expression, timezone))
+        return self._new(Schedule("cron", owner, payload, due, None, expression, timezone), now)
 
-    def _new(self, schedule: Schedule) -> Entry:
+    def _new(self, schedule: Schedule, now: float) -> Entry:
         if not schedule.owner or not schedule.payload.strip():
             raise ValueError("a schedule needs an owner and payload")
         entry_id = uuid.uuid4().hex
@@ -272,7 +275,6 @@ class Scheduler:
             "signal": "limit_reached" if schedule.kind == "stopwatch" else "timeout",
             "slots": [],
         }
-        now = time.time()
 
         def insert(document: dict[str, Any]) -> None:
             for old_id in [key for key, row in document["entries"].items() if abandoned(row, now)]:
