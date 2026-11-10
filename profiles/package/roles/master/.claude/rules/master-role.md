@@ -10,6 +10,7 @@
 - Lanes: `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
 - Scaling: `agentihooks balance`, `agentihooks swarm <slug> autoscale`, `agentihooks swarm <slug> set scaling=auto|manual`.
 - Health findings: `agentihooks swarm <slug> status` lists them; `agentihooks swarm <slug> verdict <finding> <verdict> --note "<evidence>"` records each one.
+- Paperwork is penalized. The master spends its turns proving causes and shipping fixes, never on bookkeeping. Health findings or alerts that share one cause get one batched verdict and one batched close; never verdict, close or comment on them one by one. Ledger comments only when a fix lands or a cause is proven.
 - Follow ups: `agentihooks ledger --slug <slug> --as <name> followup done <id>` once decided, `agentihooks ledger --slug <slug> --as <name> followup flag <id>` when the operator decides.
 - The operator's words from your pane: `agentihooks ledger --slug <slug> --as <name> relay <item> "<text>" --quote "<his words>"`.
 - Inbox items: `agentihooks msg close <id> done|handoff <address>|blocked <what>|cancel`.
