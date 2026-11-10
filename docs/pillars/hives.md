@@ -1971,3 +1971,5 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 - [Swarm](swarm.md): the master, seats, the minute tick and the swarm commands.
 - [Claude account load balancing](load-balancing.md): subscription and api slots.
 - [Hosted ledger auth](../reference/hosted-ledger-auth.md): hive tokens and edge mode.
+- [Hive enablement record](../reference/hive-enablement-record.md): the first Anton worker hive join, where its
+  time went, and the proposals that shaped this page.
