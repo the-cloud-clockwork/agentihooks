@@ -138,8 +138,8 @@ kubectl -n <namespace> rollout restart deployment -l app.kubernetes.io/component
 
 `scripts/packaging/hive-reproduce.sh` runs the invite path against a namespace ArgoCD already synced and records the
 wall time of every step up to the first healthy engineer: an engineer working on the new hive whose join report grades
-`complete` or `partial`. Run it on the workstation from an agentihooks checkout, with
-the same settings as `hive invite` and `kubectl` reaching the cluster:
+`complete` or `partial`. Run it on the workstation from an agentihooks checkout, with the same settings as `hive
+invite` and `kubectl` reaching the cluster:
 
 ```bash
 scripts/packaging/hive-reproduce.sh <label> [<namespace>]
