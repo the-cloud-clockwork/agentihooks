@@ -1,10 +1,13 @@
+import urllib.error
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm import cli, outage
+from scripts.hive import sweep
+from scripts.swarm import cli, command_runner, delivery, incidents, ledger_watchdog, outage
+from scripts.swarm.health import prompt_backlog
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -59,12 +62,6 @@ def test_tick_records_the_provider_error_observed_for_its_agent(store, tmp_path,
 def test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps(
     store: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import urllib.error
-
-    from scripts.hive import sweep
-    from scripts.swarm import command_runner, incidents, ledger_watchdog
-    from scripts.swarm.health import prompt_backlog
-
     def refused(slug: str, service: bool = False, timeout: float | None = None) -> None:
         raise urllib.error.URLError("refused")
 
@@ -77,7 +74,8 @@ def test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps(
     monkeypatch.setattr(incidents, "host_pressure", lambda *args, **kwargs: called.append("host pressure") or [])
     monkeypatch.setattr(prompt_backlog, "observe", lambda *args, **kwargs: called.append("prompt backlog") or [])
     monkeypatch.setattr(sweep, "sweep", lambda *args, **kwargs: called.append("hive sweep") or [])
+    monkeypatch.setattr(delivery, "migrate_outbox", lambda *args, **kwargs: called.append("outbox migration") or 0)
     monkeypatch.setattr(ledger_watchdog, "watch", lambda *args, **kwargs: called.append("ledger watchdog") or [])
     monkeypatch.setattr(command_runner, "consume", lambda *args, **kwargs: called.append("command runner") or [])
     assert cli.run_tick(store, "sw", LedgerClient(), FakeRuntime()) == ["Ledger health probe failed"]
-    assert sorted(called) == ["hive sweep", "host pressure", "prompt backlog"]
+    assert sorted(called) == ["hive sweep", "host pressure", "outbox migration", "prompt backlog"]

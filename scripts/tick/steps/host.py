@@ -28,7 +28,7 @@ from scripts.tick.steps.tasks import PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
-REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep"})
+REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
 
 
 def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
