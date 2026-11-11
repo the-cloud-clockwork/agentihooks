@@ -201,11 +201,15 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
 
 
 def withdraw_stale(bus: Bus, view: Snapshot, policy: QueuePolicy = QueuePolicy()) -> int:
-    """Removes from every lane queue each waiting offer that ``withdrawal`` names against the snapshot."""
+    """Removes from every lane queue each waiting offer that ``withdrawal`` names against the snapshot, or whose task
+    turned workstation, which hives never take."""
     return sum(
-        bus.queue(queue_name(view.slug, lane), policy).withdraw(lambda event: bool(withdrawal(event, view)))
-        for lane in LANES
+        bus.queue(queue_name(view.slug, lane), policy).withdraw(lambda event: stale(event, view)) for lane in LANES
     )
+
+
+def stale(event: Envelope, view: Snapshot) -> bool:
+    return bool(withdrawal(event, view) or view.rows[event.key].get("workstation"))
 
 
 def withdrawal(event: Envelope, view: Snapshot) -> str:

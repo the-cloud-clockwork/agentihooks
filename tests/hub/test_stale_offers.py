@@ -91,6 +91,19 @@ def test_withdraw_stale_sweeps_every_lane_with_the_withdrawal_reasons(monkeypatc
 
 
 @pytest.mark.feature(FEATURE)
+def test_an_offer_whose_task_turned_workstation_is_withdrawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    admit_all(monkeypatch)
+    row, store, ledger = source()
+    view = readiness.Source(store, ledger).snapshot("rig")
+    assert not readiness.stale(offered("task-a", 3), view)
+    row["workstation"] = True
+    assert readiness.stale(offered("task-a", 3), view)
+    with backend("memory", None) as bus:
+        assert bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy()).offer(offered("task-a", 3))
+        assert readiness.withdraw_stale(bus, view) == 1
+
+
+@pytest.mark.feature(FEATURE)
 def test_the_controller_grant_lets_the_hub_delete_a_stale_offer_from_any_lane_stream() -> None:
     from scripts.hive import nats_grant
 
