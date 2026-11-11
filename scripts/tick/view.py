@@ -141,6 +141,7 @@ class Held:
     stale: bool = False
     offline: bool = False
     slow: bool = False
+    path: Path | None = None
 
 
 HELD: ContextVar[Held | None] = ContextVar("tick_ledger_held", default=None)
@@ -224,8 +225,10 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:
-        """The held view patched with one delta read."""
-        return refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
+        """The held view patched with one delta read, dropping the task fields offline passes queued."""
+        answered = refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
+        queued_file(path).unlink(missing_ok=True)
+        return answered
 
     try:
         view = refresh()
@@ -233,8 +236,9 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
         if exc.code != 400:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
+        queued_file(path).unlink(missing_ok=True)
         view = None
-    _hold(slug, view, _kept(refresh))
+    _hold(slug, view, _kept(refresh), path)
     return view
 
 
@@ -269,22 +273,44 @@ def timed_out(exc: OSError) -> bool:
     return isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
 
 
-def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView]) -> None:
+def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView], path: Path | None = None) -> None:
     """Hold ``view`` of ledger ``slug`` for the rest of the pass, read again through ``renew``."""
     CURRENT.set(view)
-    HELD.set(None if view is None else Held(view, renew))
+    HELD.set(None if view is None else Held(view, renew, path=path))
     REFRESH.set(None if view is None else (slug, renew))
 
 
 def stored(slug: str) -> LedgerView | None:
-    """The last good view of this swarm's ledger stored on this host, or nothing when the host stores none."""
+    """The last good view of this swarm's ledger stored on this host with the task fields an offline pass queued
+    since applied, or nothing when the host stores none."""
+    return _stored_at(_stored_file(slug))
+
+
+def _stored_at(path: Path) -> LedgerView | None:
+    """The view stored at ``path`` with the task fields kept beside it applied, or nothing when none is stored."""
+    found = read_export_file(path)
+    if found is None:
+        return None
+    generation, state = found
+    kept = read_export_file(queued_file(path))
+    if kept is not None and "tasks" in state:
+        state["tasks"] = [{**task, **kept[1].get(task.get("id"), {})} for task in state["tasks"]]
+    return LedgerView(generation, state)
+
+
+def _stored_file(slug: str) -> Path:
+    """The file holding the last good view of this swarm's ledger on this host."""
     from scripts.scheduler import service as scheduler
     from scripts.swarm.ledger_client import _ledger  # pyright: ignore[reportPrivateUsage]
 
     ledger: Any = _ledger()
     base: str = ledger.base(slug)
-    found = read_export_file(view_file(base, slug, scheduler.runtime_dir()))
-    return None if found is None else LedgerView(found[0], found[1])
+    return view_file(base, slug, scheduler.runtime_dir())
+
+
+def queued_file(path: Path) -> Path:
+    """The file beside stored view ``path`` keeping the task fields offline passes queued until the server answers."""
+    return path.with_name(f"{path.stem}.queued.json")
 
 
 def fresh(slug: str) -> bool:
@@ -305,15 +331,17 @@ def fresh(slug: str) -> bool:
 def hold_stored(slug: str) -> LedgerView | None:
     """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
     the host stores none."""
-    view = stored(slug)
+    path = _stored_file(slug)
+    view = _stored_at(path)
     if view is not None:
-        _hold(slug, view, lambda: HELD.get().view)  # pyright: ignore[reportOptionalMemberAccess]
+        _hold(slug, view, lambda: HELD.get().view, path)  # pyright: ignore[reportOptionalMemberAccess]
     return view
 
 
 def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
     """The held document with the task fields of queued ``ops`` applied, held as the view the rest of the pass
-    reads, or an empty document when the pass holds no view."""
+    reads and kept beside the stored view for later offline passes, or an empty document when the pass holds no
+    view."""
     held = HELD.get()
     if held is None:
         return {}
@@ -321,7 +349,18 @@ def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
     document = dict(held.view.document)
     document["tasks"] = [{**task, **fields.get(task.get("id"), {})} for task in held.view.tasks]
     held.view = LedgerView(held.view.generation, document)
+    if held.path is not None:
+        _keep_queued(queued_file(held.path), held.view.generation, fields)
     return document
+
+
+def _keep_queued(path: Path, generation: int, fields: dict[str, dict[str, Any]]) -> None:
+    """Merge the queued task ``fields`` into those kept at ``path``."""
+    kept = read_export_file(path)
+    merged: dict[str, Any] = dict(kept[1]) if kept is not None else {}
+    for task, values in fields.items():
+        merged[task] = {**merged.get(task, {}), **values}
+    write_export_file(path, generation, merged)
 
 
 def document(slug: str) -> dict[str, Any] | None:

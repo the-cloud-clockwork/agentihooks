@@ -255,6 +255,87 @@ def test_an_offline_write_without_a_held_view_is_queued_unguarded(stored: Queued
     assert len(stored) == 1
 
 
+def _offline_claim(name: str) -> dict[str, Any]:
+    with view.holding():
+        view.hold_stored("sw")
+        token = OFFLINE.set(True)
+        try:
+            return LedgerClient().update_task(
+                "sw", "t1", {"state": "claimed", "claimed_by": name}, if_state=("open",), if_match={"claimed_by": ""}
+            )
+        finally:
+            OFFLINE.reset(token)
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued(stored: Queued) -> None:
+    from scripts.swarm.ledger_client import LedgerRefused
+
+    assert _offline_claim("e1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
+    with pytest.raises(LedgerRefused, match="ledger sw refused: tasks/t1 moved since the last good view"):
+        _offline_claim("e2")
+    assert len(stored) == 1
+    held = view.stored("sw")
+    assert held is not None and held.generation == 7
+    assert held.read("tasks", "t1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_queued_writes_of_several_offline_passes_merge_onto_the_stored_view(stored: Queued) -> None:
+    for item, fields in (
+        ("tasks/t1", {"claimed_by": "e1"}),
+        ("tasks/t1", {"state": "claimed"}),
+        ("tasks/t2", {"pr": 9}),
+    ):
+        with view.holding():
+            view.hold_stored("sw")
+            view.queued([{"op": "task_update", "item": item, "fields": fields}])
+    held = view.stored("sw")
+    assert held is not None
+    assert held.read("tasks", "t1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
+    assert held.read("tasks", "t2") == {"id": "t2", "state": "claimed", "pr": 9}
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
+    stored: Queued, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def changes(
+        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+    ) -> dict[str, Any]:
+        return {"generation": since, "changes": {"lists": {}, "set": [], "drop": []}}
+
+    _offline_claim("e1")
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    with view.holding():
+        held = view.start("sw", False)
+        assert held is not None and held.read("tasks", "t1") == {"id": "t1", "state": "open"}
+    reloaded = view.stored("sw")
+    assert reloaded is not None and reloaded.read("tasks", "t1") == {"id": "t1", "state": "open"}
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
+    stored: Queued, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def changes(
+        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+    ) -> dict[str, Any]:
+        return {"generation": since, "changes": {"lists": {}, "set": [], "drop": []}}
+
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    with view.holding():
+        view.start("sw", False)
+        view.queued([{"op": "task_update", "item": "tasks/t1", "fields": {"claimed_by": "e1"}}])
+        kept = view.stored("sw")
+        assert kept is not None and kept.read("tasks", "t1") == {"id": "t1", "state": "open", "claimed_by": "e1"}
+        view.wrote()
+        current = view.current()
+        assert current is not None and current.read("tasks", "t1") == {"id": "t1", "state": "open"}
+    reloaded = view.stored("sw")
+    assert reloaded is not None and reloaded.read("tasks", "t1") == {"id": "t1", "state": "open"}
+
+
 @pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_first_read_stores_the_view_even_at_generation_zero(tmp_path: Path) -> None:
     path = tmp_path / "view.json"

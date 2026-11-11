@@ -364,6 +364,25 @@ def test_a_failed_reboot_pass_ends_the_pass_failed_before_the_tick_runs(
     assert calls == []
 
 
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_step_refused_the_credential_over_plain_http_ends_the_pass_failed(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    swarm, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+
+    def refused(*args: Any) -> list[str]:
+        raise Cleartext("a ledger credential off loopback travels only over https")
+
+    monkeypatch.setattr(reboot, "boot_pass", refused)
+    actions = cli.run_tick(swarm, "sw", ledger, rt, FakeHerdr({}))
+    assert actions == ["pass failed: a step raised Cleartext: a ledger credential off loopback travels only over https"]
+    assert not swarm.redis.exists(swarm.key("sw", "tick-lock"))
+
+
 def _raise(message: str) -> Callable[[Get], list[str]]:
     def call(get: Get) -> list[str]:
         get("box")[task_steps.RAISED] = RuntimeError(message)

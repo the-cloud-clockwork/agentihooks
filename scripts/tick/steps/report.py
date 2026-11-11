@@ -34,6 +34,10 @@ from scripts.tick.steps.host import held, viewed
 Get = Callable[[str], Any]
 
 
+def _reread(get: Get) -> Callable[[str], Any]:
+    return ledger_events.fresh_reader(get("view"), cache=get("store").redis)
+
+
 def _event_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
         ledger_events.event_pass,  # pyright: ignore[reportUnknownMemberType]
@@ -79,14 +83,14 @@ def _waits_end(cli: Any, get: Get) -> Any:
         get("inbox"),
         get("view"),
         cli.now_ms(),
-        ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
+        _reread(get),
     )
 
 
 def _merge_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
         ready.merge_pass,  # pyright: ignore[reportUnknownMemberType]
-        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), ledger_events.view, cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
+        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), _reread(get), cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
         get("rows"),
     )
 
@@ -107,7 +111,7 @@ def _stall_watch(cli: Any, get: Get) -> Any:
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
             released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
-            reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
+            reread=_reread(get),
         ),
         get("doc"),
     )

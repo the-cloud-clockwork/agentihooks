@@ -7,7 +7,7 @@ def run(payload: dict, event: str) -> None:
     hive = os.environ.get("AGENTIHOOKS_HIVE_ID")
     slug = os.environ.get("AGENTIHOOKS_SWARM")
     name = os.environ.get("AGENTIHOOKS_AGENT_NAME")
-    if not all((hive, slug, name)):
+    if not (hive and slug and name):
         return
     from scripts.hive import join_checks, join_report
     from scripts.profiles.binding import HOMES
@@ -44,6 +44,7 @@ def run(payload: dict, event: str) -> None:
         "harness": agent.harness,
         "pane": os.environ.get("HERDR_PANE_ID", agent.pane_id),
         "transcript_dir": str(Path(transcript).parent) if transcript else "",
+        "headed": join_checks.headed(store.redis, hive),
     }
     report = {"agent": name, "slug": slug, "execution_id": agent.execution_id, "started_at": at, "context": context}
     checks = join_checks.startup(store.redis, report)

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.profiles.hub_import import import_hub, main
+from scripts.profiles.hub_import import _write, import_hub, main
 
 
 @pytest.fixture
@@ -192,3 +192,103 @@ def test_command_line_prints_the_dry_run_report(hub: Path, tmp_path: Path, capsy
     assert main([str(hub), str(out), "--dry-run"]) == 0
     assert json.loads(capsys.readouterr().out) == import_hub(hub, out, True)
     assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize(
+    "env",
+    [{"GITHUB_TOKEN": "plain-value-123"}, {"DOCS": "xoxb-" + "1" * 12}, {"DB_PASSWORD": "hunter2" + "-literal"}],
+)
+def test_literal_credential_values_refuse_the_import(hub: Path, tmp_path: Path, env: dict[str, str]) -> None:
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=r"literal credential .*settings\.json"):
+        import_hub(hub, out, False)
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+def test_credential_environment_references_are_kept(hub: Path, tmp_path: Path) -> None:
+    env = {"GITHUB_TOKEN": "${GITHUB_TOKEN}", "API_KEY": "$DIAGRAM_KEY", "AUTH_MODE": ""}
+    env |= {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000", "CLAUDE_CODE_DISABLE_AUTH_CHECK": "1"}
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False)
+    assert json.loads((out / "profiles/diagram/.claude/settings.overrides.json").read_text()) == {"env": env}
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize("event", ["PreToolUse", "PermissionRequest", "UserPromptSubmit"])
+def test_a_guard_hook_that_import_would_drop_refuses_the_import(hub: Path, tmp_path: Path, event: str) -> None:
+    guard = [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python /home/operator/guard.py"}]}]
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"hooks": {event: guard}}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"{event} hook .*settings\.json"):
+        import_hub(hub, out, False)
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize(("method", "fail_after"), [("write_bytes", 5), ("rename", 1)])
+def test_a_write_error_leaves_no_profile_behind(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str, fail_after: int
+) -> None:
+    second = hub / "agents/second/package"
+    second.mkdir(parents=True)
+    (second / "command.yml").write_text(yaml.safe_dump({"name": "second"}))
+    (second / "CLAUDE.md").write_text("Second.\n")
+    real = getattr(Path, method)
+    calls: list[Path] = []
+
+    def failing(self: Path, arg: object) -> object:
+        calls.append(self)
+        if len(calls) == fail_after + 1:
+            raise OSError("disk full")
+        return real(self, arg)
+
+    monkeypatch.setattr(Path, method, failing)
+    out = tmp_path / "nested/bundle"
+    with pytest.raises(OSError, match="disk full"):
+        import_hub(hub, out, False)
+    assert [path for path in out.rglob("*") if path.is_file()] == []
+    assert all(path.is_relative_to(out) for path in calls)
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_failed_rollback_names_the_profile_left_behind(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    second = hub / "agents/second/package"
+    second.mkdir(parents=True)
+    (second / "command.yml").write_text(yaml.safe_dump({"name": "second"}))
+    real = Path.rename
+    calls: list[Path] = []
+
+    def failing(self: Path, target: Path) -> Path:
+        calls.append(self)
+        if len(calls) > 1:
+            raise OSError("disk full")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing)
+    out = tmp_path / "bundle"
+    with pytest.raises(OSError, match="disk full") as raised:
+        import_hub(hub, out, False)
+    assert raised.value.__notes__ == [f"remove left over profile: {out / 'profiles/diagram'}"]
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_profile_folder_that_appeared_since_planning_is_never_overwritten(tmp_path: Path) -> None:
+    out = tmp_path / "bundle"
+    existing = out / "profiles/second"
+    existing.mkdir(parents=True)
+    (existing / "CLAUDE.md").write_text("Existing")
+    with pytest.raises(ValueError, match="profile name taken: second"):
+        _write(out, {"first": {"CLAUDE.md": b"First"}, "second": {"CLAUDE.md": b"Second"}})
+    assert sorted(path.name for path in (out / "profiles").iterdir()) == ["second"]
+    assert (existing / "CLAUDE.md").read_text() == "Existing"
+    assert sorted(path.relative_to(out).as_posix() for path in out.rglob("*")) == [
+        "profiles",
+        "profiles/second",
+        "profiles/second/CLAUDE.md",
+    ]

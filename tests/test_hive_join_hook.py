@@ -140,7 +140,14 @@ def test_hive_hook_reports_defaults_for_the_named_agent_once(monkeypatch):
     monkeypatch.setattr(join_checks, "startup", lambda redis, report: calls.append((redis, report)) or checks)
     hive_join.run({}, "start")
     hive_join.run({}, "start")
-    context = {"home": "", "profile": "engineer", "harness": "copilot", "pane": "task-pane", "transcript_dir": ""}
+    context = {
+        "home": "",
+        "profile": "engineer",
+        "harness": "copilot",
+        "pane": "task-pane",
+        "transcript_dir": "",
+        "headed": False,
+    }
     assert len(calls) == 1
     assert calls[0][0] is client.redis
     assert calls[0][1] == {
