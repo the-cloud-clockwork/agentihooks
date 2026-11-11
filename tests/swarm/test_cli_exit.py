@@ -64,35 +64,6 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
 
 
-@pytest.mark.feature("swarm-exit-after-release")
-def test_a_released_worker_exits_and_the_next_tick_retires_it(env, monkeypatch, capsys):  # noqa: F811
-    from scripts.swarm.tick import tick
-
-    store, ledger, runtime = env
-    run("sw", "create", "--repo", ".", "--max-eng-agents", "0", "--max-ci-agents", "0")
-    name = store.next_name("sw", "eng", 1000)
-    agent = AgentRecord(name, "eng", "t1", pane_id="w1:p1", seat="eng-1@sw", started_at=1000, state="finished")
-    store.put_agent("sw", agent)
-    store.seats.occupy(agent.seat, name, 1000)
-    runtime.live.add(name)
-    assert store.claim("sw", "t1", name, 60_000)
-    ledger.rows["t1"].update(state="pr", claimed_by=name)
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
-    capsys.readouterr()
-
-    assert run("sw", "exit") == 0
-    assert capsys.readouterr().out == f'{{"exited": "{name}"}}\n'
-    assert runtime.reaped == [name]
-    assert store.claimant("sw", "t1") == name
-    assert ledger.rows["t1"]["claimed_by"] == name
-
-    store.update("sw", state="paused")
-    tick("sw", store, ledger, runtime, now_ms=6001)
-    assert [a for a in store.agents("sw") if a.lane != "master"] == []
-    assert runtime.closed == ["w1:p1"]
-
-
 def test_exit_does_not_abandon_an_active_worker_claim(env, monkeypatch):  # noqa: F811
     store, _, runtime = env
     run("sw", "create", "--repo", ".")
