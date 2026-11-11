@@ -1068,8 +1068,10 @@ selectors into one ordered list. Each task then costs one lookup per node of its
 plus the merged chain, and one comparison per selector record, instead of a match of every focus record against every
 task. On 3 November 2026, with the 284 focus records `rig-grade-swarm` held, one call over 3000 tasks went from
 0.622 s to 0.006 s with the same ranks
-([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). The call has its own
-`scripts.swarm.focus_budget.ranks` row inside `_spawn_order`, read as in the table above.
+([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). Spawn order calls `ranks` once
+per lane inside `focus_budget.place`, which orders the lane's ready tasks with it, and once more after the lanes to sort
+the whole queue. Only that last call has its own `scripts.swarm.focus_budget.ranks` row; the per lane calls count in
+each lane's `focus_budget.place` row.
 
 Measure the spawn step over a thirty minute UTC window from its `swarm_tick_step` finished records:
 
@@ -1085,7 +1087,8 @@ print(len(w), "spawn passes; median", round(w[len(w) // 2], 2) if w else None, "
 
 Measured this way on the workstation tick of `rig-grade-swarm`, the spawn step read 8 passes with a median of 27.37 s
 and a max of 49.88 s from 17:30 to 18:00 UTC on 3 November 2026, and 9 passes with a median of 2.20 s and a max of
-32.89 s from 22:56 to 23:17 UTC after the merge. The max stayed above the 5 s target, so the remaining slow passes are
+32.89 s from 22:56 to 23:17 UTC after the merge, as recorded in the proof of the ledger task the pull request
+closed. The max stayed above the 5 s target, so the remaining slow passes are
 in other parts of spawn order or in the launch itself; split them with the rows above and with
 [Timed rows inside a fenced spawn](#timed-rows-inside-a-fenced-spawn).
 
@@ -1097,7 +1100,7 @@ node address focuses without calling `freeze.covers` once.
 |---|---|
 | A task inside a focused phase launches after tasks of a later focus | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
 | A focus record never ranks any task | Its target is a selector with no value, such as `lane:`, or names a node that no task's ancestry holds; clear it with `unfreeze TARGET` |
-| The `focus_budget.ranks` row is close to the `_spawn_order` row | The ledger document holds many tasks or selector records; each selector record costs one comparison per task |
+| The `focus_budget.ranks` row, times one more than the lane count, is close to the `_spawn_order` row | Ranking is the slow part, since every lane's `focus_budget.place` row holds one more `ranks` call; the ledger document holds many tasks or selector records, and each selector record costs one comparison per task |
 
 ## One lease heartbeat per tick pass
 
