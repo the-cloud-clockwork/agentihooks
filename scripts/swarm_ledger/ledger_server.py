@@ -1263,7 +1263,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "no such ledger", "text/plain")
         origin = self.headers.get("Origin")
         agent = self.headers.get("X-Ledger-Agent")
-        operator = operator_plan and agent in (None, "operator")
+        operator = operator_plan and agent in (None, "operator") and not self.headers.get("X-Ledger-Tick")
         if origin not in ALLOWED_ORIGINS and (origin is not None or not (agent or operator)):
             return self.send(403, "origin not allowed", "text/plain")
         if self.refused(slug):

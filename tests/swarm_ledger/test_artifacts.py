@@ -430,8 +430,11 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
 
 
 class TestOperatorHostPlanUpload(Endpoint):
-    def upload_like_the_cli(self, agent: str | None, request: dict) -> tuple[int, str]:
+    def upload_like_the_cli(
+        self, agent: str | None, request: dict, extra: dict[str, str] | None = None
+    ) -> tuple[int, str]:
         headers = {
+            **(extra or {}),
             "Host": f"127.0.0.1:{server.PORT}",
             "X-Artifact-Name": "plan.md",
             "X-Artifact-Request": json.dumps(request),
@@ -466,6 +469,16 @@ class TestOperatorHostPlanUpload(Endpoint):
     @pytest.mark.feature("operator-host-plan-upload")
     def test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused(self) -> None:
         assert self.upload_like_the_cli("host-stranger", {"task": "", "title": "Plan", "plan": True}) == (
+            403,
+            "agent must join this ledger before uploading",
+        )
+
+    @pytest.mark.feature("operator-host-plan-upload")
+    def test_a_tick_credential_plan_upload_is_never_taken_as_the_operator(self) -> None:
+        plan = {"task": "", "title": "Plan", "plan": True}
+        tick = {"X-Ledger-Tick": "1.signed"}
+        assert self.upload_like_the_cli(None, plan, tick) == (403, "origin not allowed")
+        assert self.upload_like_the_cli("operator", plan, tick) == (
             403,
             "agent must join this ledger before uploading",
         )
