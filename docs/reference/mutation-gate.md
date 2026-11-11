@@ -371,7 +371,7 @@ body changes the shape.
 | A class attribute is added or removed, such as a new dataclass field | Unchanged | Tests that executed the changed lines |
 | A class attribute whose value is a dict literal changes, such as a dispatch table | Changed | Every test reaching a recorded unit of the module |
 | A top level assignment changes, `SETTING = 1` to `SETTING = 2` | Changed | Every test reaching a recorded unit of the module |
-| A new entry is appended to a top level literal, `HANDLERS = {"a": f}` to `HANDLERS = {"a": f, "b": g}` | Changed, exempt as additive | Tests that executed the changed lines, plus tests that executed a line reading that table. A dict subscript lookup outside a `try` block is not counted, because only a test passing the new key reaches the new entry |
+| A new entry is appended to a top level literal, `HANDLERS = {"a": f}` to `HANDLERS = {"a": f, "b": g}` | Changed, exempt as additive | Tests that executed the changed lines, plus tests that executed a line reading that table, plus any test that executed a line of that file and whose own test file names the table. A dict subscript lookup outside a `try` block is not counted as a read, because only a test passing the new key reaches the new entry |
 | A class base, keyword or decorator changes | Changed | Every test reaching a recorded unit of the module |
 | A decorator on a function or method is added, removed or changed | Changed | Every test reaching a recorded unit of the module |
 | A method or nested class is added, removed or renamed | Changed | Every test reaching a recorded unit of the module |
