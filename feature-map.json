@@ -3629,6 +3629,16 @@
         "tests/hive/test_join_headed.py::test_startup_runs_the_headed_checks_only_on_a_headed_hive",
         "tests/hive/test_join_headed.py::test_a_hive_is_headed_when_its_registry_record_carries_the_interface"
       ]
+    },
+    {
+      "id": "swarm-exit-after-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-agent-self-exit",
+      "behaviour": "A tick launched worker that already handed off its seat with ready, park or handoff, so the tick already counts it ended, can run swarm exit to end its own session without the swarm up refusal; the claim the swarm carries for its pull request stays in place and the next tick pass retires the finished agent and closes its pane.",
+      "seam": "swarm exit against the tick retire path for a finished worker",
+      "tests": [
+        "tests/swarm/test_cli_self_exit.py::test_a_released_worker_exits_and_the_next_tick_retires_it"
+      ]
     }
   ],
   "unmapped_rules": [
