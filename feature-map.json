@@ -3956,6 +3956,18 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
       ]
+    },
+    {
+      "id": "hub-withdraws-stale-offers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-withdraw-stale-offers",
+      "behaviour": "Before the hub readiness pass publishes fresh offers, it removes from every lane work queue each waiting offer whose task is gone, claimed, no longer open, at a newer claim generation, moved lane or held, so a stream with thousands of withdrawn offers ahead delivers the fresh offer first.",
+      "seam": "scripts.swarm.readiness.publish through WorkQueue.withdraw on the memory and NATS work queues",
+      "tests": [
+        "tests/hub/test_stale_offers.py::test_a_lane_stream_with_withdrawn_offers_ahead_delivers_the_fresh_offer_first",
+        "tests/hub/test_stale_offers.py::test_withdraw_removes_only_the_offers_named_stale_and_counts_them",
+        "tests/hub/test_stale_offers.py::test_withdraw_stale_sweeps_every_lane_with_the_withdrawal_reasons"
+      ]
     }
   ],
   "unmapped_rules": [
