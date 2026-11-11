@@ -51,7 +51,7 @@ pulls the merge.
 |-----|---------|---------|
 | `threshold` | `30` | Live processes with one name that flag the name |
 | `timeout` | `1h` | How long a flagged name stays over the threshold before its processes are ended: `<n>h`, `<n>m`, `<n>s` or seconds |
-| `excludes` | shells, `node`, `python3`, `docker`, `claude`, `systemd` and others | Process names the guard never counts |
+| `excludes` | shells, `node`, `python`, `python3`, `docker`, `claude`, `systemd` and others | Process names the guard never counts |
 | `excludeCommands` | see below | Bash extended regular expressions matched against a process's command line |
 | `logMaxSizeMB` | `10` | Size at which `~/guard-daemon.log` moves to `~/guard-daemon.log.1` |
 | `stateFile` | `~/guard-daemon-state.json` | Where flag times are kept |
@@ -90,7 +90,7 @@ not spare the tick without sparing every `agentihooks` process.
 | Process | Process name | Pattern |
 |---------|--------------|---------|
 | A tick pass, `agentihooks swarm tick`, run by any path to the command | `agentihooks` | `(^\|[ /])agentihooks swarm tick( \|$)` |
-| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started by the swarm timer unit | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
+| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started by the swarm timer unit or by each scheduler delivery of the tick | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
 
 Both patterns end at a space or the end of the command line, so a longer
 subcommand is not matched:
@@ -101,15 +101,15 @@ subcommand is not matched:
 | `/home/u/.venv/bin/agentihooks swarm tick --slug x` | yes |
 | `/usr/bin/python3 -m scripts.swarm.scheduled_tick` | yes |
 | `agentihooks swarm tick-report` | no |
-| `agentihooks swarm tick-watch` | no; the third pattern, added by [#5107](https://github.com/the-cloud-clockwork/agentihooks/pull/5107), keeps it alive |
+| `agentihooks swarm tick-watch` | no; kept alive by the fourth shipped pattern, from [#5107](https://github.com/the-cloud-clockwork/agentihooks/pull/5107) |
 
 `python` and `python3` are already in `excludes`; the second pattern keeps the
 holder alive when its interpreter runs under another name, such as
 `python3.12`.
 
-A skipped process still counts toward its group. A tick that keeps the
-`agentihooks` group at the threshold lets the guard end the other processes in
-that group; it is never ended itself. The same holds for every
+A skipped process still counts toward its group. When the tick keeps the
+`agentihooks` group at the threshold, the guard still ends the other processes
+in that group; the tick itself is never ended. The same holds for every
 `excludeCommands` pattern.
 
 The guard checks every `excludeCommands` entry before it counts any process.
@@ -394,6 +394,9 @@ done
 
 ## Evidence for pull request 4962
 
+- The incident, the runs and the dry run below are recorded in the
+  [pull request](https://github.com/the-cloud-clockwork/agentihooks/pull/4962)
+  body.
 - Red: [Proofs run 39337608074](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337608074)
   ran the new test against the guard as it was. The tick probe ended with
   status `-15` (`SIGTERM`).
@@ -402,15 +405,20 @@ done
   after review fixes.
 - `tests/test_host_guard.py` runs the real guard script twice against long
   lived probes that share one process name, with `threshold` 4 and `timeout`
-  `0s`. Every other process name the account runs is added to `excludes`, so
-  only the probe group can be ended. The tick and scheduled tick probes must
-  survive and be logged `SKIPPED`. The other `agentihooks` probes, such as
-  `ledger watch`, must be logged `KILLED`. A second test gives the guard an invalid pattern and a string in
-  place of the list, and checks that each pass exits 1 before `TICK_START`.
+  `0s`. The test adds every other process name its user runs to `excludes`,
+  so only the probe group can be ended. At #4962 the tick and scheduled tick
+  probes had to survive and be logged `SKIPPED`, while the `ledger watch` and
+  `swarm tick-watch` probes had to be logged `KILLED`. Later pull requests
+  extended the same test: today the `select-profile`, `tick-watch`, `prober`
+  and `waker` probes must survive too, and `ledger watch` and
+  `swarm waker-report` must be `KILLED`. `waker-report` checks that a longer
+  subcommand is not matched. A second test gives the guard an invalid pattern
+  and a string in place of the list, and checks that each pass exits 1 before
+  `TICK_START`.
 - A dry run on the workstation, with threshold 5 and timeout `0s`, compared the
-  old home guard with the new one. Both flagged the same 32 processes. The only
-  difference was the running `agentihooks swarm tick`: `would_kill` under the
-  old guard, `SKIPPED` under the new one.
+  guard before #4962 with the guard after it. Both flagged the same 32
+  processes. The only difference was the running `agentihooks swarm tick`:
+  `would_kill` before, `SKIPPED` after.
 
 ## Evidence for pull request 5006
 
