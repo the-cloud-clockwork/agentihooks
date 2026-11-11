@@ -240,6 +240,7 @@ def test_a_master_remote_or_live_launch_closes_its_pane_on_retirement(store, age
     assert runtime.closed == [agent.pane_id] and failed_panes.held(store, "sw") == {}
 
 
+@pytest.mark.feature("hive-launch-pane-off-controller-hold")
 def test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold(store, monkeypatch):
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
     runtime = PaneRuntime()
