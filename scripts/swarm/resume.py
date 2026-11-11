@@ -77,18 +77,17 @@ def restored_text(slug, agent, ledger):
 
 
 def occupants_first(store, agents):
-    """The seat's current occupant is judged before an older record of the same seat, so it is the one that waits."""
     return sorted(agents, key=lambda a: bool(a.seat) and store.seats.occupant(a.seat).occupant != a.name)
 
 
 def waiting_peer(store, slug, agent) -> str:
-    """Another agent of the same seat already awaiting a restore decision; one seat waits on one decision."""
     if not agent.seat:
         return ""
-    return next(
-        (a.name for a in store.agents(slug) if a.name != agent.name and a.seat == agent.seat and a.state == AWAITING),
-        "",
-    )
+    occupant = store.seats.occupant(agent.seat).occupant
+    if occupant == agent.name:
+        return ""
+    waiting = any(a.name == occupant and a.state == AWAITING for a in store.agents(slug))
+    return occupant if waiting else ""
 
 
 def reopen(store, slug, worktrees, runtime, now_ms, ledger, has_quota=account_quota):
@@ -115,8 +114,13 @@ class RestoreContext:
 
 
 def _attempt(store, slug, agent, worktree, context, transfer):
-    peer = waiting_peer(store, slug, agent)
-    if agent.seat and not peer:
+    if peer := waiting_peer(store, slug, agent):
+        store.put_agent(slug, replace(agent, state="finished"))
+        reason = f"seat {agent.seat} already waits on {peer}"
+        return Outcome(
+            agent.name, agent.lane, agent.task, REFUSED, reason, agent.conversation_id, context.at, transfer["id"]
+        )
+    if agent.seat:
         if store.seats.occupant(agent.seat).occupant != agent.name:
             store.seats.occupy(agent.seat, agent.name, context.at)
         transfers.attach(store, slug, agent)
@@ -143,15 +147,20 @@ def _attempt(store, slug, agent, worktree, context, transfer):
                 idle_ticks=0,
                 state="working",
             )
-    outcome, reason = RESUMED, REOPENED
     if why:
-        outcome, reason = (REFUSED, f"seat {agent.seat} already waits on {peer}") if peer else (AWAITING, why)
-        agent = replace(agent, state="finished" if peer else AWAITING)
+        agent = replace(agent, state=AWAITING)
     store.put_agent(slug, agent)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live)
     return Outcome(
-        agent.name, agent.lane, agent.task, outcome, reason, agent.conversation_id, context.at, transfer["id"]
+        agent.name,
+        agent.lane,
+        agent.task,
+        AWAITING if why else RESUMED,
+        why or REOPENED,
+        agent.conversation_id,
+        context.at,
+        transfer["id"],
     )
 
 

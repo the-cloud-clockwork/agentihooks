@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from scripts.swarm import resume, snapshot
+from scripts.swarm import reboot, resume, snapshot
 from scripts.swarm.health import restore_wait
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from tests.swarm.test_resume import ResumingRuntime, restore
@@ -14,9 +14,9 @@ pytestmark = pytest.mark.unit
 MINUTE = 60_000
 
 
-def waiting(store, at, name="sw-eng-1", **fields):
+def waiting(store, at, name="sw-eng-1"):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
-    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", state=resume.AWAITING, **fields)
+    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", state=resume.AWAITING)
     store.put_agent("sw", agent)
     row = resume.Outcome(name, "eng", "t1", resume.AWAITING, "worktree gone", "c1", at)
     store.put_restored("sw", [asdict(row)])
@@ -112,16 +112,45 @@ class Notes:
 
 
 def test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(store):
-    from scripts.swarm import reboot
-
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     first = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw", state=resume.AWAITING)
     second = AgentRecord("sw-master-2", MASTER, MASTER, seat="master@sw")
     store.put_agent("sw", first)
     store.put_agent("sw", second)
+    store.seats.occupy("master@sw", "sw-master-1", 1)
     notes = Notes()
     action = reboot._await_decision("sw", store, notes, second, 1_000)
     assert action == "sw-master-2 was not left waiting because seat master@sw already waits on sw-master-1"
     assert {a.name: a.state for a in store.agents("sw")} == {"sw-master-1": resume.AWAITING, "sw-master-2": "finished"}
     assert store.restored("sw") == []
     assert notes.lines == [f"{action}; one restore decision covers the seat."]
+
+
+def test_a_stale_waiting_record_that_no_longer_holds_the_seat_never_refuses_its_occupant(store):
+    store.create(SwarmConfig("sw", "/repo", 2, 1))
+    stale = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw", state=resume.AWAITING)
+    current = AgentRecord("sw-master-2", MASTER, MASTER, seat="master@sw")
+    store.put_agent("sw", stale)
+    store.put_agent("sw", current)
+    store.seats.occupy("master@sw", "sw-master-2", 1)
+    assert resume.waiting_peer(store, "sw", current) == ""
+    reboot._await_decision("sw", store, Notes(), current, 1_000)
+    assert {a.name: a.state for a in store.agents("sw")}["sw-master-2"] == resume.AWAITING
+
+
+def test_restore_refuses_a_second_agent_of_a_waiting_seat_even_when_its_own_conversation_could_reopen(store, tmp_path):
+    store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
+    store.put_agent(
+        "sw", AgentRecord("sw-master-1", MASTER, MASTER, pane_id="w1:m1", harness="claude", seat="master@sw")
+    )
+    second = AgentRecord(
+        "sw-master-2", MASTER, MASTER, pane_id="w1:m2", harness="claude", seat="master@sw", conversation_id="c2"
+    )
+    store.put_agent("sw", second)
+    snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
+    store.redis.flushall()
+    store.seats.occupy("master@sw", "sw-master-1", 1)
+    rt = ResumingRuntime()
+    outcomes = restore(store, rt)
+    assert {o.name: o.outcome for o in outcomes} == {"sw-master-1": resume.AWAITING, "sw-master-2": resume.REFUSED}
+    assert rt.resumed == []
