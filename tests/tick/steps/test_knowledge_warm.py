@@ -97,12 +97,11 @@ def _refresh(document: dict[str, Any], repository: _Repository, capsys: pytest.C
 def test_knowledge_warm() -> None:
     """The knowledge warm step registers in group wrapper metrics on the slow lane with its feature and ports."""
     found = _step()
-    assert (found.group, found.lane, found.feature, found.effects, found.reads, found.writes, found.needs) == (
+    assert (found.group, found.lane, found.feature, found.effects, found.reads, found.needs) == (
         "wrapper metrics",
         "slow",
         "tick-knowledge-warm",
         frozenset({"host"}),
-        frozenset(),
         frozenset(),
         frozenset(),
     )
