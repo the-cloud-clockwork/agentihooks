@@ -156,6 +156,71 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Master retire request
+
+The handoff ask and its deadline live in one retire request per master, a field named after the master in the
+swarm's Redis hash `<root>:swarm:<slug>:master-retire-requests` (`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`,
+default `agentihooks`). Each field holds:
+
+| Field | Value |
+|---|---|
+| `at` | When the tick sent the ask, in epoch milliseconds; the deadline is `at` plus `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` |
+| `reason` | Why the tick retires the master, such as `its launch check failed on model` or `the swarm is stopping` |
+| `item` | The id of the ask item, sent from `swarm` to the master with ref `master-retire-handoff` |
+| `world` | The inbox the ask was written to: the hive member whose keys hold the master's inbox, or empty for the controller's own inbox |
+
+Every tick that would retire the master reads its request:
+
+| State | Tick action | Journal line |
+|---|---|---|
+| No request, master live and reported | Sends the ask, writes the request, keeps the master | `asked <name> for a handoff before retiring it: <reason>` |
+| Request younger than the wait | Keeps the master | `waiting on <name>'s handoff before retiring it: <reason>` |
+| Request at or past the wait | Forgets the request and retires the master | The retire line of the path that asked, such as `retired <name> after its launch check failed on <fields>` |
+| Master not live, `finished`, `starting`, not a master, or a wait of 0 | Forgets any request and retires at once | The retire line of that path |
+
+Forgetting a request, whether at the deadline, after a handoff, when a stalled master resumes or when the tick drops
+the agent, runs in this order:
+
+1. Delete the request field. From here on `reason` reads empty and the master counts as no longer held.
+2. Open the inbox named by `world`. A request written before the field existed has none and uses the tick's own
+   inbox.
+3. Read the ask and, when it is still open, close it `done` from `swarm` with the reason the work moved, by default
+   `the master handed off or was retired`.
+
+The ask is a best effort close. When it is missing (the inbox store answers `no message <id>`), already closed, or
+refused for any other inbox error, the request still counts as forgotten and the tick goes on with the pass. A close
+that loses a race with another writer (`Contended`) is retried up to three times; after the third loss the ask stays
+open and the request is gone all the same, because keeping it would hold the seat for an agent the tick has already
+dropped.
+
+This keeps the tick alive on the failed launch path: a master whose launch check fails is asked for a handoff, and at
+the deadline the tick forgets the request and retires it even when the ask item no longer exists. Before this, a
+missing ask raised `InboxError: no message <id>` out of the failed launch step and the whole controller process exited,
+on 20 October restarting the Anton swarm controller container once. Regression tests:
+`test_a_failed_launch_retires_a_master_whose_ask_item_is_gone`,
+`test_forget_counts_a_missing_ask_item_as_already_forgotten`, `test_a_contended_close_still_clears_the_request`,
+`test_a_lost_close_race_is_retried_until_the_ask_is_closed` and
+`test_a_close_that_keeps_losing_gives_up_after_its_attempts`.
+
+Check a held master and its ask:
+
+```bash
+# The retire request: at, reason, item and world
+redis-cli HGET agentihooks:swarm:<slug>:master-retire-requests 'master@<code>-<n>'
+
+# The ask item and its state, from the master's inbox
+agentihooks msg inbox --of 'master@<code>-<n>'
+
+# Retire at once without asking, for one tick run
+AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0 agentihooks swarm <slug> tick
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A retired master's inbox still lists a pending `master-retire-handoff` ask | Three close attempts lost a race with another writer | None needed: the request is gone and the master is no longer held; only the ask item remains in the inbox |
+| The controller exits with `InboxError: no message <id>` while retiring a master | A release older than this behaviour | Upgrade; the tick then counts a missing ask as already forgotten |
+| A master stays held past the wait | No tick that would retire it has run since the deadline; a held master keeps its first request and its `at` until it is forgotten | Read `at` and `reason` in the request; the next such tick past `at` plus the wait retires it |
+
 ### Stalled master recycle
 
 Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
@@ -4507,6 +4572,50 @@ Independent GitHub watches spend the shared GitHub hourly quota. Use agentihooks
 
 The guard reads the command's own words, so `gh -R owner/repo run watch 1` is refused as well.
 
+##### Full `gh run view` refusal
+
+The same guard refuses a `gh run view` that names none of `--json`, `--log`, `--log-failed`, `--job` (`-j`) or `--web` (`-w`). This rule covers every swarm agent, masters included, from a `Bash` or `Monitor` call, task or not:
+
+```text
+gh run view without --json, --log, --log-failed or --job reads the annotations of every job, one REST call per job, from the shared GitHub hourly quota. Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>.
+```
+
+In `GH_DEBUG=api` traces, a plain `gh run view <id>` read the run, its jobs, its artifacts and its workflow, then called `check-runs/<id>/annotations` once per job. On the agentihooks Tests run that came to 56 REST requests for one command, while the gh call log recorded the command once. The narrow forms cost a few calls:
+
+| Command | REST requests |
+|---|---|
+| `gh run view <id>` | 56 on the Tests run; 4 plus one per job in general |
+| `gh run view <id> --json status,conclusion` | 2 |
+| `gh run view <id> --json jobs` | 3 |
+| `gh run view <id> --job <job id>` | 4 |
+
+Pick the form by what you need to know:
+
+```bash
+gh run view <run id> --json status,conclusion,jobs
+gh run view <run id> --log-failed
+gh run view <run id> --job <job id> --log
+gh run view <run id> --web
+```
+
+To wait for a run to finish, declare `agentihooks swarm <swarm> wait --on checks <run url>` instead of reading it repeatedly.
+
+What the guard counts as a narrow view:
+
+| Refused | Allowed |
+|---|---|
+| `gh run view 123` | `gh run view 123 --json status,conclusion`, `--json=jobs` |
+| `gh run view 123 -R owner/repo --exit-status` | `gh run view 123 --log`, `--log-failed` |
+| `gh -R owner/repo run view 123 --verbose`, `gh --repo=owner/repo run view 123` | `gh run view 123 --job 456`, `--job=456`, `-j 456`, `-j456` |
+| `cd repo && /usr/bin/gh run view 123 \| tail -n 5` | `gh run view 123 --web`, `-w` |
+| `bash -lc 'gh run view 123'`, `env X=1 gh run view 123`, `time gh run view 123` | `gh run list -L 5`, `echo gh run view 123` |
+
+The guard splits the shell command into its commands, skips leading `gh` options such as `-R`, `--repo` and `--hostname`, and reads the first two words after them. Flags such as `--exit-status`, `--verbose` or `--attempt` do not narrow the read. A session missing `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_AGENT_NAME` is outside the swarm and runs a full view unchanged. There is no setting to turn this rule off within a swarm; it fires through the same pre tool shell guards as the watch refusal.
+
+Delivered in [pull request 8620](https://github.com/the-cloud-clockwork/agentihooks/pull/8620) for ledger task t1781. The hourly sampler of the workstation login, over one hour from 05:00 UTC with the tick running, read 3619 REST calls outside the Doctor, 2470 of them not attributed to any caller; agents ran `gh run view` 87 times in that hour. `GH_DEBUG=api` traces gave the request counts in the table. A conditional read answered `304` did not raise `x-ratelimit-used` in four paired reads, so conditional reads were ruled out as the unattributed share.
+
+`tests/context/test_swarm_wait_nudge.py` pins the rule: `test_a_full_run_view_is_refused_to_every_swarm_agent` for the refused forms across engineer, ci and master names and the exact refusal text, `test_a_narrow_run_view_is_allowed` for the allowed forms, `test_a_full_run_view_outside_the_swarm_is_allowed` for sessions outside a swarm, and `test_a_monitor_cannot_start_a_full_run_view` for `Monitor`.
+
 #### A checked wait ends the turn
 
 A checked wait (`--on checks|merge|reply|task|mutation|intent`) that the command accepts prints one JSON line with a `next` field:
@@ -4550,6 +4659,8 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 | A Claude agent gets the notice twice for one call | Not expected: post tool delivery runs only when `can_inject_context("PreToolUse")` is false. Check `AGENTIHOOKS_TARGET` in the session; the codex wrapper sets it to `codex`. |
 | A Codex agent keeps polling after `wait --on checks` | Read the command output for `next`. When it is missing, the wait was refused or was a bare wait; fix the target and declare it again. |
 | `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on mutation <run url>`. |
+| `gh run view` is refused with `one REST call per job` | The [full run view refusal](#full-gh-run-view-refusal). Add `--json <fields>`, `--log-failed`, or `--job <job id>`; to wait for the run, declare `wait --on checks <run url>`. |
+| A master's `gh run view` is refused while its `gh run watch` is not | Expected: the watch refusal covers eng and ci agents only, the full run view refusal covers every swarm agent. |
 
 ## The minute tick
 
@@ -4787,6 +4898,114 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
+### Idle swarm pane sweep
+
+At the end of every host tick, after the passes of every swarm, the tick closes each herdr pane its swarms opened
+that has had no agent running for five minutes. Handoff tabs, finished engineers and failed launches no longer stay
+open as idle shells. The sweep reads only panes agentihooks recorded at launch, so a pane the operator opened, or any
+pane with no record, is never read or closed.
+
+#### Which panes are recorded
+
+`init-agent` (every swarm spawn, handoff, resume and proof launch) and `run-in-terminal` with a command write one
+record per pane they open in `~/.agentihooks/herdr/panes/` (`AGENTIHOOKS_HERDR_PANES_DIR` overrides the folder).
+A plain `run-in-terminal` shell with no command is not recorded. The record holds:
+
+| Field | Meaning |
+|---|---|
+| `pane_id`, `terminal_id`, `tab_id`, `workspace_id` | Where herdr placed the pane. The terminal id tells a reused pane id apart. |
+| `kind` | `init-agent` or `run-in-terminal`. |
+| `owner_session` | The agent name passed to `init-agent`, or `AGENTIHOOKS_AGENT_NAME` for `run-in-terminal`. |
+| `owner_swarm` | `AGENTIHOOKS_SWARM` of the launching environment; empty outside a swarm. |
+| `swarm_store` | The swarm Redis URL the pane was launched against. A URL with a password is never written: it is stored as `withheld:<digest>`, a digest of the URL without its password. |
+| `launched_at`, `route_status` | Launch time, and whether the launcher reported a started route (`routed`, `bare`, `direct`). |
+| `seen`, `active_at` | A digest of the pane screen at the last sweep and the time it last changed. |
+
+The tick sweep judges only records with an `owner_swarm`. A withheld store opens only when this environment's own
+`AGENTIHOOKS_SWARM_REDIS_URL` has the same digest. A record written before the digest existed carries a bare
+`withheld` mark and resolves to this environment's URL only when that URL has a password. A store that does not
+resolve keeps the pane.
+
+#### How a pane is judged
+
+Each recorded pane goes through these checks in order. The first one that applies decides it.
+
+| Check | Outcome |
+|---|---|
+| herdr no longer lists the pane | The record is dropped. |
+| The pane id now holds another terminal | The record is dropped; the pane is left alone. |
+| Launched inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) | Kept: inside the launch grace. |
+| The swarm store cannot be read, or a legacy `withheld` record's store does not hold the swarm | Kept. |
+| Its owner is an unfinished agent of a running swarm | Kept: its agent is live. A live master pane stays this way. |
+| An `init-agent` pane at a bare shell (every foreground process is a shell with no arguments but flags) whose record never reported a started route | Gone: a failed launch, whatever the swarm says of its agent. |
+| Its owner is not an unfinished agent of the swarm, the swarm is stopped, or the swarm is gone from the store | Gone: its agent was retired, its swarm stopped, or its swarm was removed. |
+| The pane is at a bare shell | Gone: its agent or command exited and left a bare shell. |
+| Otherwise | Kept: its agent is live. |
+| A gone pane whose input line holds text | Kept. |
+| A gone pane idle under five minutes | Kept: used inside the quiet window. |
+
+Idle time runs from the later of two moments: the last time the sweep saw the pane screen change, and the last
+prompt the swarm sent that agent. The threshold is five minutes, or `AGENTIHOOKS_INBOX_QUIET_S` (default 180
+seconds) when that is longer. The sweep stores a screen digest on each pass, so a pane closes no sooner than five
+minutes after the first sweep that saw its current screen.
+
+A pane that passes every check is closed by its own pane id and its record is removed. A tab or workspace the
+sweep leaves with no panes is closed too. A herdr read error on one pane keeps that pane and the sweep goes on to
+the next.
+
+#### Log lines
+
+Each close prints one line to the tick output with the `herdr:` prefix, naming pane, agent, task and idle minutes:
+
+```text
+herdr: closed pane w1:p2 of engineer@a1b2c3-0002, task t-panesweep, idle 5 minutes: its agent was retired
+herdr: closed tab w1:t4, left empty
+```
+
+The reasons are `its agent was retired`, `its swarm stopped`, `its swarm was removed`,
+`its agent exited and left a bare shell`, `its command exited and left a bare shell` and
+`a failed launch left it at a bare shell`. The task is `none` when the swarm store lists no task for the agent.
+A herdr failure for the whole sweep prints `herdr: herdr sweep failed: <error>`. The sweep is skipped when herdr is
+not installed or its server is not running, and when the tick stops at its 450 second deadline or on a service stop.
+
+The same pass removes launch files older than 24 hours from `$XDG_RUNTIME_DIR/agentihooks-claude-terminal` and
+prints `herdr: removed <file>` for each.
+
+#### Run the sweep by hand
+
+`agentihooks gc` lists what the sweep would do, as `would close pane …` lines, and `agentihooks gc --enforce`
+closes it. Unlike the tick, `gc` judges every recorded pane, including `run-in-terminal` panes launched outside a
+swarm:
+
+```bash
+agentihooks gc
+agentihooks gc --enforce
+agentihooks gc --json | jq .herdr
+```
+
+Read the tick's closes from the tick journal:
+
+```bash
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now | grep 'herdr: closed'
+```
+
+#### Configuration
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` | 5 | No pane closes inside this many minutes of its launch. |
+| `AGENTIHOOKS_INBOX_QUIET_S` | 180 | Raises the idle threshold above five minutes when set longer. |
+| `AGENTIHOOKS_HERDR_PANES_DIR` | `~/.agentihooks/herdr/panes` | Folder of pane records. Launchers and the sweep must see the same value. |
+| `AGENTIHOOKS_SWARM_REDIS_URL` | | The store a withheld record resolves to. |
+
+#### Troubleshooting
+
+| Symptom | Cause and action |
+|---|---|
+| An idle swarm tab stays open | Run `agentihooks gc --json` and read the pane's finding. `its swarm store cannot be read` means the record's store does not resolve here: the tick environment's `AGENTIHOOKS_SWARM_REDIS_URL` differs from the launcher's. `its input line holds text` means text sits at the prompt; clear it. A pane with no record was not opened by agentihooks and is never closed. |
+| A pane never closes although its agent ended | The screen keeps changing, or the agent was prompted recently; the idle clock restarts on each. |
+| No `herdr:` lines in the journal | herdr is not installed or its server is down, or the tick stopped at its deadline before the sweep. |
+
 ### Scheduled tick delivery guard
 
 The minute tick moved from the `agentihooks-swarm` systemd timer to the scheduler cron. On 18 October an install
@@ -4828,10 +5047,134 @@ stopped or stopping swarm, and each tick pass while the timer units are still on
   machine tick lock lets only one tick run at a time.
 - **Proven.** The timer is disabled, its service group is drained (stop, then SIGTERM for 30 seconds, then SIGKILL
   for 10), and both unit files are deleted. A timer that cannot be disabled, or a group that does not empty, keeps
-  its files and prints why; a later pass retries.
+  its files and prints why; a later pass retries. See [Draining the old tick service](#draining-the-old-tick-service).
 
 The cron and the supervisor are registered after this decision in both cases. A run from a git worktree or from a
 checkout other than the installed agentihooks leaves the shared units alone and says so.
+
+#### One tick per machine and leftover tick reaping
+
+The 18 to 19 October outage first looked like the old timer tick and the new scheduler tick running side by side.
+The scheduler log disproved it: 169 deliveries failed with `ModuleNotFoundError` from 22:04 UTC to 05:18 UTC, so no
+scheduled tick ran in that window (see [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). The journal
+did show the old `agentihooks-swarm.service` leaving tick children running after every tick from 12:00 to 00:04
+local, and `agentihooks swarm tick` took no machine lock, so the timer and the cron could still have run two ticks
+at once. Three changes close that path; each is in force wherever `agentihooks swarm tick` runs.
+
+**The machine tick lock.** Every machine wide tick runs under one file lock, `swarm-tick.lock` in the scheduler
+runtime folder. The folder is `~/.cache/agentihooks/scheduler/` for the local Redis at `redis://127.0.0.1:6379/0`
+and a hashed subfolder for any other Redis endpoint, hive namespace or event bus, so a scratch Redis gets a lock of
+its own. Two ticks for the same swarm Redis never run at once, whichever started them:
+
+| Who starts the tick | How it holds the lock |
+|---|---|
+| The scheduler cron | The holder (`python -m scripts.swarm.scheduled_tick`, logging to `swarm-tick.log` in the runtime folder) takes the lock, then starts `agentihooks swarm tick` through `systemd-cat -t agentihooks-swarm`, passing the locked descriptor in `AGENTIHOOKS_SWARM_TICK_LOCK_FD`. The tick runs under the holder's lock. |
+| The systemd timer, while it stays | The service runs the same holder with `--unit` (`python -m scripts.swarm.scheduled_tick --unit`), which hands its lock to the tick the same way and writes no delivery record. Units written before [pull request 9586](https://github.com/the-cloud-clockwork/agentihooks/pull/9586) run `agentihooks swarm tick` directly, which takes the lock itself. |
+| A hand run or any other caller | `agentihooks swarm tick` takes the lock itself. |
+
+A tick that finds the lock held prints `another swarm tick is running on this machine` on stderr and ends without
+reaping or ticking. A holder that finds the lock held starts no tick and writes no delivery record. The descriptor in
+`AGENTIHOOKS_SWARM_TICK_LOCK_FD` counts only while it is open on that same lock file; a stale, forged or unreadable
+value falls back to taking the lock, which a running holder refuses. `AGENTIHOOKS_SWARM_TICK_LOCK_FD` is set by the
+holder alone; never set it by hand.
+
+A per swarm tick (`agentihooks swarm <id> tick`) takes no machine lock; its swarm's Redis tick lock still applies
+(see [Tick lock holder record](#tick-lock-holder-record)).
+
+**The leftover tick reaper.** Under the lock, before any other work, the tick ends every earlier tick process it
+finds in `/proc`. A process is a leftover when all of these hold:
+
+- It runs as the same user.
+- Its command line ends in `swarm tick`, or it is a scheduler holder (`-m scripts.swarm.scheduled_tick`).
+- Its environment, over the env files a tick loads (`~/.agentihooks/.env` and `~/.agentihooks/*.env`), resolves to
+  the same scheduler runtime folder, which means the same swarm Redis.
+- It is neither the reaping tick nor one of its parents, so the holder that started this tick is spared.
+
+Age does not matter: since the reaper runs under the lock, any other tick of the same Redis is not the running tick.
+The reaper sends SIGTERM to each leftover, waits up to 10 seconds, then sends SIGKILL to each one still alive whose
+start time still matches, so a pid reused by another process is never killed. It signals the pid only, never its
+process group. Each process ended prints one line in the tick's output:
+
+```text
+reaped leftover swarm tick process 48213 after 62 seconds with SIGTERM: /home/me/.local/bin/agentihooks swarm tick
+```
+
+The signal is `SIGKILL` when the process outlived the grace. A host without `/proc` reaps nothing.
+
+#### Draining the old tick service
+
+The tick service runs with `KillMode=process`, so stopping it stops only its main process and leaves any tick child
+running. Retiring the timer therefore drains the service group before the unit files go:
+
+1. `systemctl --user disable --now agentihooks-swarm.timer`. On failure the pass prints
+   `the agentihooks-swarm timer could not be disabled; its unit files stay until a later pass` and stops here.
+2. Drain `agentihooks-swarm.service`, chosen by where the retiring process runs:
+   - **Outside the unit** (the scheduler tick, a swarm start, a wait pass): `systemctl --user stop` (up to
+     120 seconds), then `systemctl --user kill --kill-who=all` with SIGTERM, polling `TasksCurrent` each second for
+     30 seconds, then the same with SIGKILL for 10 seconds.
+   - **Inside the unit** (a tick the old timer started, found through `/proc/self/cgroup` on cgroup v1 or v2): the
+     tick cannot stop its own unit, so it signals every other live member of the unit's `cgroup.procs`, SIGTERM
+     for 30 seconds, then SIGKILL for 10. It never signals itself or its parents.
+3. When the group is empty, both unit files are deleted and systemd is reloaded. Otherwise the pass prints
+   `the agentihooks-swarm service group did not empty (<n> processes left); its unit files stay until a later pass`,
+   where `<n>` is `unknown` when the group could not be read, and the next pass retries.
+
+The scheduler cron is registered even when the drain fails. The timer is already disabled by then, and the cron is
+the only tick left; skipping it would stop every tick, as on 18 October. A survivor of the failed drain cannot run
+beside a new tick: new code takes the machine lock, and the next tick reaps an old one at any age.
+
+#### Check one tick per machine
+
+All of these only read.
+
+```bash
+# The machine tick lock file and the pid that last took it (local Redis; other endpoints use a hashed subfolder)
+ls ~/.cache/agentihooks/scheduler/swarm-tick.lock ~/.cache/agentihooks/scheduler/*/swarm-tick.lock 2>/dev/null
+cat ~/.cache/agentihooks/scheduler/swarm-tick.lock; echo
+
+# Every machine wide tick and scheduler holder now running, with parent and age in seconds; at most one tick
+# per runtime folder, and a holder only as the parent of that tick
+ps -eo pid,ppid,etimes,args | grep -E "swarm tick$|scripts.swarm.scheduled_tick" | grep -v grep
+
+# Refused starts and reaped leftovers in the last hour: timer ticks write to the unit, scheduled ticks to the user
+# journal through systemd-cat, and holders without systemd-cat to swarm-tick.log
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now --no-pager \
+  | grep -E "another swarm tick|reaped leftover"
+TZ=UTC journalctl --user --since "-1h" --until now --no-pager | grep -E "another swarm tick|reaped leftover"
+grep -E "another swarm tick|reaped leftover" ~/.cache/agentihooks/scheduler/swarm-tick.log
+
+# Drain results of recent retire attempts
+journalctl --user --since "-1h" --no-pager | grep -E "agentihooks-swarm (timer could not|service group did not)"
+```
+
+A `reaped leftover` line right after a timer retire or an upgrade is expected: it is a tick the old service left.
+The same line on every pass means something keeps starting ticks outside the lock.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `another swarm tick is running on this machine` once in a while | A tick pass ran past the next minute, or the timer and the cron fired together while the timer stays. | Expected. The next free minute ticks. |
+| `another swarm tick is running on this machine` on every pass | One tick holds the lock without finishing. | Find it with the `ps` line above. A scheduled tick is stopped by its holder after 9 minutes (SIGTERM, then SIGKILL 90 seconds later); a tick started by hand is not, so end it by its pid. |
+| `reaped leftover swarm tick process` on every pass | A process outside the lock keeps starting ticks, such as a loop or an old checkout. | Read the reaped command line and the parent with `ps -o ppid= -p <pid>` while it runs, and stop that caller. |
+| A tick of a scratch Redis was not reaped by the installed tick | It resolves to another scheduler runtime folder. | Expected: each Redis endpoint has its own lock and reaper. |
+| `service group did not empty` on several passes | A member of the old service ignores SIGKILL, for example stuck in uninterruptible I/O, or the group could not be read. | Run `systemctl --user status agentihooks-swarm.service` and end the process listed there. The timer stays disabled, and the next pass retires the unit files. |
+| `the agentihooks-swarm timer could not be disabled` | The user bus is down or `systemctl` is missing. | Restore the user systemd session; the next install pass retries. |
+
+**Tests and runs.** `tests/swarm/test_machine_tick_lock.py` pins that a second tick start exits while one holds the
+lock, that the holder hands its locked descriptor to the tick, that a descriptor not open on the lock file is refused
+while the holder runs, that the tick reaps and records leftovers before it ticks, and
+`test_two_concurrent_tick_starts_run_one_at_a_time`. `tests/swarm/test_tick_reaper.py` pins the match rules, including
+`test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group`,
+`test_a_leftover_that_ignores_terminate_is_killed`, `test_a_tick_of_another_swarm_redis_is_never_a_leftover` and
+`test_the_reaping_tick_spares_itself_and_its_ancestors`. The timer install tests pin both drains, including
+`test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself` and
+`test_an_unreadable_own_group_keeps_the_units`. Delivered by
+[pull request 4732](https://github.com/the-cloud-clockwork/agentihooks/pull/4732), closing
+[issue 4667](https://github.com/the-cloud-clockwork/agentihooks/issues/4667). Red: the tests only commit,
+[run 39209570508](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39209570508), where the lock and
+reaper tests failed to import and three retire tests failed. A scratch proof on a scratch Redis namespace ran two
+concurrent tick starts one at a time and reaped a planted leftover tick aged 62 seconds with SIGTERM while sparing a
+tick of another Redis. On scratch transient user units, a leftover that ignored SIGTERM was killed at 31 seconds, and
+a drain run from inside its own unit killed its sibling and left the unit ending `Result=success`.
 
 #### The wait pass guard
 
@@ -5036,7 +5379,9 @@ KillMode=process
 ```
 
 When the pass ends, systemd stops only its main process, `agentihooks swarm waits`. The supervisor, its runner and
-any tick in flight keep running, and later passes find the supervisor holding its lock and leave it alone.
+any tick in flight keep running, and later passes find the supervisor holding its lock and leave it alone. On a
+workstation with the scheduler unit installed, the pass starts that unit instead and no supervisor joins the waits
+group; see [The scheduler runs in its own user unit](#the-scheduler-runs-in-its-own-user-unit).
 
 Without the setting, systemd's default `KillMode=control-group` sent SIGTERM to every process in the group at the end
 of each pass. Every main checkout sync moved the installed revision, the next pass recycled the supervisor, started
@@ -5098,6 +5443,114 @@ and asserts that `timer.reconcile` writes it back and reloads systemd. Red on th
 | `systemctl --user show -p KillMode agentihooks-swarm-waits.service` prints `KillMode=control-group` | The unit file predates the setting and no host tick has run the installed code since. | Wait one scheduled minute; the tick rewrites the unit. When it persists, read the tick journal for `the swarm user services could not be installed or enabled`. |
 | `stopped by the service` ticks a few seconds into each wait pass, right after a `recycling the scheduler supervisor` line | The waits service still runs with the old kill mode. | Check the setting as above. A hand edited unit is replaced on the next tick, so fix the unit text in `timer.units`, never on disk. |
 | `systemctl --user stop agentihooks-swarm-waits.service` leaves the supervisor running | Stopping the unit stops only its main process under `KillMode=process`. | Expected: the supervisor is meant to outlive every pass, so stopping the waits unit does not stop the scheduler. |
+
+#### The scheduler runs in its own user unit
+
+`KillMode=process` keeps a waits pass from killing the supervisor it started, but the supervisor still lived in the
+control group of whichever unit called `ensure_running` first. On 29 October a systemd reload removed the swarm tick
+unit and the live supervisor ran inside the `agentihooks-swarm-waits.service` group, later inside
+`agentihooks-hive.service`; a restart of either unit took the scheduler and the tick with it, and the main swarm
+finished no pass for over 28 minutes. Since
+[pull request 8658](https://github.com/the-cloud-clockwork/agentihooks/pull/8658) the scheduler has a user unit of its
+own, so restarting, reloading or stopping any unit that starts it leaves the tick running.
+
+**The unit.** Every install of the swarm services (`swarm <id> start`, `master up`, `take-master` and each host tick
+through `timer.reconcile`) writes and enables `agentihooks-scheduler.service` with `systemctl --user enable --now`,
+beside the waits, tick watch, inbox waker and quota prober units. The text comes from `timer.units`:
+
+```ini
+[Unit]
+Description=agentihooks scheduler, apart from the units that start it
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=AGENTIHOOKS_SCHEDULER_UNIT=1
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.agentihooks/.env
+ExecStart="<installed python>" -m scripts.scheduler.service supervise
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=2
+KillMode=process
+
+[Install]
+WantedBy=default.target
+```
+
+- `ExecStart` names the Python interpreter of the installed agentihooks.
+- `Restart=always` brings a supervisor that exits or is recycled back after five seconds.
+- `RestartPreventExitStatus=2`: a supervisor that finds the machine lock held prints
+  `scheduler supervisor is already running` and exits 2, and systemd does not restart it in a loop. The next
+  `ensure_running` call starts the unit again.
+- `AGENTIHOOKS_SCHEDULER_UNIT=1` tells the supervisor that systemd started it. Only the unit sets it; never set it by
+  hand.
+- [Workstation tick retirement](#workstation-tick-retirement) keeps this unit: a workstation whose swarms are all
+  served in Anton still runs its scheduler.
+
+**The runtime folder mark.** A supervisor started with `AGENTIHOOKS_SCHEDULER_UNIT` set loads the
+`~/.agentihooks/*.env` files, so it resolves the same scheduler runtime folder as the commands that call it, creates
+the folder when missing and writes a file named `agentihooks-scheduler.service` into it, before it takes the machine
+lock. A supervisor started any other way writes no mark.
+
+**Taking over.** A supervisor started by the unit first drains a lock holder started outside it: it prints
+`the scheduler unit takes over from supervisor <pid>, started outside it`, sends that supervisor SIGTERM and waits
+up to 30 seconds for the lock. When the holder still has the lock after that, it prints
+`the scheduler supervisor <pid> still held its lock after 30 seconds` and exits 2.
+
+**How callers start it.** `ensure_running` runs when a process waits on a scheduler timer, connects to the scheduler
+for a command, or a wait pass finds no supervisor (step 2 of [The wait pass guard](#the-wait-pass-guard)). With no
+supervisor holding the lock it chooses:
+
+| Runtime folder holds the mark, and `~/.config/systemd/user/agentihooks-scheduler.service` exists | `systemctl --user start --no-block agentihooks-scheduler.service` | Result |
+|---|---|---|
+| Yes | Exits 0 | The unit starts the supervisor; no child is spawned. |
+| Yes | Exits non zero, raises, or takes over 30 seconds | A detached child supervisor is spawned, as before the unit existed. |
+| No | Not run | A detached child supervisor is spawned. |
+
+A scratch ledger proof or any caller on another Redis endpoint has its own runtime folder without the mark, so it
+still spawns its own child, tied to its starter as described in
+[A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter).
+
+Check it on a live machine, read only:
+
+```bash
+systemctl --user is-enabled agentihooks-scheduler.service       # enabled
+systemctl --user is-active agentihooks-scheduler.service        # active
+systemctl --user show -p MainPID,Restart,KillMode agentihooks-scheduler.service
+
+# The supervisor's control group names the scheduler unit, not the waits or hive unit
+cat "/proc/$(systemctl --user show -p MainPID --value agentihooks-scheduler.service)/cgroup"
+
+# The mark in the runtime folder; a non default Redis endpoint keeps it in a hashed subfolder
+ls ~/.cache/agentihooks/scheduler/agentihooks-scheduler.service \
+  ~/.cache/agentihooks/scheduler/*/agentihooks-scheduler.service 2>/dev/null
+
+# Take overs, stops and restarts of the unit
+TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-1h" --until now --no-pager \
+  | grep -E "takes over|still held its lock|stops on|already running"
+
+# Finished tick passes after a restart of the waits unit
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-15min" --until now --no-pager | tail -20
+```
+
+The cgroup line ends in `agentihooks-scheduler.service`. A restart of `agentihooks-swarm-waits.service` or
+`agentihooks-hive.service` leaves the scheduler's `MainPID` unchanged, and tick passes keep finishing every minute.
+
+Tests: `tests/scheduler/test_service.py` pins that a folder the unit owns starts the unit instead of a child, that a
+failed or raising `systemctl` start falls back to a child, that a folder missing the mark or the unit file spawns a
+child, and that only a supervisor started by its unit writes the mark, creating the folder when needed.
+`tests/swarm/test_timer_install.py` pins the unit text and that `timer.ensure` writes and enables it. Red: Proofs run
+[40832818662](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40832818662) on the tests only commit,
+the new seam tests failing. Green: Proofs run
+[40834075702](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40834075702) across `tests/scheduler` and
+`tests/swarm`. Issue [8631](https://github.com/the-cloud-clockwork/agentihooks/issues/8631).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
+| `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
+| The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 
 #### The Doctor finding
 
@@ -6938,6 +7391,7 @@ Every open task is in one of three states. **Focused** tasks form an ordered que
 
 - **Freeze** holds the target and everything under it, unless a focus on a node nearer the task covers it. Freezing a focused target ends its focus.
 - **Focus** appends the target to the focus queue; `--top` puts it first and `--bottom` appends it. Focusing a target already in the queue with `--top` or `--bottom` moves it to that end; without either it keeps its place. `--only` drops every other focus, so the target and everything under it are the whole queue. A focus unfreezes its target and every node under it.
+- A task's place in the focus queue is the position of the first focus record that covers it, by node address in its ancestry or by a `lane:` or `kind:` selector; a task no focus covers comes after every focused one. The tick reads these ranks from one lookup per pass (see [Focus ranks in spawn order](../reference/tick-adapters.md#focus-ranks-in-spawn-order)).
 - While any focused task is open, claimed, blocked or in a pull request, every task outside the focus waits, whatever its rank: `urgent` orders tasks within their state and never passes the focus queue. The tasks a focused task depends on or is parked on, and the open tasks of every phase its phase waits on, join the focus, so the queue never waits on held work. A focus whose tasks are all done, frozen or waiting on frozen work holds nothing.
 - A Doctor swarm's fix phase is exempt from focus, its own and the one on the ledger it watches.
 
@@ -6960,6 +7414,56 @@ marks the swarm drained and posts a ledger notice. It names how many open tasks 
 example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
 says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
 and says so: `with 3 frozen tasks holding 90m of work left out`.
+
+### How a freeze hold is named
+
+Every claim filter asks one place why an open task may not be claimed: its post merge proof window, its phase, a
+freeze or a focus, or an open dependency. The tick's ready work, which the night watch's held spawn check counts,
+asks only whether a hold exists and reads no target title. The reason text is built only where it is shown: the
+`urgent hold` step's finding, a withdrawn claim offer and the refusal to rank a held task `urgent`. For a freeze,
+that text names one record:
+
+1. The filter walks `freezes` in ledger order and stops at the first record whose verb is `freeze` and whose target
+   covers the task: the task itself, an ancestor slice, phase or plan, its lane or its kind. `focus` records are
+   skipped.
+2. It resolves the title of that one record's target and returns `<name> holds it`.
+3. When no freeze covers the task but a focus elsewhere keeps it out, it returns `a focus elsewhere holds it`, and no
+   target title is read.
+
+| Covering record | Reason |
+| --- | --- |
+| `freeze tasks/held` on a task titled `Held work` | `the freeze on task Held work holds it` |
+| `freeze lane:eng` | `the freeze on the eng lane holds it` |
+| `freeze kind:code` | `the freeze on code tasks holds it` |
+
+Older records that cover other tasks cost nothing: only the covering record's target is looked up, so title reads
+grow with the held tasks being explained, not with the freeze history. A ledger with a hundred freezes on finished
+tasks and one `freeze lane:eng` resolves only `lane:eng`, at most once per task. A night watch pass over thirty two
+open eng tasks on such a ledger reads no other target title; `tests/swarm/test_night_watch_reads.py` holds that bound.
+
+Before this, the filter built the display name of every freeze record for every task it judged and kept the first
+covering one, and the tick's ready work asked for the full reason text. Each task, slice or phase target is a scan of
+its collection, so a long freeze history multiplied every readiness read. On 20 October the `night watch` step took
+292 s of a 450 s tick deadline while its gate was in `log only` mode. Resolving only the covering record bounded those
+reads; ready work later moved to the yes or no check, so it now reads no title at all. The wording of each reason is
+unchanged.
+
+Read the step's wall from the tick report, where it shows as `night watch`:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 60
+```
+
+Its declared floor is 22 s at a 120 s interval; see
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals). The step also
+stops its Redis reads after 30 s and returns `skipped the rest of the night watch pass: <cause>`, so a stalled Redis
+cannot hold the tick past that bound.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| `night watch` p95 in the tick report runs past its floor | Count the freeze records in `swarm status` and the open tasks | Clear freezes on finished work with `unfreeze TARGET`; the read cost follows open tasks, so a remaining slow pass points at another read in the step |
+| An urgent hold finding names a freeze that is not the one you wrote last | Order of the `freeze` lines in `swarm status` | Expected: the first covering record in ledger order is named. Unfreeze it to see the next |
+| A held task reads `a focus elsewhere holds it` with a freeze on it | Whether the freeze is a `focus` record or covers the task | A `focus` record is never named as a freeze; check the target covers the task's id, phase, lane or kind |
 
 ## Task awaiting states
 

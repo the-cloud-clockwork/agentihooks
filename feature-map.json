@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "replacement-missing-occupant",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
+      "behaviour": "A controller replacement pass whose launched replacement sits on a seat with no occupant left after the execution archive records the attempt superseded and completes instead of failing the controller.",
+      "seam": "Replacements.__call__ through _launch and _record against the execution occupants",
+      "tests": [
+        "tests/test_swarm_v2_kubernetes_failures.py::test_a_launched_replacement_whose_seat_has_no_occupant_left_is_recorded_superseded"
+      ]
+    },
+    {
       "id": "claude-trust-lock-reclaim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",
@@ -3528,6 +3538,26 @@
       ]
     },
     {
+      "id": "swarm-archive-stale-generations-of-a-listed-name",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
+      "behaviour": "ExecutionRegistry.archive moves every ended generation of a seat that is not the seat's current head into the archive, even when the agent's name stays listed through a later generation under the same name, so a reused name's old handoff generations do not pile up forever in the live fenced executions hash.",
+      "seam": "ExecutionRegistry.archive archives old generations of a still listed name",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_moves_older_generations_of_a_name_that_stays_listed"
+      ]
+    },
+    {
+      "id": "swarm-archive-keeps-listed-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
+      "behaviour": "ExecutionRegistry.archive never moves a seat's own head row into the archive while its name stays listed, even when that head row is itself ended, so the live occupant projection always resolves to a row still present in the executions hash.",
+      "seam": "ExecutionRegistry.archive keeps a listed head that is ended and moves its older generation",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_a_listed_head_that_is_ended"
+      ]
+    },
+    {
       "id": "swarm-archive-prunes-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
@@ -3777,6 +3807,16 @@
       "tests": [
         "tests/swarm/test_stale_swarm_tick.py::test_the_controller_runs_no_steps_for_a_closed_or_binned_swarm_holding_a_ghost_agent",
         "tests/swarm/test_stale_swarm_tick.py::test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger"
+      ]
+    },
+    {
+      "id": "controller-ticks-cleartext-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43001784835-0",
+      "behaviour": "The controller tick pass keeps running and ticks a swarm whose ledger address refuses the credential over plain http, so the pass reports the refusal instead of the controller exiting before it takes the lease.",
+      "seam": "scripts.swarm.controller.run_once and scripts.swarm.controller.tickable",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_the_controller_ticks_a_swarm_whose_ledger_address_refuses_cleartext"
       ]
     },
     {
