@@ -35,21 +35,29 @@ class Seats:
     owner: Callable
     ready: Callable
     placement: Callable
-    view: Callable | None = None
+    view: Callable[..., Any] | None = None
 
     def holds(self, agent) -> bool:
         return not self.ended(agent, self.rows) and self.owner(agent, self.rows.get(agent.task, {}))
 
-    def claim_view(self, slug: str, store: Any, doc: dict, dispatched: Callable | None) -> Any:
+    def claim_view(self, slug: str, store: Any, doc: dict[str, Any], dispatched: Callable[..., Any] | None) -> Any:
         """One claim view for the pass, or None when the seats carry no builder."""
-        return self.view(slug, store, self.rows, doc, dispatched) if self.view else None
+        view: Callable[..., Any] | None = self.view
+        return view(slug, store, self.rows, doc, dispatched) if view else None
 
     def claimable(
-        self, slug: str, store: Any, doc: dict, lane: str, dispatched: Callable | None, claims: Any
-    ) -> list[dict]:
+        self,
+        slug: str,
+        store: Any,
+        doc: dict[str, Any],
+        lane: str,
+        dispatched: Callable[..., Any] | None,
+        claims: Any,
+    ) -> list[dict[str, Any]]:
         """The lane's ready tasks, read from the pass's claim view when there is one."""
-        extra = {"claims": claims} if claims is not None else {}
-        return self.ready(slug, store, self.rows, doc, lane, dispatched, **extra)
+        extra: dict[str, Any] = {"claims": claims} if claims is not None else {}
+        ready: Callable[..., list[dict[str, Any]]] = self.ready
+        return ready(slug, store, self.rows, doc, lane, dispatched, **extra)
 
 
 def _places(lane: str, task: dict) -> str:

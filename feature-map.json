@@ -97,7 +97,8 @@
       "seam": "scripts.swarm.preempt.run over the Seats claim view builder",
       "tests": [
         "tests/swarm/test_preempt.py::test_run_reads_every_full_lane_from_one_claim_view",
-        "tests/swarm/test_claim_view.py::test_a_preempt_pass_builds_one_claim_view_for_every_full_lane"
+        "tests/swarm/test_claim_view.py::test_a_preempt_pass_builds_one_claim_view_for_every_full_lane",
+        "tests/hub/test_preemption.py::test_the_hub_preempts_with_the_tick_claim_view_builder"
       ]
     },
     {
