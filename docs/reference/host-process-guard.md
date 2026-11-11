@@ -90,7 +90,7 @@ not spare the tick without sparing every `agentihooks` process.
 | Process | Process name | Pattern |
 |---------|--------------|---------|
 | A tick pass, `agentihooks swarm tick`, run by any path to the command | `agentihooks` | `(^\|[ /])agentihooks swarm tick( \|$)` |
-| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started by the swarm timer unit or by each scheduler delivery of the tick | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
+| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started once per scheduled tick run by the swarm timer unit or by the agentihooks scheduler | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
 
 Both patterns end at a space or the end of the command line, so a longer
 subcommand is not matched:
@@ -408,10 +408,10 @@ done
   `0s`. The test adds every other process name its user runs to `excludes`,
   so only the probe group can be ended. At #4962 the tick and scheduled tick
   probes had to survive and be logged `SKIPPED`, while the `ledger watch` and
-  `swarm tick-watch` probes had to be logged `KILLED`. Later pull requests
-  extended the same test: today the `select-profile`, `tick-watch`, `prober`
-  and `waker` probes must survive too, and `ledger watch` and
-  `swarm waker-report` must be `KILLED`. `waker-report` checks that a longer
+  `swarm tick-watch` probes had to be logged `KILLED`. Since #5006 and
+  #5107 the same test also requires the `select-profile`, `tick-watch`, `prober`
+  and `waker` probes to survive, and the `ledger watch` and
+  `swarm waker-report` probes to be `KILLED`. `waker-report` checks that a longer
   subcommand is not matched. A second test gives the guard an invalid pattern
   and a string in place of the list, and checks that each pass exits 1 before
   `TICK_START`.
