@@ -782,6 +782,7 @@ WORKSTATION_TEXT = (
     "`/home/iamroot/dev/agentihub/agents/diagram/package/token.json`, the agent folder\n"
     "/Users/op/hub/agents/diagram/ and its hook /home/op/hub/agents/diagram/hooks/render.py.\n"
     "Config sits in /home/iamroot/.config/gws/, /root/.cache and /home/op.\n"
+    "Agents sit in /home/op/.claude/agents/other/notes.md.\n"
     "Placeholders such as /home/.../foo.mp4 and ~/notes stay.\n"
 )
 PORTABLE_TEXT = (
@@ -789,6 +790,7 @@ PORTABLE_TEXT = (
     "`profiles/diagram/token.json`, the agent folder\n"
     "profiles/diagram/ and its hook profiles/diagram/hooks/render.py.\n"
     "Config sits in $HOME/.config/gws/, $HOME/.cache and $HOME.\n"
+    "Agents sit in $HOME/.claude/agents/other/notes.md.\n"
     "Placeholders such as /home/.../foo.mp4 and ~/notes stay.\n"
 )
 
@@ -812,6 +814,7 @@ def test_workstation_paths_in_instructions_become_bundle_or_environment_forms(
         "C:/Users/nesto/Videos/clip.mp4",
         "/mnt/c/Users/nesto/Desktop/thumb.png",
         "/home/iamroot/dev/agentihub/agents/diagram/bootstrap.sh",
+        "/home/iamroot/dev/agentihub/agents/other/package/run.sh",
     ],
 )
 def test_a_workstation_path_with_no_portable_form_refuses_the_import(hub: Path, tmp_path: Path, path: str) -> None:

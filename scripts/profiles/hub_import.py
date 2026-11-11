@@ -68,7 +68,6 @@ WORKSTATION_PATH = re.compile(
     r"(?:[\\/][^\s`'\"()<>\[\]{},;|]*)?"
 )
 HOME_PREFIX = re.compile(r"/(?:home|Users)/[^/]+|/root")
-INSTRUCTION_ROOTS = ("CLAUDE.md", ".claude/")
 DATA = ("state", "reports")
 CASES = "evaluation/cases"
 CASE_SUFFIXES = (".yaml", ".yml")
@@ -269,7 +268,7 @@ def _localize(files: dict[str, bytes], agents: dict[str, str]) -> dict[str, byte
 
 def _is_instruction(relative: str) -> bool:
     """Tell whether a profile file is instruction, rule or skill Markdown."""
-    return relative.endswith(".md") and relative.startswith(INSTRUCTION_ROOTS)
+    return relative == "CLAUDE.md" or (relative.endswith(".md") and relative.startswith(".claude/"))
 
 
 def _localized(relative: str, content: bytes, agents: dict[str, str]) -> bytes:
@@ -293,8 +292,10 @@ def _home_form(rest: str, agents: dict[str, str]) -> str | None:
     """Map a path below a home folder to its profile path when it names a hub agent, else to ``$HOME``."""
     parts = rest.split("/")
     for index, part in enumerate(parts[:-1]):
+        inside = parts[index + 2 :]
+        if part == "agents" and parts[index + 1] not in agents and inside[:1] == ["package"]:
+            return None
         if part == "agents" and parts[index + 1] in agents:
-            inside = parts[index + 2 :]
             if inside[:1] == ["package"]:
                 inside = inside[1:]
             elif inside[:1] not in ([], [""], [AGENT_HOOKS]):
