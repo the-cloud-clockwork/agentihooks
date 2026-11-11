@@ -207,7 +207,7 @@ def _refuse_literal_credentials(settings: object, path: Path) -> None:
 
 
 def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
-    """Stage every planned profile, then move them into place together, leaving none on failure."""
+    """Stage every planned profile, then move them into place together, leaving none on failure or naming the one left behind."""
     out.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".hub-import-", dir=out))
     committed: list[Path] = []
