@@ -3385,6 +3385,9 @@
         "tests/swarm/test_required_harness.py::test_an_admitted_codex_relaunch_refuses_a_task_requiring_claude",
         "tests/swarm/test_required_harness.py::test_a_lane_pinned_to_codex_refuses_a_task_requiring_claude",
         "tests/swarm/test_required_harness.py::test_the_quota_plan_reserves_only_the_required_harness",
+        "tests/swarm/test_required_harness.py::test_an_admitted_claude_relaunch_keeps_a_task_requiring_claude",
+        "tests/swarm/test_required_harness.py::test_the_lane_harness_falls_back_to_the_required_one",
+        "tests/swarm_ledger/test_task_requires_harness.py::test_task_cli_offers_only_claude_or_codex",
         "tests/hive/test_codex_launch.py::test_a_hive_launches_a_task_requiring_claude_only_on_claude",
         "tests/hive/test_codex_launch.py::test_a_hive_waits_on_a_lane_pinned_to_codex_for_a_task_requiring_claude",
         "tests/test_swarm_v2_launch.py::test_a_task_requiring_claude_launches_claude_over_its_harness_and_plan"

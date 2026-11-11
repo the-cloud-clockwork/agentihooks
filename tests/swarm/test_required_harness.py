@@ -76,14 +76,36 @@ def test_an_admitted_codex_relaunch_refuses_a_task_requiring_claude(tmp_path):
     task = {"requires_harness": "claude", "launch_assignment": launch, "admitted_execution_id": "e1"}
     with pytest.raises(SpawnError) as refused:
         _spawned(tmp_path, task, [claude(), codex()])
-    assert refused.value.status == "unsupported"
+    assert (str(refused.value), refused.value.status) == (
+        "admitted codex launch cannot run a task that requires claude",
+        "unsupported",
+    )
+
+
+@pytest.mark.feature("task-requires-harness")
+def test_an_admitted_claude_relaunch_keeps_a_task_requiring_claude(tmp_path):
+    launch = {"profile": "engineer", "harness": "claude", "model": "m", "effort": "high", "account": "cc"}
+    task = {"requires_harness": "claude", "launch_assignment": launch, "admitted_execution_id": "e1"}
+    assert _spawned(tmp_path, task, [claude(), codex()]) == ("claude", "cc")
 
 
 @pytest.mark.feature("task-requires-harness")
 def test_a_lane_pinned_to_codex_refuses_a_task_requiring_claude(tmp_path):
     with pytest.raises(SpawnError) as refused:
         _spawned(tmp_path, {"requires_harness": "claude"}, [claude(), codex()], {"eng": {"agent": "codex"}})
-    assert refused.value.status == "unsupported"
+    assert (str(refused.value), refused.value.status) == (
+        "lane harness codex cannot run a task that requires claude",
+        "unsupported",
+    )
+
+
+@pytest.mark.feature("task-requires-harness")
+@pytest.mark.parametrize(
+    ("want", "task", "harness"),
+    [("", {}, ""), ("codex", {}, "codex"), ("", {"requires_harness": "claude"}, "claude")],
+)
+def test_the_lane_harness_falls_back_to_the_required_one(want, task, harness):
+    assert runtime._required(want, task) == harness
 
 
 @pytest.mark.feature("task-requires-harness")

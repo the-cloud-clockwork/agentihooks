@@ -1,3 +1,5 @@
+import argparse
+
 import pytest
 
 from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
@@ -62,3 +64,15 @@ def test_task_cli_sends_the_required_harness(monkeypatch):
         ledger.cmd_task(ledger.build_parser().parse_args(["--slug", SLUG, "--as", "liaison", *argv]))
     assert [f.get("requires_harness") for _, f in sent[:2]] == ["claude", None]
     assert sent[2][1]["fields"] == {"requires_harness": "codex"}
+
+
+@pytest.mark.feature("task-requires-harness")
+def test_task_cli_offers_only_claude_or_codex():
+    subcommands = next(a for a in ledger.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+    option = next(a for a in subcommands.choices["task"]._actions if a.dest == "requires_harness")
+    assert (option.choices, option.help) == (
+        ("claude", "codex"),
+        "the only harness that may claim the task, which waits for a free seat of it",
+    )
+    with pytest.raises(SystemExit):
+        ledger.build_parser().parse_args(["--slug", SLUG, "task", "add", "t5", "d", "--requires-harness", "copilot"])

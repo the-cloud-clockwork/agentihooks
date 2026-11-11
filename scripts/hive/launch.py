@@ -364,7 +364,7 @@ class HiveLaunch:
             return self._record_wait(lane, task, refused)
         listed = tuple(hives)
         hives = [hive for hive in hosting(hives, profile, advertised) if placement.hosts(lane, hive, (profile,))]
-        required: str = task.get("requires_harness", "")
+        required: str | None = task.get("requires_harness")
         pinned: str = chosen.get("agent") or "auto"
         if required and pinned not in ("auto", required):
             wait = placement.Wait(f"lane harness {pinned} cannot run a task that requires {required}", role)

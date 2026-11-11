@@ -170,15 +170,19 @@ def test_a_hive_launches_a_task_requiring_claude_only_on_claude(setup, pin):
 
 
 @pytest.mark.feature("task-requires-harness")
-def test_a_hive_waits_on_a_lane_pinned_to_codex_for_a_task_requiring_claude(setup):
+def test_a_hive_waits_on_a_lane_pinned_to_codex_for_a_task_requiring_claude(setup, monkeypatch):
+    from scripts.hive import launch
     from scripts.hive.placement import Wait
 
+    observed = []
+    monkeypatch.setattr(launch.placement_waits, "observe", lambda *args: observed.append(args[2:5]))
     config = replace(setup.config, lanes={"eng": {"agent": "codex"}})
 
     selected = setup.launcher.select(config, "eng", {"id": "task", "requires_harness": "claude"})
 
     assert isinstance(selected, Wait)
-    assert selected.reason == "lane harness codex cannot run a task that requires claude"
+    assert (selected.reason, selected.role) == ("lane harness codex cannot run a task that requires claude", "eng")
+    assert observed == [("eng", "task", "lane harness codex cannot run a task that requires claude")]
 
 
 @pytest.mark.parametrize(
