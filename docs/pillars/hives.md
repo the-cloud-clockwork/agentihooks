@@ -2586,8 +2586,13 @@ The spawn is admitted and the local cap reads 20. Before
 no hive for eng has room: ..., and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
 ```
 
-A spawn whose placement already chose the machine's own hive waits with the same text from
-`, and the local machine runs` on, without the hives' reason in front. #7039 let the share yield to the stored
+A spawn whose placement already chose the machine's own hive waits without the hives' reason in front:
+
+```text
+, and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
+```
+
+#7039 let the share yield to the stored
 `max-agents`; [#10131](https://github.com/the-cloud-clockwork/agentihooks/pull/10131) changed the figure it yields
 to into the computed ceiling held under that cap, so a host whose own reading allows fewer agents than `max-agents`
 yields only that far.
@@ -2611,7 +2616,7 @@ agentihooks swarm <id> autoscale --json | jq .local_slots
 `hive list` shows the hive's max agents. `local_slots` reads 20, the smaller of `local-max-agents` and the hive's
 stored `max-agents`; it does not read the host. The cap a spawn meets reads lower when the computed ceiling or a host
 line is tighter: the spawn's refusal detail names the binding limit, and `autoscale --json` lists each hive's room
-under `hive_admission` and the tightest under `binding`.
+under `hive_admission` and names the binding limit under `binding`.
 
 ### Workstation with eight local agents
 
