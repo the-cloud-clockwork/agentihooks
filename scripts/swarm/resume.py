@@ -272,7 +272,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
         return False
     if agent.seat and store.seats.occupant(agent.seat).occupant != agent.name:
         return False
-    claim = fencing.read(store, slug)["claims"].get(agent.task)
+    claim = fencing.read_claims(store, slug).get(agent.task)
     if not claim:
         return not agent.execution_id or agent.runtime_backend == "local"
     return (
@@ -285,7 +285,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
 
 
 def _recovery_identity(store, slug, agent):
-    claim = fencing.read(store, slug)["claims"].get(agent.task)
+    claim = fencing.read_claims(store, slug).get(agent.task)
     generation = claim["generation"] if claim else 0
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
 
