@@ -24,7 +24,7 @@ UNFIT_NAK_MS = 5_000
 @dataclass(frozen=True)
 class Snapshot:
     slug: str
-    rows: dict
+    rows: dict[str, Any]
     doc: dict
     graph: dict
     fix: str

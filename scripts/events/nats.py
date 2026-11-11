@@ -112,7 +112,7 @@ class _Loop:
             self.close()
             raise RuntimeError("bus loop did not start")
 
-    def run(self, coro: Coroutine):
+    def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
         if self.closed:
             coro.close()
             raise RuntimeError("bus is closed")
@@ -403,17 +403,21 @@ class NatsWorkQueue:
         return deliveries[0] if deliveries else None
 
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
-        removed, sequence = 0, 1
-        while (msg := self._loop.run(self._next(sequence))) is not None:
-            sequence = msg.seq + 1
-            if stale(Envelope.decode(msg.data or b"")):
-                self._loop.run(self._js.delete_msg(self._stream, msg.seq))
-                removed += 1
-        return removed
+        """Reads each sequence the stream held when the sweep began once, so offers published during it wait for the
+        next sweep."""
+        state = self._loop.run(self._js.stream_info(self._stream)).state
+        return sum(self._withdrawn(sequence, stale) for sequence in range(state.first_seq, state.last_seq + 1))
 
-    async def _next(self, sequence: int) -> api.RawStreamMsg | None:
+    def _withdrawn(self, sequence: int, stale: Callable[[Envelope], bool]) -> bool:
+        msg = self._loop.run(self._get(sequence))
+        if msg is None or not stale(Envelope.decode(msg.data)):
+            return False
+        self._loop.run(self._js.delete_msg(self._stream, sequence))
+        return True
+
+    async def _get(self, sequence: int) -> api.RawStreamMsg | None:
         try:
-            return await self._js.get_msg(self._stream, seq=sequence, subject=self._filter, next=True)
+            return await self._js.get_msg(self._stream, sequence)
         except NotFoundError:
             return None
 
