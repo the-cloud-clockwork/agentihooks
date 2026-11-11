@@ -405,6 +405,53 @@ def test_a_bundle_without_deps_gets_a_new_manifest(hub: Path, tmp_path: Path) ->
 
 
 @pytest.mark.feature("hub-import-deps")
+def test_new_deps_entries_append_without_rewriting_existing_entries(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    out = tmp_path / "bundle"
+    out.mkdir()
+    existing = '{\n  "deps": [\n    {"id": "uv", "kind": "system", "check": ["uv", "--version"]}\n  ]\n}\n'
+    (out / "deps.json").write_text(existing)
+    import_hub(hub, out, False, tmp_path / "data")
+    entry = (
+        '    {\n      "id": "diagram-npm-root",\n      "kind": "npm",\n      "check": ["npm", "ls", "--global", "zod"],\n'
+        '      "install": ["npm", "install", "--global", "zod@3"]\n    }'
+    )
+    expected = (
+        '{\n  "deps": [\n    {"id": "uv", "kind": "system", "check": ["uv", "--version"]},\n' + entry + "\n  ]\n}\n"
+    )
+    assert (out / "deps.json").read_text() == expected
+    fresh = tmp_path / "fresh"
+    import_hub(hub, fresh, False, tmp_path / "fresh-data")
+    assert (fresh / "deps.json").read_text() == '{\n  "deps": [\n' + entry + "\n  ]\n}\n"
+
+
+@pytest.mark.feature("hub-import-deps")
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        '{"deps": [{"id": "uv"}], "version": 1}\n',
+        '{"deps": [], "extra": []}\n',
+        '{"deps": [], "extra": [1]}\n',
+    ],
+)
+def test_a_manifest_the_append_cannot_keep_is_rewritten_whole(hub: Path, tmp_path: Path, manifest: str) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    out = tmp_path / "bundle"
+    out.mkdir()
+    (out / "deps.json").write_text(manifest)
+    import_hub(hub, out, False, tmp_path / "data")
+    loaded = json.loads(manifest)
+    entry = {
+        "id": "diagram-npm-root",
+        "kind": "npm",
+        "check": ["npm", "ls", "--global", "zod"],
+        "install": ["npm", "install", "--global", "zod@3"],
+    }
+    expected = loaded | {"deps": [*loaded["deps"], entry]}
+    assert (out / "deps.json").read_text() == json.dumps(expected, indent=2) + "\n"
+
+
+@pytest.mark.feature("hub-import-deps")
 def test_manifests_without_installs_add_no_entry(hub: Path, tmp_path: Path) -> None:
     package = _package(hub)
     (package / "package.json").write_text(json.dumps({"name": "x", "devDependencies": {"x": "1"}}))

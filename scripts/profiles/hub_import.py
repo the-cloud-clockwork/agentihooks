@@ -61,6 +61,7 @@ DATA = ("state", "reports")
 CASES = "evaluation/cases"
 CASE_SUFFIXES = (".yaml", ".yml")
 DEPS = "deps.json"
+EMPTY_DEPS = '{\n  "deps": [\n  ]\n}\n'
 INSTALLS = (("npm", "package.json"), ("pip", "requirements.txt"))
 CHECKS = {
     "npm": ("npm", "ls", "--global"),
@@ -98,7 +99,7 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
         if any(stores.values()):
             _write(data, {name: files for name, files in stores.items() if files})
         if deps:
-            _replace(out / DEPS, (json.dumps(manifest, indent=2) + "\n").encode())
+            _replace(out / DEPS, manifest)
     files = sorted(f"profiles/{name}/{relative}" for name, plan in plans.items() for relative in plan)
     return {
         "profiles": sorted(plans),
@@ -306,9 +307,10 @@ def _pip(path: Path) -> tuple[list[str], list[str]]:
     return names, specs
 
 
-def _manifest(path: Path, entries: list[dict[str, object]]) -> dict[str, object]:
-    """Return the bundle deps manifest with ``entries`` appended, refusing an id it already holds."""
-    loaded: object = json.loads(path.read_text()) if path.is_file() else {"deps": []}
+def _manifest(path: Path, entries: list[dict[str, object]]) -> bytes:
+    """Return the bundle deps manifest with ``entries`` appended, keeping existing text, refusing a taken id."""
+    text = path.read_text() if path.is_file() else EMPTY_DEPS
+    loaded: object = json.loads(text)
     current = loaded.get("deps") if _is_mapping(loaded) else None
     if not _is_mapping(loaded) or not _is_list(current):
         raise ValueError(f"deps.json has no deps list: {path}")
@@ -317,7 +319,26 @@ def _manifest(path: Path, entries: list[dict[str, object]]) -> dict[str, object]
         if entry["id"] in taken:
             raise ValueError(f"deps.json entry taken: {entry['id']}")
         taken.add(entry["id"])
-    return loaded | {"deps": [*current, *entries]}
+    expected = loaded | {"deps": [*current, *entries]}
+    body = text.rstrip().removesuffix("}").rstrip()
+    rendered = ",\n".join(
+        "    {\n"
+        + ",\n".join(f"      {json.dumps(key)}: {json.dumps(value)}" for key, value in entry.items())
+        + "\n    }"
+        for entry in entries
+    )
+    appended = f"{body.removesuffix(']').rstrip()}{',' if current else ''}\n{rendered}\n  ]\n}}\n"
+    if not body.endswith("]") or not _parses_to(appended, expected):
+        appended = json.dumps(expected, indent=2) + "\n"
+    return appended.encode()
+
+
+def _parses_to(text: str, expected: object) -> bool:
+    """Tell whether ``text`` is JSON equal to ``expected``."""
+    try:
+        return json.loads(text) == expected
+    except json.JSONDecodeError:
+        return False
 
 
 def _replace(path: Path, data: bytes) -> None:

@@ -1761,6 +1761,8 @@
       "tests": [
         "tests/profiles/test_hub_import.py::test_node_and_pip_installs_become_deps_entries",
         "tests/profiles/test_hub_import.py::test_a_bundle_without_deps_gets_a_new_manifest",
+        "tests/profiles/test_hub_import.py::test_new_deps_entries_append_without_rewriting_existing_entries",
+        "tests/profiles/test_hub_import.py::test_a_manifest_the_append_cannot_keep_is_rewritten_whole",
         "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
         "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_a_deps_manifest_without_a_deps_list_refuses_the_import",
