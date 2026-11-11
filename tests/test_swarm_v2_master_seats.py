@@ -669,7 +669,9 @@ def test_control_notices_go_to_the_live_lead_and_never_to_a_working_engineer_or_
 
 
 @pytest.mark.feature("retired-master-seat-owns-no-hive")
-def test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written(swarm):
+def test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written(
+    swarm: tuple[RedisStore, InboxStore],
+) -> None:
     store, _ = swarm
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 3)
@@ -689,7 +691,9 @@ def test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written
 
 
 @pytest.mark.feature("retired-master-seat-owns-no-hive")
-def test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired(swarm, monkeypatch):
+def test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired(
+    swarm: tuple[RedisStore, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, _ = swarm
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 3)
