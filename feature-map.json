@@ -1763,6 +1763,8 @@
         "tests/profiles/test_hub_import.py::test_a_bundle_without_deps_gets_a_new_manifest",
         "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
         "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_deps_manifest_without_a_deps_list_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_profiles_with_one_install_folder_get_separate_ids",
         "tests/profiles/test_hub_import.py::test_an_install_from_an_absolute_path_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_a_dry_run_reports_deps_without_writing_the_manifest"
       ]

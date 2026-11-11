@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -315,6 +316,7 @@ def test_state_and_reports_move_to_the_data_folder(hub: Path, tmp_path: Path) ->
     assert (data / "profiles/diagram/reports/week.md").read_text() == "Week.\n"
     assert not (out / "profiles/diagram/state").exists()
     assert not (out / "profiles/diagram/reports").exists()
+    assert isinstance(report["files"], list)
     assert all(not path.startswith(("profiles/diagram/state", "profiles/diagram/reports")) for path in report["files"])
 
 
@@ -427,6 +429,28 @@ def test_a_taken_deps_id_refuses_the_import(hub: Path, tmp_path: Path) -> None:
 
 
 @pytest.mark.feature("hub-import-deps")
+@pytest.mark.parametrize("manifest", [{"other": []}, {"deps": {}}, []])
+def test_a_deps_manifest_without_a_deps_list_refuses_the_import(hub: Path, tmp_path: Path, manifest: object) -> None:
+    out = tmp_path / "bundle"
+    out.mkdir()
+    (out / "deps.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match=r"deps.json has no deps list: .*deps\.json"):
+        import_hub(hub, out, True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_two_profiles_with_one_install_folder_get_separate_ids(hub: Path, tmp_path: Path) -> None:
+    other = hub / "agents/chart/package"
+    shutil.copytree(_package(hub), other)
+    (other / "command.yml").write_text(yaml.safe_dump({"name": "chart"}))
+    for package in (_package(hub), other):
+        (package / "tools/node").mkdir(parents=True)
+        (package / "tools/node/package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    report = import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+    assert report["deps"] == ["chart-npm-tools-node", "diagram-npm-tools-node"]
+
+
+@pytest.mark.feature("hub-import-deps")
 def test_an_install_from_an_absolute_path_refuses_the_import(hub: Path, tmp_path: Path) -> None:
     (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"lib": "file:/home/operator/lib"}}))
     out = tmp_path / "bundle"
@@ -466,6 +490,8 @@ def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False, tmp_path / "data")
     assert report["cases"] == ["profiles/diagram/cases/named.json", "profiles/diagram/cases/simple.json"]
+    assert isinstance(report["files"], list)
+    assert isinstance(report["cases"], list)
     assert set(report["cases"]) <= set(report["files"])
     simple = (out / "profiles/diagram/cases/simple.json").read_text()
     points = [
@@ -486,6 +512,7 @@ def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
         {"name": "empty", "expected": {"tools_required": []}},
         {"name": "none"},
         {"description": "", "expected": {"a": ["b"]}},
+        {"name": "", "expected": {"a": ["b"]}},
         {"name": 3, "expected": {"a": ["b"]}},
         {"name": "list", "expected": ["a"]},
     ],
