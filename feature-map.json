@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "replacement-missing-occupant",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
+      "behaviour": "A controller replacement pass whose launched replacement sits on a seat with no occupant left after the execution archive records the attempt superseded and completes instead of failing the controller.",
+      "seam": "Replacements.__call__ through _launch and _record against the execution occupants",
+      "tests": [
+        "tests/test_swarm_v2_kubernetes_failures.py::test_a_launched_replacement_whose_seat_has_no_occupant_left_is_recorded_superseded"
+      ]
+    },
+    {
       "id": "claude-trust-lock-reclaim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",

@@ -1752,6 +1752,27 @@ def test_a_placed_fresh_replacement_reopens_its_task_for_hive_placement_and_neve
     assert relaunch.calls == []
 
 
+@pytest.mark.feature("replacement-missing-occupant")
+def test_a_launched_replacement_whose_seat_has_no_occupant_left_is_recorded_superseded(world: Any) -> None:
+    recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
+    replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
+    world.show(world.old, "oom_killed")
+    world.reconcile(recovery)
+    replacements()
+    decision = recovery.decide(world.old.execution_id, "fresh")
+    replacements()
+    successor = world.store.execution(cases.SLUG, decision.replacement)
+    world.store.redis.hdel(world.store.key(cases.SLUG, "agents"), world.old.name, successor.name)
+    world.store.execution_registry.archive(cases.SLUG)
+    world.store.redis.hdel(world.store.key(cases.SLUG, "attempt-recovery-records"), world.old.execution_id)
+
+    assert successor.seat not in world.store.execution_occupants(cases.SLUG)
+    assert _hash(world, "attempt-replacement-launches") == {world.old.execution_id: decision.replacement}
+    assert replacements() == {}
+    assert _hash(world, "attempt-recovery-records") == {world.old.execution_id: "superseded"}
+    assert relaunch.calls == []
+
+
 def test_a_placed_fresh_replacement_whose_reopen_is_refused_waits_for_the_next_pass(world: Any) -> None:
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
     replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
