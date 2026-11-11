@@ -1748,6 +1748,7 @@
         "tests/profiles/test_hub_import.py::test_state_and_reports_move_to_the_data_folder",
         "tests/profiles/test_hub_import.py::test_a_package_without_state_writes_no_data_folder",
         "tests/profiles/test_hub_import.py::test_the_data_folder_defaults_under_the_agentihooks_home",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_falls_back_to_the_home_folder",
         "tests/profiles/test_hub_import.py::test_an_occupied_data_folder_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_the_command_line_takes_the_data_folder"
       ]
@@ -1765,6 +1766,7 @@
         "tests/profiles/test_hub_import.py::test_a_manifest_the_append_cannot_keep_is_rewritten_whole",
         "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
         "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_install_folders_with_one_id_refuse_the_import",
         "tests/profiles/test_hub_import.py::test_a_deps_manifest_without_a_deps_list_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_two_profiles_with_one_install_folder_get_separate_ids",
         "tests/profiles/test_hub_import.py::test_an_npm_install_from_a_local_path_refuses_the_import",

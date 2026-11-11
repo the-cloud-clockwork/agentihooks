@@ -292,7 +292,7 @@ def _pip(path: Path) -> tuple[list[str], list[str]]:
     names: list[str] = []
     specs: list[str] = []
     for line in path.read_text().splitlines():
-        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        text = line.partition("#")[0].strip().removesuffix("\\").strip()
         tokens = text.split()
         if any(token.startswith("-") and not token.startswith("--hash") for token in tokens):
             raise ValueError(f"requirements option refused: {text} in {path}")
