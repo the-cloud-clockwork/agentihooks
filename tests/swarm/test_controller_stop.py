@@ -9,8 +9,10 @@ from scripts.swarm_v2 import control_service, proof_swarm
 
 
 @pytest.fixture(autouse=True)
-def stop(monkeypatch):
+def stop(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick_stop, "STOP", threading.Event())
+    monkeypatch.setattr(controller, "RUNNING", threading.Event())
+    monkeypatch.setattr(controller, "DRAINING", threading.Event())
 
 
 class Service:
