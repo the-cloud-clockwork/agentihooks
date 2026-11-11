@@ -4806,8 +4806,11 @@ workstation's tick (see [Workstation tick retirement](#workstation-tick-retireme
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal:
-`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
+minutes (see [The tick holder](#the-tick-holder)). With `systemd-cat` on the path each pass logs under the
+`agentihooks-swarm` identifier, in the journal of the unit that started it. A fallback pass is read from the swarm
+unit: `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`. A scheduler cron pass is
+read from the scheduler unit: `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-1h" --until now`.
+Without `systemd-cat` a scheduler cron pass writes to `swarm-tick.log`; a hand run prints to its terminal.
 Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
 whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
@@ -4897,6 +4900,72 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### The tick holder
+
+Each minute the scheduler cron fires the holder, `python -m scripts.swarm.scheduled_tick`, started from the
+supervisor's checkout in its own session. The holder owns one machine tick for its whole life:
+
+1. It takes the machine lock `swarm-tick` (`swarm-tick.lock` in the scheduler runtime folder). When another tick
+   holds it, the holder exits 0 at once and records nothing.
+2. It starts `agentihooks swarm tick` in a new process group, wrapped in `systemd-cat -t agentihooks-swarm` when
+   `systemd-cat` is on the path. The child inherits the open lock file through `AGENTIHOOKS_SWARM_TICK_LOCK_FD`
+   and keeps that lock instead of taking a second one, so the machine holds exactly one tick lock while the pass
+   runs. The child's environment carries only `HOME`, `LANG`, `LOGNAME`, `SHELL`, `USER`, `XDG_RUNTIME_DIR`,
+   `XDG_DATA_DIRS`, `AGENTIHOOKS_SWARM_TICK_LOCK_FD` and a fixed `PATH` (`~/.local/bin`, `~/.cargo/bin`,
+   `/usr/local/bin`, `/usr/bin`, `/bin`); a variable exported in an interactive shell never reaches a scheduled
+   tick.
+3. It waits 540 seconds for the pass. A pass still running then gets SIGTERM on its process group and 90 more
+   seconds, then SIGKILL.
+4. After a pass that timed out or exited non-zero, it sweeps the process group: SIGTERM, up to 10 seconds, then
+   SIGKILL and up to 10 more seconds, so no child of a failed pass outlives it.
+5. After the pass ends, whatever its exit status, it writes the [delivery record](#the-delivery-record).
+
+A hand run of `agentihooks swarm tick` takes the same machine lock. While a scheduled pass holds it, the hand run
+prints `another swarm tick is running on this machine` and does nothing. A run from a worktree or any checkout other
+than the installed agentihooks is refused before it takes the lock:
+`the tick refused to run: this run comes from <running>, not the installed agentihooks at <installed>`.
+The machine lock is a file lock on this machine; it is separate from the per swarm Redis tick lock described in
+[Troubleshooting a held tick lock](#troubleshooting-a-held-tick-lock).
+
+The fallback `agentihooks-swarm.service`, while the [delivery guard](#scheduled-tick-delivery-guard) keeps it, runs
+the same holder with `--unit`. It shares the lock, the stop times and the sweep, and never writes the delivery
+record. Its `TimeoutStartSec` of 710 seconds covers the 540 second wait, the 90 second grace, both 10 second sweep
+steps and one minute, so systemd never stops the holder before the holder stops its pass.
+
+The cron entry is registered under the scheduler lease `swarm-tick-lock`, waited for up to 30 seconds and held for
+at most 90, so two paths registering at once leave one entry.
+An entry that is cancelled, failed, missing or unregistered is replaced, and the replacement prints
+`recreated the swarm tick cron entry as <new id>: entry '<old id>' was <state>`. Registration while Redis is down
+prints `the scheduled swarm tick could not be registered for <caller>: <ExcType>: <message>`; the next tick pass or swarm start
+retries it.
+
+| What | Where |
+|---|---|
+| Tick pass output | A scheduler cron pass: `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now`, or `swarm-tick.log` when `systemd-cat` is missing. A fallback pass: `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10min" --until now`. Both carry the `agentihooks-swarm` identifier. |
+| Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder for a holder the scheduler cron started; `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10min" --until now` for the fallback holder |
+| Scheduler supervisor output | `scheduler.log` in the scheduler runtime folder when the supervisor was not started by `agentihooks-scheduler.service`; that unit's journal otherwise |
+
+The runtime folder is `~/.cache/agentihooks/scheduler/` for the local Redis at `127.0.0.1:6379/0` on a machine that
+is not a hive member; another Redis endpoint, a hive member or the bus backend uses a hashed subfolder. Find the logs for any endpoint:
+
+```bash
+find ~/.cache/agentihooks/scheduler -name 'swarm-tick.log' -o -name 'scheduler.log'
+TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now --no-pager | tail
+```
+
+On a machine that ticks, the journal shows a pass every minute, and `systemctl --user list-timers 'agentihooks-*'`
+lists no `agentihooks-swarm.timer` once delivery is proven. On an upgraded machine, swarm start, the tick and the
+waits pass remove the old timer and service after that proof, as
+[Retiring the systemd timer](#retiring-the-systemd-timer) describes. The installer writes no swarm timer; while the delivery guard keeps it, swarm start or a tick pass rewrites it. A workstation whose swarms are all served in Anton runs
+no tick at all (see [Workstation tick retirement](#workstation-tick-retirement)).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The swarm unit journal shows no new pass | Passes the scheduler cron started run under the scheduler supervisor's unit, not the swarm unit; the timer and its service are retired once delivery is proven. | Read `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now`, or `swarm-tick.log` when `systemd-cat` is missing. |
+| `another swarm tick is running on this machine` from a hand run | A scheduled pass holds the machine lock. | Expected. Wait for the pass to end, or read its output in the journal. |
+| A pass ends every minute near the nine minute mark | The pass ran past 540 seconds and the holder stopped it. | Read the pass's output for the slow step; [Tick report](../reference/tick-report.md) times each step. |
+| A setting exported in a shell has no effect on scheduled ticks | The holder passes only its fixed environment. | Record the setting in `~/.agentihooks/.env`. |
 
 ### Idle swarm pane sweep
 
@@ -5017,12 +5086,13 @@ tick, and the wait pass keeps a supervisor from the installed code running.
 
 #### The delivery record
 
-After a scheduled tick exits with status zero, the holder that ran it writes one Redis record,
+After a scheduled tick pass ends, whatever its exit status, the holder that ran it writes one Redis record,
 `swarm-tick-delivered`, in the scheduler's machine keyspace: the root of the code the holder ran from (the
-supervisor's checkout) and the time of the tick. A tick that fails, cannot start, times out or is skipped because
-another tick holds the machine lock writes nothing. A tick run by the systemd timer (`agentihooks swarm tick`)
-never writes the record, so only the scheduler can prove the scheduler. A Redis error while writing prints
-`the swarm tick delivery could not be recorded: <error>` to the holder's log (`swarm-tick.log` in the scheduler
+supervisor's checkout) and the time of the tick. A pass that cannot start, or is skipped because another tick holds
+the machine lock, writes nothing. A tick run by the systemd timer, whose service starts the holder
+with `--unit`, or by hand with `agentihooks swarm tick` never writes the record, so only the scheduler can prove the
+scheduler. A Redis error while writing prints
+`the swarm tick delivery could not be recorded: <ExcType>: <message>` to the holder's log (`swarm-tick.log` in the scheduler
 runtime folder); the tick's work stands, and delivery stays unproven until a later tick writes the record.
 
 The record proves delivery only when all of these hold. Otherwise the reason below is the evidence everywhere the
