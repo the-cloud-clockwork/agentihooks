@@ -16,7 +16,7 @@ def lock_path(slug: str, environ: Mapping[str, str]) -> Path:
     return service.index_path(slug, environ).with_suffix(".warm.lock")
 
 
-def spawn(lock: int, slug: str, log: Path) -> None:
+def spawn(lock: int, slug: str, log: Path, environ: Mapping[str, str]) -> None:
     """Launch the refresh process, handing it the held lock."""
     with log.open("ab") as errors:
         subprocess.Popen(
@@ -26,6 +26,7 @@ def spawn(lock: int, slug: str, log: Path) -> None:
             stderr=errors,
             start_new_session=True,
             pass_fds=(lock,),
+            env=dict(environ),
         )
 
 
@@ -40,7 +41,7 @@ def start(slug: str, environ: Mapping[str, str]) -> bool:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return False
-        spawn(lock.fileno(), slug, path.with_suffix(".log"))
+        spawn(lock.fileno(), slug, path.with_suffix(".log"), environ)
     return True
 
 

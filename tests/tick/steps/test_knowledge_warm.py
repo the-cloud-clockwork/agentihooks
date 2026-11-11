@@ -71,9 +71,9 @@ def repository(monkeypatch: pytest.MonkeyPatch) -> _Repository:
 
 
 @pytest.fixture
-def spawned(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str, Path]]:
-    calls: list[tuple[int, str, Path]] = []
-    monkeypatch.setattr(warm_job, "spawn", lambda lock, slug, log: calls.append((lock, slug, log)))
+def spawned(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Path, dict[str, str]]]:
+    calls: list[tuple[str, Path, dict[str, str]]] = []
+    monkeypatch.setattr(warm_job, "spawn", lambda lock, slug, log, environ: calls.append((slug, log, environ)))
     return calls
 
 
@@ -137,13 +137,13 @@ def test_the_local_host_runs_the_knowledge_job_for_its_swarm(monkeypatch: pytest
 
 @pytest.mark.feature("tick-knowledge-warm")
 def test_a_start_while_an_earlier_refresh_holds_the_lock_launches_nothing(
-    _home: Path, spawned: list[tuple[int, str, Path]]
+    _home: Path, spawned: list[tuple[str, Path, dict[str, str]]]
 ) -> None:
     environ = _environ(_home / "fresh")
     path = warm_job.lock_path(SLUG, environ)
     assert path == _home / "fresh" / "knowledge" / "sw.warm.lock"
     assert warm_job.start(SLUG, environ) is True
-    assert [(slug, log) for _lock, slug, log in spawned] == [(SLUG, _home / "fresh" / "knowledge" / "sw.warm.log")]
+    assert spawned == [(SLUG, _home / "fresh" / "knowledge" / "sw.warm.log", environ)]
     with path.open("a") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert warm_job.start(SLUG, environ) is False
@@ -153,7 +153,9 @@ def test_a_start_while_an_earlier_refresh_holds_the_lock_launches_nothing(
 
 
 @pytest.mark.feature("tick-knowledge-warm")
-def test_a_semantic_embedder_setting_launches_nothing(_home: Path, spawned: list[tuple[int, str, Path]]) -> None:
+def test_a_semantic_embedder_setting_launches_nothing(
+    _home: Path, spawned: list[tuple[str, Path, dict[str, str]]]
+) -> None:
     environ = {**_environ(_home), "AGENTIHOOKS_KNOWLEDGE_EMBEDDER": "semantic"}
     assert warm_job.start(SLUG, environ) is False
     assert spawned == []
@@ -165,7 +167,7 @@ def test_the_job_is_launched_detached_holding_the_lock(tmp_path: Path, monkeypat
     launched: list[tuple[list[str], dict[str, Any]]] = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **options: launched.append((argv, options)))
     log = tmp_path / "warm.log"
-    warm_job.spawn(7, SLUG, log)
+    warm_job.spawn(7, SLUG, log, {"AGENTIHOOKS_HOME": "/home/x"})
     assert log.exists()
     [(argv, options)] = launched
     assert argv == [sys.executable, "-m", "scripts.ledger_knowledge.warm_job", "7", SLUG]
@@ -175,6 +177,7 @@ def test_the_job_is_launched_detached_holding_the_lock(tmp_path: Path, monkeypat
         "stdout": subprocess.DEVNULL,
         "start_new_session": True,
         "pass_fds": (7,),
+        "env": {"AGENTIHOOKS_HOME": "/home/x"},
     }
 
 
