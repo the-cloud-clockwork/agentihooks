@@ -291,7 +291,7 @@
   "scripts/events/envelope.py": 38,
   "scripts/events/memory.py": 8,
   "scripts/events/migrate_ready.py": 75,
-  "scripts/events/nats.py": 71,
+  "scripts/events/nats.py": 59,
   "scripts/events/nats_legacy.py": 13,
   "scripts/events/nats_migration.py": 213,
   "scripts/events/nats_names.py": 23,

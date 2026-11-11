@@ -112,7 +112,7 @@ class _Loop:
             self.close()
             raise RuntimeError("bus loop did not start")
 
-    def run[T](self, coro: Coroutine[Any, Any, T]) -> T:
+    def run(self, coro: Coroutine[Any, Any, Any]) -> Any:
         if self.closed:
             coro.close()
             raise RuntimeError("bus is closed")
@@ -405,11 +405,12 @@ class NatsWorkQueue:
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
         """Reads each sequence the stream held when the sweep began once, so offers published during it wait for the
         next sweep."""
-        state = self._loop.run(self._js.stream_info(self._stream)).state
+        info: api.StreamInfo = self._loop.run(self._js.stream_info(self._stream))
+        state = info.state
         return sum(self._withdrawn(sequence, stale) for sequence in range(state.first_seq, state.last_seq + 1))
 
     def _withdrawn(self, sequence: int, stale: Callable[[Envelope], bool]) -> bool:
-        msg = self._loop.run(self._get(sequence))
+        msg: api.RawStreamMsg | None = self._loop.run(self._get(sequence))
         if msg is None or not stale(Envelope.decode(msg.data)):
             return False
         self._loop.run(self._js.delete_msg(self._stream, sequence))
