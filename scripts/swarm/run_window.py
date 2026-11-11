@@ -10,10 +10,11 @@ from datetime import UTC, datetime
 
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
+from scripts.inbox import store as inbox_store
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.inbox.store import DuplicateItem
 from scripts.swarm import capacity, doc_report
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_notifications
 
 MINUTE_MS = 60_000
@@ -247,9 +248,9 @@ def _publish(slug, mode, store, ledger, rows, bounds, watchdog):
     return "run window: published the final state to the ledger and the watchdog"
 
 
-def _send_once(store, address, text, ref, task=""):
+def _send_once(store: RedisStore, address: str, text: str, ref: str, task: str = "") -> None:
     try:
-        InboxStore(store.redis).send(SENDER, address, text, ref=ref, task=task, item_id=_item_id(ref))
+        inbox_store.InboxStore(store.redis).send(SENDER, address, text, ref=ref, task=task, item_id=_item_id(ref))
     except DuplicateItem:
         pass
 

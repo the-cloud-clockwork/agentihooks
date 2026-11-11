@@ -43,20 +43,34 @@ def section(store, name):
 def test_archive_moves_only_rows_no_live_reader_returns(store):
     first, second, third, other = history(store)
     registry = store.execution_registry
-    agents, occupants = registry.agents("fixture"), registry.occupants("fixture")
+    agents = registry.agents("fixture")
     records = sorted(registry.records("fixture"), key=lambda a: a.execution_id)
 
-    assert registry.archive("fixture") == 2
+    assert registry.archive("fixture") == 3
 
-    assert set(section(store, "executions")) == {third.execution_id, other.execution_id}
-    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+    assert set(section(store, "executions")) == {third.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id, other.execution_id}
     assert registry.agents("fixture") == agents
-    assert registry.occupants("fixture") == occupants
+    assert registry.occupants("fixture") == {"eng-1@fixture": store.execution("fixture", third.execution_id)}
     assert sorted(registry.records("fixture"), key=lambda a: a.execution_id) == records
     assert store.execution("fixture", first.execution_id).name == first.name
     assert registry.managed("fixture", second.name)
     assert not registry.managed("fixture", "nobody@fixture")
     assert registry.archive("fixture") == 0
+
+
+@pytest.mark.feature("swarm-archive-terminal-head")
+def test_archive_moves_a_terminal_head_with_no_newer_generation(store):
+    agent = started(store, "eng-9@fixture")
+    store.drop_agent("fixture", agent.name)
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 1
+
+    assert agent.execution_id not in section(store, "executions")
+    assert agent.execution_id in section(store, "archive")
+    assert store.execution("fixture", agent.execution_id).state == "ended"
+    assert registry.occupants("fixture") == {}
 
 
 @pytest.mark.feature("swarm-archive-prunes-intents")
@@ -70,13 +84,13 @@ def test_archive_prunes_intents_for_the_rows_it_archives(store):
         assert first.execution_id in section(store, "intents")
         assert second.execution_id in section(store, "intents")
 
-    assert store.execution_registry.archive("fixture") == 2
+    assert store.execution_registry.archive("fixture") == 3
 
     intents = section(store, "intents")
     assert first.execution_id not in intents
     assert second.execution_id not in intents
     assert third.execution_id in intents
-    assert other.execution_id in intents
+    assert other.execution_id not in intents
 
 
 @pytest.mark.parametrize("external", [False, True])
@@ -89,13 +103,13 @@ def test_fenced_archive_and_rows_written_in_the_old_layout_reach_old_readers(sto
     held = lease.acquire(store, "fixture", "home")
     assert held is not None
     with lease.fencing(held.epoch):
-        assert store.execution_registry.archive("fixture") == 2
+        assert store.execution_registry.archive("fixture") == 3
         store.put_agent("fixture", replace(third, state="working"))
     port = fencing.records(store, "fixture")
     assert port.layout("fixture") == fencing.DOCUMENT
     doc = fencing.read(store, "fixture")
     executions = fencing.read_executions(store, "fixture")
-    assert set(doc["archive"]) == {first.execution_id, second.execution_id}
+    assert set(doc["archive"]) == {first.execution_id, second.execution_id, other.execution_id}
     assert executions == doc["executions"]
     assert executions[third.execution_id]["state"] == "working"
     for execution_id, row in doc["archive"].items():
@@ -301,13 +315,13 @@ def test_reconcile_archives_dead_rows(store):
     held = lease.acquire(store, "fixture", "home")
     assert held is not None
     with lease.fencing(held.epoch):
-        first, second, *_ = history(store)
+        first, second, third, other = history(store)
     runtime = MagicMock()
     runtime.live_names.return_value = set()
 
     ExecutionRegistry(store).reconcile("fixture", runtime, 0)
 
-    assert set(section(store, "archive")) == {first.execution_id, second.execution_id}
+    assert set(section(store, "archive")) == {first.execution_id, second.execution_id, other.execution_id}
     assert first.execution_id not in section(store, "intents")
     assert second.execution_id not in section(store, "intents")
 
