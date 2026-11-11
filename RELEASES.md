@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.807 · 2026-11-11
+
+### 2026-11-11 · 0a68dfacb590 · #10713 · @agenticore-app
+
+**Document the swarm tick OTEL metrics and Swarm Tick dashboard**
+
+This change adds the missing documentation for the swarm tick OTEL metrics and the Swarm Tick Grafana dashboard delivered earlier in #9549, closing a gap where the feature worked but was unexplained. The new reference page covers the five metric names, labels, buckets, when each is recorded, delta temporality over OTLP HTTP, relevant environment variables, the antoncore collector path, dashboard panels and PromQL queries, plus verification, limitations, and troubleshooting guidance, so operators can confidently find, interpret, and debug tick metrics in Grafana.
+
+### 2026-11-11 · c3d18e75507b · #10652 · @agenticore-app
+
+**Ledger writes report time per write substep**
+
+This change breaks down each ledger write's recorded time into its four substeps—hierarchy sync, outbox write, refresh record, and event append—and attaches those timings to request metrics write records, summary totals, and journal samples, the same way lock, client, and Postgres waits are already tracked. It matters because recent production measurements showed slow writes (up to 18.9 seconds) with large unattributed time gaps, and the freeze list rewrite theory was ruled out; this instrumentation lets the next live measurement pinpoint exactly which substep is causing the slowdown instead of guessing.
+
 ## v2.17.805 · 2026-11-11
 
 ### 2026-11-11 · 587c2e283847 · #10679 · @agenticore-app
