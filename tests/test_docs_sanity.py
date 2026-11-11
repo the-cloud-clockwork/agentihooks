@@ -213,6 +213,8 @@ def test_each_edge_of_the_lab_host_and_ipv6_rules(line: str, rules: list[str]) -
         '"auth' + 'Token": "' + TAIL[:24] + '"',
         "Authorization: " + "Bea" + "rer " + TAIL[:20],
         "clone https://bot:" + TAIL[:12] + "@git.example.com/r.git",
+        "pass" + "word_valid: " + TAIL[:11],
+        "api_token_hid=" + TAIL[:10],
     ],
 )
 def test_a_password_or_token_like_value_is_flagged(line: str) -> None:

@@ -40,7 +40,7 @@ CLOUD_ADDRESS_HOST = re.compile(r"(?<![\w-])ip-(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d
 INSTANCE_HOST = re.compile(r"(?<![0-9a-z])(?:(?:i|ec2)-[0-9a-f]{17}|i-[0-9a-f]{8})(?![0-9a-z])")
 SECRET_ASSIGNMENT = re.compile(
     r"[\w-]*(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|auth[_-]?key|private[_-]?key)"
-    r"(?![\w-]*(?:name|ref|file|path|id)[\"']?\s*[:=])"
+    r"(?![\w-]*?(?:[_-](?:name|ref|file|path|id)|(?-i:Name|Ref|File|Path|Id))[\"']?\s*[:=])"
     r"[\w-]*[\"']?\s*[:=]\s*[\"']?([^\s\"'`,;()\[\]{}<>]+)",
     re.IGNORECASE,
 )
