@@ -5,7 +5,6 @@ import sys
 from types import ModuleType
 from unittest.mock import patch
 
-import fakeredis
 import pytest
 
 import scripts.swarm
@@ -33,6 +32,8 @@ def test_a_first_import_under_a_patched_inbox_store_keeps_no_fake(name: str, mon
 def test_the_run_window_sends_through_the_real_store_after_a_patched_first_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     monkeypatch.setattr(scripts.swarm, "run_window", run_window)
     monkeypatch.delitem(sys.modules, run_window.__name__)
