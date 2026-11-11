@@ -418,6 +418,7 @@ def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
     ledger, runtime, messenger = object(), object(), object()
     calls = []
     monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: calls.append((args, kwargs)) or ["done"])
+    monkeypatch.setattr(controller, "tickable", lambda reader, slug: reader is ledger)
     assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
     assert calls == [((store, "sw", ledger, runtime, messenger), {"scheduled": True})]
 

@@ -209,7 +209,7 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.sites import TICK_SITES, TickSites, run_sites
+from scripts.tick.sites import TICK_HOOK_KEYS, TICK_SHUT_KEYS, TICK_SITES, TickSites, run_sites
 from scripts.tick.step import Domain
 from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
@@ -255,19 +255,22 @@ WRAPPER_PREFIX = (
     "wrapper reboot",
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
-INTENT_JOINS = {"wrapper intent": "wrapper relay"}
 NONE: frozenset[Domain] = frozenset()
 WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper probes": (NONE, NONE),
-    "wrapper commands": (NONE, NONE),
-    "wrapper phases": (NONE, hook_domains("doc")),
-    "wrapper intent": (NONE, hook_domains("doc", "config")),
+    "wrapper commands": (pass_domains("stop"), NONE),
+    "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
+    "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
     "wrapper relay": (pass_domains("judged"), hook_domains("view")),
-    "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
+PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
+PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
 WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
+ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
+LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -277,7 +280,6 @@ CONFIG_KEYS = {
     "engine": "engine",
     "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
-    "watchdog-document": "watchdog_document",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
 }
@@ -287,6 +289,7 @@ TICK_LOCK_MS = 10 * 60 * 1000
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
@@ -429,6 +432,11 @@ def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, conf
     return view, skip_refused(check.run, doc)
 
 
+def _unstopped(owner: Any, hook: Callable[[], bool]) -> Callable[[], bool]:
+    """Return ``hook`` answering false without running once the ledger health probe stopped the pass of ``owner``."""
+    return lambda: "stop" not in owner.box and hook()
+
+
 @dataclass
 class _Wrapper:
     """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
@@ -472,7 +480,8 @@ class _Wrapper:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
         later site's step may spawn before its hook runs. Each check reads and writes the keys
-        ``WRAPPER_HOOK_KEYS`` declares for its site."""
+        ``WRAPPER_HOOK_KEYS`` declares for its site; the checks that reach the ledger answer false without running
+        once the ledger health probe stopped the pass, because the sites they open are shut then."""
         found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
@@ -482,15 +491,17 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
-        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        guarded = hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        return {site: _unstopped(self, hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
-        needs only Redis and the host, past the commands once the ledger was binned or gone, and as the tick's sites
-        say."""
+        needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
         open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
         stopped = not open_past_stop and "stop" in self.box
-        return stopped or self.ended is not None or self.ticks.shut(step)
+        ended = self.ended is not None and step.group not in ENDS_AFTER
+        return stopped or ended or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
@@ -698,9 +709,9 @@ def run_tick(
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
         _hold_view(beating, slug, ledger)
-        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
+        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
-            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
+            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
         finally:
             wrapper.watching.close()
         doc, view = box.get("doc", doc), box.get("view")
@@ -968,6 +979,8 @@ def cmd_tick_watch(store, args):
 def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
+    if WEB_REPO.match(args.repo):
+        raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
@@ -1311,7 +1324,7 @@ def config_value(key, value):
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
-        or key in ("engine", "tick-mode", "watchdog-address", "watchdog-document", "placement-mode")
+        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
     ):
         return value
     if key == HIVE_PLACEMENT:
