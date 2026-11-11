@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "account-keys-indexed-not-scanned",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
+      "behaviour": "Listing and counting the fleet's provider account slots reads an index of account keys and never walks the whole Redis keyspace, which cost the closing status publish step about 0.85 s each pass over about 968 thousand keys; an account stored before the index existed is found by one backfill walk.",
+      "seam": "scripts.swarm_v2.accounts.stored_accounts and fleet_held against the account index and Redis SCAN",
+      "tests": [
+        "tests/test_swarm_v2_accounts.py::test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists",
+        "tests/test_swarm_v2_accounts.py::test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill"
+      ]
+    },
+    {
       "id": "ci-select-markdown-glob-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
