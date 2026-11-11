@@ -103,7 +103,7 @@ median of the `run_tick` row.
 | `swarm set max-eng-agents=8` | 3.9 s | 2.3 s |
 | Tick pass, first change | 428.95 s | 122.96 s |
 | Tick pass, second change | 122.96 s | 109.3 s (n=18) |
-| Tick pass, latest window before the third change reached the workstation | 109.3 s | 78.8 s (n=15) |
+| Tick pass, last window before the third change (workstation) | 109.3 s | 78.8 s (n=15) |
 | Status report build, third change | 10.5 s | 4.8 to 6.9 s |
 | Status payload, third change | 25.2 MB | 6.4 MB |
 | `_LATEST` script server time, third change | 32.4 ms | 16.0 ms |
@@ -112,9 +112,10 @@ The set command is under the one minute target. The last recorded tick median,
 78.8 s, predates the third change running on the workstation; the third change
 removes the hot spots measured in that pass.
 
-Redis serves no other client while a Lua script runs. At the time of this change `_LATEST` showed as a
-25 to 30 ms `SLOWLOG` entry on every call, with 32.4 ms measured server time,
-so halving it also shortens every other swarm client's waits.
+Redis serves no other client while a Lua script runs. At the time of this
+change `_LATEST` showed as a 25 to 30 ms `SLOWLOG` entry on every call, with
+32.4 ms measured server time, so halving it also shortens every other swarm
+client's waits.
 
 ## Limits
 
@@ -139,7 +140,7 @@ so halving it also shortens every other swarm client's waits.
 ## Delivery evidence
 
 Delivered by pull request 5491, "Cut swarm tick Redis server time and payloads",
-merged as commit 4938721ed, the third change for the task to finish the swarm
+merged into dev as commit 6f5d43507, the third change for the task to finish the swarm
 tick on the Anton Redis in under a minute. The CI runs it cites are no longer
 retained by GitHub; the timings come from the source task's proof, measured with
 the journal and `time` commands on this page.
