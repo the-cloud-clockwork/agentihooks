@@ -64,16 +64,12 @@ def test_gates_are_job_ids_of_every_workflow(tmp_path: Path) -> None:
 
 def test_lab_block_parses(tmp_path: Path) -> None:
     mutation = {"run_on": "ready", "mutants_per_changed_line": 3, "arid": ["scripts/x.py:f"]}
-    lab = delivery.lab(tree(tmp_path, block(mutation=mutation, check_prefix="grade")))
-    assert lab == delivery.Lab(
-        authoritative=(),
-        mutation=delivery.Mutation(run_on="ready", mutants_per_changed_line=3, arid=("scripts/x.py:f",)),
-        check_prefix="grade",
-    )
+    expected = block(mutation=mutation, check_prefix="grade")
+    assert delivery.lab(tree(tmp_path, expected)) == expected
 
 
-def test_all_mutants_is_none(tmp_path: Path) -> None:
-    assert delivery.lab(tree(tmp_path, block())).mutation.mutants_per_changed_line is None
+def test_all_mutants_is_kept(tmp_path: Path) -> None:
+    assert delivery.lab(tree(tmp_path, block()))["mutation"]["mutants_per_changed_line"] == delivery.ALL_MUTANTS
 
 
 @pytest.mark.parametrize(
@@ -175,7 +171,7 @@ def test_load_runtime_reads_the_mounted_file(tmp_path: Path) -> None:
 
 def test_repository_file_has_an_empty_authoritative_list() -> None:
     assert delivery.authoritative(ROOT) == ()
-    assert delivery.lab(ROOT).check_prefix == "lab"
+    assert delivery.lab(ROOT)["check_prefix"] == "lab"
 
 
 def test_template_carries_the_lab_block() -> None:

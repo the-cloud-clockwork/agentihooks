@@ -4,8 +4,8 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import yaml
@@ -73,24 +73,6 @@ class DeliveryError(ValueError):
     """A delivery.yaml lab block or a runtime config that breaks its schema."""
 
 
-@dataclass(frozen=True)
-class Mutation:
-    """When the lab runs mutation and how many mutants it keeps per changed line; None keeps all."""
-
-    run_on: str
-    mutants_per_changed_line: int | None
-    arid: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Lab:
-    """The lab block of a repository's delivery.yaml."""
-
-    authoritative: tuple[str, ...]
-    mutation: Mutation
-    check_prefix: str
-
-
 def _validate(document: object, schema: Mapping[str, object], name: str) -> None:
     """Raise DeliveryError naming the failing path when the document breaks the schema."""
     try:
@@ -109,30 +91,20 @@ def gates(root: Path) -> frozenset[str]:
     return frozenset(names)
 
 
-def lab(root: Path) -> Lab:
-    """Parse and validate the lab block of the tree's delivery.yaml against the tree's own gates."""
+def lab(root: Path) -> Mapping[str, Any]:
+    """Return the lab block of the tree's delivery.yaml, validated against the schema and the tree's own gates."""
     document = yaml.safe_load((root / DELIVERY).read_text())
     _validate(document, DELIVERY_SCHEMA, DELIVERY)
     block = document["lab"]
     unknown = sorted(set(block["authoritative"]) - gates(root))
     if unknown:
         raise DeliveryError(f"lab.authoritative names unknown gates: {', '.join(unknown)}")
-    mutation = block["mutation"]
-    count = mutation["mutants_per_changed_line"]
-    return Lab(
-        authoritative=tuple(block["authoritative"]),
-        mutation=Mutation(
-            run_on=mutation["run_on"],
-            mutants_per_changed_line=None if count == ALL_MUTANTS else count,
-            arid=tuple(mutation["arid"]),
-        ),
-        check_prefix=block["check_prefix"],
-    )
+    return block
 
 
 def authoritative(grader_root: Path) -> tuple[str, ...]:
     """Return the gates the lab grades authoritatively, read only from the grader copy of delivery.yaml."""
-    return lab(grader_root).authoritative
+    return tuple(lab(grader_root)["authoritative"])
 
 
 def cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
