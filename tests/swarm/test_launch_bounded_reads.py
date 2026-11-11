@@ -5,7 +5,6 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-import fakeredis
 import pytest
 
 from scripts.swarm import (
@@ -26,7 +25,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.tick.steps import place
 
 SLUG = "sw"
-FEATURE = pytest.mark.feature("swarm-launch-bounded-reads")
+LAUNCH_CHECKED = True
 
 
 GUARDED = (
@@ -49,47 +48,52 @@ def _guarded(name: Any) -> bool:
     return ":local-slots:" in name or any(name == key or name.endswith(f":{key}") for key in GUARDED)
 
 
-class Refusing(fakeredis.FakeRedis):
-    """A Redis double whose whole read of a launch path hash fails the test."""
+def _refusing() -> Any:
+    from fakeredis import FakeRedis
 
-    def hgetall(self, name: Any) -> Any:
-        """Refuse a whole read of a launch path hash."""
-        assert not _guarded(name), f"whole hash read of {name}"
-        return super().hgetall(name)
+    class Refusing(FakeRedis):
+        """A Redis double whose whole read of a launch path hash fails the test."""
 
-    def hkeys(self, name: Any) -> Any:
-        """Refuse a whole field listing of a launch path hash."""
-        assert not _guarded(name), f"whole hash field listing of {name}"
-        return super().hkeys(name)
+        def hgetall(self, name: Any) -> Any:
+            """Refuse a whole read of a launch path hash."""
+            assert not _guarded(name), f"whole hash read of {name}"
+            return super().hgetall(name)
+
+        def hkeys(self, name: Any) -> Any:
+            """Refuse a whole field listing of a launch path hash."""
+            assert not _guarded(name), f"whole hash field listing of {name}"
+            return super().hkeys(name)
+
+    return Refusing(decode_responses=True)
 
 
 @pytest.fixture
 def store() -> RedisStore:
-    """A swarm store on a Redis double that refuses whole hash reads."""
-    created = RedisStore(Refusing(decode_responses=True))
+    """A swarm store on a Redis double that refuses whole reads of launch path hashes."""
+    created = RedisStore(_refusing())
     created.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=1))
     return created
 
 
 def _agent(name: str, task: str, **fields: Any) -> AgentRecord:
-    return AgentRecord(name=name, task=task, lane="eng", pane_id="", started_at=1, **fields)
+    return AgentRecord(name=name, task=task, lane="eng", started_at=1, **fields)
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_fields_reads_every_field_across_pages(store: RedisStore) -> None:
     store.redis.hset("h", mapping={f"f{n}": str(n) for n in range(7)})
     assert hash_pages.fields(store.redis, "h", page=2) == {f"f{n}": str(n) for n in range(7)}
     assert hash_pages.fields(store.redis, "missing") == {}
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_picked_returns_only_the_named_fields_that_are_set(store: RedisStore) -> None:
     store.redis.hset("h", mapping={"a": "1", "b": "2", "c": "3"})
     assert hash_pages.picked(store.redis, "h", ["a", "c", "z", "a"]) == {"a": "1", "c": "3"}
     assert hash_pages.picked(store.redis, "h", []) == {}
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_place_holds_spawns_for_another_swarms_waiting_master(store: RedisStore) -> None:
     store.redis.hset(swarm_tick.MASTER_WAITING, mapping={SLUG: "100", "other": "100", "old": "-999999999"})
     assert place._held_for_master(SLUG, store, 200) == [
@@ -97,7 +101,7 @@ def test_place_holds_spawns_for_another_swarms_waiting_master(store: RedisStore)
     ]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_launch_check_reads_pending_checks_and_reports_paged(store: RedisStore) -> None:
     launch_check.begin(store, SLUG, _agent("engineer@1-1", "t1"), 10)
     held = _agent("engineer@1-2", "t2")
@@ -109,7 +113,7 @@ def test_launch_check_reads_pending_checks_and_reports_paged(store: RedisStore) 
     assert [finding.subject.split("/")[0] for finding in launch_check.findings(store, SLUG)] == ["profile"]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_launch_job_collect_drops_a_job_whose_agent_is_gone(store: RedisStore) -> None:
     key = store.key(SLUG, launch_job.KEY)
     store.redis.hset(key, "engineer@1-9", json.dumps({"task": "t9", "placed": {}}))
@@ -118,7 +122,7 @@ def test_launch_job_collect_drops_a_job_whose_agent_is_gone(store: RedisStore) -
     assert not store.redis.exists(key)
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_local_slots_count_and_claim_held_slots_paged(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(local_slots, "live", lambda: set())
     now = local_slots.lease.now_ms(store)
@@ -129,7 +133,7 @@ def test_local_slots_count_and_claim_held_slots_paged(store: RedisStore, monkeyp
     assert sorted(hash_pages.fields(store.redis, local_slots.key("m"))) == [f"{SLUG}/a", f"{SLUG}/c"]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_preempt_keeps_only_asks_of_live_holders(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("scripts.hive.placement_waits.read", lambda store, slug: {})
     key = store.key(SLUG, preempt.ASKED)
@@ -139,7 +143,7 @@ def test_preempt_keeps_only_asks_of_live_holders(store: RedisStore, monkeypatch:
     assert sorted(hash_pages.fields(store.redis, key)) == ["engineer@1-1"]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record(store: RedisStore) -> None:
     record = {"agent": "engineer@1-1", "generation": 1, "target": "x", "blocked": True}
     store.redis.hset(prerequisite_wait.key(SLUG), mapping={"t1": json.dumps(record), "t2": json.dumps({})})
@@ -147,7 +151,7 @@ def test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record(store: Redis
     assert sorted(hash_pages.fields(store.redis, prerequisite_wait.key(SLUG))) == ["t2"]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_failed_panes_held_reads_every_pane(store: RedisStore) -> None:
     failed_panes.hold(store, SLUG, _agent("engineer@1-1", "t1", pane_id="p1"), 5, "boom")
     assert failed_panes.held(store, SLUG) == {
@@ -155,13 +159,13 @@ def test_failed_panes_held_reads_every_pane(store: RedisStore) -> None:
     }
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_remote_control_failures_reads_every_master(store: RedisStore) -> None:
     remote_control.record(store, SLUG, "master@1-1", "lost", 7)
     assert remote_control.failures(store, SLUG) == {"master@1-1": {"message": "lost", "at": 7}}
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_dispatch_seat_red_dev_reads_only_blocked_tasks(store: RedisStore) -> None:
     store.redis.hset(dev_red.key(SLUG), mapping={"t1": "5", "t2": "9", "t3": "11"})
     doc = {"tasks": [{"id": "t1", "state": "blocked"}, {"id": "t2", "state": "blocked"}, {"id": "t3", "state": "open"}]}
@@ -171,7 +175,7 @@ def test_dispatch_seat_red_dev_reads_only_blocked_tasks(store: RedisStore) -> No
     assert dispatch_seat.red_dev(store, SLUG, {"tasks": [{"id": "t3", "state": "open"}]}) == []
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_run_window_reads_its_marks_by_field(store: RedisStore) -> None:
     window = {"start_ms": 0, "minutes": 10}
     config = replace(store.config(SLUG), window=window)
@@ -183,7 +187,7 @@ def test_run_window_reads_its_marks_by_field(store: RedisStore) -> None:
     assert set(hash_pages.fields(store.redis, key)) <= set(run_window.MARKS)
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_dispatch_seat_wake_reads_sent_triggers_by_id(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, str]] = []
     inbox = SimpleNamespace(send=lambda sender, address, text: sent.append((address, text)))
@@ -199,7 +203,7 @@ def test_dispatch_seat_wake_reads_sent_triggers_by_id(store: RedisStore, monkeyp
     assert sorted(hash_pages.fields(store.redis, store.key(SLUG, dispatch_seat.SENT))) == ["old", "t1", "t2"]
 
 
-@FEATURE
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_dispatch_seat_departed_seat_holds_only_sent_triggers(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

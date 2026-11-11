@@ -267,8 +267,10 @@ def told(found: dict, outcome: str) -> str:
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:
     groups: dict[str, dict] = {}
-    for raw in hash_pages.fields(store.redis, store.key(slug, "launch-check-reports")).values():
-        found = json.loads(raw)
+    reports = [
+        json.loads(raw) for raw in hash_pages.fields(store.redis, store.key(slug, "launch-check-reports")).values()
+    ]
+    for found in sorted(reports, key=lambda report: report["at"], reverse=True):
         for field, values in found["misses"].items():
             if field in REPORT_ONLY:
                 continue

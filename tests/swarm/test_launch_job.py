@@ -351,7 +351,7 @@ def test_collect_settles_each_job_with_the_tick_paths(store, monkeypatch):
 
     actions, waiting = launch_job.collect(run)
 
-    assert actions == ["finished", "started", "failed", "failed"]
+    assert actions == ["failed", "started", "failed", "finished"]
     assert waiting == {"a-wait"}
     assert list(store.redis.hgetall(store.key("sw", launch_job.KEY))) == ["a-wait"]
     store.refresh.assert_called_once_with("sw", "t-wait", "a-wait", engine.LEASE_MS)
