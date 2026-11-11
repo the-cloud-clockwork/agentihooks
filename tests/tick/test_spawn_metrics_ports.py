@@ -100,7 +100,11 @@ def test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port() -> 
     measured, _, calls = _ports()
     action = dispatcher.Action(dispatcher.CHAIN, "apply", "chain claimed", {"id": "t1"})
 
-    assert dispatcher.log("sw", [action], 9, calls) == []
+    token = dispatcher.PORT.set(calls)
+    try:
+        assert dispatcher.log("sw", [action], 9) == []
+    finally:
+        dispatcher.PORT.reset(token)
 
     assert [call.operation for call in measured.calls] == ["log", "emit"]
     [row] = cast(tuple[gate_log.Row, ...], measured.calls[0].args[1])
@@ -111,17 +115,20 @@ def test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port() -> 
 
 
 @pytest.mark.feature("tick-spawn-metrics-processes")
-def test_the_chain_claim_report_passes_its_port_to_the_dispatcher_log(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[object] = []
-    monkeypatch.setattr(dispatcher, "log", lambda slug, actions, now_ms, port=None: seen.append(port) or [])
-    monkeypatch.setattr(dispatcher, "_comment", lambda *args: "")
-    doc = {"tasks": [{"id": "d1", "state": "done"}], "_meta": {"stamps": {"tasks/d1/state": {"at": 1000}}}}
-    monkeypatch.setattr(dispatcher, "_merged", lambda task, known: ["d1"])
-    port = object()
+def test_the_dispatcher_log_outside_a_pass_writes_the_host_gate_log_and_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    landed: list[tuple[str, object]] = []
+    recorded: list[tuple[object, object, int]] = []
+    monkeypatch.setattr(gate_log, "append", lambda slug, row: landed.append((slug, row)))
+    monkeypatch.setattr(metrics, "record", lambda table, rows, now_ms: recorded.append((table, rows, now_ms)) or [])
+    action = dispatcher.Action(dispatcher.CHAIN, "apply", "chain claimed", {"id": "t1"})
 
-    dispatcher._chain_report("sw", None, doc, {"id": "t1"}, "eng", 5000, port)
+    assert dispatcher.log("sw", [action], 9) == []
 
-    assert seen == [port]
+    row = gate_log.Row(9, dispatcher.AUTHOR, "apply", dispatcher.AUTHOR, "t1", dispatcher.CHAIN, "chain claimed")
+    assert landed == [("sw", row)]
+    assert recorded == [(dispatcher.TABLE, [dispatcher.dispatch_row("sw", 0, action, 9)], 9)]
 
 
 @pytest.mark.feature("tick-spawn-metrics-processes")
@@ -229,9 +236,11 @@ def test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports(monkeypat
 
     tick = _tick()
     found: list[MetricsCalls | None] = []
+    logged: list[object] = []
 
     def spawn(*args: object) -> list[str]:
         found.append(place.PASS_METRICS.get())
+        logged.append(dispatcher.PORT.get())
         return []
 
     tick._spawn = spawn
@@ -259,6 +268,7 @@ def test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports(monkeypat
     assert "metrics" in step.effects
     assert (calls.metrics, calls.processes) == (granted.metrics, granted.processes)
     assert calls.deadline.expires_at == 50.0 + tick.SPAWN_BUDGET_S
-    assert place.PASS_METRICS.get() is None
+    assert logged == [calls]
+    assert (place.PASS_METRICS.get(), dispatcher.PORT.get()) == (None, None)
     calls.log("sw", [gate_log.Row.of("claims", "deny", Who(name="swarm", task="t1"), now_ms=1)])
     assert [call.operation for call in cast(FakeMetrics, cast(Any, tools.metrics)).calls] == ["log"]

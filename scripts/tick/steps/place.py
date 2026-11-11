@@ -134,11 +134,13 @@ def _spawn_step(tick: Any, get: Get) -> Any:
         bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
         args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
         token = PASS_DEADLINE.set(deadline)
-        measured = PASS_METRICS.set(MetricsCalls(tools.metrics, tools.processes, recording))
+        ports = MetricsCalls(tools.metrics, tools.processes, recording)
+        measured, logged = PASS_METRICS.set(ports), dispatcher.PORT.set(ports)
         try:
             with tick._placement_pass(runtime):
                 found = tick.skip_refused(tick._spawn, *args)
         finally:
+            dispatcher.PORT.reset(logged)
             PASS_METRICS.reset(measured)
             PASS_DEADLINE.reset(token)
         get("box")["rows"] = MappingProxyType(rows)
@@ -178,7 +180,7 @@ def _started(
     profile_first.spawned(slug, store, task["id"])
     return [
         f"spawned {record.name} for {task['id']}",
-        *dispatcher.chain_claimed(slug, config, ledger, doc, task, record.lane, now_ms, PASS_METRICS.get()),
+        *dispatcher.chain_claimed(slug, config, ledger, doc, task, record.lane, now_ms),
     ]
 
 

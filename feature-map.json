@@ -3456,7 +3456,7 @@
         "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
         "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
         "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port",
-        "tests/tick/test_spawn_metrics_ports.py::test_the_chain_claim_report_passes_its_port_to_the_dispatcher_log",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_outside_a_pass_writes_the_host_gate_log_and_outbox",
         "tests/tick/test_spawn_metrics_ports.py::test_a_failed_metrics_emit_reports_like_the_outbox",
         "tests/tick/test_spawn_metrics_ports.py::test_the_spool_metrics_appends_each_gate_row_to_the_gate_log",
         "tests/tick/test_spawn_metrics_ports.py::test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none",

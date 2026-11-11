@@ -18,6 +18,7 @@ task.
 import json
 from collections import Counter
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -58,6 +59,7 @@ SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
+PORT: ContextVar[Any] = ContextVar("dispatch_log_port", default=None)
 ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {why}."
 LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
 LEADS = "it leads a chain of {chain} and unblocks {work}"
@@ -172,24 +174,13 @@ def _merged(task, known):
     return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
 
 
-def chain_claimed(
-    slug: str,
-    config: Any,
-    ledger: Any,
-    doc: dict[str, Any],
-    task: dict[str, Any],
-    lane: str,
-    now_ms: int,
-    port: Any = None,
-) -> list[str]:
+def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
     if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
         return []
-    return _chain_report(slug, ledger, doc, task, lane, now_ms, port)
+    return _chain_report(slug, ledger, doc, task, lane, now_ms)
 
 
-def _chain_report(
-    slug: str, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int, port: Any = None
-) -> list[str]:
+def _chain_report(slug, ledger, doc, task, lane, now_ms):
     known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
     times = [
         (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
@@ -201,7 +192,7 @@ def _chain_report(
     text = CHAIN_CLAIM.format(task=task["id"], elapsed=elapsed, dep=dep)
     said = _comment(slug, ledger, task, CHAIN_CLAIMED.format(lane=lane, elapsed=elapsed))
     action = Action(CHAIN, "apply", text + said, task)
-    return [action.text] + log(slug, [action], now_ms, port)
+    return [action.text] + log(slug, [action], now_ms)
 
 
 def _band(task, fixed, guard):
@@ -367,12 +358,13 @@ def priorities(store, slug, doc, ledger, view, now_ms):
     return found + log(slug, [Action(PRIORITIES, "apply", text, {}) for text in found], now_ms)
 
 
-def log(slug: str, actions: list[Any], now_ms: int, port: Any = None) -> list[str]:
-    """Write each action's gate log row and dispatch row, through ``port`` when the caller holds one."""
+def log(slug: str, actions: list[Any], now_ms: int) -> list[str]:
+    """Write each action's gate log row and dispatch row, through the tick pass's ``PORT`` when one is set."""
     from scripts.swarm import metrics
 
     if not actions:
         return []
+    port = PORT.get()
     gated = [
         gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
         for action in actions
