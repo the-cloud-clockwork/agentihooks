@@ -128,6 +128,24 @@
       ]
     },
     {
+      "id": "swarm-tick-claim-after-dependency",
+      "origin": "inventory",
+      "behaviour": "A task whose dependency is still open is not claimed, and the tick pass after that dependency is done claims it and spawns its engineer.",
+      "seam": "the tick claim pass, scripts.swarm.tick.tick over a ledger task carrying depends_on",
+      "tests": [
+        "tests/swarm/test_tick_claims.py::test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done"
+      ]
+    },
+    {
+      "id": "swarm-tick-idle-retire",
+      "origin": "inventory",
+      "behaviour": "A worker whose pane reads idle for IDLE_KILL_TICKS tick passes is retired without a typed nudge and its task is reopened.",
+      "seam": "the tick idle pass, scripts.swarm.tick.tick over an agent the runtime reports idle",
+      "tests": [
+        "tests/swarm/test_tick_idle.py::test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened"
+      ]
+    },
+    {
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
