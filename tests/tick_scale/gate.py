@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from scripts.swarm.store import RedisStore
 from scripts.tick.steps.budgets import SPAWN_NEEDS, floor_of
 from tests.swarm.test_tick import FakeRuntime
-from tests.tick_scale.seed import SLUG, ScaleLedger, seed_store
+from tests.tick_scale.seed import SLUG, ScaleLedger, seed_live, seed_store
 
 GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
 PASSES = 3
@@ -46,7 +46,7 @@ def step_records(store: RedisStore) -> list[dict[str, Any]]:
     return [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key(SLUG, "tick:steps"))]
 
 
-def run_passes(store: RedisStore) -> int:
+def run_passes(store: RedisStore, started_ms: int) -> int:
     """Run ``PASSES`` scheduled tick passes through the tick command over the seeded store and full size ledger,
     with every GitHub and terminal reach replaced by the recorded fakes the tick command tests use."""
     import pytest
@@ -57,6 +57,7 @@ def run_passes(store: RedisStore) -> int:
     from tests.swarm.test_delivery import FakeHerdr
 
     ledger, runtime = ScaleLedger(), FakeRuntime()
+    runtime.live.update(seed_live(store, ledger, started_ms))
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
         patch.setattr(controller, "_host_reading", lambda store, machine: IDLE_HOST)
@@ -88,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the gate flushes its Redis database, so --redis must name a loopback host")
     now_ms = time.time_ns() // 1_000_000
     store = seed_store(redis.Redis.from_url(args.redis, decode_responses=True), now_ms)
-    launched = run_passes(store)
+    launched = run_passes(store, now_ms)
     records = step_records(store)
     found = misses(records) + ([] if launched else ["no agent launched, so the passes measured no launch path"])
     gated = [record for record in records if record.get("step") in GATED]

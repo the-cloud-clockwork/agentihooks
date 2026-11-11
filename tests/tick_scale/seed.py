@@ -18,6 +18,8 @@ OPEN = 60
 SEATS = 40
 CI_SEATS = 10
 CHUNK = 1_000
+LIVE = 30
+CLAIM_MS = 3_600_000
 STAMP = "2026-11-10T00:00:00Z"
 DESCRIPTION = (
     "Launch the tick pass against the production sized store, keep every step inside its budget, record the proof "
@@ -75,6 +77,34 @@ def seed_store(redis: Any, started_ms: int) -> RedisStore:
     fencing.migrate_records(store, SLUG, writers_upgraded=True)
     seed_archive(store, started_ms)
     return store
+
+
+def seed_live(store: RedisStore, ledger: "ScaleLedger", started_ms: int) -> list[str]:
+    """Start ``LIVE`` Kubernetes executions that hold the first open tasks, so every pass reaps, verifies and
+    updates real executions, and return their names."""
+    names = []
+    for index in range(LIVE):
+        task = ledger.rows[f"t-{index:05d}"]
+        lane, seat = task["lane"], f"{'ci' if task['lane'] == 'ci' else 'eng'}-{index + 1}@{SLUG}"
+        target = {"pod_namespace": "swarm", "pod_name": f"live-{index}", "pod_uid": f"live-uid-{index:04d}"}
+        agent = AgentRecord(
+            store.next_name(SLUG, lane),
+            lane,
+            task["id"],
+            pane_id=f"w1:l{index}",
+            harness="claude",
+            account="acct",
+            started_at=started_ms,
+            seat=seat,
+            runtime_backend="kubernetes",
+            runtime_target=target,
+            hive="swarm-hive-001",
+        )
+        started = store.start_execution(SLUG, agent)
+        store.claim(SLUG, task["id"], started.name, CLAIM_MS)
+        task.update(state="claimed", claimed_by=started.name)
+        names.append(started.name)
+    return names
 
 
 def task_row(index: int) -> dict[str, Any]:
