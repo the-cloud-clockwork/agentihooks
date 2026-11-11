@@ -2,13 +2,10 @@
 
 import json
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING
+from typing import Any
 
 from scripts.hive import registry
 from scripts.hive.orders import RECEIPT_SECONDS, SENT, Ack
-
-if TYPE_CHECKING:
-    from redis import Redis
 
 __all__ = ["RunOrder", "RunOrders"]
 
@@ -31,12 +28,13 @@ class RunOrder:
     @classmethod
     def decode(cls, raw: str) -> "RunOrder":
         """The order a stream entry carries, with its needs back as a tuple."""
-        fields = json.loads(raw)
-        return cls(**{**fields, "needs": tuple(fields["needs"])})
+        fields: dict[str, Any] = json.loads(raw)
+        needs = tuple(fields.pop("needs"))
+        return cls(**fields, needs=needs)
 
 
 class RunOrders:
-    def __init__(self, redis: "Redis") -> None:
+    def __init__(self, redis: Any) -> None:
         self.redis = redis
 
     def stream(self, hive: str) -> str:

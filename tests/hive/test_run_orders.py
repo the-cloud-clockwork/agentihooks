@@ -1,18 +1,16 @@
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 if TYPE_CHECKING:
-    from redis import Redis
-
     from scripts.hive.run_orders import RunOrder
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def setup() -> "tuple[Redis, ModuleType, RunOrder]":
+def setup() -> "tuple[Any, ModuleType, RunOrder]":
     import fakeredis
 
     from scripts.hive import run_orders
@@ -24,7 +22,7 @@ def setup() -> "tuple[Redis, ModuleType, RunOrder]":
     return redis, run_orders, order
 
 
-def test_a_run_order_round_trips_through_its_hive_stream(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
+def test_a_run_order_round_trips_through_its_hive_stream(setup: "tuple[Any, ModuleType, RunOrder]") -> None:
     from scripts.hive import registry
     from scripts.hive.orders import RECEIPT_SECONDS, Ack
 
@@ -46,7 +44,7 @@ def test_a_run_order_round_trips_through_its_hive_stream(setup: "tuple[Redis, Mo
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_duplicate_run_order_send_adds_no_entry(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
+def test_a_duplicate_run_order_send_adds_no_entry(setup: "tuple[Any, ModuleType, RunOrder]") -> None:
     redis, run_orders, order = setup
     store = run_orders.RunOrders(redis)
     assert store.send("host", order) is not None
@@ -55,7 +53,7 @@ def test_a_duplicate_run_order_send_adds_no_entry(setup: "tuple[Redis, ModuleTyp
 
 
 def test_a_send_raced_by_another_sender_adds_no_entry(
-    setup: "tuple[Redis, ModuleType, RunOrder]", monkeypatch: pytest.MonkeyPatch
+    setup: "tuple[Any, ModuleType, RunOrder]", monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from redis.client import Pipeline
 
@@ -72,7 +70,7 @@ def test_a_send_raced_by_another_sender_adds_no_entry(
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_run_order_for_another_hive_is_not_sent(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
+def test_a_run_order_for_another_hive_is_not_sent(setup: "tuple[Any, ModuleType, RunOrder]") -> None:
     redis, run_orders, order = setup
     store = run_orders.RunOrders(redis)
     assert store.send("other", order) is None
