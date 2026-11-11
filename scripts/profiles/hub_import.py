@@ -1,8 +1,9 @@
 """Import agentihub agent packages as portable bundle profiles.
 
 Each package under ``agents/<agent>/package`` becomes ``profiles/<name>`` in the
-bundle: ``command.yml`` turns into ``profile.yml``, instructions, skills and rules
-are copied, and Claude settings become overrides with absolute paths removed.
+bundle: ``command.yml`` turns into ``profile.yml``, every other package file and the
+agent level ``hooks/`` are copied, and Claude settings become overrides with
+absolute paths removed.
 ``state/`` and ``reports/`` go to a runtime data folder, Node and pip installs
 become bundle ``deps.json`` entries, and evaluation cases become judge cases.
 Secret files, symlinks, unsafe names and taken names refuse the whole import
@@ -29,8 +30,10 @@ from hooks import secrets
 
 PROFILE_KEYS = ("description", "capabilities")
 CLAUDE_KEYS = ("model", "effort")
-COPIED = ("CLAUDE.md", ".claude/skills", ".claude/rules")
 SETTINGS = ".claude/settings.json"
+CONVERTED = frozenset({"command.yml", SETTINGS, ".claude/settings.local.json"})
+SKIPPED_DIRS = frozenset({"node_modules", ".git"})
+AGENT_HOOKS = "hooks"
 OVERRIDES = ".claude/settings.overrides.json"
 SECRET_NAMES = frozenset(
     {
@@ -63,6 +66,7 @@ CASE_SUFFIXES = (".yaml", ".yml")
 DEPS = "deps.json"
 EMPTY_DEPS = '{\n  "deps": [\n  ]\n}\n'
 INSTALLS = (("npm", "package.json"), ("pip", "requirements.txt"))
+INSTALL_MANIFESTS = frozenset(manifest for _, manifest in INSTALLS)
 CHECKS = {
     "npm": ("npm", "ls", "--global"),
     "pip": ("python3", "-c", "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"),
@@ -80,6 +84,9 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
     packages = _packages(src)
     for package in packages:
         _refuse_unsafe_files(package)
+        hooks = package.parent / AGENT_HOOKS
+        if hooks.exists() or hooks.is_symlink():
+            _refuse_unsafe_files(hooks)
     plans: dict[str, dict[str, bytes]] = {}
     stores: dict[str, dict[str, bytes]] = {}
     deps: list[dict[str, object]] = []
@@ -90,7 +97,7 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
             raise ValueError(f"profile name taken: {name}")
         if (data / "profiles" / name).exists():
             raise ValueError(f"profile data taken: {name}")
-        plans[name] = _plan(package, name, command) | _cases(package.parent / CASES)
+        plans[name] = _merge(_plan(package, name, command), _cases(package.parent / CASES))
         stores[name] = _collect(package, DATA)
         deps.extend(_deps(package, name))
     manifest = _manifest(out / DEPS, deps)
@@ -193,7 +200,7 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()} | _collect(package, COPIED)
+    files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package))
     settings_path = package / SETTINGS
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
@@ -202,8 +209,36 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         _refuse_literal_credentials(settings, settings_path)
         portable = _portable(settings)
         if portable is not _DROP:
-            files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
+            files = _merge(files, {OVERRIDES: (json.dumps(portable, indent=2) + "\n").encode()})
     return files
+
+
+def _assets(package: Path) -> dict[str, bytes]:
+    """Return every package file the profile carries and the agent level hooks.
+
+    Leaves out what import converts or moves and refuses a file holding a literal credential.
+    """
+    files: dict[str, bytes] = {}
+    for root, dirs, names in package.walk():
+        top = root == package
+        dirs[:] = sorted(d for d in dirs if d not in SKIPPED_DIRS and not (top and d in DATA))
+        for entry in sorted(names):
+            relative = (root / entry).relative_to(package).as_posix()
+            if relative not in CONVERTED and entry not in INSTALL_MANIFESTS:
+                files[relative] = (root / entry).read_bytes()
+    files = _merge(files, _collect(package.parent, (AGENT_HOOKS,)))
+    for relative, content in files.items():
+        if secrets.scan(content.decode(errors="ignore"), mode="strict"):
+            raise ValueError(f"literal credential refused: {relative} in {package.parent}")
+    return files
+
+
+def _merge(files: dict[str, bytes], added: dict[str, bytes]) -> dict[str, bytes]:
+    """Return both file sets together, refusing a profile path that both of them write."""
+    taken = sorted(files.keys() & added.keys())
+    if taken:
+        raise ValueError(f"profile file taken twice: {taken[0]}")
+    return files | added
 
 
 def _collect(package: Path, relatives: tuple[str, ...]) -> dict[str, bytes]:
