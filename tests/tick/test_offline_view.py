@@ -281,6 +281,22 @@ def test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
+def test_queued_writes_of_several_offline_passes_merge_onto_the_stored_view(stored: Queued) -> None:
+    for item, fields in (
+        ("tasks/t1", {"claimed_by": "e1"}),
+        ("tasks/t1", {"state": "claimed"}),
+        ("tasks/t2", {"pr": 9}),
+    ):
+        with view.holding():
+            view.hold_stored("sw")
+            view.queued([{"op": "task_update", "item": item, "fields": fields}])
+    held = view.stored("sw")
+    assert held is not None
+    assert held.read("tasks", "t1") == {"id": "t1", "state": "claimed", "claimed_by": "e1"}
+    assert held.read("tasks", "t2") == {"id": "t2", "state": "claimed", "pr": 9}
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
 def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
     stored: Queued, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -342,6 +342,7 @@
         "tests/tick/test_offline_view.py::test_an_offline_write_matching_a_held_field_is_queued",
         "tests/tick/test_offline_view.py::test_an_offline_write_without_a_held_view_is_queued_unguarded",
         "tests/tick/test_offline_view.py::test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued",
+        "tests/tick/test_offline_view.py::test_queued_writes_of_several_offline_passes_merge_onto_the_stored_view",
         "tests/tick/test_offline_view.py::test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept",
         "tests/tick/test_offline_view.py::test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept",
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
