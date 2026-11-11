@@ -2332,9 +2332,10 @@ files nothing new.
 
 The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
 the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
-its standard error: the user journal (`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`), or `swarm-tick.log` in the runtime
-directory for a scheduled tick. The run is not marked handled, and the held cause is dropped on the next pass because
-no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
+its standard error: the user journal
+(`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`),
+or `swarm-tick.log` in the runtime directory for a scheduled tick. The run is not marked handled, and the held cause
+is dropped on the next pass because no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
 `promo-<run id>-<n>` task once.
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
@@ -4577,8 +4578,9 @@ workstation's tick (see [Workstation tick retirement](#workstation-tick-retireme
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`. Each pass considers every step the
-[tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
+minutes. Tick output goes to the user journal:
+`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
+Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
 ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.

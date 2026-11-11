@@ -1,5 +1,3 @@
-"""Documented tick journal reads select the user unit and pass UTC bounds."""
-
 import re
 from pathlib import Path
 
@@ -14,8 +12,8 @@ UNIT = "-u agentihooks-swarm.service"
 
 
 def documents() -> list[Path]:
-    skills = [*ROOT.glob("profiles/**/skills/**/*.md"), *ROOT.glob("profiles/**/.claude/skills/**/*.md")]
-    return sorted({*ROOT.glob("docs/**/*.md"), *skills})
+    skipped = {".git", ".venv", "node_modules"}
+    return sorted(path for path in ROOT.rglob("*.md") if not skipped & set(path.relative_to(ROOT).parts))
 
 
 def commands(path: Path) -> list[str]:
@@ -30,7 +28,8 @@ def tick_reads() -> list[tuple[Path, str]]:
 
 
 def test_tick_journal_reads_exist_in_the_docs() -> None:
-    assert len(tick_reads()) > 10
+    reads = tick_reads()
+    assert len(reads) > 10, f"{len(reads)} tick journal reads found in the repository markdown"
 
 
 def test_no_tick_journal_read_selects_the_old_tag() -> None:
