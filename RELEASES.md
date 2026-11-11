@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.808 · 2026-11-11
+
+### 2026-11-11 · 15c38d20d319 · #10658 · @agenticore-app
+
+**Keep a hive hosted launch's pane off the controller's failed pane hold**
+
+This change fixes the tick observe step so that retiring a launch hosted on another hive now correctly recognizes the agent as remote by checking `runtime_target.host_id`, letting the hive retire its own pane instead of leaving it on the controller's failed-pane hold. Previously the controller kept panes like 8036, 6052, 5871 and 7491 in its hold despite having no herdr server to read or close them, causing repeated retry failures. A new regression test, `test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold`, guards against this recurring.
+
+### 2026-11-11 · 261f5120b777 · #10693 · @agenticore-app
+
+**Refuse unbounded whole store reads in swarm and tick code**
+
+This change adds a semgrep rule that flags unbounded whole-store reads (hgetall, uncounted scans, keys) in scripts/swarm and scripts/tick, since these can block or overload the store as data grows. Existing uncounted reads are temporarily allowlisted per-module, tied to follow-up cleanup tasks, and a CI check now enforces that this allowlist only shrinks over time rather than growing. Fixture tests verify the rule catches the right 12 cases and ignores 10 safe ones, keeping future code from reintroducing this performance risk.
+
 ## v2.17.807 · 2026-11-11
 
 ### 2026-11-11 · 0a68dfacb590 · #10713 · @agenticore-app
