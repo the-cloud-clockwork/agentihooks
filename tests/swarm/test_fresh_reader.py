@@ -13,6 +13,7 @@ pytestmark = pytest.mark.unit
 
 URLS = [f"https://github.com/o/r/pull/{n}" for n in range(3)]
 MERGED = "https://github.com/o/r/pull/9"
+REAL = (ledger_events.view, ledger_events.views)
 
 
 def resource(head: str) -> dict[str, Any]:
@@ -63,6 +64,8 @@ def port(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     source = cast(SourceControl, RunPort(run))
     monkeypatch.setattr(stack, "login_source_control", lambda: source)
+    monkeypatch.setattr(ledger_events, "view", REAL[0])
+    monkeypatch.setattr(ledger_events, "views", REAL[1])
     return SimpleNamespace(calls=calls, missing=missing)
 
 
