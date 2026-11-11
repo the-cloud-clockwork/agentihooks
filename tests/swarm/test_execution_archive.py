@@ -73,6 +73,41 @@ def test_archive_moves_a_terminal_head_with_no_newer_generation(store):
     assert registry.occupants("fixture") == {}
 
 
+@pytest.mark.feature("swarm-archive-stale-generations-of-a-listed-name")
+def test_archive_moves_older_generations_of_a_name_that_stays_listed(store):
+    name = store.next_name("fixture", "eng")
+    agent = AgentRecord(name, "eng", "task", seat="eng-1@fixture")
+    one = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", name)
+    two = store.start_execution("fixture", agent, one.execution_id)
+    store.drop_agent("fixture", name)
+    three = store.start_execution("fixture", agent, two.execution_id)
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 2
+
+    assert set(section(store, "executions")) == {three.execution_id}
+    assert set(section(store, "archive")) == {one.execution_id, two.execution_id}
+    assert registry.occupants("fixture") == {"eng-1@fixture": store.execution("fixture", three.execution_id)}
+
+
+@pytest.mark.feature("swarm-archive-keeps-listed-head")
+def test_archive_keeps_a_listed_head_that_is_ended(store):
+    name = store.next_name("fixture", "eng")
+    agent = AgentRecord(name, "eng", "task", seat="eng-9@fixture")
+    older = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", name)
+    head = store.start_execution("fixture", agent, older.execution_id)
+    store.put_agent("fixture", replace(head, state="ended"))
+    registry = store.execution_registry
+
+    assert registry.archive("fixture") == 1
+
+    assert set(section(store, "executions")) == {head.execution_id}
+    assert set(section(store, "archive")) == {older.execution_id}
+    assert registry.occupants("fixture") == {"eng-9@fixture": store.execution("fixture", head.execution_id)}
+
+
 @pytest.mark.feature("swarm-archive-prunes-intents")
 def test_archive_prunes_intents_for_the_rows_it_archives(store):
     from scripts.swarm import lease
