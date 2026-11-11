@@ -4065,6 +4065,22 @@
         "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
         "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
+    },
+    {
+      "id": "hub-withdraws-stale-offers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-withdraw-stale-offers",
+      "behaviour": "Before the hub readiness pass publishes fresh offers, it removes from every lane work queue each waiting offer whose task is gone, claimed, no longer open, at a newer claim generation, moved lane, turned workstation or held, so a stream with thousands of withdrawn offers ahead delivers the fresh offer first.",
+      "seam": "scripts.swarm.readiness.publish through WorkQueue.withdraw on the memory and NATS work queues",
+      "tests": [
+        "tests/hub/test_stale_offers.py::test_a_lane_stream_with_withdrawn_offers_ahead_delivers_the_fresh_offer_first",
+        "tests/hub/test_stale_offers.py::test_withdraw_removes_only_the_offers_named_stale_and_counts_them",
+        "tests/hub/test_stale_offers.py::test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fresh_one",
+        "tests/hub/test_stale_offers.py::test_the_controller_grant_lets_the_hub_delete_a_stale_offer_from_any_lane_stream",
+        "tests/hub/test_stale_offers.py::test_an_offer_whose_task_turned_workstation_is_withdrawn",
+        "tests/hub/test_stale_offers.py::test_a_nats_sweep_leaves_an_offer_published_while_it_runs_for_the_next_sweep",
+        "tests/hub/test_stale_offers.py::test_a_swarm_scoped_queue_withdraws_through_its_lane_queue"
+      ]
     }
   ],
   "unmapped_rules": [
