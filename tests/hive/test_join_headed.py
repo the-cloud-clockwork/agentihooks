@@ -121,10 +121,29 @@ def test_startup_runs_the_headed_checks_only_on_a_headed_hive(monkeypatch: pytes
     monkeypatch.setattr(join_checks, "ledger_checks", lambda report: {"ledger_join": True})
     monkeypatch.setattr(join_checks, "github_ready", lambda: True)
     monkeypatch.setattr(join_checks, "kubectl_ready", lambda: True)
-    monkeypatch.setattr(join_checks, "git_identity_ready", lambda: False)
+    monkeypatch.setattr(join_checks, "git_identity_ready", lambda: True)
     checks = join_checks.startup(cast(Any, object()), {"context": {"headed": headed}})
     expected = {"pane": True, "ledger_join": True, "github": True}
-    assert checks == ({**expected, "kubectl": True, "git_identity": False} if headed else expected)
+    assert checks == ({**expected, "kubectl": True, "git_identity": True} if headed else expected)
+
+
+@pytest.mark.feature("hive-headed-member-check")
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    from hooks.context import hive_join
+    from scripts.swarm import store
+
+    for name in ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"):
+        monkeypatch.setenv(name, "set")
+    monkeypatch.setenv(missing, "")
+
+    def unexpected() -> None:
+        raise AssertionError("an agent without its hive, swarm or name must not connect")
+
+    monkeypatch.setattr(store, "connect", unexpected)
+    hive_join.run({"session_id": "session"}, "start")
 
 
 @pytest.mark.feature("hive-headed-member-check")
