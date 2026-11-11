@@ -151,6 +151,7 @@ class Registry:
 
 
 registry = Registry()
+registry.require("scripts.tick.steps")
 
 
 def register(step: Step) -> None:

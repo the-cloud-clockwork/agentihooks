@@ -244,6 +244,48 @@ def test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent(monkeypatch
 
 
 @pytest.mark.feature("swarm-tick-territory")
+def test_a_stopping_swarm_retires_agents_whose_runtime_never_answers_then_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _settle_seams(monkeypatch)
+    dropped: list[tuple[str, str]] = []
+
+    ghosts = [_agent("master@1-1", "master", tick.SUSPECT), _agent("engineer@1-1", "eng", tick.SUSPECT)]
+    store, ledger, rows = _SettleStore(ghosts), _Ledger(), {"t1": {"state": "claimed"}}
+
+    def drop(slug: str, seen: object, read: object, rows_seen: object, agent: AgentRecord, reason: str) -> str:
+        assert (slug, seen, read, rows_seen) == ("sw", store, ledger, rows)
+        dropped.append((agent.name, reason))
+        return f"retired {agent.name}: {reason}"
+
+    monkeypatch.setattr(tick, "_drop_remote", drop)
+    config = SimpleNamespace(state="stopping")
+
+    assert _settled(config, store, ledger, rows, {}) == [
+        "retired master@1-1: the swarm is stopping and its runtime never answered",
+        "retired engineer@1-1: the swarm is stopping and its runtime never answered",
+        "stopped",
+    ]
+    assert dropped == [
+        ("master@1-1", "the swarm is stopping and its runtime never answered"),
+        ("engineer@1-1", "the swarm is stopping and its runtime never answered"),
+    ]
+    assert calls == []
+    assert store.updates == [("sw", {"state": "stopped"})]
+
+
+@pytest.mark.feature("swarm-tick-territory")
+def test_a_stopping_swarm_keeps_a_ghost_while_another_agent_still_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    _settle_seams(monkeypatch)
+    dropped: list[str] = []
+    monkeypatch.setattr(tick, "_drop_remote", lambda *args: dropped.append(args[4].name) or "")
+    store = _SettleStore([_agent("engineer@1-1", "eng", tick.SUSPECT), _agent("engineer@1-2", "eng")])
+
+    assert _settled(SimpleNamespace(state="stopping"), store, _Ledger(), {}, {}) == []
+    assert dropped == [] and store.updates == []
+
+
+@pytest.mark.feature("swarm-tick-territory")
 @pytest.mark.parametrize(
     ("blocked", "tail"),
     [(0, ""), (1, ", one blocked task waits for you"), (2, ", 2 blocked tasks wait for you")],

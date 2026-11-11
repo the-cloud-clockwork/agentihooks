@@ -159,18 +159,20 @@ def test_the_probe_returns_the_runtime_refusal_and_refuses_an_unresolved_profile
     )
 
 
-def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
+def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
 
     class Down(InboxStore):
         def send(self, *args, **kwargs):
             raise ConnectionError("redis went away")
 
-    monkeypatch.setattr(preempt, "InboxStore", Down)
+    monkeypatch.setattr(preempt.inbox_store, "InboxStore", Down)
     with pytest.raises(ConnectionError):
         preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e2": '["t3", 2]'}
-    monkeypatch.setattr(preempt, "InboxStore", InboxStore)
+    monkeypatch.setattr(preempt.inbox_store, "InboxStore", InboxStore)
     assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 3) == []
 
 
