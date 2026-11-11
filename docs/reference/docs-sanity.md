@@ -19,9 +19,9 @@ workflow that any repository can call.
 | `email` | Any address outside reserved domains | `example.com`, `example.org`, `example.net`, `.example`, `.test`, `.invalid`, `.localhost`, no reply mailboxes, `git@` remotes and URL user names |
 | `private-host` | Names ending in `.lan`, `.local`, `.internal`, `.intranet`, `.corp`, `.localdomain`, `.home.arpa` or `.ts.net` | Names with an `example` label and Kubernetes `cluster.local` names |
 | `private-ipv6` | Addresses in the RFC 4193 unique local and the link local ranges | The documentation range `2001:db8::/32`, loopback `::1` and public addresses |
-| `cloud-host` | Host names that encode a private address in the `ip-a-b-c-d` form, and names carrying a 17 digit compute instance id | Names that encode a documentation or public address |
+| `cloud-host` | Host names that encode a private address in the `ip-a-b-c-d` form, and names carrying an 8 or 17 digit compute instance id | Names that encode a documentation or public address |
 | `lab-name` | The home lab by name, its repository, its domain and host names under it, matched without case | Words that only contain the name, such as `antonym` |
-| `secret-value` | Password or token like values after a password, secret, token or key name, after `Bearer`, or as the password in a URL | Placeholders (`<...>`, `$VAR`, `${{ ... }}`, `example`, `your`), environment variable names, paths, package versions and values under 8 characters or without both a letter and a digit |
+| `secret-value` | Password or token like values after a password, secret, token or key name, after `Bearer`, or as the password in a URL | Placeholders such as `<...>`, `$VAR`, `${{ ... }}` or a value containing `example`, `your`, `redacted` or `changeme`, keys ending in `name`, `ref`, `file`, `path` or `id`, environment variable names, paths, package versions and values under 8 characters or without both a letter and a digit |
 | Token shapes | GitHub, AWS, Slack, Anthropic, OpenAI and Google keys, JSON web tokens and private key headers | Vendor sample keys that contain `EXAMPLE` |
 | `keyword` | Any private keyword the caller supplies, matched without case | Everything else |
 
@@ -114,7 +114,7 @@ that must carry real addresses are not scanned.
 | `email` on a sample address | Use `user@example.com` |
 | `private-host` on a sample host | Use a name under `example.com` or `example.internal` |
 | `lab-name` on a page | Describe the deployment generically, such as "the cluster" or "the deployment repository" |
-| `cloud-host` on a node name | Use a placeholder such as `pool-node-1` |
+| `cloud-host` on a node name | Use a placeholder such as `redacted-node-1` |
 | `secret-value` on a sample | Use a placeholder such as `<token>` or `$API_TOKEN` |
 | `keyword` with no visible cause | Compare the line against the private keyword list where it is stored; the log never shows the keyword |
 | The check never reports on a pull request | The calling workflow must run on `pull_request` and `merge_group` |

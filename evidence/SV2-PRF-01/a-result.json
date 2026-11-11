@@ -6,7 +6,7 @@
     "measurements.json": "a32d3d92a843b1860aeeb20584a3c74ed7f1ab27dcfa4794f2550a92cf834406",
     "repeat.json": "ede1a4cd1cc69e9351f2001954f5832441aee3d95184c3af05e5a705c4ea7500",
     "update.json": "73352ce1ac1a4ff3ac10761d296d29fabfdadfa3ce3dc5ec2e961648095791ec",
-    "nodes.json": "e672f8574db396e729abe1508759a45be93ef3b053523afc2c12f3c56ca3273d",
+    "nodes.json": "989fd57cde1d9387868f71bc81434c7efaba5860b4b64e0e9c403d69ec4b44ef",
     "disclosure.json": "5619b504a31319971f751190ca09241f1e9ac8bef2c9454d660f46662d65041c"
   },
   "observed": {
@@ -43,25 +43,25 @@
       "idle": "an idle sample cannot size a worker"
     },
     "fits": {
-      "pool-node-1": {
+      "redacted-node-1": {
         "browser": 1,
         "compiler": 1,
         "general": 1,
         "memory": 5
       },
-      "pool-node-2": {
+      "redacted-node-2": {
         "browser": 0,
         "compiler": 0,
         "general": 0,
         "memory": 1
       },
-      "pool-node-4": {
+      "redacted-node-4": {
         "browser": 0,
         "compiler": 0,
         "general": 0,
         "memory": 1
       },
-      "pool-node-5": {
+      "redacted-node-5": {
         "browser": 0,
         "compiler": 0,
         "general": 0,
@@ -134,25 +134,25 @@
         "idle": "an idle sample cannot size a worker"
       },
       "fits": {
-        "pool-node-1": {
+        "redacted-node-1": {
           "browser": 1,
           "compiler": 1,
           "general": 1,
           "memory": 5
         },
-        "pool-node-2": {
+        "redacted-node-2": {
           "browser": 0,
           "compiler": 0,
           "general": 0,
           "memory": 1
         },
-        "pool-node-4": {
+        "redacted-node-4": {
           "browser": 0,
           "compiler": 0,
           "general": 0,
           "memory": 1
         },
-        "pool-node-5": {
+        "redacted-node-5": {
           "browser": 0,
           "compiler": 0,
           "general": 0,

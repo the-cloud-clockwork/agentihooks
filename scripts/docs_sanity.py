@@ -1,6 +1,6 @@
 """Docs sanity scanner: flags internal addresses, lab and cloud host names, personal emails, secrets and keywords.
 
-Project agnostic and standard library only, so any repository can copy or fetch it.
+Project agnostic apart from the built in lab name, and standard library only, so any repository can copy it.
 Usage: python docs_sanity.py [--keywords-env NAME] [--keywords-file PATH] [--exclude GLOB]
        [--baseline PATH] [--write-baseline PATH] PATH...
 Keywords are read one per line or comma separated, so the private list lives in a CI secret or a
@@ -37,9 +37,10 @@ NOT_ADDRESS = re.compile(r"[^0-9.]+|\.(?![0-9])")
 NOT_V6 = re.compile(r"[^0-9A-Fa-f:]+")
 LAB_NAME = re.compile(r"(?<![a-z0-9])(?:homeof)?anton(?:core)?(?![a-z])", re.IGNORECASE)
 CLOUD_ADDRESS_HOST = re.compile(r"(?<![\w-])ip-(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})(?![\w-]*\d)")
-INSTANCE_HOST = re.compile(r"(?<![0-9a-z])(?:i|ec2)-[0-9a-f]{17}(?![0-9a-z])")
+INSTANCE_HOST = re.compile(r"(?<![0-9a-z])(?:(?:i|ec2)-[0-9a-f]{17}|i-[0-9a-f]{8})(?![0-9a-z])")
 SECRET_ASSIGNMENT = re.compile(
     r"[\w-]*(?:password|passwd|pwd|passphrase|secret|token|api[_-]?key|access[_-]?key|auth[_-]?key|private[_-]?key)"
+    r"(?![\w-]*(?:name|ref|file|path|id)[\"']?\s*[:=])"
     r"[\w-]*[\"']?\s*[:=]\s*[\"']?([^\s\"'`,;()\[\]{}<>]+)",
     re.IGNORECASE,
 )

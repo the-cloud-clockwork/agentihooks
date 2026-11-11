@@ -195,6 +195,7 @@ def test_each_edge_of_the_built_in_rules(line: str, rules: list[str]) -> None:
         ("node ip-203-0-113-9 is up", []),
         ("instance i-0a1b2c3d4e5f60718 restarted", ["cloud-host"]),
         ("build i-12345 and sha 0a1b2c3d4e5f60718aa", []),
+        ("legacy instance i-0a1b2c3d", ["cloud-host"]),
         ("peer fd00:1234::5", ["private-ipv6"]),
         ("docs 2001:db8::1, loopback ::1 and time 12:30:45", []),
     ],
@@ -230,6 +231,7 @@ def test_a_password_or_token_like_value_is_flagged(line: str) -> None:
         "token_budget: 50000 and sec" + "ret=get_secret",
         "https://user:secret-placeholder@github.com/org/repo.git",
         "token_file=/run/secrets/x1y2z3w4",
+        "secretName: ingress-tls2 and tokenRef: vault-ref1",
     ],
 )
 def test_a_placeholder_reference_or_version_is_not_a_secret(line: str) -> None:

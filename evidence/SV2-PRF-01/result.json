@@ -77,7 +77,7 @@
         "ephemeral_mib": 3072
       }
     },
-    "coexistence": "On the read of 2026-10-11T12:28:53Z, pool-node-1 and k8s-master each fit at least one worker of every profile on its own and worker-001 fits one compiler, general or memory worker; no node fits one of each at once, because the four CPU requests sum to 6750 millis and the most free CPU on any node is 4412. The three busy EC2 workers and both k8s workers fit only memory workers.",
+    "coexistence": "On the read of 2026-10-11T12:28:53Z, redacted-node-1 and k8s-master each fit at least one worker of every profile on its own and worker-001 fits one compiler, general or memory worker; no node fits one of each at once, because the four CPU requests sum to 6750 millis and the most free CPU on any node is 4412. The three busy EC2 workers and both k8s workers fit only memory workers.",
     "parent_and_children": {
       "unit": "maximum over each class's nine runs; cores over whole one second windows, floored at the run average",
       "browser": {

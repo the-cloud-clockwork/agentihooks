@@ -6,7 +6,7 @@
   },
   "nodes": [
     {
-      "name": "pool-node-1",
+      "name": "redacted-node-1",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -17,7 +17,7 @@
       "colocated_pods": 4
     },
     {
-      "name": "pool-node-2",
+      "name": "redacted-node-2",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -28,7 +28,7 @@
       "colocated_pods": 9
     },
     {
-      "name": "pool-node-4",
+      "name": "redacted-node-4",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -39,7 +39,7 @@
       "colocated_pods": 10
     },
     {
-      "name": "pool-node-5",
+      "name": "redacted-node-5",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,

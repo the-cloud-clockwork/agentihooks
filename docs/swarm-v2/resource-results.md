@@ -76,10 +76,10 @@ Suite `worker-resources`, generation 110. Source: Worker resources run 381498551
 
 | Node | Free memory MiB | Free CPU millis | Workers that fit | All profiles at once |
 |---|---|---|---|---|
-| pool-node-1 | 15645 | 3984 | browser 1, compiler 1, general 1, memory 5 | no |
-| pool-node-2 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
-| pool-node-4 | 4893 | 1234 | browser 0, compiler 0, general 0, memory 1 | no |
-| pool-node-5 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
+| redacted-node-1 | 15645 | 3984 | browser 1, compiler 1, general 1, memory 5 | no |
+| redacted-node-2 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
+| redacted-node-4 | 4893 | 1234 | browser 0, compiler 0, general 0, memory 1 | no |
+| redacted-node-5 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
 | k8s-master | 6208 | 3783 | browser 1, compiler 1, general 1, memory 2 | no |
 | k8s-worker-1 | 6276 | 1362 | browser 0, compiler 0, general 0, memory 2 | no |
 | k8s-worker-2 | 10252 | 1417 | browser 0, compiler 0, general 0, memory 3 | no |
