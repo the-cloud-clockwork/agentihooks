@@ -44,7 +44,15 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None, published=None, reads=None, bridges=None):
+def ports_for(
+    hives: list[dict],
+    readings: dict,
+    here: str = "",
+    local: dict | None = None,
+    published: dict | None = None,
+    reads: list | None = None,
+    bridges: dict | None = None,
+) -> tuple:
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
         live=lambda hive, now: hive["live"] and now == NOW,
@@ -54,7 +62,7 @@ def ports_for(hives, readings, here="", local=None, published=None, reads=None, 
         read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) and now == NOW else None
     )
 
-    def read(redis, hive, now):
+    def read(redis: object, hive: str, now: int) -> dict | None:
         (reads if reads is not None else []).append((redis, hive, now))
         if not isinstance(redis, Redis) or now != NOW:
             return None
@@ -307,7 +315,7 @@ ROOT_BRIDGE = {
 
 @pytest.mark.feature("monitor-every-interface-hive")
 @pytest.mark.parametrize("order", ["desk first", "root first"])
-def test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows(order):
+def test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows(order: str) -> None:
     interface = [DESK, {**ROOT, "name": "swarm-master"}]
     hives = [*(interface if order == "desk first" else interface[::-1]), POD_HIVE, HIVE_003]
     bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": ROOT_BRIDGE}
@@ -322,7 +330,7 @@ def test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_
 
 @pytest.mark.feature("monitor-every-interface-hive")
 @pytest.mark.parametrize("order", ["desk first", "root first"])
-def test_a_hive_two_readings_count_is_counted_once_from_its_own_reading(order):
+def test_a_hive_two_readings_count_is_counted_once_from_its_own_reading(order: str) -> None:
     root_bridge = {**ROOT_BRIDGE, "machines": {**ROOT_BRIDGE["machines"], "desk": {"claude": 2}}}
     bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": root_bridge}
     interface = [{**DESK, "name": "desk"}, ROOT]
@@ -338,7 +346,7 @@ def test_a_hive_two_readings_count_is_counted_once_from_its_own_reading(order):
 
 @pytest.mark.feature("monitor-every-interface-hive")
 @pytest.mark.parametrize("order", ["desk first", "root first"])
-def test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives(order):
+def test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives(order: str) -> None:
     root_bridge = {**ROOT_BRIDGE, "machines": {"master": {"claude": 3}, "desk": {"claude": 2}}}
     bridges = {"desk": {"machines": {}, "silent": ["master"], "measured_at": NOW}, "root": root_bridge}
     interface = [{**DESK, "name": "desk"}, ROOT]

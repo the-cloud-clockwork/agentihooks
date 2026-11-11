@@ -69,14 +69,14 @@ def herdr_machines(
         for name, counts in {**reading["machines"], **dict.fromkeys(reading["silent"])}.items():
             own = name == stats.MASTER
             hive = publisher if own else by_name.get(name) or by_id.get(name)
-            if hive is None:
-                counted.setdefault(name, (name, counts))
+            if hive is not None and hive["id"] not in live_ids:
                 continue
-            if hive["id"] not in live_ids:
-                continue
-            held = counted.get(hive["id"])
+            key, row = (
+                (name, name) if hive is None else (hive["id"], LOCAL if hive.get("ui") == "yes" else hive["name"])
+            )
+            held = counted.get(key)
             if held is None or held[1] is None or (own and counts is not None):
-                counted[hive["id"]] = (LOCAL if hive.get("ui") == "yes" else hive["name"], counts)
+                counted[key] = (row, counts)
     return list(counted.values())
 
 
