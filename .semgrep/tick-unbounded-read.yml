@@ -18,12 +18,14 @@ rules:
               - pattern-either:
                   - pattern: $STORE.hscan($KEY, ...)
                   - pattern: $STORE.hscan(..., name=$KEY, ...)
-                  - pattern: $STORE.scan(...)
+                  - pattern: $STORE.scan()
+                  - pattern: $STORE.scan($CURSOR, ...)
+                  - pattern: $STORE.scan(..., cursor=$CURSOR, ...)
+                  - pattern: $STORE.scan(..., match=$MATCH, ...)
                   - pattern: $STORE.scan_iter(...)
                   - pattern: $STORE.keys($MATCH, ...)
                   - pattern: $STORE.keys(..., pattern=$MATCH, ...)
               - pattern-not: $STORE.$READ(..., count=$PAGE, ...)
-              - pattern-not: $STORE.$READ(..., deadline=$LIMIT, ...)
       - pattern-not-inside:
           patterns:
             - pattern-either:
