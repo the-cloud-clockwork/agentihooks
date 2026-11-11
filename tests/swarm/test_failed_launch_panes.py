@@ -1,5 +1,6 @@
 import subprocess
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -459,14 +460,15 @@ def test_lines_drop_trailing_blanks_and_keep_the_last_ones():
 class HistoryReads:
     """Wrap a Redis client and record each range read of a key."""
 
-    def __init__(self, redis: object) -> None:
-        self.redis, self.ranged = redis, []
+    def __init__(self, redis: Any) -> None:
+        self.redis: Any = redis
+        self.ranged: list[str] = []
 
     def lrange(self, key: str, start: int, end: int) -> list[str]:
         self.ranged.append(key)
         return self.redis.lrange(key, start, end)
 
-    def __getattr__(self, name: str) -> object:
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.redis, name)
 
 

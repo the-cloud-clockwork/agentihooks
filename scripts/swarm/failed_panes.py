@@ -2,6 +2,7 @@
 so operator panes and pairing sessions outside the swarm are never touched."""
 
 import json
+from typing import Any
 
 CLOSE_AFTER_MS = 2 * 60 * 1000
 TAIL_LINES = 20
@@ -64,8 +65,11 @@ def sweep(slug, store, runtime, now_ms):
     return actions
 
 
-def report(store, slug):
-    return [row for row in store.launches(slug) if row.get("pane_lines")]
+def report(store: Any, slug: str) -> list[dict[str, Any]]:
+    """Return the launch rows of swarm ``slug`` that carry pane lines, read from the launches hash alone, the only place
+    pane lines are written, so the whole swarm history list is never read."""
+    rows = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launches")).values())
+    return [row for row in rows if row.get("pane_lines")]
 
 
 def status_lines(store, slug):
