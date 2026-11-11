@@ -237,6 +237,9 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
+| `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` | `false` | Front door masters launch on a stored claude ai login (see [Master claude ai login](account-login.md#master-claude-ai-login)); route `claude-ai` works with it on or off |
+| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login)) |
+| `AGENTIHOOKS_MASTER_LOGIN_SLOTS` | `5` | Number of stored claude ai login slots |
 | `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `2` | 7-day left % on the first entry of `AGENTIHOOKS_MASTER_LOGIN_ORDER` at or under which nothing new places there (claude-ai route, master login placement, worker token routing, controller admission); a master already there gets a handoff directive |
 | `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |
 | `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
