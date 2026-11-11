@@ -42,6 +42,8 @@ See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion
 
 See [intent verdict timing](swarm.md#intent-verdict-timing) for why a ready pull request is judged before agent launches, the `at` and `persisted_at` verdict fields and how to measure ready to verdict, and [tick lock holder record](swarm.md#tick-lock-holder-record) for how a killed tick's lock is replaced at once.
 
+See [the tick holder](swarm.md#the-tick-holder) for how the scheduler cron runs the minute tick under one machine lock, its stop times, the environment it passes and where its output goes.
+
 See [hives](hives.md) for joining machines, roles, placement, launches on a hive, failover and fencing, and [deployment modes](../reference/deployment-modes.md) for where the controller, ledger and Redis run.
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
