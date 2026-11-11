@@ -5507,7 +5507,7 @@ On each pass the step calls `snapshot_job.start`, which starts the job only when
 
 When both hold, the step starts `python -m scripts.swarm.snapshot_job <slug>` with the tick's interpreter in a new
 session, with stdin and stdout discarded, and adds the tick action `started automatic snapshot`. Otherwise it adds
-no action. The step runs on the critical lane like the inbox wake (see
+no action. The step runs on the critical lane (see
 [Two lanes and fan out](#two-lanes-and-fan-out)). The `snapshot` job of the
 [Host adapter](../reference/tick-adapters.md#host-adapter) makes the same `snapshot_job.start` call.
 
