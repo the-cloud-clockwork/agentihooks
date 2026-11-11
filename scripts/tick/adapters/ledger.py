@@ -105,6 +105,18 @@ class ClientLedger:
             return {}
         return reply["data"]
 
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]:
+        from urllib.error import HTTPError
+
+        client: Any = self.clients(deadline.live())
+        try:
+            reply: dict[str, Any] = client.request(self.slug, "watchdog")
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            return {}
+        return reply["data"]
+
     def notify(self, text: str, *, deadline: Deadline) -> None:
         deadline.live()
         self.mutate([operation("notice", "swarm", {"text": text})], deadline=deadline)
@@ -159,6 +171,11 @@ class PassLedger:
         deadline.live()
         row: dict[str, Any] = self.client.task(self.slug, task_id)
         return row
+
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]:
+        deadline.live()
+        copy: dict[str, Any] = self.client.watchdog_copy(self.slug)
+        return copy
 
     def notify(self, text: str, *, deadline: Deadline) -> None:
         deadline.live()

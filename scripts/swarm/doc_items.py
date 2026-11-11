@@ -10,6 +10,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.tools import Tools
 
 MARK = "doc-items-digest"
+REVISION_MARK = "doc-items-copy-revision"
+COPY_STAMP = "watchdog_copy"
 
 
 def task_ids(tag: str) -> list[str]:
@@ -68,12 +70,25 @@ def digest(document: str) -> str:
     return hashlib.sha256(document.encode()).hexdigest()
 
 
-def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
-    """Map the copy at ``document`` onto ``tasks`` when its digest differs from the last mapped one, write the new
-    items through the ledger port and record the digest through the coordination port; return the line naming the run."""
-    if not document.is_file():
+def map_changed(doc: dict[str, Any], tools: Tools, deadline: Deadline) -> list[str]:
+    """Read the watchdog copy from the ledger only when the stamp of its last store in the held ledger view moved
+    since the last read, map it with ``map_copy`` and record that stamp revision through the coordination port."""
+    stamps: dict[str, dict[str, Any]] = doc.get("_meta", {}).get("stamps", {})
+    revision = str((stamps.get(COPY_STAMP) or {}).get("rev", ""))
+    if not revision or revision == tools.coordination.marked(REVISION_MARK, deadline=deadline):
         return []
-    text = document.read_bytes().decode()
+    lines = map_copy(doc["tasks"], tools, deadline)
+    tools.coordination.mark(REVISION_MARK, revision, deadline=deadline)
+    return lines
+
+
+def map_copy(tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
+    """Map the newest watchdog document copy on the ledger onto ``tasks`` when its digest differs from the last
+    mapped one, write the new items through the ledger port and record the digest through the coordination port;
+    return the line naming the run."""
+    text = tools.ledger.watchdog_copy(deadline=deadline).get("text") or ""
+    if not text:
+        return []
     found = digest(text)
     if found == tools.coordination.marked(MARK, deadline=deadline):
         return []
@@ -82,21 +97,27 @@ def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadl
         changed = changes(tasks, mapping)
     except ValueError as exc:
         tools.coordination.mark(MARK, found, deadline=deadline)
-        return [f"refused watchdog doc items of {document}: {exc}"]
+        return [f"refused watchdog doc items of the ledger copy: {exc}"]
     for tid, merged in changed.items():
         tools.ledger.update_task(tid, {"doc_items": merged}, deadline=deadline)
     tools.coordination.mark(MARK, found, deadline=deadline)
     items = sum(len(links) for links in mapping.values())
     updated = ", ".join(changed) or "none"
-    return [f"mapped watchdog doc items of {document}: {items} items on {len(mapping)} tasks, updated {updated}"]
+    return [f"mapped watchdog doc items of the ledger copy: {items} items on {len(mapping)} tasks, updated {updated}"]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Map watchdog document items to their ledger tasks")
     parser.add_argument("--slug", required=True)
     parser.add_argument("--document", type=Path, required=True)
+    parser.add_argument("--store-as", default="")
     args = parser.parse_args(argv)
-    mapping = parse(args.document.read_text())
+    text = args.document.read_text()
+    if args.store_as:
+        LedgerClient().store_watchdog_copy(args.slug, text, args.store_as)
+        print(json.dumps({"slug": args.slug, "stored": digest(text)}))
+        return 0
+    mapping = parse(text)
     changed = sync(LedgerClient(), args.slug, mapping)
     print(
         json.dumps(

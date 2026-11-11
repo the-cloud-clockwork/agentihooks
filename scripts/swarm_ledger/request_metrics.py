@@ -79,6 +79,7 @@ RESOURCES = frozenset(
         "agent-token",
         "hierarchy",
         "freezes",
+        "watchdog",
     )
 )
 FIXED_ROUTES = frozenset(

@@ -3066,19 +3066,22 @@
     {
       "id": "tick-doc-items-map",
       "origin": "inventory",
-      "behaviour": "When the watchdog document copy named by the swarm setting watchdog-document changes, the next tick maps its open items onto their tasks once and records the copy digest; an unchanged, unset or missing copy runs nothing.",
-      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed",
+      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing.",
+      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed and the ledger port read watchdog_copy of the ledger operation watchdog_copy, stored by python -m scripts.swarm.doc_items --store-as",
       "tests": [
         "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
-        "tests/tick/steps/test_doc_items_map.py::test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once",
+        "tests/tick/steps/test_doc_items_map.py::test_a_new_copy_on_the_ledger_maps_its_items_to_their_tasks_exactly_once",
         "tests/tick/steps/test_doc_items_map.py::test_an_unchanged_copy_runs_nothing",
-        "tests/tick/steps/test_doc_items_map.py::test_an_unset_or_missing_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_ledger_without_a_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_ledger_view_without_a_stored_copy_reads_nothing",
         "tests/tick/steps/test_doc_items_map.py::test_a_copy_already_on_its_tasks_records_its_digest_without_writes",
         "tests/tick/steps/test_doc_items_map.py::test_unknown_tasks_refuse_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
-        "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
+        "tests/swarm_ledger/test_watchdog_copy.py::test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest",
+        "tests/swarm_ledger/test_watchdog_copy.py::test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy",
+        "tests/swarm_ledger/test_watchdog_copy.py::test_the_doc_items_command_stores_the_watchdog_copy_from_a_file"
       ]
     },
     {

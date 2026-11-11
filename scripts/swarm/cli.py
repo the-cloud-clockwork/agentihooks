@@ -280,7 +280,6 @@ CONFIG_KEYS = {
     "engine": "engine",
     "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
-    "watchdog-document": "watchdog_document",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
 }
@@ -1325,7 +1324,7 @@ def config_value(key, value):
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
-        or key in ("engine", "tick-mode", "watchdog-address", "watchdog-document", "placement-mode")
+        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
     ):
         return value
     if key == HIVE_PLACEMENT:
