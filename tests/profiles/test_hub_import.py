@@ -251,3 +251,26 @@ def test_a_write_error_leaves_no_profile_behind(
     with pytest.raises(OSError, match="disk full"):
         import_hub(hub, out, False)
     assert [path for path in out.rglob("*") if path.is_file()] == []
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_failed_rollback_names_the_profile_left_behind(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    second = hub / "agents/second/package"
+    second.mkdir(parents=True)
+    (second / "command.yml").write_text(yaml.safe_dump({"name": "second"}))
+    real = Path.rename
+    calls: list[Path] = []
+
+    def failing(self: Path, target: Path) -> Path:
+        calls.append(self)
+        if len(calls) > 1:
+            raise OSError("disk full")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing)
+    out = tmp_path / "bundle"
+    with pytest.raises(OSError, match="disk full") as raised:
+        import_hub(hub, out, False)
+    assert raised.value.__notes__ == [f"remove left over profile: {out / 'profiles/diagram'}"]

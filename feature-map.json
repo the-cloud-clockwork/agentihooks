@@ -1604,7 +1604,8 @@
         "tests/profiles/test_hub_import.py::test_literal_credential_values_refuse_the_import",
         "tests/profiles/test_hub_import.py::test_credential_environment_references_are_kept",
         "tests/profiles/test_hub_import.py::test_a_guard_hook_that_import_would_drop_refuses_the_import",
-        "tests/profiles/test_hub_import.py::test_a_write_error_leaves_no_profile_behind"
+        "tests/profiles/test_hub_import.py::test_a_write_error_leaves_no_profile_behind",
+        "tests/profiles/test_hub_import.py::test_a_failed_rollback_names_the_profile_left_behind"
       ]
     },
     {

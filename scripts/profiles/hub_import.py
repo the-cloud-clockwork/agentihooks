@@ -7,13 +7,12 @@ Secret files, symlinks, unsafe names and taken names refuse the whole import
 before any file is read for content or written; literal credential values and
 guard hooks the import would drop refuse it before any write. Profiles are
 staged first and moved into place only once all are written; an error while
-moving them moves the moved ones back.
+moving them removes the ones already moved.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import re
 import shutil
@@ -225,10 +224,12 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
                 raise ValueError(f"profile name taken: {name}")
             (staging / name).rename(target)
             committed.append(target)
-    except BaseException:
+    except BaseException as exc:
         for target in committed:
-            with contextlib.suppress(OSError):
+            try:
                 target.rename(staging / target.name)
+            except OSError:
+                exc.add_note(f"remove left over profile: {target}")
         raise
     finally:
         shutil.rmtree(staging)
