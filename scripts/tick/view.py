@@ -42,7 +42,6 @@ __all__ = [
     "hold_stored",
     "holding",
     "queued",
-    "queued_file",
     "refreshed",
     "slow",
     "start",
@@ -282,10 +281,11 @@ def _stored_at(path: Path) -> LedgerView | None:
     found = read_export_file(path)
     if found is None:
         return None
+    generation, state = found
     kept = read_export_file(queued_file(path))
-    fields: dict[str, Any] = kept[1] if kept is not None else {}
-    state = {**found[1], "tasks": [{**task, **fields.get(task.get("id"), {})} for task in found[1].get("tasks", [])]}
-    return LedgerView(found[0], state)
+    if kept is not None and "tasks" in state:
+        state["tasks"] = [{**task, **kept[1].get(task.get("id"), {})} for task in state["tasks"]]
+    return LedgerView(generation, state)
 
 
 def _stored_file(slug: str) -> Path:
