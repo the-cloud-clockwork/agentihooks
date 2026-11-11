@@ -264,9 +264,7 @@ def test_source_records_the_session_claude_code_injects(tmp_path: Path, monkeypa
 
 
 @pytest.mark.feature("plain-shell-plan-ingest")
-def test_source_names_the_codex_thread_or_else_the_plain_shell(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_source_names_the_codex_thread_or_else_the_plain_shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("socket.gethostname", lambda: "workstation")
     monkeypatch.setattr("os.getppid", lambda: 4242)
