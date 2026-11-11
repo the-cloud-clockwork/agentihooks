@@ -1349,7 +1349,16 @@ def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     assert "task t1 had no agent, reopened" not in actions
 
 
+STALE_MS = 10 * 60_000
 IDLER = "engineer@a1b2c3-0001"
+
+
+def spawned(store, status="idle", runtime=None):
+    ledger, runtime = tasks(("t1", "eng")), runtime or FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    store.update("sw", state="paused")
+    runtime.statuses[IDLER] = status
+    return ledger, runtime
 
 
 def stale_nudges(store, name=IDLER):

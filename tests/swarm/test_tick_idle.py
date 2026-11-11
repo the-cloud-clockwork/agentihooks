@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.swarm.tick import tick
 from tests.swarm import test_tick
-from tests.swarm.test_tick import IDLER, FakeRuntime, idle_for, stale_nudges, tasks, workers
+from tests.swarm.test_tick import IDLER, STALE_MS, FakeRuntime, idle_for, spawned, stale_nudges, tasks, workers
 
 store = test_tick.store
 
@@ -22,17 +22,6 @@ def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(st
         tick("sw", store, ledger, runtime, now_ms=2_000 + n * 60_000)
     assert runtime.nudged == []
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
-
-
-STALE_MS = 10 * 60_000
-
-
-def spawned(store, status="idle", runtime=None):
-    ledger, runtime = tasks(("t1", "eng")), runtime or FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", state="paused")
-    runtime.statuses[IDLER] = status
-    return ledger, runtime
 
 
 def test_an_agent_quiet_past_ten_minutes_gets_one_inbox_nudge_per_window_and_no_typed_prompt(store):
