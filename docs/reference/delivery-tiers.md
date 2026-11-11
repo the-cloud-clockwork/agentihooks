@@ -61,9 +61,9 @@ few rows, so they cannot catch a step whose cost grows with stored data.
 A push to a `diffcheck/tick-scale-*` branch runs the same gate on that branch.
 On `diffcheck/tick-scale-plant` it first applies the planted fault in
 `tests/tick_scale/whole_hash.patch`. In that fault every fenced write loads the
-execution archive and rewrites every record it loaded. In the reference proof
-run, the planted fault drove `reap` to 25 seconds against its 22 second floor. This planted fault must
-turn the gate red. On `diffcheck/tick-scale-profile` the gate profiles
+execution archive and rewrites every record it loaded. This planted fault must
+turn the gate red. In the reference proof run it drove `reap` to 25 seconds
+against its 22 second floor. On `diffcheck/tick-scale-profile` the gate profiles
 `track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
 walls are evidence only. A caller can also pass `plant` and `profile` inputs.
 

@@ -85,7 +85,8 @@ def seed_live(store: RedisStore, ledger: "ScaleLedger", started_ms: int) -> list
     names = []
     for index in range(LIVE):
         task = ledger.rows[f"t-{index:05d}"]
-        lane, seat = task["lane"], f"{'ci' if task['lane'] == 'ci' else 'eng'}-{index + 1}@{SLUG}"
+        lane = task["lane"]
+        seat = f"{lane}-{index + 1}@{SLUG}"
         target = {"pod_namespace": "swarm", "pod_name": f"live-{index}", "pod_uid": f"live-uid-{index:04d}"}
         agent = AgentRecord(
             store.next_name(SLUG, lane),
@@ -147,7 +148,6 @@ class ScaleLedger(FakeLedger):
         self.phases = [{"id": f"p-{index:02d}", "title": f"Phase {index}"} for index in range(PHASES)]
         self.freezes = freezes()
         self.said: list[tuple[str, str | None]] = []
-        self.pulls: dict[str, Any] = {}
 
     def metadata(self, slug: str) -> dict[str, Any]:
         """Return the ledger overview metadata."""
