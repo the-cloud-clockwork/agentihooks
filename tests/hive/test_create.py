@@ -968,6 +968,7 @@ def _reserved(world, name):
     return world.tools.redis.get(f"{create.RESERVED}:{name}")
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_two_concurrent_creates_reserve_different_names(world):
     import threading
 
@@ -992,6 +993,7 @@ def test_two_concurrent_creates_reserve_different_names(world):
         assert 0 < world.tools.redis.ttl(f"{create.RESERVED}:{state['name']}") <= create.RESERVE_S
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_name_another_create_reserved_is_skipped(world):
     world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
 
@@ -1001,6 +1003,7 @@ def test_a_name_another_create_reserved_is_skipped(world):
     assert _reserved(world, "swarm-hive-002") is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_an_explicit_name_another_create_reserved_is_refused(world):
     world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
 
@@ -1014,6 +1017,7 @@ def test_an_explicit_name_another_create_reserved_is_refused(world):
     assert _reserved(world, NAME) == "other:run"
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_failed_create_releases_its_reservation(world, monkeypatch):
     def crash(*args):
         raise auth.HiveError("killed")
@@ -1026,12 +1030,14 @@ def test_a_failed_create_releases_its_reservation(world, monkeypatch):
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_finished_create_releases_its_reservation(world):
     create.create(world.tools, create.Options(timeout_s=60))
 
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_failed_service_read_releases_the_reservation(world, monkeypatch):
     def broken(tools, argv):
         raise auth.HiveError("no cluster")
@@ -1043,6 +1049,7 @@ def test_a_failed_service_read_releases_the_reservation(world, monkeypatch):
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_release_leaves_a_reservation_another_run_took(world):
     world.tools.redis.set(f"{create.RESERVED}:{NAME}", "other:run")
     world.tools.state = {"name": NAME, "reservation": "root:mine"}
@@ -1052,6 +1059,7 @@ def test_a_release_leaves_a_reservation_another_run_took(world):
     assert _reserved(world, NAME) == "other:run"
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_resumed_create_takes_its_reservation_back(world, monkeypatch):
     def crash(*args):
         raise auth.HiveError("killed")
@@ -1070,6 +1078,7 @@ def test_a_resumed_create_takes_its_reservation_back(world, monkeypatch):
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_resumed_create_refuses_a_name_another_run_reserved(world, monkeypatch):
     def crash(*args):
         raise auth.HiveError("killed")
@@ -1089,6 +1098,7 @@ def test_a_resumed_create_refuses_a_name_another_run_reserved(world, monkeypatch
     assert _reserved(world, NAME) == "other:run"
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_resumed_create_with_its_pull_request_reserves_nothing(world):
     world.run.state = "CLOSED"
     with pytest.raises(auth.HiveError, match="closed without merging"):
@@ -1104,12 +1114,14 @@ def test_a_resumed_create_with_its_pull_request_reserves_nothing(world):
     assert _reserved(world, NAME) == "other:run"
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_the_dry_run_reserves_nothing(world):
     create.create(world.tools, create.Options(dry_run=True))
 
     assert world.tools.redis.keys(f"{create.RESERVED}:*") == []
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_dry_run_of_an_unfinished_create_leaves_its_reservation(world, monkeypatch):
     def crash(*args):
         raise auth.HiveError("killed")
@@ -1125,6 +1137,7 @@ def test_a_dry_run_of_an_unfinished_create_leaves_its_reservation(world, monkeyp
     assert _reserved(world, NAME) == token
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_failed_port_choice_releases_the_reservation(world, monkeypatch):
     def broken(services):
         raise auth.HiveError("no lan address")
@@ -1146,6 +1159,7 @@ def _crashed_once(world, monkeypatch):
     return crash
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_resumed_create_killed_before_its_release_keeps_its_own_reservation(world, monkeypatch):
     crash = _crashed_once(world, monkeypatch)
     token = _state(world)["reservation"]
@@ -1160,6 +1174,7 @@ def test_a_resumed_create_killed_before_its_release_keeps_its_own_reservation(wo
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_a_resumed_create_saved_without_a_reservation_reserves_and_releases_one(world, monkeypatch):
     crash = _crashed_once(world, monkeypatch)
     saved = _state(world)
@@ -1176,6 +1191,7 @@ def test_a_resumed_create_saved_without_a_reservation_reserves_and_releases_one(
     assert _reserved(world, NAME) is None
 
 
+@pytest.mark.feature("hive-create-name-reservation")
 def test_an_explicit_name_lost_to_a_racing_create_is_refused(world, monkeypatch):
     monkeypatch.setattr(create, "_reserve", lambda tools, name, token: False)
 

@@ -46,6 +46,7 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
+@pytest.mark.feature("tick-scale-gate-wiring")
 def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     scale = jobs["tick-scale"]

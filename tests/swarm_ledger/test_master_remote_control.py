@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from tests.swarm_ledger.ledger_page import page_source
 
 STUBS = """
@@ -27,6 +29,7 @@ def _run(script):
     return json.loads(subprocess.check_output(["node", "-e", js], text=True))
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell():
     cells = _run("""
 const on = {state: 'on', detail: 'master 1 · sw'};
@@ -52,6 +55,7 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => agentRow(r, false)[5])))
     ]
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_an_off_master_without_transport_shows_phone_access_unavailable_with_the_reason():
     cell = _run("""
 const raw = {agents: [{name: 'm', lane: 'master', remote_control: {state: 'off', detail: 'fallback auth'}}]};
@@ -67,6 +71,7 @@ console.log(JSON.stringify(agentRow(agentRows(raw, 0)[0], false)[5]));
     }
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_a_master_on_the_token_fallback_card_says_phone_access_unavailable():
     cell = _run("""
 const off = {state: 'off', detail: 'subscription token fallback'};

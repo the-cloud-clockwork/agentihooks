@@ -27,21 +27,25 @@ def tick_reads() -> list[tuple[Path, str]]:
     ]
 
 
+@pytest.mark.feature("docs-tick-journal-user-unit-utc")
 def test_tick_journal_reads_exist_in_the_docs() -> None:
     reads = tick_reads()
     assert len(reads) > 10, f"{len(reads)} tick journal reads found in the repository markdown"
 
 
+@pytest.mark.feature("docs-tick-journal-user-unit-utc")
 def test_no_tick_journal_read_selects_the_old_tag() -> None:
     offenders = [f"{path.relative_to(ROOT)}: {line.strip()}" for path, line in tick_reads() if OLD_TAG.search(line)]
     assert offenders == []
 
 
+@pytest.mark.feature("docs-tick-journal-user-unit-utc")
 def test_every_tick_journal_read_selects_the_user_unit() -> None:
     offenders = [f"{path.relative_to(ROOT)}: {line.strip()}" for path, line in tick_reads() if UNIT not in line]
     assert offenders == []
 
 
+@pytest.mark.feature("docs-tick-journal-user-unit-utc")
 def test_every_tick_journal_read_passes_utc_bounds() -> None:
     offenders = [
         f"{path.relative_to(ROOT)}: {line.strip()}"

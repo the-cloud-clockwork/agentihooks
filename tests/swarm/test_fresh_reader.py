@@ -69,6 +69,7 @@ def port(monkeypatch: pytest.MonkeyPatch) -> Any:
     return SimpleNamespace(calls=calls, missing=missing)
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_a_pass_rereads_every_open_pull_request_in_one_batched_request(port: Any) -> None:
     reread = ledger_events.fresh_reader(held(*URLS))
     assert head(reread(URLS[1])) == "fresh1"
@@ -79,6 +80,7 @@ def test_a_pass_rereads_every_open_pull_request_in_one_batched_request(port: Any
     assert MERGED not in port.calls[0]
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_a_pull_request_the_batch_did_not_return_is_read_on_its_own(port: Any) -> None:
     port.missing.add(1)
     reread = ledger_events.fresh_reader(held(*URLS))
@@ -89,6 +91,7 @@ def test_a_pull_request_the_batch_did_not_return_is_read_on_its_own(port: Any) -
     assert [query.startswith("query=query($url:URI!)") for query in port.calls] == [False, True, True]
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own(port: Any) -> None:
     for lookup in (held(), {}.get):
         reread = ledger_events.fresh_reader(lookup)
@@ -97,6 +100,7 @@ def test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own(port: 
     assert all("p0:resource" not in query for query in port.calls)
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_a_reread_during_a_rate_limit_backoff_makes_no_request(port: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutation_wait, "backing_off", lambda: True)
     reread = ledger_events.fresh_reader(held(*URLS))
@@ -104,6 +108,7 @@ def test_a_reread_during_a_rate_limit_backoff_makes_no_request(port: Any, monkey
     assert port.calls == []
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_each_pass_reads_fresh_past_the_shared_snapshot(
     port: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
 ) -> None:
@@ -114,6 +119,7 @@ def test_each_pass_reads_fresh_past_the_shared_snapshot(
     assert len(port.calls) == 2
 
 
+@pytest.mark.feature("tick-pass-pull-request-reread-batching")
 def test_the_batch_forwards_its_cache_and_a_zero_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutation_wait, "backing_off", lambda: False)
     seen: list[tuple[Any, ...]] = []

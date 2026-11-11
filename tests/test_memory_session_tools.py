@@ -236,6 +236,7 @@ def test_search_hits_carry_citation_metadata_and_no_resume(inputs, bank):
         assert not [key for key in result if "resume" in key]
 
 
+@pytest.mark.feature("memory-search-skips-deleted-session")
 def test_search_through_every_name_skips_a_deleted_session_before_the_sweep(inputs: dict, bank: Bank) -> None:
     uid, domain = bank.uid("lock"), inputs["grant"]["corpus"]
     stored = "SELECT COUNT(*) FROM search_chunk WHERE access_domain = ? AND session_uid = ?"
