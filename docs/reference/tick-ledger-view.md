@@ -26,7 +26,10 @@ is one delta read, or a delta read and a full read when the delta does not
 apply (see [One refresh](#one-refresh)).
 
 The view lives in `scripts.tick.view`; the export parts live in the ledger
-API's `export` route. The feature map entry is `swarm-tick-delta-reads`.
+API's `export` route. Both read one list of ledger parts, `LEDGER_PARTS` in
+`scripts.swarm_ledger.api.schemas` (see
+[One ledger part list](#one-ledger-part-list)). The feature map entry is
+`swarm-tick-delta-reads`.
 
 ## When a pass reads the view
 
@@ -232,7 +235,7 @@ changes. The body now also takes `parts`:
 | Field | Rule |
 | --- | --- |
 | `since` | Required integer, at least 0 |
-| `parts` | Optional. A non-empty list of distinct names from `tasks`, `_meta`, `phases`, `freezes`, `priorities`, `followups`, `alerts`, `overview`. Any other value, an empty list, a repeated name or another field answers 400 |
+| `parts` | Optional. A non-empty list of distinct names from `LEDGER_PARTS`: `tasks`, `_meta`, `phases`, `freezes`, `priorities`, `followups`, `alerts`, `overview`. Any other value, an empty list, a repeated name or another field answers 400 |
 
 Without `parts` the export covers every top level part, as before.
 
@@ -257,6 +260,48 @@ with an `id`, else `["index", <position>, <occurrence>]`.
   export per part set, so the tick's part set does not displace the full
   export other readers use.
 - The metadata entries `seeds` and `api_operations` are never exported.
+
+### One ledger part list
+
+`LEDGER_PARTS` in `scripts.swarm_ledger.api.schemas` is the only list of
+ledger parts:
+
+```python
+LEDGER_PARTS = ("tasks", "_meta", "phases", "freezes", "priorities", "followups", "alerts", "overview")
+```
+
+Two consumers read it:
+
+| Consumer | Reads it as |
+| --- | --- |
+| The export route's `since` body schema (`routes.SINCE_SCHEMA`) | `parts.items.enum`, built as `list(schemas.LEDGER_PARTS)` |
+| The tick ledger view (`scripts.tick.view`) | `view.PARTS`, the same tuple object, sent as `parts` on every delta read |
+
+The parts a pass asks for and the parts the server accepts therefore cannot
+drift apart. Before this change each module held its own copy, and a part
+added to one copy only either went missing from every pass document or made
+every delta read answer 400.
+
+#### Adding a ledger part
+
+1. Append the part to `LEDGER_PARTS`. Both consumers pick it up; edit
+   neither `view.PARTS` nor the route's enum.
+2. Update the exact tuple in
+   `test_the_view_and_the_export_schema_read_one_ledger_part_list` in
+   `tests/tick/test_view.py`. The test also asserts that `view.PARTS` is
+   `schemas.LEDGER_PARTS` and that the schema enum equals the list, so a
+   reintroduced copy fails it.
+3. Read the new part in steps through `pass_state`. A view stored before the
+   change lacks the part. Its next delta read carries the part only when the
+   part changed since the stored generation; a change under the missing part
+   does not fit the stored view, so the pass reads every part in full and
+   stores that. Until then a step sees no such part. Delete the view file to
+   force the full read at once (see [Checking it](#checking-it)).
+
+A ledger server running code older than the new part refuses it with 400;
+the pass then logs the skipped view line under
+[One refresh](#one-refresh) and runs without a view until the server is
+updated.
 
 The server answers in full (`data`) when:
 
@@ -360,8 +405,8 @@ With this change merged it prints
 `5 files read the whole ledger state, 5 on the base allowlist, 0 errors`.
 
 Adding a whole ledger read is refused; a step that needs another part of the
-ledger adds that part to `view.PARTS` and to the export route's `parts` enum
-instead.
+ledger adds that part to `LEDGER_PARTS` instead (see
+[Adding a ledger part](#adding-a-ledger-part)).
 
 ## Checking it
 
@@ -393,7 +438,8 @@ advances with ledger writes.
 | A view looks stale | Delete its file. The next pass reads the parts in full and stores them |
 | A step does not see a write it made earlier in the pass | The write did not go through `LedgerClient` with operations, so `view.wrote()` never marked the view stale. Route the write through the ledger client, or call `view.wrote()` after it |
 | The phase pass misses a task, or ticks a phase early | The projection reads the pass document: check the task's `slice` or `phase` field leads to a phase row. A task whose parent chain loops or names a missing node sits under no phase |
-| A step's `pass_state` result lacks a top level part | The part is not in `view.PARTS`. Add it there and to the export route's `parts` enum |
+| A step's `pass_state` result lacks a top level part | The part is not in `LEDGER_PARTS`: add it there (see [Adding a ledger part](#adding-a-ledger-part)). If it is, the stored view predates the part; delete the view file |
+| Every delta read answers 400 after a part was added | The ledger server runs code older than the new `LEDGER_PARTS`. Update the server; the pass skips its view meanwhile |
 | Lint fails with `reads the whole ledger state N times` | The change added a whole ledger read in the swarm or tick package. Read through `pass_state` instead |
 | Lint fails with `differs from the head's measurement` | The allowlist was not rerecorded after removing or moving a read. Run `python -m scripts.no_whole_ledger --write` and commit the file |
 
@@ -402,7 +448,8 @@ advances with ledger writes.
 - `tests/tick/test_view.py`: first full read, one delta call patching the
   stored view, an exceeded change window, a patch that does not fit, an
   unchanged generation, `start` reading through the ledger client, the view
-  holding every top level part the pass reads, `pass_state` reading each
+  holding every top level part the pass reads, the view and the export
+  schema reading the one `LEDGER_PARTS` tuple, `pass_state` reading each
   document through one delta read, and `document` serving the held view and
   reading again only after a write.
 - `tests/swarm/test_phase_projection.py`: each phase's tasks listed through
