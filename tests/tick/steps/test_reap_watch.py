@@ -550,6 +550,7 @@ def test_an_ended_agent_whose_drop_the_store_refuses_is_kept_without_settling_it
     monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports))
     monkeypatch.setattr(tick, "_refund_parked", calls.fn("refund_parked"))
     monkeypatch.setattr(tick, "exits", SimpleNamespace(settle=calls.fn("settle")))
+    monkeypatch.setattr(tick, "_current_owner", calls.fn("current", False))
     redis = SimpleNamespace(hset=calls.fn("hset"), hexists=lambda key, field: False)
     store = SimpleNamespace(
         redis=redis,
@@ -560,6 +561,7 @@ def test_an_ended_agent_whose_drop_the_store_refuses_is_kept_without_settling_it
     actions = agents._retire_ended("sw", store, "ledger", "runtime", {}, _agent(), NOW)
     assert actions == ["kept eng@1-1, the store refused its drop, retrying next pass"]
     assert [call[0] for call in calls][-2:] == ["release", "drop_agent"]
+    assert "settle" not in [call[0] for call in calls]
 
 
 def _reaping(monkeypatch: pytest.MonkeyPatch, calls: Calls, live: set[str], **answers: Any) -> Any:
