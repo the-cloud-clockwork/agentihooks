@@ -1,10 +1,18 @@
+from types import ModuleType
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from redis import Redis
+
+    from scripts.hive.run_orders import RunOrder
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def setup():
+def setup() -> "tuple[Redis, ModuleType, RunOrder]":
     import fakeredis
 
     from scripts.hive import run_orders
@@ -16,7 +24,7 @@ def setup():
     return redis, run_orders, order
 
 
-def test_a_run_order_round_trips_through_its_hive_stream(setup):
+def test_a_run_order_round_trips_through_its_hive_stream(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
     from scripts.hive import registry
     from scripts.hive.orders import RECEIPT_SECONDS, Ack
 
@@ -38,7 +46,7 @@ def test_a_run_order_round_trips_through_its_hive_stream(setup):
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_duplicate_run_order_send_adds_no_entry(setup):
+def test_a_duplicate_run_order_send_adds_no_entry(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
     redis, run_orders, order = setup
     store = run_orders.RunOrders(redis)
     assert store.send("host", order) is not None
@@ -46,7 +54,9 @@ def test_a_duplicate_run_order_send_adds_no_entry(setup):
     assert redis.xlen(store.stream("host")) == 1
 
 
-def test_a_send_raced_by_another_sender_adds_no_entry(setup, monkeypatch):
+def test_a_send_raced_by_another_sender_adds_no_entry(
+    setup: "tuple[Redis, ModuleType, RunOrder]", monkeypatch: pytest.MonkeyPatch
+) -> None:
     from redis.client import Pipeline
 
     redis, run_orders, order = setup
@@ -62,10 +72,8 @@ def test_a_send_raced_by_another_sender_adds_no_entry(setup, monkeypatch):
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_run_order_for_another_hive_is_not_sent(setup):
+def test_a_run_order_for_another_hive_is_not_sent(setup: "tuple[Redis, ModuleType, RunOrder]") -> None:
     redis, run_orders, order = setup
     store = run_orders.RunOrders(redis)
     assert store.send("other", order) is None
-    assert redis.xlen(store.stream("other")) == 0
-    assert redis.xlen(store.stream("host")) == 0
-    assert not redis.exists(store.receipt(order))
+    assert redis.keys() == []
