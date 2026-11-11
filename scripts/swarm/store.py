@@ -93,7 +93,6 @@ class SwarmConfig:
     load_high: float = DEFAULT_LOAD_HIGH
     load_low: float = DEFAULT_LOAD_LOW
     memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
-    lane_shift: int = 0
     api_url: str = ""
     claude_model: str = default_models.DEFAULTS["claude"]
     codex_model: str = default_models.DEFAULTS["codex"]
@@ -270,7 +269,6 @@ class RedisStore:
             float(raw.get("load_high") or DEFAULT_LOAD_HIGH),
             float(raw.get("load_low") or DEFAULT_LOAD_LOW),
             int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
-            int(raw.get("lane_shift") or 0),
             raw.get("api_url", ""),
             raw.get("claude_model") or default_models.DEFAULTS["claude"],
             raw.get("codex_model") or default_models.DEFAULTS["codex"],

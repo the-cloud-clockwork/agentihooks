@@ -1418,10 +1418,10 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against a stored lane shift.",
+      "behaviour": "Manual lane caps hold against lane demand.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
-        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_ignore_a_stored_lane_shift"
+        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
       ]
     },
     {
