@@ -16,7 +16,7 @@ EVALS = SKILL.parent / "evals"
 RULE = PACKAGE / "rules" / "tick-pattern.md"
 ENGINEER = PACKAGE / "roles" / "engineer" / ".claude" / "skills" / "swarm-engineer" / "SKILL.md"
 MASTER = PACKAGE / "roles" / "master" / ".claude" / "skills" / "swarm-master" / "SKILL.md"
-ROLES = ("master", "engineer", "cicd", "planner", "qa")
+ROLES = tuple(sorted(path.parent.name for path in (PACKAGE / "roles").glob("*/profile.yml")))
 COMMANDS = (
     "python -m scripts.tick.new_step",
     'python -m scripts.tick_pattern --base "$BASE"',
