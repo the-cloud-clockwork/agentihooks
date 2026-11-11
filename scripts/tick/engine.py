@@ -159,6 +159,7 @@ class _Run:
             return self.given_up
 
 
+@dataclass
 class _Start:
     """When one scheduled step's run began, by its lane clock and by wall time, decided once under a lock against
     the end of its lane."""
