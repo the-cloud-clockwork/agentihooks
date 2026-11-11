@@ -74,6 +74,7 @@ class StepRecord:
     applied: tuple[str, ...] = ()
     rested: bool = False
     cut: bool = False
+    started_at: float | None = field(default=None, compare=False)
 
     @property
     def outcome(self) -> str:
@@ -112,6 +113,7 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
+    began = time.time()
     outcome: list[Result | BaseException] = []
     caller = copy_context()
     key = (timing.SWARM.get(), step.name)
@@ -128,12 +130,12 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         worker.start()
     worker.join(step.budget_s)
     if run.give_up():
-        return _left(step, outcome, clock() - started)
+        return replace(_left(step, outcome, clock() - started), started_at=began)
     worker.join(END_GRACE_S)
     if not outcome:
         _lost_writes(step, CUT_EVENT)
-        return StepRecord(step.name, clock() - started, step.budget_s, cut=True)
-    return _finished(step, outcome, clock() - started)
+        return StepRecord(step.name, clock() - started, step.budget_s, cut=True, started_at=began)
+    return replace(_finished(step, outcome, clock() - started), started_at=began)
 
 
 @dataclass
@@ -448,6 +450,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         dropped = len(record.dropped)
     else:
         dropped = len(step.writes) if record.lost and not record.skipped else 0
+    start = offset if record.started_at is None else record.started_at - current["start_ms"] / 1000
     row = {
         "pass_id": current["pass_id"],
         "step": record.name,
@@ -455,7 +458,8 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "outcome": SKIPPED if record.skipped else record.outcome,
         "wall_s": record.wall_s,
         "budget_s": record.budget_s,
-        "start_s": offset,
+        "ready_s": offset,
+        "start_s": start,
         "abandoned": record.abandoned and not record.skipped,
         "cut": record.cut,
         "held": record.held,
@@ -466,8 +470,8 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
     }
     if record.outcome in (OK, FAILED) and (step.interval_s > CRON_S or step.lane == SLOW):
         timing.step_ended(store, slug, step.name, time.time())
-    if offset is not None and _critical(step):
-        current["critical_end_s"] = max(current.get("critical_end_s", 0.0), offset + record.wall_s)
+    if start is not None and _critical(step):
+        current["critical_end_s"] = max(current.get("critical_end_s", 0.0), start + record.wall_s)
     timing.append_record(store, slug, "tick:records", row)
     return record
 

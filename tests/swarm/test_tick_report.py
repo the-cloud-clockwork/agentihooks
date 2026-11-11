@@ -38,6 +38,7 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "ready_gaps": [],
         "rows_read_max": None,
     }
 
@@ -155,6 +156,7 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "ready_gaps": [],
         "rows_read_max": None,
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
@@ -238,6 +240,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Task rows read per pass, most: n/a\n"
         "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
         "launch  1  100.00%  1  0  0  2\n"
+        "Step  Ready to start median  Ready to start max\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
     )
 

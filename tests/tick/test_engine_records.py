@@ -249,5 +249,20 @@ def test_step_that_never_ran_starts_at_its_ready_time() -> None:
     assert found["skipped"] and found["start_s"] == found["ready_s"]
 
 
+@pytest.mark.feature("swarm-tick-ready-gap")
+def test_abandoned_and_held_rows_keep_their_run_start_apart_from_their_ready_time() -> None:
+    store, release = Store(), Event()
+    try:
+        with recording(store):
+            engine.run_group("planted", Context(View(), Deadline.after(60.0)), [planted(release)])
+            engine.run_group("planted", Context(View(), Deadline.after(60.0)), [planted(release)])
+    finally:
+        release.set()
+        engine._RUNNING[("sw", "size pass")].join(5)
+    left, held = store.records()
+    assert left["abandoned"] and left["start_s"] > left["ready_s"]
+    assert held["held"] and held["start_s"] == held["ready_s"]
+
+
 def ok_step() -> WriteStep:
     return WriteStep("size pass", "planted", lambda tick, get: [])
