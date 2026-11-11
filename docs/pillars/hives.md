@@ -1215,8 +1215,8 @@ them.
 Pinned and gated tasks narrow the hives before the role rule runs:
 
 - A task with `hive` set places only on that hive.
-- A task with `workstation=yes` places on the UI hive, or on the controller's own hive when no UI hive is
-  registered, and waits with `the task needs the workstation, so no remote hive takes it` otherwise.
+- A task with `workstation=yes` places only on the `root` hive, or on the controller's own hive when no `root` hive
+  is registered, never on another UI hive, and waits with `the task needs the workstation, so no remote hive takes it` otherwise.
 - A task with `needs` places only on hives that declare every capability; see
   [Capabilities and task needs](#capabilities-and-task-needs).
 

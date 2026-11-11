@@ -88,9 +88,11 @@ def equipped(task: dict, hive: dict | None) -> bool:
 
 
 def workstation_hives(hives: list[dict[str, Any]], local: str) -> list[dict[str, Any]]:
-    """The hives a workstation task runs on: the headed hive, else the controller's own hive."""
-    headed = [hive for hive in hives if hive.get("ui") == YES]
-    return headed or [hive for hive in hives if hive["id"] == local]
+    """The hives a workstation task runs on: the root hive, else the controller's own hive."""
+    from scripts.swarm.probe import ROOT
+
+    rooted = [hive for hive in hives if hive["id"] == ROOT]
+    return rooted or [hive for hive in hives if hive["id"] == local]
 
 
 def needs_refusal(task: dict, hives: list[dict]) -> str:
