@@ -2,6 +2,7 @@ import asyncio
 import base64
 import datetime
 import logging
+import sys
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
@@ -112,7 +113,7 @@ class _Loop:
             self.close()
             raise RuntimeError("bus loop did not start")
 
-    def run(self, coro: Coroutine):
+    def run(self, coro: Coroutine[Any, Any, Any]) -> Any:
         if self.closed:
             coro.close()
             raise RuntimeError("bus is closed")
@@ -402,6 +403,28 @@ class NatsWorkQueue:
         deliveries = self._consumer.fetch(1, timeout_ms)
         return deliveries[0] if deliveries else None
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        """Reads each sequence the stream held when the sweep began once, so offers published during it wait for the
+        next sweep."""
+        info: api.StreamInfo = self._loop.run(self._js.stream_info(self._stream))
+        state = info.state
+        if not state.messages:
+            return 0
+        return sum(self._withdrawn(sequence, stale) for sequence in range(state.first_seq, state.last_seq + 1))
+
+    def _withdrawn(self, sequence: int, stale: Callable[[Envelope], bool]) -> bool:
+        msg: api.RawStreamMsg | None = self._loop.run(self._get(sequence))
+        if msg is None or not stale(Envelope.decode(msg.data)):
+            return False
+        self._loop.run(self._js.delete_msg(self._stream, sequence))
+        return True
+
+    async def _get(self, sequence: int) -> api.RawStreamMsg | None:
+        try:
+            return await self._js.get_msg(self._stream, sequence)
+        except NotFoundError:
+            return None
+
 
 class NatsStateStore:
     def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
@@ -572,10 +595,14 @@ class NatsBus:
 
     def _logs(self, kind: str) -> list[EventLog]:
         from .nats_scope import discover_swarms
+        from .nats_state import LegacyStateUnowned
 
         if self._config.provision:
             for swarm in self._loop.run(discover_swarms(self._js)):
-                self.for_swarm(swarm)
+                try:
+                    self.for_swarm(swarm)
+                except LegacyStateUnowned as refusal:
+                    print(f"hub: swarm {swarm!r} skipped: {refusal}", file=sys.stderr)
         with self._lock:
             legacy = [getattr(self, f"_legacy_{kind}")] if self._config.provision else []
             return legacy + [getattr(view, kind) for view in self._views.values()]
