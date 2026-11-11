@@ -4082,6 +4082,19 @@
       ]
     },
     {
+      "id": "monitor-every-interface-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-monitor-one-hive",
+      "behaviour": "The HOME resource monitor counts the herdr reading of every live interface hive, so a second headed hive publishing only its own panes never hides the hives the other reading counts, and a hive two readings name is counted once, from its own reading unless that one is silent.",
+      "seam": "scripts.swarm_ledger.api.monitor.view",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_two_readings_count_is_counted_once_from_its_own_reading",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
+      ]
+    },
+    {
       "id": "phase-pass-sliced-tasks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-tick-sliced-tasks",
