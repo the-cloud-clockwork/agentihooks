@@ -173,7 +173,7 @@ tick journal gets one line naming the lost writes:
 Find these lines:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-6h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
   | grep '"event": "swarm_tick_step_abandoned"' | grep '"step": "fleet red notice"'
 ```
 

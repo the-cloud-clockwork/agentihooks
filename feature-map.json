@@ -101,6 +101,18 @@
       ]
     },
     {
+      "id": "swarm-preempt-claim-view-once-per-pass",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-preempt-claim-view-reuse",
+      "behaviour": "A preempt pass builds one claim view, on its first full lane, and reads the ready tasks of every lane whose seats are all held from that same view, instead of rebuilding it once per full lane.",
+      "seam": "scripts.swarm.preempt.run over the Seats claim view builder",
+      "tests": [
+        "tests/swarm/test_preempt.py::test_run_reads_every_full_lane_from_one_claim_view",
+        "tests/swarm/test_claim_view.py::test_a_preempt_pass_builds_one_claim_view_for_every_full_lane",
+        "tests/hub/test_preemption.py::test_the_hub_preempts_with_the_tick_claim_view_builder"
+      ]
+    },
+    {
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
@@ -348,10 +360,16 @@
         "tests/tick/test_offline_view.py::test_a_down_server_without_a_stored_view_leaves_the_pass_to_its_health_probe",
         "tests/tick/test_offline_view.py::test_a_refusing_server_still_ends_the_pass",
         "tests/tick/test_offline_view.py::test_a_cleartext_ledger_address_leaves_the_pass_to_its_health_probe",
+        "tests/swarm/test_tick_groups.py::test_a_step_refused_the_credential_over_plain_http_ends_the_pass_failed",
+        "tests/tick/test_host.py::test_a_cleartext_refusal_fails_the_pass_held_or_not_and_in_the_closing_group",
         "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_fails_on_the_held_view_is_refused",
         "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_holds_is_queued",
         "tests/tick/test_offline_view.py::test_an_offline_write_matching_a_held_field_is_queued",
         "tests/tick/test_offline_view.py::test_an_offline_write_without_a_held_view_is_queued_unguarded",
+        "tests/tick/test_offline_view.py::test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued",
+        "tests/tick/test_offline_view.py::test_queued_writes_of_several_offline_passes_merge_onto_the_stored_view",
+        "tests/tick/test_offline_view.py::test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept",
+        "tests/tick/test_offline_view.py::test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept",
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
@@ -359,6 +377,27 @@
         "tests/tick/test_offline_view.py::test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once",
         "tests/tick/test_offline_view.py::test_a_refusal_or_other_failure_leaves_the_held_view_online",
         "tests/tick/test_offline_view.py::test_a_timeout_without_a_held_view_marks_nothing"
+      ]
+    },
+    {
+      "id": "swarm-tick-redis-only-steps",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-offline-no-view-design",
+      "behaviour": "A tick pass whose ledger server does not answer on a host that stores no ledger view still runs the steps that need only Redis and the host, host pressure, prompt backlog, the quiet hive sweep and the outbox migration, and keeps every other step past the probes shut.",
+      "seam": "scripts.swarm.cli.run_tick with a failed ledger health probe and no stored ledger view",
+      "tests": [
+        "tests/swarm/test_outage_ledger.py::test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps",
+        "tests/swarm/test_outage_ledger.py::test_a_ledger_health_stop_shuts_only_the_steps_past_the_probes_that_need_the_ledger"
+      ]
+    },
+    {
+      "id": "tick-time-left-server-error",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-time-left-escape",
+      "behaviour": "A tick pass whose time left write meets a ledger server error skips that write and still runs its remaining steps, placing claimable tasks.",
+      "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
+      "tests": [
+        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running"
       ]
     },
     {
@@ -625,6 +664,8 @@
         "tests/tick/test_agents.py::test_the_reap_cluster_lives_in_the_agents_step_module_and_tick_reexports_it",
         "tests/tick/test_agents.py::test_the_reap_step_declares_its_ports_feature_and_lane",
         "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam",
+        "tests/tick/steps/test_reap.py::test_reap_keeps_an_agent_whose_drop_the_store_refuses_for_the_next_pass",
+        "tests/tick/steps/test_reap.py::test_a_refused_drop_skips_the_reopen_for_any_caller_and_the_next_pass_retries_it",
         "tests/tick/steps/test_reap_watch.py::test_the_operator_holds_the_pane_while_typing_or_inside_the_quiet_window",
         "tests/tick/steps/test_reap_watch.py::test_a_content_refusal_is_due_only_for_the_claimant_away_from_the_operator",
         "tests/tick/steps/test_reap_watch.py::test_an_agent_is_stuck_on_its_provider_when_recovery_is_spent_or_the_idle_outage_ran_past_its_limit",
@@ -644,6 +685,7 @@
         "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped",
         "tests/tick/steps/test_reap_watch.py::test_an_owner_is_restored_only_for_a_live_current_agent_that_holds_its_claim",
         "tests/tick/steps/test_reap_watch.py::test_a_refused_retire_is_recorded_with_its_refusal_and_retried",
+        "tests/tick/steps/test_reap_watch.py::test_an_ended_agent_whose_drop_the_store_refuses_is_kept_without_settling_its_exit",
         "tests/tick/steps/test_reap_watch.py::test_an_agent_awaiting_a_decision_or_a_starting_master_is_not_judged",
         "tests/tick/steps/test_reap_watch.py::test_a_live_local_agent_has_its_owner_restored_then_is_watched",
         "tests/tick/steps/test_reap_watch.py::test_a_missing_agent_with_a_pending_recovery_keeps_its_lease",
@@ -3499,6 +3541,30 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "task-requires-harness",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1751",
+      "behaviour": "A task naming a required harness is planned, spawned and hive launched only on that harness and waits for a free seat of it; a task without the field routes as before.",
+      "seam": "requires_harness task field through HerdrRuntime quota_requirements and spawn and HiveLaunch select",
+      "tests": [
+        "tests/swarm_ledger/test_task_requires_harness.py::test_a_task_keeps_the_harness_it_requires",
+        "tests/swarm_ledger/test_task_requires_harness.py::test_a_harness_other_than_claude_or_codex_is_refused",
+        "tests/swarm_ledger/test_task_requires_harness.py::test_task_cli_sends_the_required_harness",
+        "tests/swarm/test_required_harness.py::test_a_task_requiring_claude_is_spawned_only_on_claude",
+        "tests/swarm/test_required_harness.py::test_a_task_requiring_claude_waits_while_no_claude_seat_is_free",
+        "tests/swarm/test_required_harness.py::test_a_task_requiring_claude_drops_a_saved_codex_launch",
+        "tests/swarm/test_required_harness.py::test_an_admitted_codex_relaunch_refuses_a_task_requiring_claude",
+        "tests/swarm/test_required_harness.py::test_a_lane_pinned_to_codex_refuses_a_task_requiring_claude",
+        "tests/swarm/test_required_harness.py::test_the_quota_plan_reserves_only_the_required_harness",
+        "tests/swarm/test_required_harness.py::test_an_admitted_claude_relaunch_keeps_a_task_requiring_claude",
+        "tests/swarm/test_required_harness.py::test_the_lane_harness_falls_back_to_the_required_one",
+        "tests/swarm_ledger/test_task_requires_harness.py::test_task_cli_offers_only_claude_or_codex",
+        "tests/hive/test_codex_launch.py::test_a_hive_launches_a_task_requiring_claude_only_on_claude",
+        "tests/hive/test_codex_launch.py::test_a_hive_waits_on_a_lane_pinned_to_codex_for_a_task_requiring_claude",
+        "tests/test_swarm_v2_launch.py::test_a_task_requiring_claude_launches_claude_over_its_harness_and_plan"
       ]
     },
     {

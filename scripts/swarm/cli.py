@@ -487,10 +487,11 @@ class _Wrapper:
         return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, from the
-        phases once their hook found the ledger binned or gone, so the probes, health and commands sites the barrier
-        ran before that hook keep running, and as the tick's sites say."""
-        stopped = step.group != "wrapper probes" and "stop" in self.box
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
         ended = self.ended is not None and step.group not in ENDS_AFTER
         return stopped or ended or self.ticks.shut(step)
 
@@ -678,7 +679,7 @@ def run_tick(
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     wrapper: _Wrapper | None = None
-    failed: Exception | None = None
+    failed: BaseException | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
@@ -718,7 +719,7 @@ def run_tick(
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)
-    except Exception as exc:
+    except (Exception, ledger_link.Cleartext) as exc:
         failed = exc
         return host_steps.held_failure(exc, box, getattr(wrapper, "judging", {}))
     finally:

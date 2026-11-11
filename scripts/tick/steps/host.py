@@ -31,6 +31,7 @@ from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
+REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
 VIEW_RESERVE_S = 20.0
 _LAST_VIEWS: dict[str, Any] = {}
 _VIEW_ORDER: dict[str, int] = {}
@@ -76,11 +77,15 @@ def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], A
     return run
 
 
-def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
-    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
-    raise it again."""
+def held_failure(exc: BaseException, *boxes: dict[str, Any]) -> list[str]:
+    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes`` or a
+    ledger address refusing the credential over plain http, else raise it again."""
     from redis.exceptions import RedisError
 
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    if isinstance(exc, Cleartext):
+        return failed_pass(exc)
     if isinstance(exc, RedisError) or not any(box.get("raised") is exc for box in boxes):
         raise exc
     return failed_pass(exc)
@@ -96,14 +101,16 @@ def failed_pass(exc: BaseException) -> list[str]:
 
 
 def end_held(box: dict[str, Any]) -> list[str]:
-    """Raise a stop a step held in ``box``, else log the exception it held and return the line ending its pass as
-    failed, nothing when no step raised."""
+    """Raise a stop a step held in ``box``, else log the exception it held, a ledger address refusing the credential
+    over plain http included, and return the line ending its pass as failed, nothing when no step raised."""
     from redis.exceptions import RedisError
+
+    from scripts.swarm_ledger.ledger_link import Cleartext
 
     raised = box.get("raised")
     if raised is None:
         return []
-    if not isinstance(raised, Exception) or isinstance(raised, RedisError):
+    if not isinstance(raised, (Exception, Cleartext)) or isinstance(raised, RedisError):
         raise raised
     return failed_pass(raised)
 

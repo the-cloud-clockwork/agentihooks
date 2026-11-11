@@ -52,7 +52,7 @@ def _reap(
             agent = agents[index]
             with tick.timing.acting(agent.name):
                 try:
-                    judged.append((index, tick._reap_agent(judging, agent)))
+                    judged.append((index, _kept_on_refusal(agent.name, tick._reap_agent(judging, agent))))
                 except tick.SwarmError as exc:
                     if _IDENTITY_CONFLICT not in str(exc):
                         raise
@@ -67,6 +67,13 @@ def _reap(
     if left:
         actions.append(f"reap stopped at the pass deadline, {left} of {len(agents)} agents left for the next pass")
     return actions
+
+
+def _kept_on_refusal(name: str, actions: list[str]) -> list[str]:
+    """Report an agent whose drop the store refused as kept for the next pass, never as retired or lost."""
+    from scripts.tick.steps.common import DROP_REFUSED
+
+    return [f"kept {name}{DROP_REFUSED}" if action.endswith(DROP_REFUSED) else action for action in actions]
 
 
 def _strays(slug: Any, config: Any, store: Any, runtime: Any) -> Any:
@@ -185,7 +192,10 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     store.redis.hset(retired, agent.name, now_ms)
     tick._refund_parked(slug, store, rows, agent)
     store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
+    if store.drop_agent(slug, agent.name) is False:
+        from scripts.tick.steps.common import DROP_REFUSED
+
+        return [f"kept {agent.name}{DROP_REFUSED}"]
     row = rows.get(agent.task, {})
     goes_on = (
         tick._current_owner(agent, row)
