@@ -295,8 +295,8 @@ drift apart.
    as a string, is patched straight into the stored view. A change under a
    missing list part, or to a key inside a missing dictionary part, cannot
    be patched, so the pass reads every part in full and stores that. Until
-   then a step sees no such part. Delete the view file to force the full
-   read at once (see [Checking it](#checking-it)).
+   the part first changes, a step sees no such part. Delete the view file to
+   force a full read at once (see [Checking it](#checking-it)).
 
 A ledger server running code older than the new part refuses it with 400;
 the pass then logs the skipped view line under
