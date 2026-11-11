@@ -145,9 +145,10 @@ def test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut() ->
 
 
 @pytest.mark.feature("swarm-tick-spawn-reserve")
-def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier() -> None:
+def test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_site_edge() -> None:
     release, seen = Event(), []
-    steps = (Step("collect", "observe", _stuck(release)), Step("spawn", "place", _left(seen)))
+    rows = frozenset({Domain("pass:rows")})
+    steps = (Step("collect", "observe", _stuck(release), writes=rows), Step("spawn", "place", _left(seen), reads=rows))
     edged = registry.site_edges(steps, ("observe", "place"))
     try:
         with pool.running(workers=2, critical_s=1.0, reserves={"spawn": 0.6}):

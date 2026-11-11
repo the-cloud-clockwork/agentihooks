@@ -91,3 +91,9 @@ def test_any_other_refusal_of_a_targeting_read_is_raised(
     with pytest.raises(urllib.error.HTTPError) as raised:
         ledger_client.LedgerClient().tasks_targeting("demo", url)
     assert raised.value.code == code
+
+
+def test_a_watchdog_copy_read_names_the_watchdog_resource(monkeypatch):
+    reads = served(monkeypatch, {"text": "copy", "digest": "d"})
+    assert ledger_client.LedgerClient(service=True).watchdog_copy("demo") == {"text": "copy", "digest": "d"}
+    assert reads == [("demo", "watchdog", True, False)]
