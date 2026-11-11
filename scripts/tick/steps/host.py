@@ -92,14 +92,16 @@ def failed_pass(exc: BaseException) -> list[str]:
 
 
 def end_held(box: dict[str, Any]) -> list[str]:
-    """Raise a stop a step held in ``box``, else log the exception it held and return the line ending its pass as
-    failed, nothing when no step raised."""
+    """Raise a stop a step held in ``box``, else log the exception it held, a ledger address refusing the credential
+    over plain http included, and return the line ending its pass as failed, nothing when no step raised."""
     from redis.exceptions import RedisError
+
+    from scripts.swarm_ledger.ledger_link import Cleartext
 
     raised = box.get("raised")
     if raised is None:
         return []
-    if not isinstance(raised, Exception) or isinstance(raised, RedisError):
+    if not isinstance(raised, (Exception, Cleartext)) or isinstance(raised, RedisError):
         raise raised
     return failed_pass(raised)
 
