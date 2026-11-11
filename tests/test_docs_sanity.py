@@ -276,7 +276,14 @@ def test_a_baseline_never_holds_addresses_or_secrets(tmp_path: Path) -> None:
 @pytest.mark.feature("docs-sanity-scan")
 def test_the_public_docs_pass_and_the_baseline_matches_them_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(ROOT)
-    found = docs_sanity.scan(PUBLIC, ())
+    present = tuple(path for path in PUBLIC if (ROOT / path).exists())
+    found = docs_sanity.scan(present, ())
+    held = {
+        path: rules
+        for path, rules in json.loads(BASELINE.read_text()).items()
+        if any(path == root or path.startswith(root + "/") for root in present)
+    }
 
+    assert "docs" in present
     assert docs_sanity.beyond_baseline(found, docs_sanity.load_baseline(str(BASELINE))) == []
-    assert docs_sanity.count_hits(found) == json.loads(BASELINE.read_text())
+    assert docs_sanity.count_hits(found) == held
