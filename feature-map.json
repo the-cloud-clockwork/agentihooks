@@ -1,6 +1,21 @@
 {
   "features": [
     {
+      "id": "claude-trust-lock-reclaim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",
+      "behaviour": "An agent launch that marks its folder trusted in a shared profile home's Claude config reclaims a lock directory left past the Claude lockfile stale bound by a killed launch and marks the folder, while a lock younger than the bound still blocks until the timeout.",
+      "seam": "claude_trust.ensure_trusted through _mark and _reclaim on the Claude config lock directory",
+      "tests": [
+        "tests/test_claude_trust.py::test_an_abandoned_lock_from_a_killed_launch_is_reclaimed_and_the_folder_marked",
+        "tests/test_claude_trust.py::test_a_lock_held_by_a_live_holder_still_blocks_the_mark",
+        "tests/test_claude_trust.py::test_a_lock_just_inside_the_stale_bound_is_left_to_its_holder",
+        "tests/test_claude_trust.py::test_a_lock_past_the_stale_bound_is_removed_and_a_vanished_one_reads_as_free",
+        "tests/test_claude_trust.py::test_a_stale_lock_another_launch_removed_first_reads_as_free",
+        "tests/test_claude_trust.py::test_a_lock_exactly_at_the_stale_bound_is_reclaimed"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
@@ -110,6 +125,24 @@
         "tests/swarm/test_preempt.py::test_run_reads_every_full_lane_from_one_claim_view",
         "tests/swarm/test_claim_view.py::test_a_preempt_pass_builds_one_claim_view_for_every_full_lane",
         "tests/hub/test_preemption.py::test_the_hub_preempts_with_the_tick_claim_view_builder"
+      ]
+    },
+    {
+      "id": "swarm-tick-claim-after-dependency",
+      "origin": "inventory",
+      "behaviour": "A task whose dependency is still open is not claimed, and the tick pass after that dependency is done claims it and spawns its engineer.",
+      "seam": "the tick claim pass, scripts.swarm.tick.tick over a ledger task carrying depends_on",
+      "tests": [
+        "tests/swarm/test_tick_claims.py::test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done"
+      ]
+    },
+    {
+      "id": "swarm-tick-idle-retire",
+      "origin": "inventory",
+      "behaviour": "A worker whose pane reads idle for IDLE_KILL_TICKS tick passes is retired without a typed nudge and its task is reopened.",
+      "seam": "the tick idle pass, scripts.swarm.tick.tick over an agent the runtime reports idle",
+      "tests": [
+        "tests/swarm/test_tick_idle.py::test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened"
       ]
     },
     {
@@ -1611,7 +1644,7 @@
       "id": "hub-import-core",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
-      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
+      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, literal credential values, dropped guard hooks, unsafe names, symlinks and occupied names before writing, and committing every profile together from a staging folder.",
       "seam": "scripts.profiles.hub_import.import_hub",
       "tests": [
         "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
@@ -1628,7 +1661,13 @@
         "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
         "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
         "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused",
-        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused"
+        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused",
+        "tests/profiles/test_hub_import.py::test_literal_credential_values_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_credential_environment_references_are_kept",
+        "tests/profiles/test_hub_import.py::test_a_guard_hook_that_import_would_drop_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_write_error_leaves_no_profile_behind",
+        "tests/profiles/test_hub_import.py::test_a_failed_rollback_names_the_profile_left_behind",
+        "tests/profiles/test_hub_import.py::test_a_profile_folder_that_appeared_since_planning_is_never_overwritten"
       ]
     },
     {
@@ -1850,6 +1889,16 @@
         "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
         "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
         "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
+      ]
+    },
+    {
+      "id": "tick-inbox-store-lookup",
+      "origin": "inventory",
+      "behaviour": "Preempt, the run window, the dispatcher seat and ledger events keep no inbox store class bound at import, so a first import under a patched store leaves later calls on the real store.",
+      "seam": "Module globals of the tick modules in scripts.swarm",
+      "tests": [
+        "tests/swarm/test_inbox_store_lookup.py::test_a_first_import_under_a_patched_inbox_store_keeps_no_fake",
+        "tests/swarm/test_inbox_store_lookup.py::test_the_run_window_sends_through_the_real_store_after_a_patched_first_import"
       ]
     },
     {
@@ -3415,6 +3464,16 @@
         "tests/swarm/test_priority_sweep.py::test_a_thousand_stale_priorities_clear_inside_the_step_floor",
         "tests/swarm/test_priority_sweep.py::test_the_sweep_clears_its_stale_priorities_in_one_batch",
         "tests/swarm/test_ledger_client_priorities.py::test_clear_priorities_sends_every_clear_as_the_swarm_in_bounded_batches"
+      ]
+    },
+    {
+      "id": "swarm-archive-terminal-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-executions-archive",
+      "behaviour": "ExecutionRegistry.archive moves a seat's own head row into the archive once it is ended or finished and its name is no longer listed, even with no newer generation superseding it, so a seat that is never reused does not hold its terminal execution in the live fenced executions hash forever.",
+      "seam": "ExecutionRegistry.archive archives a terminal head with no newer generation",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_moves_a_terminal_head_with_no_newer_generation"
       ]
     },
     {
