@@ -763,11 +763,15 @@ def test_an_asset_holding_a_literal_credential_refuses_the_import(hub: Path, tmp
 
 
 @pytest.mark.feature("hub-import-assets")
-@pytest.mark.parametrize("relative", ["profile.yml", "hooks/render.py"])
+@pytest.mark.parametrize(
+    "relative", ["profile.yml", "hooks/render.py", ".claude/settings.overrides.json", "cases/check.json"]
+)
 def test_a_profile_file_taken_twice_refuses_the_import(hub: Path, tmp_path: Path, relative: str) -> None:
     (hub / "agents/diagram/hooks").mkdir()
     (hub / "agents/diagram/hooks/render.py").write_text("")
+    (_package(hub) / ".claude/settings.json").write_text(json.dumps({"env": {"MODE": "fast"}}))
+    _case(hub, "check.yaml", {"name": "check", "expected": {"output": ["a diagram"]}})
     (_package(hub) / relative).parent.mkdir(parents=True, exist_ok=True)
     (_package(hub) / relative).write_text("")
-    with pytest.raises(ValueError, match=rf"profile file taken twice: {relative}"):
+    with pytest.raises(ValueError, match=f"profile file taken twice: {relative}"):
         import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
