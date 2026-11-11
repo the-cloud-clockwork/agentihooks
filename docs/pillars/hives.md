@@ -1481,7 +1481,7 @@ An observed account closes for new hive agents, with state `CLOSED` and cap `0`,
 
 Both thresholds are fixed in code; there is no setting for them. An observed row also closes when its latest reading
 is `rejected` by the provider, when it is the primary Claude login (rank zero of `AGENTIHOOKS_MASTER_LOGIN_ORDER`)
-with its week at or under `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` left (default 20), or when it is the Claude account
+with its week at or under `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` left (default 2), or when it is the Claude account
 a live master holds and its week has reached the workers' ceiling (see [reserved
 rows](load-balancing.md#reserved-rows-in-agentihooks-balance)). Any other observed row takes its quota band alone; the
 controller's launch cap does not bound it. A row whose reading is missing, older than fifteen minutes, reported as a

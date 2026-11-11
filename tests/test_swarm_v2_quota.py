@@ -320,7 +320,7 @@ def test_the_primary_login_is_refused_admission_and_capped_at_its_reserve(world,
     from scripts import master_claude_login as login
 
     monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
-    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 80.0}, account=ACCOUNT)
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 98.0}, account=ACCOUNT)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
 
