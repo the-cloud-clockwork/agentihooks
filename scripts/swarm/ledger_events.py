@@ -14,6 +14,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -477,15 +478,28 @@ def views(
             else _graphql(query, port)
         )
         gates = _workflow_gates(data, port, cache)
-        for i, url in enumerate(batch):
-            raw = data.get(f"p{i}")
-            declaration = gates.get(_workflow_id(raw))
-            found[url] = (
-                _view_resource(raw, _number(url), declaration["gated"], port, gate_workflows=declaration["workflows"])
-                if declaration is not None
-                else None
-            )
+        found.update(_batch_views(batch, data, gates, port))
     return found
+
+
+def _batch_views(
+    batch: list[str], data: dict[str, Any], gates: dict[str | None, Any], source: SourceControl
+) -> dict[str, "PullRequest | None"]:
+    """Resolve every pull request of one batch on its own thread: each view's own extra pages, if any, are an
+    independent GraphQL round trip no other pull request's resolution waits on."""
+
+    def resolve(indexed: tuple[int, str]) -> tuple[str, "PullRequest | None"]:
+        i, url = indexed
+        raw = data.get(f"p{i}")
+        declaration = gates.get(_workflow_id(raw))
+        if declaration is None:
+            return url, None
+        return url, _view_resource(
+            raw, _number(url), declaration["gated"], source, gate_workflows=declaration["workflows"]
+        )
+
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        return dict(pool.map(resolve, enumerate(batch)))
 
 
 PULL_TEXT = "resource(url:$url){...on PullRequest{headRefOid title body state isDraft}}"

@@ -686,3 +686,77 @@ def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
         False,
         True,
     )
+
+
+@pytest.mark.feature("swarm-views-batch-concurrent-paging")
+def test_three_oversized_pull_requests_in_one_batch_cost_exactly_one_extra_call_each():
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(3)]
+    big: dict[str, dict] = {}
+    rests: dict[str, list] = {}
+    for i, url in enumerate(urls):
+        pull = resource(f"h{i}")
+        commit = pull["commits"]["nodes"][0]["commit"]
+        commit["id"] = f"C{i}"
+        first = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+        commit["statusCheckRollup"] = {
+            "contexts": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": f"c{i}"}}
+        }
+        big[url] = pull
+        rests[f"C{i}"] = [{"name": f"job 100-{i}", "conclusion": "FAILURE", "databaseId": 100}]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        for commit_id, rest in rests.items():
+            if f"id={commit_id}" in command:
+                node = {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}
+                return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"node": node}}))
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"data": {f"p{i}": big[urls[i]] for i in range(len(urls))}})
+        )
+
+    found = views(urls, run)
+    assert len(calls) == 1 + len(urls)
+    for i, url in enumerate(urls):
+        assert found[url].head == f"h{i}"
+        assert found[url].failed == (f"job 100-{i}",)
+
+
+@pytest.mark.feature("swarm-views-batch-concurrent-paging")
+def test_oversized_pull_requests_resolve_the_same_regardless_of_which_extra_page_returns_last():
+    import threading
+
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(3)]
+    big: dict[str, dict] = {}
+    rests: dict[str, list] = {}
+    for i, url in enumerate(urls):
+        pull = resource(f"h{i}")
+        commit = pull["commits"]["nodes"][0]["commit"]
+        commit["id"] = f"C{i}"
+        first = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+        commit["statusCheckRollup"] = {
+            "contexts": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": f"c{i}"}}
+        }
+        big[url] = pull
+        rests[f"C{i}"] = [{"name": f"job 100-{i}", "conclusion": "FAILURE", "databaseId": 100}]
+    finished = {"C1": threading.Event(), "C2": threading.Event()}
+
+    def run(command, **kwargs):
+        for commit_id, rest in rests.items():
+            if f"id={commit_id}" in command:
+                if commit_id == "C0":
+                    assert finished["C1"].wait(timeout=5)
+                    assert finished["C2"].wait(timeout=5)
+                node = {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}
+                result = SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"node": node}}))
+                if commit_id in finished:
+                    finished[commit_id].set()
+                return result
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"data": {f"p{i}": big[urls[i]] for i in range(len(urls))}})
+        )
+
+    found = views(urls, run)
+    for i, url in enumerate(urls):
+        assert found[url].head == f"h{i}"
+        assert found[url].failed == (f"job 100-{i}",)

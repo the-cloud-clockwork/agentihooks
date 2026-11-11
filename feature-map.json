@@ -3155,6 +3155,17 @@
         "tests/swarm/test_execution_archive.py::test_archive_prunes_intents_for_the_rows_it_archives",
         "tests/swarm/test_execution_archive.py::test_reconcile_archives_dead_rows"
       ]
+    },
+    {
+      "id": "swarm-views-batch-concurrent-paging",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-intent-check-speed",
+      "behaviour": "views() resolves every pull request of one batched GraphQL fetch on its own thread, so a pull request whose check list needs an extra paginated round trip no longer holds up every other pull request of the same batch; the final mapping from url to PullRequest is the same regardless of which pull request's extra page comes back last.",
+      "seam": "scripts.swarm.ledger_events.views and _batch_views",
+      "tests": [
+        "tests/swarm/test_pull_views.py::test_three_oversized_pull_requests_in_one_batch_cost_exactly_one_extra_call_each",
+        "tests/swarm/test_pull_views.py::test_oversized_pull_requests_resolve_the_same_regardless_of_which_extra_page_returns_last"
+      ]
     }
   ],
   "unmapped_rules": [
