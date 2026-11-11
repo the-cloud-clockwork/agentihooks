@@ -7291,6 +7291,56 @@ example `The swarm has no task it may start: 3 open tasks are held by the focus 
 says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
 and says so: `with 3 frozen tasks holding 90m of work left out`.
 
+### How a freeze hold is named
+
+Every claim filter asks one place why an open task may not be claimed: its post merge proof window, its phase, a
+freeze or a focus, or an open dependency. The tick's ready work, which the night watch's held spawn check counts,
+asks only whether a hold exists and reads no target title. The reason text is built only where it is shown: the
+`urgent hold` step's finding, a withdrawn claim offer and the refusal to rank a held task `urgent`. For a freeze,
+that text names one record:
+
+1. The filter walks `freezes` in ledger order and stops at the first record whose verb is `freeze` and whose target
+   covers the task: the task itself, an ancestor slice, phase or plan, its lane or its kind. `focus` records are
+   skipped.
+2. It resolves the title of that one record's target and returns `<name> holds it`.
+3. When no freeze covers the task but a focus elsewhere keeps it out, it returns `a focus elsewhere holds it`, and no
+   target title is read.
+
+| Covering record | Reason |
+| --- | --- |
+| `freeze tasks/held` on a task titled `Held work` | `the freeze on task Held work holds it` |
+| `freeze lane:eng` | `the freeze on the eng lane holds it` |
+| `freeze kind:code` | `the freeze on code tasks holds it` |
+
+Older records that cover other tasks cost nothing: only the covering record's target is looked up, so title reads
+grow with the held tasks being explained, not with the freeze history. A ledger with a hundred freezes on finished
+tasks and one `freeze lane:eng` resolves only `lane:eng`, at most once per task. A night watch pass over thirty two
+open eng tasks on such a ledger reads no other target title; `tests/swarm/test_night_watch_reads.py` holds that bound.
+
+Before this, the filter built the display name of every freeze record for every task it judged and kept the first
+covering one, and the tick's ready work asked for the full reason text. Each task, slice or phase target is a scan of
+its collection, so a long freeze history multiplied every readiness read. On 20 October the `night watch` step took
+292 s of a 450 s tick deadline while its gate was in `log only` mode. Resolving only the covering record bounded those
+reads; ready work later moved to the yes or no check, so it now reads no title at all. The wording of each reason is
+unchanged.
+
+Read the step's wall from the tick report, where it shows as `night watch`:
+
+```bash
+agentihooks swarm rig-grade-swarm tick-report --passes 60
+```
+
+Its declared floor is 22 s at a 120 s interval; see
+[Tick engine steps](../reference/tick-engine-steps.md#live-budgets-floors-and-declared-intervals). The step also
+stops its Redis reads after 30 s and returns `skipped the rest of the night watch pass: <cause>`, so a stalled Redis
+cannot hold the tick past that bound.
+
+| Symptom | Check | Fix |
+| --- | --- | --- |
+| `night watch` p95 in the tick report runs past its floor | Count the freeze records in `swarm status` and the open tasks | Clear freezes on finished work with `unfreeze TARGET`; the read cost follows open tasks, so a remaining slow pass points at another read in the step |
+| An urgent hold finding names a freeze that is not the one you wrote last | Order of the `freeze` lines in `swarm status` | Expected: the first covering record in ledger order is named. Unfreeze it to see the next |
+| A held task reads `a focus elsewhere holds it` with a freeze on it | Whether the freeze is a `focus` record or covers the task | A `focus` record is never named as a freeze; check the target covers the task's id, phase, lane or kind |
+
 ## Task awaiting states
 
 A task's `awaiting` field names what the task waits on beyond its `state`. It lives on the task record in the
