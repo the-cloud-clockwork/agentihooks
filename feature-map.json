@@ -354,7 +354,8 @@
       "behaviour": "A tick pass whose ledger server does not answer on a host that stores no ledger view still runs the steps that need only Redis and the host, host pressure, prompt backlog, the quiet hive sweep and the outbox migration, and keeps every other step past the probes shut.",
       "seam": "scripts.swarm.cli.run_tick with a failed ledger health probe and no stored ledger view",
       "tests": [
-        "tests/swarm/test_outage_ledger.py::test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps"
+        "tests/swarm/test_outage_ledger.py::test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps",
+        "tests/swarm/test_outage_ledger.py::test_a_ledger_health_stop_shuts_only_the_steps_past_the_probes_that_need_the_ledger"
       ]
     },
     {

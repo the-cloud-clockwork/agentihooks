@@ -1,5 +1,6 @@
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -79,3 +80,23 @@ def test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps(
     monkeypatch.setattr(command_runner, "consume", lambda *args, **kwargs: called.append("command runner") or [])
     assert cli.run_tick(store, "sw", LedgerClient(), FakeRuntime()) == ["Ledger health probe failed"]
     assert sorted(called) == ["hive sweep", "host pressure", "outbox migration", "prompt backlog"]
+
+
+@pytest.mark.feature("swarm-tick-redis-only-steps")
+@pytest.mark.parametrize(
+    ("group", "name", "shut"),
+    [
+        ("wrapper probes", "outage probes", False),
+        ("wrapper health", "host pressure", False),
+        ("wrapper relay", "outbox migration", False),
+        ("wrapper health", "ledger watchdog", True),
+        ("wrapper commands", "command runner", True),
+    ],
+)
+def test_a_ledger_health_stop_shuts_only_the_steps_past_the_probes_that_need_the_ledger(
+    group: str, name: str, shut: bool
+) -> None:
+    wrapper = SimpleNamespace(
+        box={"stop": ["Ledger health probe failed"]}, ended=None, ticks=SimpleNamespace(shut=lambda step: False)
+    )
+    assert cli._Wrapper.shut(wrapper, SimpleNamespace(group=group, name=name)) is shut  # pyright: ignore[reportPrivateUsage, reportArgumentType]
