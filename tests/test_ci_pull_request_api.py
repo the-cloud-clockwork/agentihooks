@@ -217,6 +217,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/packaging/swarm-smoke-parallel.sh",
         "scripts/dead_code.py",
         "scripts/design_rules.py",
+        "scripts/docs_sanity.py",
         "scripts/locked_tests.py",
         "scripts/no_comments.py",
         "scripts/no_whole_ledger.py",
