@@ -98,9 +98,10 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
     plans: dict[str, dict[str, bytes]] = {}
     stores: dict[str, dict[str, bytes]] = {}
     deps: list[dict[str, object]] = []
-    agents = {package.parent.name: _profile_name(_command(package), package.parent.name) for package in packages}
+    commands = {package: _command(package) for package in packages}
+    agents = {package.parent.name: _profile_name(commands[package], package.parent.name) for package in packages}
     for package in packages:
-        command = _command(package)
+        command = commands[package]
         name = agents[package.parent.name]
         if name in plans or (out / "profiles" / name).exists():
             raise ValueError(f"profile name taken: {name}")
