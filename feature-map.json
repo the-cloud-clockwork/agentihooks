@@ -3337,6 +3337,17 @@
       ]
     },
     {
+      "id": "hive-master-refused-login-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master2-generation-churn",
+      "behaviour": "A master launch whose account reservation refused an account never selects that account again in the same spawn, including a hive's native interactive login, so the retry ends after one admitted execution per refused account.",
+      "seam": "HiveLaunch._select master selection with refused accounts and HiveLaunch.spawn account retry",
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_master_retry_skips_the_interactive_login_its_reservation_refused",
+        "tests/hive/test_master_fallback_launch.py::test_a_master_launch_refused_by_its_only_interactive_login_admits_one_execution"
+      ]
+    },
+    {
       "id": "hive-admission-pending-launches",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2434",

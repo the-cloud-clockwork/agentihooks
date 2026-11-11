@@ -762,3 +762,43 @@ def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check
     secondary = replace(admitted, seat="master-2@fixture")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
     assert ack.failure == "unavailable: spawned"
+
+
+@pytest.mark.feature("hive-master-refused-login-retry")
+def test_a_master_retry_skips_the_interactive_login_its_reservation_refused(setup: Any) -> None:
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native", "codex": ""}, slots=[])
+    assert setup.launcher.select(setup.config, "master", task).account.name == "native"
+    selected = setup.launcher._select(setup.config, "master", task, accounts=frozenset({"claude:native"}))
+    assert (selected.hive, selected.account.name) == ("remote", "account")
+
+
+@pytest.mark.feature("hive-master-refused-login-retry")
+def test_a_master_launch_refused_by_its_only_interactive_login_admits_one_execution(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm.tick import MASTER
+    from scripts.swarm_v2.runtime.base import SpawnRequest, Status
+
+    task = master(setup)
+    setup.herdr._quota_accounts = []
+    write_hive(setup, excluded=[], ui="yes", interactive={"claude": "native", "codex": ""}, slots=[])
+    assert setup.launcher.slots.reserve("claude:native", "lead", 1, 300000)
+    admit = setup.launcher.admit
+    admitted: list[str] = []
+
+    def counted(request: Any, selected: Any) -> Any:
+        admitted.append(selected.account.name)
+        assert len(admitted) <= 3, f"the launch admitted {admitted}"
+        return admit(request, selected)
+
+    monkeypatch.setattr(setup.launcher, "admit", counted)
+    name = setup.store.next_name(setup.config.slug, MASTER)
+    task.update(seat="master-2@fixture", controller_epoch=setup.held.epoch)
+    result = setup.launcher.spawn(SpawnRequest(setup.config, MASTER, name, task))
+    assert result.status is Status.UNAVAILABLE
+    assert admitted == ["native"]
+    assert [record.state for record in setup.store.execution_registry.records(setup.config.slug)] == ["ended"]
