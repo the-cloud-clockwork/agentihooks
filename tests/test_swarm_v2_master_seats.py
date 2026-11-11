@@ -666,3 +666,50 @@ def test_control_notices_go_to_the_live_lead_and_never_to_a_working_engineer_or_
     assert control_notifications.master(store, SLUG) is None
     store.put_agent(SLUG, FIRST)
     assert control_notifications.master(store, SLUG).name == FIRST.name
+
+
+@pytest.mark.feature("retired-master-seat-owns-no-hive")
+def test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written(swarm):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 3)
+    seats.own_hive(SLUG, "anton", LEAD)
+    seats.retire(SLUG, SECOND, 5)
+    refusal = f"{SECOND} is retired, so it cannot own hive anton"
+
+    with pytest.raises(masters.MasterError) as refused:
+        seats.own_hive(SLUG, "anton", SECOND)
+    assert str(refused.value) == refusal
+    with pytest.raises(masters.MasterError) as checked:
+        seats.check_hives(SLUG, [3], [("anton", SECOND)])
+    assert str(checked.value) == refusal
+    assert store.redis.hget(seats.key(SLUG), "hives") == json.dumps({"anton": LEAD})
+    seats.own_hive(SLUG, "anton", f"master-3@{SLUG}")
+    assert seats.hive_owners(SLUG) == {"hives/anton": f"master-3@{SLUG}"}
+
+
+@pytest.mark.feature("retired-master-seat-owns-no-hive")
+def test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired(swarm, monkeypatch):
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.set_count(SLUG, 3)
+    seats.retire(SLUG, SECOND, 5)
+    third = f"master-3@{SLUG}"
+    number, raced = masters._number, []
+
+    def racing(slug: str, address: str) -> int:
+        if not raced:
+            raced.append(address)
+            masters.MasterSeats(store.redis).retire(SLUG, third, 7)
+        return number(slug, address)
+
+    monkeypatch.setattr(masters, "_number", racing)
+    seats.set_count(SLUG, 4)
+
+    assert raced == [SECOND]
+    assert seats.count(SLUG) == 4
+    assert seats.retired(SLUG) == [SECOND, third]
+    assert seats.retired_at(SLUG, third) == 7
+    with pytest.raises(masters.MasterError) as refused:
+        seats.own_hive(SLUG, "anton", third)
+    assert str(refused.value) == f"{third} is retired, so it cannot own hive anton"
