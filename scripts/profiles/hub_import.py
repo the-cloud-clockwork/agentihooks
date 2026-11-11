@@ -1,8 +1,9 @@
 """Import agentihub agent packages as portable bundle profiles.
 
 Each package under ``agents/<agent>/package`` becomes ``profiles/<name>`` in the
-bundle: ``command.yml`` turns into ``profile.yml``, instructions, skills and rules
-are copied, and Claude settings become overrides with absolute paths removed.
+bundle: ``command.yml`` turns into ``profile.yml``, every other package file and the
+agent level ``hooks/`` are copied, and Claude settings become overrides with
+absolute paths removed.
 ``state/`` and ``reports/`` go to a runtime data folder, Node and pip installs
 become bundle ``deps.json`` entries, and evaluation cases become judge cases.
 Secret files, symlinks, unsafe names and taken names refuse the whole import
@@ -29,8 +30,11 @@ from hooks import secrets
 
 PROFILE_KEYS = ("description", "capabilities")
 CLAUDE_KEYS = ("model", "effort")
-COPIED = ("CLAUDE.md", ".claude/skills", ".claude/rules")
 SETTINGS = ".claude/settings.json"
+MCP = ".mcp.json"
+CONVERTED = frozenset({"command.yml", SETTINGS, ".claude/settings.local.json"})
+SKIPPED_DIRS = frozenset({"node_modules", ".git"})
+AGENT_HOOKS = "hooks"
 OVERRIDES = ".claude/settings.overrides.json"
 SECRET_NAMES = frozenset(
     {
@@ -80,6 +84,8 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
     packages = _packages(src)
     for package in packages:
         _refuse_unsafe_files(package)
+        if (package.parent / AGENT_HOOKS).exists():
+            _refuse_unsafe_files(package.parent / AGENT_HOOKS)
     plans: dict[str, dict[str, bytes]] = {}
     stores: dict[str, dict[str, bytes]] = {}
     deps: list[dict[str, object]] = []
@@ -193,7 +199,10 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()} | _collect(package, COPIED)
+    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()} | _assets(package)
+    mcp_path = package / MCP
+    if mcp_path.is_file():
+        _refuse_literal_credentials(json.loads(mcp_path.read_text()), mcp_path)
     settings_path = package / SETTINGS
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
@@ -204,6 +213,19 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         if portable is not _DROP:
             files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
     return files
+
+
+def _assets(package: Path) -> dict[str, bytes]:
+    """Return every package file the profile carries and the agent level hooks, leaving out what import converts or moves."""
+    files: dict[str, bytes] = {}
+    for root, dirs, names in package.walk():
+        top = root == package
+        dirs[:] = sorted(d for d in dirs if d not in SKIPPED_DIRS and not (top and d in DATA))
+        for entry in sorted(names):
+            relative = (root / entry).relative_to(package).as_posix()
+            if relative not in CONVERTED:
+                files[relative] = (root / entry).read_bytes()
+    return files | _collect(package.parent, (AGENT_HOOKS,))
 
 
 def _collect(package: Path, relatives: tuple[str, ...]) -> dict[str, bytes]:
