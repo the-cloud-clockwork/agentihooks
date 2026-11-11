@@ -22,6 +22,7 @@ FROZEN = f"{ROOT}:accounts-frozen"
 CONFLICTS = f"{ROOT}:account-reservation-conflicts"
 INDEX = f"{ROOT}:accounts-index"
 INDEX_BUILT = f"{ROOT}:accounts-index-built"
+INDEX_REWALK_S = 3600
 ACCOUNT_FULL = "account_full"
 
 
@@ -60,13 +61,13 @@ def stored_accounts(store: RedisStore) -> list[str]:
 
 
 def _backfill_index(store: RedisStore) -> None:
-    """Index the account hashes written before the index existed, with one keyspace walk, and mark the index built."""
+    """Index account hashes written without the index, by an older writer, with one keyspace walk an hour at most."""
     prefix = account_key("")
     found = [key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=10000)]
     with store.redis.pipeline() as pipe:
         if found:
             pipe.sadd(INDEX, *found)
-        pipe.set(INDEX_BUILT, 1)
+        pipe.set(INDEX_BUILT, 1, ex=INDEX_REWALK_S)
         pipe.execute()
 
 

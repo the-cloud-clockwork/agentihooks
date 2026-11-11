@@ -536,6 +536,7 @@ def test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill(
     assert accounts.stored_accounts(world.store) == ["legacy"]
     assert walked >= 1
     assert len(scans) == walked
+    assert world.store.redis.ttl(accounts.INDEX_BUILT) == 3600
 
 
 def test_a_reservation_retried_after_a_lost_reply_or_restart_has_one_effect(world):
