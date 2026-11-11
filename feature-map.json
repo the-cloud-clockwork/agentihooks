@@ -3612,6 +3612,19 @@
         "tests/tick/test_master_placement_coordination.py::test_the_master_placement_waits_when_the_port_refuses_the_tick_lock",
         "tests/tick/test_master_placement_coordination.py::test_respawn_master_drops_a_gone_master_through_the_coordination_port"
       ]
+    },
+    {
+      "id": "ledger-write-substep-timing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
+      "behaviour": "Every ledger write times its hierarchy sync, outbox write, refresh record and event append into the current request, so each write record in the request metrics writes view carries the four substep times, the summary totals them across writes, and the journal keeps them across a restore.",
+      "seam": "scripts.swarm_ledger.request_metrics.step and the write records of scripts.swarm_ledger.request_metrics.records, fed by SQLiteLedgerRepository._write",
+      "tests": [
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_ledger_write_metrics_row_carries_each_substep_time",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_substeps_outside_a_measured_request_are_not_counted",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
     }
   ],
   "unmapped_rules": [
