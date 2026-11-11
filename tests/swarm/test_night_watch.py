@@ -627,7 +627,7 @@ def test_night_watch_findings_reach_the_swarm_health_findings_the_doctor_reads(e
     assert "empty-master-seat/sw" in {row["id"] for row in found}
 
 
-def test_the_tick_respawns_the_front_door_past_the_host_hold_and_spent_retries(store, monkeypatch):
+def test_the_tick_respawns_the_front_door_past_spent_retries(store, monkeypatch):
     called = []
     store.redis.set(store.key(SLUG, "master-start"), json.dumps({"alerted": True}))
     monkeypatch.setattr(tick, "_master", lambda *args, **kwargs: called.append(kwargs) or ["launched"])
@@ -640,7 +640,7 @@ def test_the_tick_respawns_the_front_door_past_the_host_hold_and_spent_retries(s
     monkeypatch.setattr(night_watch, "run", run_watch)
     tick._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
     assert seen["respawn"] == ["launched"]
-    assert called == [{"past_host": True}]
+    assert called == [{}]
     assert not store.redis.exists(store.key(SLUG, "master-start"))
 
 

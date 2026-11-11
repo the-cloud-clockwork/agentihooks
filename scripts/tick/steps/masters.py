@@ -224,7 +224,7 @@ def _night_watch(slug: Any, store: Any, ledger: Any, runtime: Any, doc: Any, now
         if tick.master_start.read(store, slug).get("alerted"):
             store.redis.delete(store.key(slug, "master-start"))
         with tick.PLACING:
-            return tick._master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
+            return tick._master(slug, store.config(slug), store, runtime, now_ms)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
@@ -354,7 +354,7 @@ def _recover_master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: An
     return [f"adopted live master {name}"]
 
 
-def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, past_host: Any = False) -> Any:
+def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
     store.redis.hdel(tick.MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == tick.MASTER]
@@ -374,8 +374,6 @@ def _master(slug: Any, config: Any, store: Any, runtime: Any, now_ms: Any, past_
     if refused := tick.seat_spawn.no_slot(config, runtime, tick.MASTER):
         store.redis.hset(tick.MASTER_WAITING, slug, now_ms)
         return [refused]
-    if not past_host and (held := tick.seat_spawn.host_hold(slug, store, now_ms, tick.MASTER)):
-        return [held]
 
     launched = {}
 

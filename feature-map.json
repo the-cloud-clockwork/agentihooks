@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-master-skips-host-hold",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
+      "behaviour": "An over budget host room never holds a master spawn, the lead launch or an extra seat, the same way workstation admission passes the master lane; the master launch still counts against the room and an over budget engineer spawn stays held.",
+      "seam": "master_fill.run and the masters step master launch against the tick spawn stop host check",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_an_over_budget_host_launches_the_master_and_still_holds_an_engineer",
+        "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
+      ]
+    },
+    {
       "id": "local-enforcements-store-ignored",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
@@ -341,6 +352,10 @@
         "tests/tick/test_offline_view.py::test_an_offline_write_whose_guard_holds_is_queued",
         "tests/tick/test_offline_view.py::test_an_offline_write_matching_a_held_field_is_queued",
         "tests/tick/test_offline_view.py::test_an_offline_write_without_a_held_view_is_queued_unguarded",
+        "tests/tick/test_offline_view.py::test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued",
+        "tests/tick/test_offline_view.py::test_queued_writes_of_several_offline_passes_merge_onto_the_stored_view",
+        "tests/tick/test_offline_view.py::test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept",
+        "tests/tick/test_offline_view.py::test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept",
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
@@ -359,6 +374,16 @@
       "tests": [
         "tests/swarm/test_outage_ledger.py::test_a_ledger_down_without_a_stored_view_still_runs_the_redis_only_steps",
         "tests/swarm/test_outage_ledger.py::test_a_ledger_health_stop_shuts_only_the_steps_past_the_probes_that_need_the_ledger"
+      ]
+    },
+    {
+      "id": "tick-time-left-server-error",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-time-left-escape",
+      "behaviour": "A tick pass whose time left write meets a ledger server error skips that write and still runs its remaining steps, placing claimable tasks.",
+      "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
+      "tests": [
+        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running"
       ]
     },
     {
@@ -512,6 +537,25 @@
       ]
     },
     {
+      "id": "swarm-tick-declared-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2466",
+      "behaviour": "A tick step reads a pass box value only when its reads or writes declare it, as a step domain or a site hook domain; reading any other box value, stored yet or not, raises UndeclaredRead naming the step and the key, and every site hook declares the box values it reads and writes.",
+      "seam": "scripts.tick.steps.declared_read and DeclaredBox behind CallStep and WriteStep, with scripts.swarm.cli.WRAPPER_HOOK_KEYS and scripts.tick.sites.TICK_HOOK_KEYS",
+      "tests": [
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_it_does_not_declare_is_refused",
+        "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name",
+        "tests/tick/test_declared_reads.py::test_declared_step_and_hook_values_and_pass_state_read_through",
+        "tests/tick/test_declared_reads.py::test_the_box_view_refuses_undeclared_keys_and_writes_through",
+        "tests/tick/test_declared_reads.py::test_a_write_step_reads_what_its_reads_and_writes_declare",
+        "tests/tick/test_declared_reads.py::test_a_pass_box_in_the_pass_state_is_guarded_and_a_plain_state_dict_is_not",
+        "tests/tick/test_declared_reads.py::test_every_site_hook_declares_its_keys",
+        "tests/tick/test_declared_reads.py::test_every_hook_value_a_step_reads_is_written_by_a_hook_at_or_before_its_site",
+        "tests/tick/test_declared_reads.py::test_the_box_keys_are_the_values_steps_and_hooks_declare_writing",
+        "tests/swarm/tick_scenarios/test_characterisation.py::test_recorded_passes_read_only_declared_values"
+      ]
+    },
+    {
       "id": "swarm-tick-live-budgets",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-g5",
@@ -637,7 +681,7 @@
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_starts_only_once_the_old_lead_ended",
         "tests/tick/steps/test_master_placement_ops.py::test_a_seated_non_lead_master_never_holds_the_start",
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_without_a_slot_is_recorded_as_waiting",
-        "tests/tick/steps/test_master_placement_ops.py::test_a_host_hold_stops_the_master_unless_it_starts_past_the_host",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_host_hold_never_stops_the_master",
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_refused_for_room_withdraws_its_start",
         "tests/tick/steps/test_master_placement_ops.py::test_a_failed_master_spawn_marks_the_transfer_and_affinity_failed",
         "tests/tick/steps/test_master_placement_ops.py::test_a_reported_master_is_working_and_clears_its_start",
@@ -2236,6 +2280,17 @@
       ]
     },
     {
+      "id": "alert-writer-closes-its-sync-alert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1769",
+      "behaviour": "A seat whose refused write raised a sync alert can claim and close that alert even after the ledger closed it on a later success or expiry, and every refused alert claim or close carries the server's reason without raising a new sync alert.",
+      "seam": "The alert_claim and alert_close ops through ledger_core.sync and the ledger CLI's refused report",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",
@@ -3453,6 +3508,21 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "lease-cache-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2470",
+      "behaviour": "On a swarm whose fencing document moved to per record keys, the cheap controller lease read answers the lease record itself, so a renew inside its margin returns the live lease without reading or writing the whole swarm document, and a lease another owner took is refused.",
+      "seam": "scripts.swarm.fencing.read_lease, used by scripts.swarm.lease.renew and current",
+      "tests": [
+        "tests/swarm/test_lease_cache_records.py::test_the_cheap_lease_read_answers_the_lease_written_through_records",
+        "tests/swarm/test_lease_cache_records.py::test_the_cheap_lease_read_survives_an_unrelated_records_write",
+        "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_inside_its_margin_writes_nothing",
+        "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_refuses_a_lease_another_owner_took",
+        "tests/swarm/test_lease_cache_records.py::test_a_records_swarm_with_no_lease_reads_none",
+        "tests/swarm/test_lease_cache_records.py::test_a_document_swarm_still_reads_its_lease_from_the_cache"
       ]
     },
     {

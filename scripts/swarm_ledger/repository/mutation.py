@@ -1,4 +1,5 @@
 import copy
+from typing import Any
 
 import ledger_alerts
 import ledger_notifications
@@ -8,7 +9,15 @@ import ledger_priorities
 from .events import keep_events
 
 
-def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
+def apply(
+    slug: str,
+    state: dict[str, Any],
+    core: Any,
+    changes: list[Any] | None = None,
+    ops: list[dict[str, Any]] | None = None,
+    gate: Any = None,
+    created: bool = False,
+) -> tuple[list[str], Any]:
     """Fold checkbox changes and ops into the stored state in place; returns (rejected ids, the context)."""
     import ledger_artifacts
     import ledger_media
@@ -30,7 +39,8 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
         else:
             rejected.append(op["id"])
         doc.setdefault("alerts", [])
-        for text in ctx.refused[start:]:
+        alerting: list[str] = [text for text in ctx.refused[start:] if not ledger_alerts.settling_refusal(text)]
+        for text in alerting:
             warning = (ledger_alerts.SYNC, text, ledger_alerts.writer(op, ctx), ledger_alerts.item(op))
             raised.append(warning)
             ledger_alerts.raise_warning(doc, ctx, warning, [])
