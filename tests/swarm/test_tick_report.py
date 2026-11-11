@@ -98,13 +98,14 @@ def test_report_names_the_most_task_rows_a_pass_read(capsys: pytest.CaptureFixtu
 @pytest.mark.feature("swarm-tick-ready-gap")
 def test_report_prints_each_step_ready_to_start_gap(capsys: pytest.CaptureFixture[str]) -> None:
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 20000, "wall_s": 19.0}]
+    counts = {"outcome": "ok", "abandoned": False, "held": False, "skipped": False, "dropped": 0}
     records = [
-        {"pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 2.0},
-        {"pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 4.5},
-        {"pass_id": "a", "step": "waits", "ready_s": 2.0, "start_s": 13.7},
-        {"pass_id": "a", "step": "merge pass", "ready_s": 3.0, "start_s": 3.0},
-        {"pass_id": "a", "step": "legacy", "start_s": 3.0},
-        {"pass_id": "other", "step": "waits", "ready_s": 0.0, "start_s": 90.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 2.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 4.5},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 2.0, "start_s": 13.7},
+        {**counts, "pass_id": "a", "step": "merge pass", "ready_s": 3.0, "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "legacy", "start_s": 3.0},
+        {**counts, "pass_id": "other", "step": "waits", "ready_s": 0.0, "start_s": 90.0},
     ]
     report = tick_report.summarize(passes, [], records)
     assert report["ready_gaps"] == [
