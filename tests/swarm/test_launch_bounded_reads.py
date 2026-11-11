@@ -176,11 +176,11 @@ def test_run_window_reads_its_marks_by_field(store: RedisStore) -> None:
     window = {"start_ms": 0, "minutes": 10}
     config = replace(store.config(SLUG), window=window)
     key, bounds = store.key(SLUG, run_window.KEY), json.dumps([0, 10 * run_window.MINUTE_MS])
-    store.redis.hset(key, mapping={"window": bounds, "mode": "enforce", "alerted": "1", "stray": "x"})
+    store.redis.hset(key, mapping={"window": bounds, "mode": "enforce", "alerted": "1"})
     assert run_window.claims_stopped(store, SLUG, config, 10 * run_window.MINUTE_MS) != ""
     assert run_window.step(SLUG, config, store, None, {}, 5 * run_window.MINUTE_MS) == []
     assert store.redis.hget(key, "alerted") == "1"
-    assert store.redis.hget(key, "stray") is None
+    assert set(hash_pages.fields(store.redis, key)) <= set(run_window.MARKS)
 
 
 @FEATURE
