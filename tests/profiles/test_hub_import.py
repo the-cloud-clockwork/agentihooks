@@ -451,9 +451,8 @@ def test_the_data_folder_falls_back_to_the_home_folder(
     (_package(hub) / "state").mkdir()
     (_package(hub) / "state/run.json").write_text("{}")
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path / "user"))
     report = import_hub(hub, tmp_path / "bundle", True)
-    assert report["data"] == [str(tmp_path / "user/.agentihooks/hub-data/profiles/diagram/state/run.json")]
+    assert report["data"] == [str(Path.home() / ".agentihooks/hub-data/profiles/diagram/state/run.json")]
 
 
 @pytest.mark.feature("hub-import-deps")
