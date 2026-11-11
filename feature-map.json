@@ -170,6 +170,17 @@
       ]
     },
     {
+      "id": "hive-workstation-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-workstation-flag-root-hive",
+      "behaviour": "A task marked workstation places only on the root hive, else the controller's own hive, never on another headed hive, and waits while root has no room.",
+      "seam": "hive launcher select through placement workstation hives",
+      "tests": [
+        "tests/hive/test_workstation_tasks.py::test_a_workstation_task_skips_another_headed_hive_for_the_root_hive",
+        "tests/hive/test_workstation_tasks.py::test_a_workstation_task_waits_for_a_full_root_hive_over_an_emptier_headed_hive"
+      ]
+    },
+    {
       "id": "hive-agent-token-cache",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2262",
