@@ -49,16 +49,16 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
     ],
 )
 def test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy(operation):
-    import ledger_watchdog
+    from scripts.swarm_ledger import ledger_watchdog_copy
 
     with pytest.raises(ValueError):
-        ledger_watchdog.check(operation)
-    assert ledger_watchdog.check({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100000}) is None
+        ledger_watchdog_copy.check(operation)
+    assert ledger_watchdog_copy.check({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100000}) is None
 
 
 def test_the_ledger_command_stores_the_watchdog_copy_from_a_file(tmp_path, monkeypatch, capsys):
     import hashlib
-    from types import SimpleNamespace
+    from argparse import Namespace
 
     copy = tmp_path / "watchdog.md"
     copy.write_text("1. [open] First. [Ledger: t1]\n", encoding="utf-8")
@@ -69,7 +69,7 @@ def test_the_ledger_command_stores_the_watchdog_copy_from_a_file(tmp_path, monke
         return {"applied": [1]}
 
     monkeypatch.setattr(ledger_cli, "send", send)
-    ledger_cli.cmd_watchdog_copy(SimpleNamespace(slug=SLUG, name="watchdog-1", path=str(copy)))
+    ledger_cli.cmd_watchdog_copy(Namespace(slug=SLUG, name="watchdog-1", path=str(copy)))
     assert sent == [("watchdog_copy", {"text": "1. [open] First. [Ledger: t1]\n"})]
     digest = hashlib.sha256(b"1. [open] First. [Ledger: t1]\n").hexdigest()
     assert json.loads(capsys.readouterr().out) == {"stored": True, "digest": digest}

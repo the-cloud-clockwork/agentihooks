@@ -2,6 +2,3 @@ class LedgerItems:
     def item(self, slug, path):
         name, _, item_id = path.partition("/")
         return next((entry for entry in self.state(slug).get(name) or [] if entry.get("id") == item_id), None)
-
-    def watchdog_copy(self, slug):
-        return self.state(slug).get("watchdog_copy") or {}

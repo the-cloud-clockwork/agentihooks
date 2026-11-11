@@ -1,5 +1,6 @@
 import hashlib
 import json
+from typing import cast
 
 from scripts.swarm_ledger import ledger_closed, models, ports
 
@@ -133,6 +134,8 @@ def value(doc: dict, path: str) -> object:
         return {name: len(doc.get(name, [])) for name in COLLECTIONS}
     if path == "events":
         return doc["_meta"].get("events", [])
+    if path == "watchdog":
+        return cast(dict[str, object], doc).get("watchdog_copy") or {}
     if name == "members":
         members = doc["_meta"].get("members", {})
         if len(parts) == 1:

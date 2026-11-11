@@ -42,6 +42,9 @@ class FakeLedger(LedgerItems):
     def events(self, slug):
         return []
 
+    def watchdog_copy(self, slug):
+        return {}
+
     def state(self, slug):
         log, tasks = getattr(self, "log", []), self.tasks(slug)
         stamps = {f"tasks/{t['id']}/rank": {"by": "operator"} for t in tasks if "rank" in t}

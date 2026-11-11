@@ -68,12 +68,13 @@ def digest(document: str) -> str:
     return hashlib.sha256(document.encode()).hexdigest()
 
 
-def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
-    """Map the copy at ``document`` onto ``tasks`` when its digest differs from the last mapped one, write the new
-    items through the ledger port and record the digest through the coordination port; return the line naming the run."""
-    if not document.is_file():
+def map_changed(tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
+    """Map the newest watchdog document copy on the ledger onto ``tasks`` when its digest differs from the last
+    mapped one, write the new items through the ledger port and record the digest through the coordination port;
+    return the line naming the run."""
+    text = tools.ledger.watchdog_copy(deadline=deadline).get("text") or ""
+    if not text:
         return []
-    text = document.read_bytes().decode()
     found = digest(text)
     if found == tools.coordination.marked(MARK, deadline=deadline):
         return []
@@ -82,13 +83,13 @@ def map_changed(document: Path, tasks: list[dict[str, Any]], tools: Tools, deadl
         changed = changes(tasks, mapping)
     except ValueError as exc:
         tools.coordination.mark(MARK, found, deadline=deadline)
-        return [f"refused watchdog doc items of {document}: {exc}"]
+        return [f"refused watchdog doc items of the ledger copy: {exc}"]
     for tid, merged in changed.items():
         tools.ledger.update_task(tid, {"doc_items": merged}, deadline=deadline)
     tools.coordination.mark(MARK, found, deadline=deadline)
     items = sum(len(links) for links in mapping.values())
     updated = ", ".join(changed) or "none"
-    return [f"mapped watchdog doc items of {document}: {items} items on {len(mapping)} tasks, updated {updated}"]
+    return [f"mapped watchdog doc items of the ledger copy: {items} items on {len(mapping)} tasks, updated {updated}"]
 
 
 def main(argv: list[str] | None = None) -> int:
