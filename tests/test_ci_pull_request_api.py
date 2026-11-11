@@ -19,6 +19,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
+    ROOT / "scripts/ci_launch_hotfix.py": {"pulls_of", "timeline_of", "head_green"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
