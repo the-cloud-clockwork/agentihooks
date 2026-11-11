@@ -186,6 +186,16 @@ def test_dry_run_needs_no_provisioning(command, monkeypatch, capsys):
     assert report["applied"] is False
 
 
+def test_move_counts_a_dotted_key(buses, command, capsys):
+    legacy, scoped = buses
+    legacy.state("spoke-work").create("claim.one", b"dotted")
+    code, report = _run(
+        command, capsys, ["--swarm", "rig", "--bucket", "spoke-work", "--key", "claim.one", "--apply", "--quiescent"]
+    )
+    assert (code, report["would_move"], report["moved"]) == (0, 1, 1)
+    assert scoped.for_swarm("rig").state("spoke-work").get("claim.one").value == b"dotted"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
