@@ -513,10 +513,10 @@ def _counting_scans(store: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[A
 def test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    world.running(HELD)
     world.store.redis.mset({f"{ROOT}:unrelated:{n}": "x" for n in range(INPUTS["unrelated_keys"])})
-    accounts.stored_accounts(world.store)
+    assert accounts.stored_accounts(world.store) == []
     scans = _counting_scans(world.store, monkeypatch)
+    world.running(HELD)
 
     assert accounts.stored_accounts(world.store) == [ACCOUNT]
     assert accounts.fleet_held(world.store, world.clock[0]) == {ACCOUNT: 1}
