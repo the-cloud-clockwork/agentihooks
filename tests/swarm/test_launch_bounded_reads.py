@@ -41,6 +41,7 @@ GUARDED = (
     "dev-red",
     dispatch_seat.SENT,
     remote_control.FAILURES,
+    "launches",
 )
 
 
@@ -181,6 +182,13 @@ def test_failed_panes_held_reads_every_pane(store: RedisStore) -> None:
     assert failed_panes.held(store, SLUG) == {
         "p1": {"agent": "engineer@1-1", "task": "t1", "failed_at": 5, "reason": "boom"}
     }
+
+
+@pytest.mark.feature("swarm-launch-bounded-reads")
+def test_failed_panes_report_pages_the_launches_hash(store: RedisStore) -> None:
+    key = store.key(SLUG, "launches")
+    store.redis.hset(key, mapping={"a": json.dumps({"pane_lines": ["x"]}), "b": json.dumps({"pane_lines": []})})
+    assert failed_panes.report(store, SLUG) == [{"pane_lines": ["x"]}]
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
