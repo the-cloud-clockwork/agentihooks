@@ -108,6 +108,13 @@ def test_picked_returns_only_the_named_fields_that_are_set(store: RedisStore) ->
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
+def test_picked_refuses_a_reply_that_misses_a_named_field() -> None:
+    client = SimpleNamespace(hmget=lambda key, names: ["1"])
+    with pytest.raises(ValueError, match="zip"):
+        hash_pages.picked(client, "h", ["a", "b"])
+
+
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_place_holds_spawns_for_another_swarms_waiting_master(store: RedisStore) -> None:
     store.redis.hset(swarm_tick.MASTER_WAITING, mapping={SLUG: "100", "other": "100", "old": "-999999999"})
     assert place._held_for_master(SLUG, store, 200) == [

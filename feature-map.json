@@ -4041,7 +4041,8 @@
         "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_red_dev_reads_only_blocked_tasks",
         "tests/swarm/test_launch_bounded_reads.py::test_run_window_reads_its_marks_by_field",
         "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_wake_reads_sent_triggers_by_id",
-        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_departed_seat_holds_only_sent_triggers"
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_departed_seat_holds_only_sent_triggers",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_refuses_a_reply_that_misses_a_named_field"
       ]
     }
   ],
