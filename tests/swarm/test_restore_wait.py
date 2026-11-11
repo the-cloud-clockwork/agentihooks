@@ -3,8 +3,10 @@ from dataclasses import asdict, replace
 
 import pytest
 
+from scripts.handoff import transfers
 from scripts.swarm import reboot, resume, snapshot
 from scripts.swarm.health import restore_wait
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
 from tests.swarm.test_resume import ResumingRuntime, restore
 from tests.swarm.test_resume import store as store
@@ -14,50 +16,92 @@ pytestmark = pytest.mark.unit
 MINUTE = 60_000
 
 
-def waiting(store, at, name="sw-eng-1"):
+def swarm(store):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
-    agent = AgentRecord(name, "eng", "t1", seat="eng-1@sw", state=resume.AWAITING)
+
+
+def waiting(store, at, name="sw-eng-1", task="t1", seat="eng-1@sw", awaited_at=0):
+    agent = AgentRecord(name, "eng", task, seat=seat, state=resume.AWAITING)
     store.put_agent("sw", agent)
-    row = resume.Outcome(name, "eng", "t1", resume.AWAITING, "worktree gone", "c1", at)
-    store.put_restored("sw", [asdict(row)])
+    row = resume.Outcome(name, "eng", task, resume.AWAITING, "worktree gone", "c1", at, awaited_at=awaited_at)
+    store.put_restored("sw", [*store.restored("sw"), asdict(row)])
     return agent
 
 
-def test_a_seat_waiting_past_one_tick_window_on_a_restore_decision_is_a_finding_for_the_master(store):
-    waiting(store, at=0)
-    (found,) = restore_wait.findings(store, "sw", 20 * MINUTE)
-    assert (found.kind, found.subject, found.measure) == ("restore wait", "sw-eng-1", 20)
-    assert found.id == "restore-wait/sw-eng-1"
-    assert "eng-1@sw" in found.summary
-    assert any("worktree gone" in line for line in found.evidence)
+def test_a_first_restore_wait_counts_from_its_restore_and_is_a_finding_for_the_master(store):
+    swarm(store)
+    waiting(store, at=10 * MINUTE)
+    found = restore_wait.findings(store, "sw", 30 * MINUTE + 30_000)
+    assert found == [
+        Finding(
+            "restore wait",
+            "sw-eng-1",
+            "seat eng-1@sw has waited 20 minutes on a resume or fresh restore decision",
+            ("restore outcome: worktree gone", "task t1"),
+            "over one tick window",
+            20,
+        )
+    ]
+    assert found[0].id == "restore-wait/sw-eng-1"
+
+
+def test_a_seatless_taskless_wait_names_the_agent_and_no_task(store):
+    swarm(store)
+    waiting(store, at=10 * MINUTE, task="", seat="")
+    (found,) = restore_wait.findings(store, "sw", 30 * MINUTE + 30_000)
+    assert found.summary == "seat sw-eng-1 has waited 20 minutes on a resume or fresh restore decision"
+    assert found.evidence == ("restore outcome: worktree gone", "task none")
 
 
 def test_a_seat_waiting_within_one_tick_window_raises_no_finding(store):
-    waiting(store, at=0)
-    assert restore_wait.findings(store, "sw", MINUTE) == []
+    swarm(store)
+    waiting(store, at=10 * MINUTE)
+    assert restore_wait.findings(store, "sw", 10 * MINUTE + 30_000) == []
 
 
-def test_a_decided_restore_raises_no_finding(store):
-    agent = waiting(store, at=0)
+def test_a_wait_within_the_window_never_hides_a_later_seat_past_it(store):
+    swarm(store)
+    waiting(store, at=29 * MINUTE + 50_000, name="sw-eng-1")
+    waiting(store, at=10 * MINUTE, name="sw-eng-2", seat="eng-2@sw")
+    found = restore_wait.findings(store, "sw", 30 * MINUTE + 30_000)
+    assert [(f.subject, f.measure) for f in found] == [("sw-eng-2", 20)]
+
+
+def test_a_decided_restore_raises_no_finding_and_never_hides_a_later_wait(store):
+    swarm(store)
+    agent = waiting(store, at=10 * MINUTE, name="sw-eng-1")
     store.put_agent("sw", replace(agent, state="working"))
-    assert restore_wait.findings(store, "sw", 20 * MINUTE) == []
+    assert restore_wait.findings(store, "sw", 30 * MINUTE + 30_000) == []
+    waiting(store, at=10 * MINUTE, name="sw-eng-2", seat="eng-2@sw")
+    found = restore_wait.findings(store, "sw", 30 * MINUTE + 30_000)
+    assert [f.subject for f in found] == ["sw-eng-2"]
 
 
 def test_the_wait_counts_from_when_a_retried_decision_first_awaited(store):
-    waiting(store, at=0)
-    row = {**store.restored("sw")[0], "at": 19 * MINUTE + 30_000, "awaited_at": 0}
-    store.put_restored("sw", [row])
-    (found,) = restore_wait.findings(store, "sw", 20 * MINUTE)
+    swarm(store)
+    waiting(store, at=29 * MINUTE + 30_000, awaited_at=10 * MINUTE)
+    (found,) = restore_wait.findings(store, "sw", 30 * MINUTE + 30_000)
     assert found.measure == 20
+
+
+def test_swarm_status_reports_a_restore_wait_at_the_current_time(store, monkeypatch):
+    from scripts.swarm import status
+
+    swarm(store)
+    waiting(store, at=10 * MINUTE)
+    monkeypatch.setattr(status, "now_ms", lambda: 30 * MINUTE + 30_000)
+    found = [f for f in status.findings(store, "sw", store.config("sw"), [], []) if f.kind == "restore wait"]
+    assert [(f.subject, f.measure) for f in found] == [("sw-eng-1", 20)]
 
 
 def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
     from scripts.inbox.store import InboxStore
     from scripts.swarm import ledger_events
 
-    waiting(store, at=0)
+    swarm(store)
+    waiting(store, at=10 * MINUTE)
     store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, pane_id="pm1", seat="master@sw"))
-    (found,) = restore_wait.findings(store, "sw", 20 * MINUTE)
+    (found,) = restore_wait.findings(store, "sw", 30 * MINUTE)
     shown = [{"id": found.id, "kind": found.kind, "subject": found.subject, "summary": found.summary}]
     inbox = InboxStore(store.redis)
     ledger_events.findings_pass(inbox, store, "sw", shown, {"phases": [], "tasks": [], "_meta": {"rev": 1}})
@@ -108,7 +152,7 @@ class Notes:
         self.lines = []
 
     def notify(self, slug, text):
-        self.lines.append(text)
+        self.lines.append((slug, text))
 
 
 def test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(store):
@@ -123,7 +167,7 @@ def test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(st
     assert action == "sw-master-2 was not left waiting because seat master@sw already waits on sw-master-1"
     assert {a.name: a.state for a in store.agents("sw")} == {"sw-master-1": resume.AWAITING, "sw-master-2": "finished"}
     assert store.restored("sw") == []
-    assert notes.lines == [f"{action}; one restore decision covers the seat."]
+    assert notes.lines == [("sw", f"{action}; one restore decision covers the seat.")]
 
 
 def test_a_stale_waiting_record_that_no_longer_holds_the_seat_never_refuses_its_occupant(store):
@@ -154,3 +198,26 @@ def test_restore_refuses_a_second_agent_of_a_waiting_seat_even_when_its_own_conv
     outcomes = restore(store, rt)
     assert {o.name: o.outcome for o in outcomes} == {"sw-master-1": resume.AWAITING, "sw-master-2": resume.REFUSED}
     assert rt.resumed == []
+    refused = next(o for o in outcomes if o.outcome == resume.REFUSED)
+    reason = "seat master@sw already waits on sw-master-1"
+    assert replace(refused, transfer="") == resume.Outcome(
+        "sw-master-2", MASTER, MASTER, resume.REFUSED, reason, "c2", 1_000
+    )
+    assert refused.transfer in {
+        r["id"] for r in transfers.list_transfers(store, "sw") if r["predecessor"] == "sw-master-2"
+    }
+
+
+def test_a_seatless_agent_has_no_waiting_peer(store):
+    swarm(store)
+    store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, state=resume.AWAITING))
+    assert resume.waiting_peer(store, "sw", AgentRecord("sw-eng-1", "eng", "t1")) == ""
+
+
+def test_another_seat_waiting_never_makes_a_working_occupant_a_waiting_peer(store):
+    swarm(store)
+    store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw"))
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat="eng-1@sw", state=resume.AWAITING))
+    store.seats.occupy("master@sw", "sw-master-1", 1)
+    second = AgentRecord("sw-master-2", MASTER, MASTER, seat="master@sw")
+    assert resume.waiting_peer(store, "sw", second) == ""

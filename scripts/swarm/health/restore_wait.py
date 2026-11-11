@@ -18,8 +18,7 @@ def findings(store: RedisStore, slug: str, now_ms: int) -> list[Finding]:
         agent = waiting.get(row["name"])
         if agent is None:
             continue
-        awaited_at = row.get("awaited_at")
-        since = awaited_at if awaited_at is not None else row["at"]
+        since = row.get("awaited_at") or row["at"]
         if now_ms - since <= lease.tick_ms():
             continue
         minutes = (now_ms - since) // MINUTE_MS
