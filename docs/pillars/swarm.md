@@ -156,6 +156,71 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Master retire request
+
+The handoff ask and its deadline live in one retire request per master, a field named after the master in the
+swarm's Redis hash `<root>:swarm:<slug>:master-retire-requests` (`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`,
+default `agentihooks`). Each field holds:
+
+| Field | Value |
+|---|---|
+| `at` | When the tick sent the ask, in epoch milliseconds; the deadline is `at` plus `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` |
+| `reason` | Why the tick retires the master, such as `its launch check failed on model` or `the swarm is stopping` |
+| `item` | The id of the ask item, sent from `swarm` to the master with ref `master-retire-handoff` |
+| `world` | The inbox the ask was written to: the hive member whose keys hold the master's inbox, or empty for the controller's own inbox |
+
+Every tick that would retire the master reads its request:
+
+| State | Tick action | Journal line |
+|---|---|---|
+| No request, master live and reported | Sends the ask, writes the request, keeps the master | `asked <name> for a handoff before retiring it: <reason>` |
+| Request younger than the wait | Keeps the master | `waiting on <name>'s handoff before retiring it: <reason>` |
+| Request at or past the wait | Forgets the request and retires the master | The retire line of the path that asked, such as `retired <name> after its launch check failed on <fields>` |
+| Master not live, `finished`, `starting`, not a master, or a wait of 0 | Forgets any request and retires at once | The retire line of that path |
+
+Forgetting a request, whether at the deadline, after a handoff, when a stalled master resumes or when the tick drops
+the agent, runs in this order:
+
+1. Delete the request field. From here on `reason` reads empty and the master counts as no longer held.
+2. Open the inbox named by `world`. A request written before the field existed has none and uses the tick's own
+   inbox.
+3. Read the ask and, when it is still open, close it `done` from `swarm` with the reason the work moved, by default
+   `the master handed off or was retired`.
+
+The ask is a best effort close. When it is missing (the inbox store answers `no message <id>`), already closed, or
+refused for any other inbox error, the request still counts as forgotten and the tick goes on with the pass. A close
+that loses a race with another writer (`Contended`) is retried up to three times; after the third loss the ask stays
+open and the request is gone all the same, because keeping it would hold the seat for an agent the tick has already
+dropped.
+
+This keeps the tick alive on the failed launch path: a master whose launch check fails is asked for a handoff, and at
+the deadline the tick forgets the request and retires it even when the ask item no longer exists. Before this, a
+missing ask raised `InboxError: no message <id>` out of the failed launch step and the whole controller process exited,
+on 20 October restarting the Anton swarm controller container once. Regression tests:
+`test_a_failed_launch_retires_a_master_whose_ask_item_is_gone`,
+`test_forget_counts_a_missing_ask_item_as_already_forgotten`, `test_a_contended_close_still_clears_the_request`,
+`test_a_lost_close_race_is_retried_until_the_ask_is_closed` and
+`test_a_close_that_keeps_losing_gives_up_after_its_attempts`.
+
+Check a held master and its ask:
+
+```bash
+# The retire request: at, reason, item and world
+redis-cli HGET agentihooks:swarm:<slug>:master-retire-requests 'master@<code>-<n>'
+
+# The ask item and its state, from the master's inbox
+agentihooks msg inbox --of 'master@<code>-<n>'
+
+# Retire at once without asking, for one tick run
+AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0 agentihooks swarm <slug> tick
+```
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A retired master's inbox still lists a pending `master-retire-handoff` ask | Three close attempts lost a race with another writer | None needed: the request is gone and the master is no longer held; only the ask item remains in the inbox |
+| The controller exits with `InboxError: no message <id>` while retiring a master | A release older than this behaviour | Upgrade; the tick then counts a missing ask as already forgotten |
+| A master stays held past the wait | No tick that would retire it has run since the deadline; a held master keeps its first request and its `at` until it is forgotten | Read `at` and `reason` in the request; the next such tick past `at` plus the wait retires it |
+
 ### Stalled master recycle
 
 Each tick checks the live master of a running swarm. A master whose pane reads `working` while it has made no tool
