@@ -110,6 +110,8 @@ def test_workflow_list_names_each_workflow_with_its_layer_and_file(
     listed = tools["workflow_list"]()
     sample = next(item for item in listed["workflows"] if item["name"] == "sample")
     assert listed["success"] is True
+    assert set(listed) == {"success", "workflows", "errors"}
+    assert isinstance(listed["errors"], list)
     assert sample == {
         "name": "sample",
         "layer": "project",
@@ -161,7 +163,9 @@ def test_workflow_schedule_arms_a_cron_and_unschedule_cancels_it(
 
     answer = tools["workflow_schedule"]("sample", str(case), expression="*/5 * * * *")
     entry = answer["entry"]
+    zoned = tools["workflow_schedule"]("sample", str(case), expression="0 9 * * *", timezone="Europe/Madrid")["entry"]
 
+    assert (zoned["due"], zoned["timezone"]) == (8 * 3600.0, "Europe/Madrid")
     assert answer["success"] is True
     assert (entry["kind"], entry["owner"], entry["payload"], entry["due"]) == ("cron", SID, "workflow sample", 1200.0)
     assert entry["targets"] == [
