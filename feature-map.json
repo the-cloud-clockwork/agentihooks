@@ -3323,6 +3323,16 @@
       ]
     },
     {
+      "id": "hive-master-refused-account-retry",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-scale-cpu",
+      "behaviour": "A hive master launch refused by a full account reservation retries on another account, never on the refused native interactive login, so the launch ends after one retry instead of looping until the tick lock goes stale.",
+      "seam": "HiveLaunch spawn account retry through master selection",
+      "tests": [
+        "tests/hive/test_master_fallback_launch.py::test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot"
+      ]
+    },
+    {
       "id": "hive-master-closed-account",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-closed-account",
