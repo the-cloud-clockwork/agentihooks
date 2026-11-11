@@ -142,10 +142,10 @@ def _codex_state(
         return "SIGNED_OUT"
     if quota is None:
         return "UNKNOWN"
-    if quota.expired:
-        return quota.state
     if not codex_router.usable(quota, now, environ):
         return STALE
+    if quota.expired:
+        return quota.state
     current = quota if session_bands.fresh(quota.observed_at, now) else replace(quota, five_hour=QuotaWindow())
     return current.state_at(now)
 
