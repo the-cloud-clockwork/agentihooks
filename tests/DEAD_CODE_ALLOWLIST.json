@@ -44,7 +44,7 @@
  "hooks/memory/spool.py": 5,
  "hooks/memory/store.py": 1,
  "hooks/observability/agent_log_stream.py": 3,
- "hooks/observability/agent_trace.py": 3,
+ "hooks/observability/agent_trace.py": 2,
  "hooks/observability/event_relay.py": 1,
  "hooks/observability/metrics.py": 16,
  "hooks/quota.py": 2,

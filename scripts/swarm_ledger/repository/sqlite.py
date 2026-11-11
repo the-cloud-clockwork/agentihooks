@@ -706,14 +706,18 @@ class SQLiteLedgerRepository:
         state = fragments.value
         before, after = diff(*(without_events(value) for value in (entry.state, state)))
         paths = write_rows(connection, slug, before, after)
-        hierarchy.sync(connection, slug, state)
+        with request_metrics.step("hierarchy_sync"):
+            hierarchy.sync(connection, slug, state)
         kept = len(state["_meta"].get("events", []))
-        append_events(connection, slug, events, kept)
-        if not events and "events" in state["_meta"]:
-            trim_events(connection, slug, kept)
-        outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
+        with request_metrics.step("event_append"):
+            append_events(connection, slug, events, kept)
+            if not events and "events" in state["_meta"]:
+                trim_events(connection, slug, kept)
+        with request_metrics.step("outbox_write"):
+            outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
-        refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
+        with request_metrics.step("refresh_record"):
+            refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),

@@ -101,7 +101,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     monkeypatch.setattr(
         request_metrics,
         "record",
-        lambda method, route, wall, cpu, lock, client_wait=0, postgres_wait=0: samples.put(cpu),
+        lambda method, route, wall, cpu, lock, waits=None: samples.put(cpu),
     )
     profiles = []
     profiling = threading.Event()
