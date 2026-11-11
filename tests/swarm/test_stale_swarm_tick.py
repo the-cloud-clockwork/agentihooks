@@ -83,7 +83,9 @@ def test_create_refuses_a_web_address_as_its_repo(
 
 
 @pytest.mark.feature("swarm-create-refuses-web-repo")
-@pytest.mark.parametrize("repo", ["/missing/checkout", "relative/checkout", "~/dev/project"])
+@pytest.mark.parametrize(
+    "repo", ["/missing/checkout", "relative/checkout", "~/dev/project", "my.project/checkout", "v1.2/app"]
+)
 def test_create_keeps_a_local_path_even_when_its_folder_is_absent(
     env: tuple[RedisStore, Any, Any],  # noqa: F811
     repo: str,

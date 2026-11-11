@@ -287,7 +287,7 @@ TICK_LOCK_MS = 10 * 60 * 1000
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
-WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|[\w-]+(\.[\w-]+)+/", re.IGNORECASE)
+WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
