@@ -262,7 +262,7 @@ def _recovery_record(store, slug, agent):
     return json.loads(raw) if raw else {}
 
 
-def _recovery_owner(store, slug, agent, rows, now_ms):
+def _recovery_owner(store: RedisStore, slug: str, agent: AgentRecord, rows: dict[str, Any], now_ms: int) -> bool:
     task = rows.get(agent.task, {})
     if agent.lane == MASTER or agent.state != "working":
         return False
@@ -284,7 +284,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
     )
 
 
-def _recovery_identity(store, slug, agent):
+def _recovery_identity(store: RedisStore, slug: str, agent: AgentRecord) -> list[Any]:
     claim = fencing.read_claims(store, slug).get(agent.task)
     generation = claim["generation"] if claim else 0
     return [agent.task, agent.seat, agent.execution_id, agent.generation, generation]
