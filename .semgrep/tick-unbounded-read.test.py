@@ -45,6 +45,22 @@ def sets_expiry(redis, key):
     redis.expire(key, 3600)
 
 
+def expiry_on_another_key(redis, key, index):
+    redis.expire(index, 3600)
+    # ruleid: tick-unbounded-store-read
+    return redis.hgetall(key)
+
+
+def keyword_cursor(redis):
+    # ruleid: tick-unbounded-store-read
+    return redis.scan(cursor=0, match="swarm:*")
+
+
+def keyword_pattern(redis):
+    # ruleid: tick-unbounded-store-read
+    return redis.keys(pattern="swarm:*")
+
+
 def named_fields(store, slug, names):
     # ok: tick-unbounded-store-read
     return store.redis.hmget(store.key(slug, "executions"), names)
@@ -85,10 +101,15 @@ def archived_by_function(store, slug):
     return store.redis.hgetall(store.key(slug, "executions"))
 
 
-def named_expiry_on_another_key(redis, key, index):
-    redis.expire(index, 3600)
+async def async_expiring(redis, key):
+    await redis.expire(key, 3600)
     # ok: tick-unbounded-store-read
-    return redis.hgetall(key)
+    return await redis.hgetall(key)
+
+
+def process_table(shared, limit):
+    # ok: tick-unbounded-store-read
+    return shared.scan(deadline=limit)
 
 
 def plain_dict(rows):

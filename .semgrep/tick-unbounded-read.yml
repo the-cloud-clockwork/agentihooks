@@ -10,15 +10,20 @@ rules:
       task that removes it.
     patterns:
       - pattern-either:
-          - pattern: $STORE.hgetall(...)
-          - pattern: $STORE.hscan_iter(...)
+          - pattern: $STORE.hgetall($KEY)
+          - pattern: $STORE.hgetall(name=$KEY)
+          - pattern: $STORE.hscan_iter($KEY, ...)
+          - pattern: $STORE.hscan_iter(..., name=$KEY, ...)
           - patterns:
               - pattern-either:
                   - pattern: $STORE.hscan($KEY, ...)
-                  - pattern: $STORE.scan($CURSOR, ...)
+                  - pattern: $STORE.hscan(..., name=$KEY, ...)
+                  - pattern: $STORE.scan(...)
                   - pattern: $STORE.scan_iter(...)
                   - pattern: $STORE.keys($MATCH, ...)
+                  - pattern: $STORE.keys(..., pattern=$MATCH, ...)
               - pattern-not: $STORE.$READ(..., count=$PAGE, ...)
+              - pattern-not: $STORE.$READ(..., deadline=$LIMIT, ...)
       - pattern-not-inside:
           patterns:
             - pattern-either:
@@ -32,9 +37,35 @@ rules:
                       ...
                       $BOUND(...)
                       ...
+                - pattern: |
+                    async def $FUNCTION(...):
+                      ...
+                      $OWNER.$BOUND(...)
+                      ...
+                - pattern: |
+                    async def $FUNCTION(...):
+                      ...
+                      $BOUND(...)
+                      ...
             - metavariable-regex:
                 metavariable: $BOUND
-                regex: (?i)^(p?expire(at)?|\w*archive\w*)$
+                regex: (?i)^\w*archive\w*$
+      - pattern-not-inside:
+          patterns:
+            - pattern-either:
+                - pattern: |
+                    def $FUNCTION(...):
+                      ...
+                      $OWNER.$EXPIRE($KEY, ...)
+                      ...
+                - pattern: |
+                    async def $FUNCTION(...):
+                      ...
+                      $OWNER.$EXPIRE($KEY, ...)
+                      ...
+            - metavariable-regex:
+                metavariable: $EXPIRE
+                regex: ^p?expire(at)?$
     paths:
       include:
         - "/scripts/swarm/**"
