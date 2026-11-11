@@ -93,13 +93,18 @@ def test_archive_moves_older_generations_of_a_name_that_stays_listed(store):
 
 @pytest.mark.feature("swarm-archive-keeps-listed-head")
 def test_archive_keeps_a_listed_head_that_is_ended(store):
-    head = started(store, "eng-9@fixture")
+    name = store.next_name("fixture", "eng")
+    agent = AgentRecord(name, "eng", "task", seat="eng-9@fixture")
+    older = store.start_execution("fixture", agent)
+    store.drop_agent("fixture", name)
+    head = store.start_execution("fixture", agent, older.execution_id)
     store.put_agent("fixture", replace(head, state="ended"))
     registry = store.execution_registry
 
-    assert registry.archive("fixture") == 0
+    assert registry.archive("fixture") == 1
 
-    assert head.execution_id in section(store, "executions")
+    assert set(section(store, "executions")) == {head.execution_id}
+    assert set(section(store, "archive")) == {older.execution_id}
     assert registry.occupants("fixture") == {"eng-9@fixture": store.execution("fixture", head.execution_id)}
 
 

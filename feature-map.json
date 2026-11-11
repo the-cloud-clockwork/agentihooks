@@ -3479,7 +3479,7 @@
     {
       "id": "swarm-archive-stale-generations-of-a-listed-name",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-executions-archive-listed-name",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
       "behaviour": "ExecutionRegistry.archive moves every ended generation of a seat that is not the seat's current head into the archive, even when the agent's name stays listed through a later generation under the same name, so a reused name's old handoff generations do not pile up forever in the live fenced executions hash.",
       "seam": "ExecutionRegistry.archive archives old generations of a still listed name",
       "tests": [
@@ -3489,9 +3489,9 @@
     {
       "id": "swarm-archive-keeps-listed-head",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-executions-archive-listed-name",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
       "behaviour": "ExecutionRegistry.archive never moves a seat's own head row into the archive while its name stays listed, even when that head row is itself ended, so the live occupant projection always resolves to a row still present in the executions hash.",
-      "seam": "ExecutionRegistry.archive keeps a listed head that is ended",
+      "seam": "ExecutionRegistry.archive keeps a listed head that is ended and moves its older generation",
       "tests": [
         "tests/swarm/test_execution_archive.py::test_archive_keeps_a_listed_head_that_is_ended"
       ]
