@@ -2747,8 +2747,8 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-ci-agents", type=int, default=None)
     create.add_argument("--max-plan-agents", type=int, default=None)
     create.add_argument("--operator-asked")
-    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename"):
-        sub.add_parser(plain)
+    for plain in ("start", "pause", "remove", "snapshot", "shutdown", "url", "reopen", "rename", "night-watch-drill"):
+        sub.add_parser(plain).set_defaults(handler={"night-watch-drill": night_watch_drill.command}.get(plain))
     sub.add_parser("restore").add_argument("--from", dest="source", default="")
     sub.add_parser("stop").add_argument("--now", action="store_true")
     close = sub.add_parser("close")
@@ -2769,7 +2769,6 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
-    sub.add_parser("night-watch-drill").set_defaults(handler=night_watch_drill.command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
     report.add_argument("--passes", type=tick_report.pass_count, default=100)

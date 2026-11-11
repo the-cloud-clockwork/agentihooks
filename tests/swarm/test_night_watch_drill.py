@@ -85,6 +85,7 @@ def test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_rec
     printed = json.loads(capsys.readouterr().out)
     stored = json.loads(store.redis.get(store.key(SCRATCH, night_watch_drill.KEY)))
     assert printed == stored
+    assert stored["swarm"] == SCRATCH and stored["at"] == NOW
     assert stored["recovered"] is True and stored["respawned"] == NOW and stored["mode"] == "enforce"
     assert f"started master of {SCRATCH}" in stored["actions"]
     assert rig["started"] == [(SCRATCH, NOW)]
