@@ -77,6 +77,48 @@ before matching it. The shipped `excludeCommands`:
 Any other `agentihooks` command, such as an old `ledger watch`, can still be
 ended once its group stays over the threshold.
 
+### The swarm tick exclusion
+
+At 22:06 UTC on 19 October the `agentihooks` group had stayed at 30 or more
+processes for an hour, and the guard ended all of them. One was the swarm tick,
+in the middle of a merge priority replay, and two pull requests were left out
+of the merge queue. The `excludes` list matches process names only, so it could
+not spare the tick without sparing every `agentihooks` process.
+[#4962](https://github.com/the-cloud-clockwork/agentihooks/pull/4962) added
+`excludeCommands` and two patterns for the tick:
+
+| Process | Process name | Pattern |
+|---------|--------------|---------|
+| A tick pass, `agentihooks swarm tick`, run by any path to the command | `agentihooks` | `(^\|[ /])agentihooks swarm tick( \|$)` |
+| The scheduled tick holder, `<python> -m scripts.swarm.scheduled_tick`, started by the swarm timer unit | the interpreter's file name, such as `python3` or `python3.12` | ` -m scripts[.]swarm[.]scheduled_tick( \|$)` |
+
+Both patterns end at a space or the end of the command line, so a longer
+subcommand is not matched:
+
+| Command line | Matched |
+|--------------|---------|
+| `agentihooks swarm tick` | yes |
+| `/home/u/.venv/bin/agentihooks swarm tick --slug x` | yes |
+| `/usr/bin/python3 -m scripts.swarm.scheduled_tick` | yes |
+| `agentihooks swarm tick-report` | no |
+| `agentihooks swarm tick-watch` | no; the third pattern, added by [#5107](https://github.com/the-cloud-clockwork/agentihooks/pull/5107), keeps it alive |
+
+`python` and `python3` are already in `excludes`; the second pattern keeps the
+holder alive when its interpreter runs under another name, such as
+`python3.12`.
+
+A skipped process still counts toward its group. A tick that keeps the
+`agentihooks` group at the threshold lets the guard end the other processes in
+that group; it is never ended itself. The same holds for every
+`excludeCommands` pattern.
+
+The guard checks every `excludeCommands` entry before it counts any process.
+When the list is not an array of strings, or an entry is not a valid
+pattern, the pass logs `ERROR config_malformed excludeCommands`, with
+`pattern=<entry>` for an invalid entry, and exits 1 without ending anything.
+A typo in a pull request that changes the list stops the guard instead of
+ending the tick.
+
 `claude` is in `excludes`, but that does not protect an agent session. The
 guard counts the wrapper under the name `agentihooks`. Before [#5006](https://github.com/the-cloud-clockwork/agentihooks/pull/5006) a
 wrapper ended with status 143 (`SIGTERM`), the `claude` it launched kept
@@ -349,6 +391,26 @@ done
    drift line it prints. A home that has both links but no schedule usually
    follows a swarm Redis move; see
    [After the swarm Redis moves](#after-the-swarm-redis-moves).
+
+## Evidence for pull request 4962
+
+- Red: [Proofs run 39337608074](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337608074)
+  ran the new test against the guard as it was. The tick probe ended with
+  status `-15` (`SIGTERM`).
+- Green: [Proofs run 39337879004](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39337879004),
+  and [Proofs run 39338378029](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39338378029)
+  after review fixes.
+- `tests/test_host_guard.py` runs the real guard script twice against long
+  lived probes that share one process name, with `threshold` 4 and `timeout`
+  `0s`. Every other process name the account runs is added to `excludes`, so
+  only the probe group can be ended. The tick and scheduled tick probes must
+  survive and be logged `SKIPPED`. The other `agentihooks` probes, such as
+  `ledger watch`, must be logged `KILLED`. A second test gives the guard an invalid pattern and a string in
+  place of the list, and checks that each pass exits 1 before `TICK_START`.
+- A dry run on the workstation, with threshold 5 and timeout `0s`, compared the
+  old home guard with the new one. Both flagged the same 32 processes. The only
+  difference was the running `agentihooks swarm tick`: `would_kill` under the
+  old guard, `SKIPPED` under the new one.
 
 ## Evidence for pull request 5006
 
