@@ -9,8 +9,10 @@ from scripts.swarm_v2 import control_service, proof_swarm
 
 
 @pytest.fixture(autouse=True)
-def stop(monkeypatch):
+def stop(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tick_stop, "STOP", threading.Event())
+    monkeypatch.setattr(controller, "RUNNING", threading.Event())
+    monkeypatch.setattr(controller, "DRAINING", threading.Event())
 
 
 class Service:
@@ -68,3 +70,11 @@ def test_controller_run_releases_held_tick_locks_on_sigterm_before_exiting(monke
     assert tick_stop._HELD == {}
     with pytest.raises(tick_stop.Stopped):
         tick_stop.check()
+
+
+def test_a_sigterm_run_leaves_the_controller_drain_state_clear_for_later_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    test_controller_run_turns_sigterm_into_exit_so_its_cleanup_runs(monkeypatch)
+    monkeypatch.undo()
+
+    assert not controller.DRAINING.is_set()
+    assert not controller.RUNNING.is_set()

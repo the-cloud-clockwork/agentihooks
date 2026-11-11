@@ -40,7 +40,7 @@ def target_slot(target: str, name: str = "", case: str = "") -> Slot:
     if target == "swarm":
         return SwarmSlot(name)
     if target == "workflow":
-        return WorkflowSlot(name, _case_file(case))
+        return WorkflowSlot(name, _case_file(case), str(Path.cwd()))
     from scripts.inbox.seats import is_seat
 
     if is_seat(name) != (target == "seat"):

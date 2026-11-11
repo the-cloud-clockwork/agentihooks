@@ -23,6 +23,16 @@
       ]
     },
     {
+      "id": "failed-panes-report-hash-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-share",
+      "behaviour": "The failed launch panes report in the published tick status reads only the launches hash, where pane lines are written, and never reads the whole swarm history list, which cost the closing status publish step about a second each pass.",
+      "seam": "scripts.swarm.failed_panes.report against the store launches hash and history list",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
@@ -101,6 +111,17 @@
         "tests/events/test_nats_batch_units.py::test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none",
         "tests/events/test_nats_batch_units.py::test_the_key_value_store_reads_many_keys_through_its_bucket_stream",
         "tests/events/test_nats_batch_units.py::test_the_scoped_store_reads_many_keys_through_its_swarm_stream"
+      ]
+    },
+    {
+      "id": "hub-fan-in-unowned-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-readiness-key-ownership",
+      "behaviour": "The hub's scoped event fan in skips a swarm whose scoped state stream cannot be created over a legacy key value bucket that still holds entries, prints one line naming that swarm and bucket, and keeps fetching every other swarm's events, so one unmigrated swarm cannot stop the readiness offer poll or any other reactor for the rest.",
+      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
+      "tests": [
+        "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
       ]
     },
     {
@@ -2334,6 +2355,30 @@
       ]
     },
     {
+      "id": "operator-host-plan-upload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2482",
+      "behaviour": "Plan ingest run by the operator on the host passes: its plan upload, carrying the operator credential with no Origin, passes the ledger server upload check with the operator agent header or none, and its source records the session Claude Code injects; a non plan upload by the operator, a plan upload by an agent that never joined and a plan upload carrying a tick credential are still refused.",
+      "seam": "ledger server receive upload check on the artifact upload route, and plan ingest source",
+      "tests": [
+        "tests/plans/test_ingest.py::test_source_records_the_session_claude_code_injects",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_tick_credential_plan_upload_is_never_taken_as_the_operator"
+      ]
+    },
+    {
+      "id": "plain-shell-plan-ingest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ingest-plain-shell",
+      "behaviour": "Plan ingest run from a plain operator shell with no Claude or Codex session in its environment records a shell session named from the host and the shell process, and the ledger accepts the plan; a Codex run records its thread.",
+      "seam": "plan ingest source and the ledger plan batch",
+      "tests": [
+        "tests/plans/test_ingest.py::test_source_names_the_codex_thread_or_else_the_plain_shell",
+        "tests/plans/test_ingest.py::test_a_plain_shell_ingest_with_no_agent_session_is_accepted_with_a_named_shell_session"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
@@ -4033,6 +4078,22 @@
         "tests/swarm/test_track_outages_claims.py::test_read_claims_answers_the_claims_section_without_the_archive",
         "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
         "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
+      ]
+    },
+    {
+      "id": "hub-withdraws-stale-offers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-withdraw-stale-offers",
+      "behaviour": "Before the hub readiness pass publishes fresh offers, it removes from every lane work queue each waiting offer whose task is gone, claimed, no longer open, at a newer claim generation, moved lane, turned workstation or held, so a stream with thousands of withdrawn offers ahead delivers the fresh offer first.",
+      "seam": "scripts.swarm.readiness.publish through WorkQueue.withdraw on the memory and NATS work queues",
+      "tests": [
+        "tests/hub/test_stale_offers.py::test_a_lane_stream_with_withdrawn_offers_ahead_delivers_the_fresh_offer_first",
+        "tests/hub/test_stale_offers.py::test_withdraw_removes_only_the_offers_named_stale_and_counts_them",
+        "tests/hub/test_stale_offers.py::test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fresh_one",
+        "tests/hub/test_stale_offers.py::test_the_controller_grant_lets_the_hub_delete_a_stale_offer_from_any_lane_stream",
+        "tests/hub/test_stale_offers.py::test_an_offer_whose_task_turned_workstation_is_withdrawn",
+        "tests/hub/test_stale_offers.py::test_a_nats_sweep_leaves_an_offer_published_while_it_runs_for_the_next_sweep",
+        "tests/hub/test_stale_offers.py::test_a_swarm_scoped_queue_withdraws_through_its_lane_queue"
       ]
     }
   ],

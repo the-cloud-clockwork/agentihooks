@@ -245,12 +245,43 @@ def test_source_records_exact_provenance(
     path: str, env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("socket.gethostname", lambda: "workstation")
+    monkeypatch.setattr("os.getppid", lambda: 4242)
     assert ingest.source(env, path, "canonical é") == {
         "harness": env.get("AGENTIHOOKS_TARGET", "claude"),
-        "session": env.get("CLAUDE_SESSION_ID", ""),
+        "session": env.get("CLAUDE_SESSION_ID", "shell@workstation:4242"),
         "path": "" if path == "-" else str(tmp_path / path),
         "sha256": hashlib.sha256("canonical é".encode()).hexdigest(),
     }
+
+
+@pytest.mark.feature("operator-host-plan-upload")
+def test_source_records_the_session_claude_code_injects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": "host-session", "CLAUDE_SESSION_ID": "legacy-session"}
+    assert ingest.source(env, "-", "plan")["session"] == "host-session"
+    assert ingest.source({"CLAUDE_SESSION_ID": "legacy-session"}, "-", "plan")["session"] == "legacy-session"
+
+
+@pytest.mark.feature("plain-shell-plan-ingest")
+def test_source_names_the_codex_thread_or_else_the_plain_shell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("socket.gethostname", lambda: "workstation")
+    monkeypatch.setattr("os.getppid", lambda: 4242)
+    assert ingest.source({"CODEX_THREAD_ID": "thread-one"}, "-", "plan")["session"] == "thread-one"
+    assert ingest.source({}, "-", "plan")["session"] == "shell@workstation:4242"
+
+
+@pytest.mark.feature("plain-shell-plan-ingest")
+def test_a_plain_shell_ingest_with_no_agent_session_is_accepted_with_a_named_shell_session(
+    served: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("socket.gethostname", lambda: "workstation")
+    monkeypatch.setattr("os.getppid", lambda: 4242)
+    result = run(tmp_path, capsys, env={})
+    state = core.sync(served["slug"])[0]
+    assert result["ingested"] is True
+    assert state["plans"][0]["source"]["session"] == "shell@workstation:4242"
 
 
 def test_parser_contract(capsys: pytest.CaptureFixture[str]) -> None:
