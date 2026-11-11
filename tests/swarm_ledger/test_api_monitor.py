@@ -23,6 +23,17 @@ POD = {
 }
 
 
+PRESENCE = SimpleNamespace(read=lambda environ, now_s: None)
+
+
+def presence_of(monkeypatch: pytest.MonkeyPatch, present: list[dict]) -> None:
+    monkeypatch.setattr(
+        PRESENCE,
+        "read",
+        lambda environ, now_s: present if environ is monitor.os.environ and now_s == NOW / 1000 else None,
+    )
+
+
 class Redis:
     def __init__(self, sessions):
         self.sessions = sessions
@@ -52,7 +63,6 @@ def ports_for(
     published: dict | None = None,
     reads: list | None = None,
     bridges: dict | None = None,
-    present: list[dict] | None = None,
 ) -> tuple:
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
@@ -70,9 +80,6 @@ def ports_for(
         return bridges.get(hive) if bridges is not None else (published if hive == "root" else None)
 
     herdr_stats = SimpleNamespace(read=read, MASTER="master")
-    presence = SimpleNamespace(
-        read=lambda environ, now_s: present if environ is monitor.os.environ and now_s == NOW / 1000 else None
-    )
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
     swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
     return (
@@ -80,7 +87,7 @@ def ports_for(
             monitor.ports,
             "hive",
             return_value=SimpleNamespace(
-                registry=registry, headroom=headroom, herdr_stats=herdr_stats, presence=presence
+                registry=registry, headroom=headroom, herdr_stats=herdr_stats, presence=PRESENCE
             ),
         ),
         mock.patch.object(monitor.ports, "hooks", return_value=hooks),
@@ -382,11 +389,12 @@ PRESENT = [
 ]
 
 
-def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry():
+def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry(monkeypatch):
+    presence_of(monkeypatch, PRESENT)
     published = {"machines": {"master": {"claude": 99}}, "silent": [], "measured_at": NOW}
     readings = {"anton-1": {**POD, "agents": {"claude": 50}}}
     hives = [ROOT, {**POD_HIVE, "id": "anton-1"}, {"id": "gone", "name": "gone", "live": False}]
-    data = viewed(Store({}), *ports_for(hives, readings, published=published, present=PRESENT))
+    data = viewed(Store({}), *ports_for(hives, readings, published=published))
     assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 4, "claude": 7, "codex": 1}
     assert data["hives"]["rows"] == [
         {"name": "automation", "agents": 5},
@@ -398,8 +406,9 @@ def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_reg
     assert data["hives"]["measured"] == 1
 
 
-def test_no_presence_falls_back_to_the_herdr_count():
+def test_no_presence_falls_back_to_the_herdr_count(monkeypatch):
+    presence_of(monkeypatch, [])
     published = {"machines": {"master": {"claude": 6}}, "silent": [], "measured_at": NOW}
-    data = viewed(Store({}), *ports_for([ROOT], {}, published=published, present=[]))
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
     assert data["agents"]["source"] == "herdr"
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
