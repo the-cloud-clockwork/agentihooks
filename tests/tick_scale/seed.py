@@ -116,6 +116,24 @@ class ScaleLedger(FakeLedger):
         super().__init__([task_row(index) for index in range(TASKS)])
         self.phases = [{"id": f"p-{index:02d}", "title": f"Phase {index}"} for index in range(PHASES)]
         self.freezes = freezes()
+        self.said: list[tuple[str, str | None]] = []
+        self.pulls: dict[str, Any] = {}
+
+    def metadata(self, slug: str) -> dict[str, Any]:
+        """Return the ledger overview metadata."""
+        return {"overview": "Project intent", "_meta": {}}
+
+    def say(self, slug: str, text: str, by: str | None = None) -> None:
+        """Record one chat line the swarm said."""
+        self.said.append((text, by))
+
+    def relay(self, slug: str, text: str, by: str, op_id: str = "", reply_to: str = "") -> None:
+        """Record one relayed chat line."""
+        self.said.append((text, by))
+
+    def chat(self, slug: str) -> list[dict[str, Any]]:
+        """Return the ledger chat, one old operator line."""
+        return [{"id": "old", "by": "operator", "at": 50, "text": "old talk"}]
 
     def state(self, slug: str) -> dict[str, Any]:
         """Return the ledger state with its freeze records."""

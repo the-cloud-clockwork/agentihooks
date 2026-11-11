@@ -24,7 +24,6 @@ DIRECT = {
     "helm-kind-published.yml": ("Published Helm chart in kind", "helm-kind-published"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "hierarchy-cpu.yml": ("Hierarchy CPU proof", "hierarchy-cpu"),
-    "tick-scale.yml": ("Tick scale", "tick-scale"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
@@ -47,6 +46,7 @@ LANE_USERS = {
     "chart-release.yml",
     "changelog.yml",
     "changelog-seed.yml",
+    "tick-scale.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
