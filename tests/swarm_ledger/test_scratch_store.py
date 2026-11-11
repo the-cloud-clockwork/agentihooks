@@ -1,6 +1,6 @@
+import sys
 from pathlib import Path
 
-import ledger_core
 import pytest
 
 from scripts.swarm_ledger import storage
@@ -29,7 +29,7 @@ def scratch(monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("LEDGER_PORT", "18999")
     monkeypatch.setenv(postgres.URL, DATABASE_URL)
     monkeypatch.delenv(postgres.SCRATCH_SHARED, raising=False)
-    monkeypatch.setattr(ledger_core, "LEDGER_DIR", folder)
+    monkeypatch.setattr(sys.modules["ledger_core"], "LEDGER_DIR", folder)
     monkeypatch.setattr(postgres, "PostgresLedgerRepository", refuse_shared)
     monkeypatch.setattr(postgres, "Database", refuse_shared)
     return folder
