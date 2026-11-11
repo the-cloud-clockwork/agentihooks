@@ -1430,8 +1430,8 @@ for a in s.agents(slug):
         print(a.name, a.hive, a.profile_decision["placement_spill"])'
 ```
 
-To confirm the first ranked hive takes launches until its memory line, set the rank, let the swarm fill, then read both its reading and the
-spills of the last ten minutes:
+To confirm the first ranked hive takes launches until its memory line, set the rank, let the swarm fill, then read
+both its reading and the spills of the last ten minutes:
 
 ```bash
 agentihooks hive set worker-1 prefer=eng:1,ci:1,plan:1,dispatch:1

@@ -2335,8 +2335,8 @@ the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the l
 its standard error: the user journal
 (`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`),
 or `swarm-tick.log` in the runtime directory for a scheduled tick. The run is not marked handled, and the held cause
-is dropped on the next pass because no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
-`promo-<run id>-<n>` task once.
+is dropped on the next pass because no live task carries it. The next pass by the owner, or by a new owner after a
+handover, files the same `promo-<run id>-<n>` task once.
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
