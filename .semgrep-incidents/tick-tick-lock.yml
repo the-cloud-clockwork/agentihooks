@@ -10,4 +10,8 @@ rules:
       include:
         - /scripts/tick/steps/
         - tick-tick-lock.py
-    pattern-regex: \b(take_tick_lock|release_tick_lock)\(\s*store\b
+    pattern-either:
+      - pattern: controller.take_tick_lock(...)
+      - pattern: controller.release_tick_lock(...)
+      - pattern: take_tick_lock(...)
+      - pattern: release_tick_lock(...)
