@@ -67,7 +67,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | prerequisite reopen | reopen passes | tick | 2 | 60 | dev red reopen | none | none |
 | promotion refresh | reopen passes | slow | 2 | 60 | drained resume | none | none |
 | release alert | reopen passes | slow | 2 | 60 | drained resume | none | none |
-| config load | start | tick | 2 | 60 | none | none | none |
+| config load | start | tick | 2 | 60 | command runner, reboot pass | none | none |
 | stopped branch | start | tick | 2 | 60 | config load | none | none |
 | dispatcher group | task passes | tick | 2 | 60 | drained resume | none | none |
 | grouping release | task passes | tick | 2 | 60 | ledger state | none | none |

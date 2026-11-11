@@ -1025,7 +1025,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 15; a swarm that stored another value keeps it. The host room guard still refuses a spawn when load or available memory leaves no room, whatever N allows. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
 | `agentihooks swarm <id> set placement-mode=anton-first\|round-robin placement-nodes=N` | How worker launches pick a hive. `anton-first`, the default, places by `prefer` rank, then the share of capacity in use. `round-robin` keeps the first N live hives by id that list the swarm's repo (`placement-nodes=0`, the default, keeps them all) and gives each eng, ci, plan or dispatch launch to the kept hive running the fewest agents, for load runs. Masters, qa and frontend, and tasks pinned to a hive or the workstation, keep `anton-first`. Applies on the next tick. See [Round robin placement for load runs](hives.md#round-robin-placement-for-load-runs). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
-| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
+| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten ([Automatic snapshot job](#automatic-snapshot-job)). Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -5569,7 +5569,8 @@ keeps its own heartbeat for the length of its run.
 The automatic snapshot never runs inside the pass. The pass only starts the detached snapshot job
 and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
 most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
-either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
+either holds the lock race for it: the first to take it writes the snapshot, the other exits without one. See
+[Automatic snapshot job](#automatic-snapshot-job).
 
 A lease taken over mid pass ends the pass at its next step boundary or launch with this journal line, and a ledger
 write in between is refused:
@@ -5604,6 +5605,82 @@ Passes that stop at the deadline in every swarm at once point at a read that gre
 than at one long step. Hive routing and roster reads used to load every archived execution on each read. How they now
 read current executions only, and how to measure `scope.readings` and stopped passes, is in
 [Current execution reads](../swarm-v2/execution-identity.md#current-execution-reads).
+
+### Automatic snapshot job
+
+The tick takes no automatic snapshot itself. Its `snapshot job` report step starts a detached process that writes
+the snapshot, and the pass moves on to its next step without waiting. Before this change the snapshot ran inside the
+pass: in `rig-grade-swarm` one automatic snapshot took 330 seconds wall and 120 seconds CPU inside a tick that was
+killed at its start timeout. Pull request [4420](https://github.com/the-cloud-clockwork/agentihooks/pull/4420)
+([issue 4411](https://github.com/the-cloud-clockwork/agentihooks/issues/4411)) moved it out.
+
+On each pass the step calls `snapshot_job.start`, which starts the job only when both hold:
+
+1. **A snapshot is due.** `snapshot.due` is true when the swarm state is `running`, its interval is above 0 and at
+   least that many minutes have passed since the newest `snapshots/auto-<ms>.json`, or no automatic snapshot exists
+   yet.
+2. **No job holds the lock.** The Redis key `snapshot-lock` under the swarm's keys
+   (`store.key(slug, "snapshot-lock")`) does not exist.
+
+When both hold, the step starts `python -m scripts.swarm.snapshot_job <slug>` with the tick's interpreter in a new
+session, with stdin and stdout discarded, and adds the tick action `started automatic snapshot`. Otherwise it adds
+no action. The step runs on the critical lane (see
+[Two lanes and fan out](#two-lanes-and-fan-out)). The `snapshot` job of the
+[Host adapter](../reference/tick-adapters.md#host-adapter) makes the same `snapshot_job.start` call.
+
+The job itself, `snapshot_job.run`:
+
+1. Takes the lock with `SET NX` and a 30 minute expiry, holding a random token. When the lock is already held it
+   exits without a snapshot.
+2. Checks `snapshot.due` again, since the interval or the swarm state can change between the tick's check and the
+   job's start. When the snapshot is no longer due it takes none.
+3. Writes `~/.agentihooks/swarm/<slug>/snapshots/auto-<ms>.json` with the same content as
+   `agentihooks swarm <slug> snapshot`, deletes the oldest automatic files past ten and prunes their source captures.
+4. Releases the lock in `finally`, on success or failure, and only while the key still holds its own token, so a job
+   whose lock expired never deletes the lock a later job took.
+
+The job takes no controller lease and writes nothing to the ledger, so a slow snapshot costs no tick its lease. The
+refresh job reuses the same token check to release its own `refresh-lock`.
+
+Configure the interval per swarm, or for every swarm without the setting through the environment:
+
+```bash
+agentihooks swarm my-swarm set snapshot-minutes=15
+agentihooks swarm my-swarm set snapshot-minutes=0
+export AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES=60
+```
+
+The first form snapshots every 15 minutes, the second turns automatic snapshots off for that swarm, and the third
+sets the default for swarms with no `snapshot-minutes` setting. With neither, the interval is 30 minutes.
+`agentihooks swarm my-swarm status` shows the outcome on its `snapshots` line:
+
+```text
+snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4
+```
+
+The job's stderr is appended to `~/.agentihooks/swarm/<slug>/snapshot-job.log`. A job that succeeds writes
+nothing there, so the file grows only when a job fails.
+
+| Symptom | Check | Meaning and fix |
+|---|---|---|
+| `status` shows no recent automatic snapshot while the swarm runs | `tail ~/.agentihooks/swarm/my-swarm/snapshot-job.log` | A traceback means each job failed; fix its cause. An empty log with no `started automatic snapshot` action in the journal means the tick never found a snapshot due: check the swarm state and `snapshot-minutes`. |
+| No new snapshot for up to 30 minutes after a crash | `python -c 'from scripts.swarm.store import connect; s = connect(); print(s.redis.pttl(s.key("my-swarm", "snapshot-lock")))'` | A positive number of milliseconds means a job killed before its `finally` left its lock until the expiry. The next tick after the key expires starts a new job. |
+| The journal shows `started automatic snapshot` on consecutive passes | `ls ~/.agentihooks/swarm/my-swarm/snapshots` | Each job exited without a file: it lost the lock race to another job, or the snapshot was no longer due when it checked again. Two jobs started before either held the lock write one snapshot between them. |
+
+Find the tick actions with:
+
+```bash
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-2h" --until now --no-pager | grep "started automatic snapshot"
+```
+
+`tests/swarm/test_snapshot_job.py` pins this behaviour.
+`test_the_tick_returns_while_the_snapshot_runs_and_the_snapshot_still_completes` holds the snapshot open on an
+event: the tick returns `started automatic snapshot` before any file exists, and once released the job writes
+`auto-1000.json` and frees the lock. The other tests in the file cover the lock key, a held lock, a snapshot no
+longer due, release after a failure and the module run as a program. The root `tests/conftest.py` replaces
+`snapshot_job.start` with an inline run so other tick tests never start a process; a test module opts out with
+`SNAPSHOT_SPAWN = True`, as `test_snapshot_job.py` does. No unit test starts the real detached interpreter, because fakeredis cannot share one Redis across
+processes.
 
 ### Doctor timer pass
 

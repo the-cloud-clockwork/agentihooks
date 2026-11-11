@@ -14,7 +14,7 @@ from scripts.tick.step import Context, Result
 from scripts.tick.steps import agents, host, report
 from tests.swarm.test_cli import env
 from tests.swarm.test_tick import FakeRuntime
-from tests.tick.test_master_steps_kept import Step
+from tests.tick.test_master_steps_kept import JUDGED, Step
 
 _fixtures = env
 pytestmark = pytest.mark.unit
@@ -58,9 +58,9 @@ def test_merge_pass(env: tuple[RedisStore, Any, FakeRuntime], monkeypatch: pytes
         release.wait(1.0)
         return Result()
 
-    prefix = (Step("intent check", "wrapper intent", blocked), Step("page relay", "wrapper relay"))
+    prefix = (Step("intent check", "wrapper intent", blocked, writes=JUDGED), Step("page relay", "wrapper relay"))
     sites = ("wrapper intent", "wrapper relay", "wrapper view", "wrapper events")
-    steps = registry.site_edges((*prefix, *selected), sites, {"wrapper intent": "wrapper relay"})
+    steps = registry.site_edges((*prefix, *selected), sites, {"wrapper relay": (JUDGED, frozenset())})
     try:
         with pool.running(critical_s=0.03, slow_s=0.03):
             records = engine.run_graph(steps, Context(_GraphView(state, box), Deadline.after(5.0)))
