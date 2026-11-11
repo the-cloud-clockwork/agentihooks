@@ -103,7 +103,7 @@ def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, .
     return registry.ordered(step for step in pool if step.group == name)
 
 
-def run_step(step: Step, ctx: Context) -> StepRecord:
+def _run_once(step: Step, ctx: Context) -> StepRecord:
     """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
@@ -113,7 +113,6 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     deadline = ctx.deadline.child(step.budget_s)
     clock = deadline.clock
     started = clock()
-    began = time.time()
     outcome: list[Result | BaseException] = []
     caller = copy_context()
     key = (timing.SWARM.get(), step.name)
@@ -130,12 +129,20 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
         worker.start()
     worker.join(step.budget_s)
     if run.give_up():
-        return replace(_left(step, outcome, clock() - started), started_at=began)
+        return _left(step, outcome, clock() - started)
     worker.join(END_GRACE_S)
     if not outcome:
         _lost_writes(step, CUT_EVENT)
-        return StepRecord(step.name, clock() - started, step.budget_s, cut=True, started_at=began)
-    return replace(_finished(step, outcome, clock() - started), started_at=began)
+        return StepRecord(step.name, clock() - started, step.budget_s, cut=True)
+    return _finished(step, outcome, clock() - started)
+
+
+def run_step(step: Step, ctx: Context) -> StepRecord:
+    """Run one step as ``_run_once`` runs it and stamp its record with the wall time its run began, unless it was
+    held and never started."""
+    began = time.time()
+    record = _run_once(step, ctx)
+    return record if record.held else replace(record, started_at=began)
 
 
 @dataclass
