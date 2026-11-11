@@ -185,10 +185,8 @@ def pass_error(store: Any, slug: str, entry: dict[str, Any]) -> None:
 
     key = store.key(slug, PASS_ERRORS)
     try:
-        pipe = store.redis.pipeline(transaction=False)
-        pipe.lpush(key, json.dumps({**entry, "error": entry["error"][:PASS_ERROR_CHARS]}))
-        pipe.ltrim(key, 0, PASS_ERRORS_KEPT - 1)
-        pipe.execute()
+        store.redis.lpush(key, json.dumps({**entry, "error": entry["error"][:PASS_ERROR_CHARS]}))
+        store.redis.ltrim(key, 0, PASS_ERRORS_KEPT - 1)
     except RedisError:
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": PASS_ERRORS}))
 
@@ -198,7 +196,7 @@ def pass_errors(store: Any, slug: str) -> list[dict[str, Any]]:
     from redis.exceptions import RedisError
 
     try:
-        rows = store.redis.lrange(store.key(slug, PASS_ERRORS), 0, PASS_ERRORS_KEPT - 1)
+        rows = store.redis.lrange(store.key(slug, PASS_ERRORS), 0, -1)
     except RedisError:
         return []
     return [json.loads(row) for row in rows]

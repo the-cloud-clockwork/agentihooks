@@ -1,9 +1,9 @@
 import argparse
 import json
 import math
+import time
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
@@ -149,5 +149,5 @@ def command(store: Any, args: argparse.Namespace) -> None:
     errors = report.get("pass_errors", [])
     print(f"Pass errors, newest first: {len(errors)}")
     for row in errors:
-        ended = datetime.fromtimestamp(row["end_ms"] / 1000, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ended = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(row["end_ms"] / 1000))
         print(f"{row['pass_id']}  {ended}  {row['error']}")

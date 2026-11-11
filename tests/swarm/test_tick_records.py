@@ -377,9 +377,10 @@ def test_a_refused_pass_error_write_is_journalled(capsys: pytest.CaptureFixture[
     def refuse(*args: Any, **kwargs: Any) -> Any:
         raise RedisError("down")
 
-    store = SimpleNamespace(
-        key=lambda slug, name: f"{slug}:{name}", redis=SimpleNamespace(pipeline=refuse, lrange=refuse)
-    )
+    store = SimpleNamespace(key=lambda slug, name: f"{slug}:{name}", redis=SimpleNamespace(lpush=refuse, lrange=refuse))
     timing.pass_error(store, "sw", {"pass_id": "p", "end_ms": 1, "error": "boom"})
-    assert '"stream": "tick:pass-errors"' in capsys.readouterr().err
+    assert (
+        capsys.readouterr().err
+        == json.dumps({"event": "swarm_tick_record_failed", "slug": "sw", "stream": "tick:pass-errors"}) + "\n"
+    )
     assert timing.pass_errors(store, "sw") == []
