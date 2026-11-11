@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from functools import partial
 from importlib import import_module
-from typing import Any, TypedDict, Unpack, cast
+from typing import Any, TypedDict, TypeGuard, Unpack, cast
 
 from scripts.tick import hook_reads, registry
 from scripts.tick.engine import StepRecord
@@ -90,6 +90,11 @@ class CallStep:
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
+def _is_box(found: object) -> TypeGuard[dict[str, Any]]:
+    """Return whether the pass value ``found`` is a box of values a step may read."""
+    return isinstance(found, dict)
+
+
 def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) -> Any:
     """Return the step deadline or tools, else the pass value under key once step ``step`` declares it; the pass
     box comes back as a view refusing every box value the step does not declare."""
@@ -98,8 +103,8 @@ def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) ->
     if key == DEADLINE:
         return ctx.deadline
     found = ctx.view.read(PASS, key)
-    if isinstance(found, dict) and (key == BOX or isinstance(found, PassBox)):
-        return DeclaredBox(cast(dict[str, Any], found), step, allowed)
+    if _is_box(found) and (key == BOX or isinstance(found, PassBox)):
+        return DeclaredBox(found, step, allowed)
     if key not in allowed and key in BOX_KEYS:
         refuse(step, key)
     return found

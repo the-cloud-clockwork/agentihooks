@@ -81,8 +81,10 @@ def test_the_box_view_refuses_undeclared_keys_and_writes_through() -> None:
     box["scratch"] = 4
     with pytest.raises(UndeclaredRead, match="pass value scratch"):
         _ = "scratch" in view
-    with pytest.raises(Left):
+    with pytest.raises(Left) as left:
         _ = DeclaredBox({}, "viewer", frozenset({"doc"}))["doc"]
+    assert left.value.args == ("doc",)
+    assert tick_steps.declared_keys({Domain("hook:a:b")}) == {"a:b", "raised"}
 
 
 @pytest.mark.feature("swarm-tick-declared-reads")
