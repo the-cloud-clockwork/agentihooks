@@ -495,8 +495,9 @@ def fresh_quotas(
     run: Callable = subprocess.run,
     force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
-    ``force`` probes every signed in account."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window,
+    or when it is expired while its token exp is ahead, at most once per recheck window; ``force`` probes every
+    signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
