@@ -3,20 +3,22 @@
 from collections.abc import Iterable
 from typing import Any
 
+from scripts.swarm.store import SwarmError
+
 PAGE = 200
 PAGES = 1000
 
 
 def fields(client: Any, key: str, page: int = PAGE) -> dict[Any, Any]:
-    """Every field of the hash at key, read with counted hash scans of at most PAGES pages."""
+    """Every field of the hash at key, read with counted hash scans; a hash past PAGES pages raises SwarmError."""
     found: dict[Any, Any] = {}
     cursor = 0
     for _ in range(PAGES):
         cursor, chunk = client.hscan(key, cursor, count=page)
         found.update(chunk)
         if not cursor:
-            break
-    return found
+            return found
+    raise SwarmError(f"hash {key} holds more than {PAGES} pages of {page} fields")
 
 
 def picked(client: Any, key: str, names: Iterable[Any]) -> dict[Any, Any]:

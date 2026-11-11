@@ -21,7 +21,7 @@ from scripts.swarm import (
     run_window,
 )
 from scripts.swarm import tick as swarm_tick
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick.steps import place
 
 SLUG = "sw"
@@ -86,7 +86,6 @@ def test_fields_reads_every_field_across_pages(store: RedisStore) -> None:
     assert hash_pages.fields(store.redis, "missing") == {}
 
 
-@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_fields_stops_after_its_page_bound() -> None:
     calls: list[int] = []
 
@@ -94,8 +93,9 @@ def test_fields_stops_after_its_page_bound() -> None:
         calls.append(cursor)
         return len(calls), {f"f{len(calls)}": "1"}
 
-    found = hash_pages.fields(SimpleNamespace(hscan=hscan), "h", page=1)
-    assert len(calls) == hash_pages.PAGES == len(found) == 1000
+    with pytest.raises(SwarmError, match="hash h holds more than 1000 pages of 1 fields"):
+        hash_pages.fields(SimpleNamespace(hscan=hscan), "h", page=1)
+    assert len(calls) == hash_pages.PAGES == 1000
     assert calls[:3] == [0, 1, 2]
 
 
