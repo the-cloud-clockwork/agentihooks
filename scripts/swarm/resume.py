@@ -150,7 +150,9 @@ def _attempt(store, slug, agent, worktree, context, transfer):
     store.put_agent(slug, agent)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live)
-    return Outcome(agent.name, agent.lane, agent.task, outcome, reason, agent.conversation_id, context.at, transfer["id"])
+    return Outcome(
+        agent.name, agent.lane, agent.task, outcome, reason, agent.conversation_id, context.at, transfer["id"]
+    )
 
 
 def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledger) -> Outcome:

@@ -54,7 +54,9 @@ def test_the_wait_counts_from_when_a_retried_decision_first_awaited(store):
 def two_masters_saved(store, tmp_path):
     store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
     for name in ("sw-master-1", "sw-master-2"):
-        store.put_agent("sw", AgentRecord(name, MASTER, MASTER, pane_id=f"w1:{name}", harness="claude", seat="master@sw"))
+        store.put_agent(
+            "sw", AgentRecord(name, MASTER, MASTER, pane_id=f"w1:{name}", harness="claude", seat="master@sw")
+        )
     snapshot.take(store, "sw", 99, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "", ""))
     store.redis.flushall()
 
