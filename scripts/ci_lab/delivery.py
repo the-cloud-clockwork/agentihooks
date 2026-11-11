@@ -141,24 +141,31 @@ def cutover(grader_root: Path, environ: Mapping[str, str]) -> list[str]:
     return list(authoritative(grader_root))
 
 
-def runtime(document: Mapping[str, object]) -> dict[str, object]:
+def runtime(document: Mapping[str, object]) -> Mapping[str, object]:
     """Validate the scheduler runtime config the chart mounts and return it."""
     _validate(document, RUNTIME_SCHEMA, "runtime")
-    return dict(document)
+    return document
 
 
-def load_runtime(path: Path) -> dict[str, object]:
+def load_runtime(path: Path) -> Mapping[str, object]:
     """Read and validate the mounted scheduler runtime config file."""
     return runtime(yaml.safe_load(path.read_text()))
 
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
-    """Run the cutover command: append skip=<json> to GITHUB_OUTPUT, exit 1 on an invalid lab block."""
+    """Run cutover, which appends skip=<json> to GITHUB_OUTPUT, or runtime, which validates a runtime config file.
+
+    Either exits 1 when its input is invalid.
+    """
     parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("cutover").add_argument("--grader-root", type=Path, required=True)
+    commands.add_parser("runtime").add_argument("path", type=Path)
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "runtime":
+            load_runtime(arguments.path)
+            return 0
         skip = cutover(arguments.grader_root, environ)
     except DeliveryError as error:
         print(error, file=sys.stderr)

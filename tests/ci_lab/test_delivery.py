@@ -1,6 +1,8 @@
 """Tests for the delivery.yaml lab block, the cutover output and the runtime config schema."""
 
 import json
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,12 +112,13 @@ def test_cutover_writes_skip_to_github_output(tmp_path: Path) -> None:
     assert output.read_text() == 'before=1\nskip=["lint"]\n'
 
 
-def test_lab_off_forces_an_empty_skip(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("value", "skip"), [("true", []), ("false", ["lint"]), ("1", ["lint"]), ("TRUE", ["lint"])])
+def test_lab_off_forces_an_empty_skip(tmp_path: Path, value: str, skip: list[str]) -> None:
     grader = tree(tmp_path / "grader", block(authoritative=["lint"]))
     output = tmp_path / "output"
-    environ = {"GITHUB_OUTPUT": str(output), "AGENTIHOOKS_LAB_OFF": "true"}
+    environ = {"GITHUB_OUTPUT": str(output), "AGENTIHOOKS_LAB_OFF": value}
     assert delivery.main(["cutover", "--grader-root", str(grader)], environ) == 0
-    assert json.loads(output.read_text().removeprefix("skip=")) == []
+    assert json.loads(output.read_text().removeprefix("skip=")) == skip
 
 
 def test_cutover_refuses_an_unknown_gate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -127,7 +130,7 @@ def test_cutover_refuses_an_unknown_gate(tmp_path: Path, capsys: pytest.CaptureF
 
 
 def test_runtime_config_validates() -> None:
-    assert delivery.runtime(RUNTIME) == RUNTIME
+    assert delivery.runtime(RUNTIME) is RUNTIME
 
 
 @pytest.mark.parametrize("fraction", [-0.01, 1.01, 2, "half"])
@@ -179,10 +182,23 @@ def test_template_carries_the_lab_block() -> None:
     assert template["lab"] == block()
 
 
-def test_module_entry_runs_cutover(tmp_path: Path) -> None:
-    from scripts.ci_lab import __main__ as entry
-
+def test_module_entry_runs_cutover(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     grader = tree(tmp_path / "grader", block())
     output = tmp_path / "output"
-    assert entry.main(["cutover", "--grader-root", str(grader)], {"GITHUB_OUTPUT": str(output)}) == 0
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(sys, "argv", ["scripts.ci_lab", "cutover", "--grader-root", str(grader)])
+    with pytest.raises(SystemExit) as exited:
+        runpy.run_module("scripts.ci_lab", run_name="__main__")
+    assert exited.value.code == 0
     assert output.read_text() == "skip=[]\n"
+
+
+def test_runtime_command_validates_a_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    good = tmp_path / "good.yaml"
+    good.write_text(yaml.safe_dump(RUNTIME))
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(yaml.safe_dump({**RUNTIME, "budget": {"coreMinutesPerDay": 1, "shed": {"queue": 1.5}}}))
+    assert delivery.main(["runtime", str(good)], {}) == 0
+    assert capsys.readouterr().err == ""
+    assert delivery.main(["runtime", str(bad)], {}) == 1
+    assert "budget.shed.queue" in capsys.readouterr().err
