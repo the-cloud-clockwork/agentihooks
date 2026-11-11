@@ -4047,6 +4047,7 @@
         "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
         "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
         "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
+        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
         "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
         "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
         "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",

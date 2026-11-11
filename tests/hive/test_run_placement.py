@@ -1,4 +1,4 @@
-import json
+from typing import cast
 
 import pytest
 
@@ -97,7 +97,7 @@ def test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing():
     assert run_placement.waits(redis) == {
         "delivery-1": {"workflow": "grade", "project": REPO, "reason": reason, "seen_at": NOW}
     }
-    assert json.loads(redis.hget(run_placement.WAITS, "delivery-1"))["reason"] == reason
+    assert redis.hexists(run_placement.WAITS, "delivery-1")
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
@@ -109,3 +109,23 @@ def test_a_later_placement_clears_the_recorded_wait():
     assert list(run_placement.waits(redis)) == ["delivery-1"]
     run_placement.deliver(redis, RUN, [hive("a")], Orders({}), NOW + 1)
     assert run_placement.waits(redis) == {}
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import registry, run_orders
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(run_placement.time, "time", lambda: NOW / 1000)
+    monkeypatch.setattr(registry, "hives", lambda client: [hive("a"), hive("b")])
+    store = run_orders.RunOrders(redis)
+    first = run_placement.RunOrderSender(redis, NOW / 1000)
+    first.send("a", run_placement.Run("other", "grade", "/c", REPO, "o", ()))
+    assert first.running("a") == 1
+    assert run_placement.dispatch(RUN, redis) == "b"
+    [(_, fields)] = cast("list[tuple[str, dict[str, str]]]", redis.xrange(store.stream("b")))
+    assert run_orders.RunOrder.decode(fields["order"]) == run_orders.RunOrder(
+        "delivery-1", "grade", "/cases/grade.json", REPO, "owner@fixture", ("build", "lint"), "b", NOW // 1000 + 3600
+    )

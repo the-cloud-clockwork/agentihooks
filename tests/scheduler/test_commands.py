@@ -116,7 +116,9 @@ def test_a_workflow_target_takes_a_hive_placement_with_its_needs(case, tmp_path,
     assert slot.record()["placement"] == "hive"
     assert slot.record()["needs"] == ["build", "lint"]
     assert restore(slot.record()) == slot
-    assert commands.target_slot("workflow", "nightly", str(case)).placement == "local"
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot(
+        "nightly", str(case), str(tmp_path), "local", ()
+    )
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
