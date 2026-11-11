@@ -3488,17 +3488,18 @@
     {
       "id": "tick-knowledge-warm",
       "origin": "inventory",
-      "behaviour": "The tick step knowledge warm embeds the new and changed items of each running swarm's ledger export into its knowledge index every minute on the slow lane, skips while an earlier refresh of the same index still runs and when the semantic embedder is set, so an ask right after it answers without refreshing.",
-      "seam": "scripts.tick.steps.knowledge._knowledge_warm registered as tick step knowledge warm",
+      "behaviour": "The tick step knowledge warm starts, every minute on the slow lane through the host port, a detached job that embeds the new and changed items of the running swarm's stored ledger into its knowledge index; it reads no ledger in the pass, launches nothing while an earlier refresh of the same index holds its lock or when the semantic embedder is set, so an ask right after the job ran answers without refreshing.",
+      "seam": "scripts.tick.steps.knowledge._knowledge_warm registered as tick step knowledge warm, and scripts.ledger_knowledge.warm_job",
       "tests": [
         "tests/tick/steps/test_knowledge_warm.py::test_knowledge_warm",
         "tests/tick/steps/test_knowledge_warm.py::test_the_step_runs_inside_the_window_an_ask_treats_as_fresh",
-        "tests/tick/steps/test_knowledge_warm.py::test_a_task_added_to_the_ledger_is_in_the_index_after_one_run",
-        "tests/tick/steps/test_knowledge_warm.py::test_the_step_reads_the_ledger_export_under_its_deadline",
-        "tests/tick/steps/test_knowledge_warm.py::test_a_run_while_an_earlier_refresh_still_runs_skips_without_reading_the_ledger",
-        "tests/tick/steps/test_knowledge_warm.py::test_a_failed_refresh_releases_the_index_for_the_next_run",
-        "tests/tick/steps/test_knowledge_warm.py::test_an_ask_right_after_the_step_ran_answers_without_reading_the_ledger",
-        "tests/tick/steps/test_knowledge_warm.py::test_a_semantic_embedder_setting_skips_without_reading_the_ledger"
+        "tests/tick/steps/test_knowledge_warm.py::test_the_step_starts_the_knowledge_job_under_its_deadline_and_reads_no_ledger",
+        "tests/tick/steps/test_knowledge_warm.py::test_the_local_host_runs_the_knowledge_job_for_its_swarm",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_start_while_an_earlier_refresh_holds_the_lock_launches_nothing",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_semantic_embedder_setting_launches_nothing",
+        "tests/tick/steps/test_knowledge_warm.py::test_the_job_is_launched_detached_holding_the_lock",
+        "tests/tick/steps/test_knowledge_warm.py::test_a_task_added_to_the_ledger_is_in_the_index_after_one_job",
+        "tests/tick/steps/test_knowledge_warm.py::test_an_ask_right_after_the_job_ran_answers_without_reading_the_ledger"
       ]
     },
     {

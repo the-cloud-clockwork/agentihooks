@@ -1,22 +1,29 @@
-"""The knowledge warm tick step keeps a running swarm's knowledge index level with its ledger export."""
+"""The knowledge warm tick step starts a detached refresh that keeps a running swarm's knowledge index level."""
 
+import fcntl
+import json
+import os
+import subprocess
+import sys
 import time
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from scripts.ledger_knowledge import service
+from scripts.ledger_knowledge import service, warm_job
 from scripts.ledger_knowledge.index import HashEmbedder, KnowledgeIndex
 from scripts.tick import registry
-from scripts.tick.adapters.fakes import FakeLedger, fake_tools
+from scripts.tick.adapters import host
+from scripts.tick.adapters.fakes import Call, FakeHost, FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import cadence_s, interval_s
-from scripts.tick.steps import CallStep, pass_domains
+from scripts.tick.steps import CallStep
 
 pytestmark = pytest.mark.unit
 
+KNOWLEDGE_WARM_JOB = True
 SLUG = "sw"
 
 
@@ -36,20 +43,38 @@ def _document(*tasks: str) -> dict[str, Any]:
     }
 
 
-def _values(document: dict[str, Any]) -> dict[str, Any]:
-    tools = fake_tools()
-    assert isinstance(tools.ledger, FakeLedger)
-    tools.ledger.answers["export"] = document
-    return {
-        "slug": SLUG,
-        "tools": tools.for_effects(frozenset({"ledger"})),
-        "deadline": Deadline.after(5),
-        "fakes": tools,
-    }
+def _environ(home: Path) -> dict[str, str]:
+    return {"AGENTIHOOKS_HOME": str(home)}
 
 
 def _index(home: Path) -> KnowledgeIndex:
-    return KnowledgeIndex(service.index_path(SLUG, {"AGENTIHOOKS_HOME": str(home)}), HashEmbedder())
+    return KnowledgeIndex(service.index_path(SLUG, _environ(home)), HashEmbedder())
+
+
+class _Repository:
+    def __init__(self, document: dict[str, Any]) -> None:
+        self.document = document
+        self.reads: list[str] = []
+
+    def get_document(self, slug: str) -> dict[str, Any]:
+        self.reads.append(slug)
+        return self.document
+
+
+@pytest.fixture
+def repository(monkeypatch: pytest.MonkeyPatch) -> _Repository:
+    from scripts.swarm_ledger import storage
+
+    stored = _Repository(_document("t1"))
+    monkeypatch.setattr(storage, "default", lambda: stored)
+    return stored
+
+
+@pytest.fixture
+def spawned(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str, Path]]:
+    calls: list[tuple[int, str, Path]] = []
+    monkeypatch.setattr(warm_job, "spawn", lambda lock, slug, log: calls.append((lock, slug, log)))
+    return calls
 
 
 @pytest.fixture(autouse=True)
@@ -59,17 +84,28 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+def _refresh(document: dict[str, Any], repository: _Repository, capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    repository.document = document
+    lock = os.open(os.devnull, os.O_RDONLY)
+    assert warm_job.main([str(lock), SLUG]) == 0
+    with pytest.raises(OSError):
+        os.fstat(lock)
+    return json.loads(capsys.readouterr().out)
+
+
 @pytest.mark.feature("tick-knowledge-warm")
 def test_knowledge_warm() -> None:
     """The knowledge warm step registers in group wrapper metrics on the slow lane with its feature and ports."""
     found = _step()
-    assert (found.group, found.lane, found.feature, found.effects) == (
+    assert (found.group, found.lane, found.feature, found.effects, found.reads, found.writes, found.needs) == (
         "wrapper metrics",
         "slow",
         "tick-knowledge-warm",
-        frozenset({"ledger"}),
+        frozenset({"host"}),
+        frozenset(),
+        frozenset(),
+        frozenset(),
     )
-    assert found.reads == pass_domains("slug")
 
 
 @pytest.mark.feature("tick-knowledge-warm")
@@ -78,14 +114,77 @@ def test_the_step_runs_inside_the_window_an_ask_treats_as_fresh() -> None:
 
 
 @pytest.mark.feature("tick-knowledge-warm")
-def test_a_task_added_to_the_ledger_is_in_the_index_after_one_run(_home: Path) -> None:
-    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
-        f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
-    ]
-    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == []
-    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1", "t2")).__getitem__) == [
-        f"knowledge warm of {SLUG}: 1 added, 0 changed, 0 removed"
-    ]
+def test_the_step_starts_the_knowledge_job_under_its_deadline_and_reads_no_ledger() -> None:
+    tools = fake_tools()
+    deadline = Deadline.after(5)
+    values = {"tools": tools.for_effects(frozenset({"host"})), "deadline": deadline}
+    assert _step().call(import_module("scripts.swarm.tick"), values.__getitem__) is None
+    assert isinstance(tools.host, FakeHost)
+    assert isinstance(tools.ledger, FakeLedger)
+    assert tools.host.calls == [Call("run", ({"job": "knowledge"},), deadline)]
+    assert tools.ledger.calls == []
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_the_local_host_runs_the_knowledge_job_for_its_swarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(warm_job, "start", lambda slug, environ: calls.append((slug, environ)) or "k")
+    environ = {"A": "1"}
+    port = host.local_host(cast(Any, "store"), SLUG, environ)
+    assert port.run({"job": "knowledge"}, deadline=Deadline.after(5)) == "k"
+    assert calls == [(SLUG, environ)]
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_a_start_while_an_earlier_refresh_holds_the_lock_launches_nothing(
+    _home: Path, spawned: list[tuple[int, str, Path]]
+) -> None:
+    environ = _environ(_home / "fresh")
+    path = warm_job.lock_path(SLUG, environ)
+    assert path == _home / "fresh" / "knowledge" / "sw.warm.lock"
+    assert warm_job.start(SLUG, environ) is True
+    assert [(slug, log) for _lock, slug, log in spawned] == [(SLUG, _home / "fresh" / "knowledge" / "sw.warm.log")]
+    with path.open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert warm_job.start(SLUG, environ) is False
+    assert len(spawned) == 1
+    assert warm_job.start(SLUG, environ) is True
+    assert len(spawned) == 2
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_a_semantic_embedder_setting_launches_nothing(_home: Path, spawned: list[tuple[int, str, Path]]) -> None:
+    environ = {**_environ(_home), "AGENTIHOOKS_KNOWLEDGE_EMBEDDER": "semantic"}
+    assert warm_job.start(SLUG, environ) is False
+    assert spawned == []
+    assert not (_home / "knowledge").exists()
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_the_job_is_launched_detached_holding_the_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    launched: list[tuple[list[str], dict[str, Any]]] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **options: launched.append((argv, options)))
+    log = tmp_path / "warm.log"
+    warm_job.spawn(7, SLUG, log)
+    assert log.exists()
+    [(argv, options)] = launched
+    assert argv == [sys.executable, "-m", "scripts.ledger_knowledge.warm_job", "7", SLUG]
+    assert options["stderr"].name == str(log)
+    assert {name: value for name, value in options.items() if name != "stderr"} == {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "start_new_session": True,
+        "pass_fds": (7,),
+    }
+
+
+@pytest.mark.feature("tick-knowledge-warm")
+def test_a_task_added_to_the_ledger_is_in_the_index_after_one_job(
+    _home: Path, repository: _Repository, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert _refresh(_document("t1"), repository, capsys)["added"] == 3
+    assert _refresh(_document("t1", "t2"), repository, capsys)["added"] == 1
+    assert repository.reads == [SLUG, SLUG]
     hits = _index(_home).query("Task t2 about knowledge", 1)
     assert [(hit.chunk.ref, [parent.ref for parent in hit.parents]) for hit in hits] == [
         ("tasks/t2", ["phases/p1", "ledger"])
@@ -93,57 +192,13 @@ def test_a_task_added_to_the_ledger_is_in_the_index_after_one_run(_home: Path) -
 
 
 @pytest.mark.feature("tick-knowledge-warm")
-def test_the_step_reads_the_ledger_export_under_its_deadline() -> None:
-    values = _values(_document("t1"))
-    _step().call(import_module("scripts.swarm.tick"), values.__getitem__)
-    assert [(call.operation, call.deadline) for call in values["fakes"].ledger.calls] == [
-        ("export", values["deadline"])
-    ]
-
-
-@pytest.mark.feature("tick-knowledge-warm")
-def test_a_run_while_an_earlier_refresh_still_runs_skips_without_reading_the_ledger(_home: Path) -> None:
-    knowledge = import_module("scripts.tick.steps.knowledge")
-    path = service.index_path(SLUG, {"AGENTIHOOKS_HOME": str(_home)})
-    assert knowledge._claim(path) is True
-    try:
-        values = _values(_document("t1"))
-        assert _step().call(import_module("scripts.swarm.tick"), values.__getitem__) == [
-            f"knowledge warm of {SLUG} skipped: an earlier refresh is still running"
-        ]
-        assert values["fakes"].ledger.calls == []
-    finally:
-        knowledge._release(path)
-    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
-        f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
-    ]
-
-
-@pytest.mark.feature("tick-knowledge-warm")
-def test_a_failed_refresh_releases_the_index_for_the_next_run(_home: Path) -> None:
-    values = _values(_document("t1"))
-    values["deadline"] = Deadline.after(-1)
-    with pytest.raises(TimeoutError, match="tool deadline expired"):
-        _step().call(import_module("scripts.swarm.tick"), values.__getitem__)
-    assert _step().call(import_module("scripts.swarm.tick"), _values(_document("t1")).__getitem__) == [
-        f"knowledge warm of {SLUG}: 3 added, 0 changed, 0 removed"
-    ]
-
-
-@pytest.mark.feature("tick-knowledge-warm")
-def test_an_ask_right_after_the_step_ran_answers_without_reading_the_ledger(_home: Path) -> None:
-    _step().call(import_module("scripts.swarm.tick"), _values(_document("t1", "t2")).__getitem__)
+def test_an_ask_right_after_the_job_ran_answers_without_reading_the_ledger(
+    _home: Path, repository: _Repository, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _refresh(_document("t1", "t2"), repository, capsys)
 
     def unread() -> dict[str, Any]:
         raise AssertionError("ask refreshed a warm index")
 
     answer = service.ask(_index(_home), unread, "Task t2 about knowledge", int(time.time() * 1000))
     assert answer["hits"][0]["ref"] == "tasks/t2"
-
-
-@pytest.mark.feature("tick-knowledge-warm")
-def test_a_semantic_embedder_setting_skips_without_reading_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENTIHOOKS_KNOWLEDGE_EMBEDDER", "semantic")
-    values = _values(_document("t1"))
-    assert _step().call(import_module("scripts.swarm.tick"), values.__getitem__) == []
-    assert values["fakes"].ledger.calls == []

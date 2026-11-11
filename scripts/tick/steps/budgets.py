@@ -36,7 +36,6 @@ SPAWN_START_S = CRITICAL_S - SPAWN_RESERVE_S
 LIGHT_S = 2.0
 REBUILT = "tick:walls-rebuilt"
 _LEDGER_READ_S = 3.0
-_KNOWLEDGE_WARM_S = 15.0
 JUDGE = frozenset({"verify", "reap", "launch checks", "track outages", "overrun pass", "quiet pass"})
 SPAWN_NEEDS = JUDGE | {"orphans", "preempt"}
 LIVE: ContextVar[Mapping[str, float]] = ContextVar("tick_live_budgets", default=MappingProxyType({}))
@@ -151,7 +150,7 @@ FLOORS: dict[str, Timing] = {
     "workflow runner": Timing(LIGHT_S, CRITICAL_S),
     "doc items map": Timing(LIGHT_S, CRITICAL_S),
     "step starvation": Timing(LIGHT_S, CRITICAL_S),
-    "knowledge warm": Timing(_KNOWLEDGE_WARM_S, CRITICAL_S),
+    "knowledge warm": Timing(LIGHT_S, CRITICAL_S),
 }
 
 
