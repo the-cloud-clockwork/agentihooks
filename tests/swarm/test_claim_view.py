@@ -68,11 +68,15 @@ def test_a_preempt_pass_builds_one_claim_view_for_every_full_lane(store: Any, mo
         store.put_agent("sw", AgentRecord(name, lane, f"held-{name}"))
 
     def ready(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        read.append((args[4], kwargs["claims"]))
-        return tick_module.ready_in_order(*args, **kwargs)
+        found = tick_module.ready_in_order(*args, **kwargs)
+        read.append((args, kwargs["claims"], ids(found)))
+        return found
 
     seats = preempt.Seats(rows.rows, lambda *a: False, lambda *a: True, ready, preempt._places, tick_module.claim_view)
     preempt.run("sw", store.config("sw"), store, doc, 1, seats)
     assert calls == [("sw", store)]
-    assert [lane for lane, _ in read] == ["eng", "ci"]
+    assert [args[4] for args, _, _ in read] == ["eng", "ci"]
     assert read[0][1] is read[1][1]
+    monkeypatch.setattr(tick_module, "_owned_tasks", owned)
+    assert [ids(tick_module.ready_in_order(*args)) for args, _, _ in read] == [found for _, _, found in read]
+    assert all(found for _, _, found in read)
