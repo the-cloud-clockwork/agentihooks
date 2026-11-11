@@ -33,6 +33,7 @@ Get = Callable[[str], Any]
 JUDGING = "judging"
 REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
 VIEW_RESERVE_S = 20.0
+PENDING_VIEW = object()
 _LAST_VIEWS: dict[str, Any] = {}
 _VIEW_ORDER: dict[str, int] = {}
 _BUILDS = count()
@@ -221,24 +222,28 @@ def _page_relay(cli: Any, get: Get) -> None:
 
 
 def _tick_view(cli: Any, get: Get) -> None:
-    view = timing.call(ledger_events.tick_view, get("inbox"), get("store"), get("slug"), get("doc"), get("view"))  # pyright: ignore[reportUnknownMemberType]
+    earlier = get("view")
+    if earlier is PENDING_VIEW:
+        get("box")["view"] = None
+        return
+    view = timing.call(ledger_events.tick_view, get("inbox"), get("store"), get("slug"), get("doc"), earlier)  # pyright: ignore[reportUnknownMemberType]
     get("box")["view"] = view
 
 
 def pass_view(slug: str, view: Any) -> Any:
     """Return the pass view of swarm ``slug``: ``view`` itself unless it is a build, the build's view or error when it
-    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed in this process; a late
-    build replaces that last view once it ends, and a swarm with no earlier view waits for its build."""
+    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed in this process, or
+    ``PENDING_VIEW`` when it completed none yet; a late build replaces that last view once it ends."""
     if not isinstance(view, Future):
         return view
     build = cast(Future[Any], view)
     earlier = _LAST_VIEWS.get(slug)
     order = next(_BUILDS)
     build.add_done_callback(lambda built: _keep_view(slug, built, order))
-    if earlier is None:
-        return build.result()
     wait((build,), timeout=_view_wait_s())
-    return build.result() if build.done() else earlier
+    if build.done():
+        return build.result()
+    return PENDING_VIEW if earlier is None else earlier
 
 
 def _keep_view(slug: str, built: Future[Any], order: int) -> None:

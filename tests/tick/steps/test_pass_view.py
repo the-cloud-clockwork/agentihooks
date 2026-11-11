@@ -117,6 +117,52 @@ def test_a_swarm_with_no_earlier_view_waits_for_its_build() -> None:
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_a_first_build_that_misses_the_bound_is_pending_and_becomes_the_next_view() -> None:
+    late = object()
+    building = _pending()
+    with pool.running(critical_s=0.0, slow_s=0.0):
+        assert host.pass_view("sw", building) is host.PENDING_VIEW
+    assert host._LAST_VIEWS == {}
+    building.set_result(late)
+    assert host._LAST_VIEWS == {"sw": late}
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_a_first_build_outside_a_pass_is_awaited() -> None:
+    view = host.pass_view("sw", _pending())
+    assert view is not host.PENDING_VIEW
+    assert host._LAST_VIEWS == {"sw": view}
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_the_tick_view_step_builds_nothing_while_the_first_build_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    built: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(host.ledger_events, "tick_view", lambda *args: built.append(args))
+    box: dict[str, Any] = {}
+    found = {"view": host.PENDING_VIEW, "box": box}
+    host._tick_view(None, found.__getitem__)
+    assert box == {"view": None}
+    assert built == []
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_the_tick_view_step_builds_on_the_pass_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    earlier, fresh = object(), object()
+    calls: list[tuple[Any, ...]] = []
+
+    def build(*args: Any) -> object:
+        calls.append(args)
+        return fresh
+
+    monkeypatch.setattr(host.ledger_events, "tick_view", build)
+    box: dict[str, Any] = {}
+    found = {"view": earlier, "box": box, "inbox": "in", "store": "st", "slug": "sw", "doc": {"tasks": []}}
+    host._tick_view(None, found.__getitem__)
+    assert box == {"view": fresh}
+    assert calls == [("in", "st", "sw", {"tasks": []}, earlier)]
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
 def test_views_are_kept_per_swarm() -> None:
     first, second = object(), object()
     host.pass_view("a", _built(first))
