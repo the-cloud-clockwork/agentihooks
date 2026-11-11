@@ -1141,6 +1141,7 @@ def test_a_scheduled_pass_gives_each_swarm_its_own_runtime_or_the_shared_one(mon
         lambda store, slug, ledger, runtime, messenger, scheduled: given.append((slug, runtime, scheduled)) or [],
     )
 
+    monkeypatch.setattr(loop, "tickable", lambda ledger, slug: True)
     loop.run_once(store, runtime="shared", runtimes={SLUG: "deployed"})
 
     assert sorted(given) == [(SLUG, "deployed", True), ("other", "shared", True)]

@@ -44,11 +44,15 @@ See [intent verdict timing](swarm.md#intent-verdict-timing) for why a ready pull
 
 See [the tick holder](swarm.md#the-tick-holder) for how the scheduler cron runs the minute tick under one machine lock, its stop times, the environment it passes and where its output goes.
 
+See [one tick per machine and leftover tick reaping](swarm.md#one-tick-per-machine-and-leftover-tick-reaping) for the machine tick lock, how a tick reaps processes an earlier pass left, and [draining the old tick service](swarm.md#draining-the-old-tick-service) for how the systemd timer retire empties its service group.
+
 See [hives](hives.md) for joining machines, roles, placement, launches on a hive, failover and fencing, and [deployment modes](../reference/deployment-modes.md) for where the controller, ledger and Redis run.
 
 See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.
 
 See [headroom](hives.md#headroom) for what a hive's headroom reading holds, how it stays fresh while a launch runs, and why a hive with no fresh reading has no room.
+
+See [workstation admission room and the swarm share](hives.md#workstation-admission-room-and-the-swarm-share) for the limits a local spawn on the workstation meets, how the forty percent swarm share yields to the hive's agent ceiling, and how to run twenty local workers.
 
 See [automatic hive quota refresh](hives.md#automatic-quota-refresh) for subscription configuration, the first heartbeat, background refresh timing and troubleshooting a slot at cap zero.
 

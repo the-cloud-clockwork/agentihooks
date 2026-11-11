@@ -81,7 +81,7 @@
  "scripts/swarm/resume.py": 1,
  "scripts/swarm/slice_screen.py": 1,
  "scripts/swarm/stall_watch.py": 1,
- "scripts/swarm/store.py": 5,
+ "scripts/swarm/store.py": 4,
  "scripts/swarm/trace_plan.py": 1,
  "scripts/swarm_ledger/events/stream.py": 1,
  "scripts/swarm_ledger/ledger.py": 34,

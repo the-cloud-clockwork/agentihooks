@@ -393,7 +393,13 @@ agenti                          # fewest live sessions among accounts below thei
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 agenti --route api              # force the api side; fails when no api endpoint is configured
+agenti --route claude-ai        # a stored claude ai login; only a front door master falls back to a token
 ```
+
+`--route claude-ai` picks a stored claude ai login by
+`AGENTIHOOKS_MASTER_LOGIN_ORDER` and prints
+`[agenti] account=<name> route=claude-ai slot=<n>`; see
+[Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login).
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a
@@ -446,6 +452,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
 | `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default the rest of the launch deadline); see [Canary deadline](profile-launch-home.md#canary-deadline) |
 | `--launch-until` | Epoch milliseconds by which the launch must return; bounds the launch deadline. A hive passes its launch order's expiry less an acknowledgement margin |
+| `--defer-canary` | With `--profile`: return once the launcher starts, printing `route_status=pending`, `profile_validation=pending` and `profile_report=<path>`; a detached child finishes the route and canary waits and writes any failure into that report. The swarm tick passes it for Claude masters; see [Deferred master canary](profile-launch-home.md#deferred-master-canary) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
@@ -801,7 +808,7 @@ A path is actionable only when it is **unused** and **removing it loses nothing*
 - An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
 - `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree, except in a scratch repository, where the snapshot stays on a local `wip/` branch and the worktree is removed.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
-- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`).
+- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`). The tick judges only panes a swarm opened; `gc` judges every recorded pane. Decision order, idle clock and log lines: [Idle swarm pane sweep](../pillars/swarm.md#idle-swarm-pane-sweep).
 - Codex execution homes (`$XDG_RUNTIME_DIR/cx` and `~/.agentihooks/cx`): a home no live process owns, by working folder, argument, open file or an answering server socket, and unchanged for ten minutes is listed under `codex_homes` in the JSON report and removed by `--enforce` on first sight, after its rollouts are appended to the canonical Codex home. Removals are logged to `~/.agentihooks/gc-codex-homes.jsonl`. See [Reclaim orphan execution homes](codex-managed-terminal.md#reclaim-orphan-execution-homes).
 - Launch run folder (`$XDG_RUNTIME_DIR/agentihooks-claude-terminal`): launch scripts, route reports, prompts, start markers and profile reports older than a day are removed, and closing markers whose launcher has exited.
 

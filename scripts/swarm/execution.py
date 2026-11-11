@@ -66,12 +66,22 @@ def latest(rows: Iterable[dict], by: str) -> dict:
     return found
 
 
+TERMINAL_STATES = ("ended", "finished")
+
+
 def _archivable(row: dict) -> bool:
     return (
         isinstance(row.get("name"), str)
         and isinstance(row.get("seat"), str)
         and isinstance(row.get("generation"), int | float)
     )
+
+
+def _stale(row: dict[str, Any], head: dict[str, Any], listed: set[str]) -> bool:
+    current = row["generation"] >= head["generation"] and row["name"] in listed
+    if row.get("state") in TERMINAL_STATES:
+        return not current
+    return row["generation"] < head["generation"] and row["name"] not in listed
 
 
 class ExecutionRegistry:
@@ -120,12 +130,8 @@ class ExecutionRegistry:
 
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
-            heads = latest(rows.values(), "seat")
-            old = [
-                key
-                for key, row in rows.items()
-                if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
-            ]
+            heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
+            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
             if not old and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)
