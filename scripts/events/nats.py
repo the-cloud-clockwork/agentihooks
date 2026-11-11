@@ -407,6 +407,8 @@ class NatsWorkQueue:
         next sweep."""
         info: api.StreamInfo = self._loop.run(self._js.stream_info(self._stream))
         state = info.state
+        if not state.messages:
+            return 0
         return sum(self._withdrawn(sequence, stale) for sequence in range(state.first_seq, state.last_seq + 1))
 
     def _withdrawn(self, sequence: int, stale: Callable[[Envelope], bool]) -> bool:

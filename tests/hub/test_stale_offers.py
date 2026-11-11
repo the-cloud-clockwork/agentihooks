@@ -62,6 +62,7 @@ def test_a_lane_stream_with_withdrawn_offers_ahead_delivers_the_fresh_offer_firs
 def test_withdraw_removes_only_the_offers_named_stale_and_counts_them(kind: str, tmp_path: Path) -> None:
     with backend(kind, tmp_path) as bus:
         queue = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy())
+        assert queue.withdraw(lambda event: True) == 0
         for key in ["old-1", "keep", "old-2"]:
             assert queue.offer(offered(key, 1))
         assert queue.withdraw(lambda event: event.key.startswith("old")) == 2
