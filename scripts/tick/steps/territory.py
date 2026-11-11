@@ -9,6 +9,8 @@ from typing import Any
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
+GHOST = "the swarm is stopping and its runtime never answered"
+
 
 def _parked(task: Any, rows: Any) -> Any:
     return any(rows.get(dep, {}).get("state") != "done" for dep in task.get("parked_on") or [])  # pyright: ignore[reportUnknownVariableType]
@@ -78,10 +80,11 @@ def _settle(
         if not any(a.lane == tick.MASTER and a.state != "finished" for a in agents):
             tick._end_awaiting_seats(slug, store, ledger, rows, agents)
             agents = [a for a in agents if a.state != tick.resume.AWAITING]
-        if agents:
+        if any(a.state != tick.SUSPECT for a in agents):
             return []
+        retired = [tick._drop_remote(slug, store, ledger, rows, a, GHOST) for a in agents]
         store.update(slug, state="stopped")  # pyright: ignore[reportUnknownMemberType]
-        return ["stopped"]
+        return [*retired, "stopped"]
     if any(a.lane != tick.MASTER for a in agents):
         return []
     if config.state != "running" or any(tick._claimable(slug, store, rows, doc, lane) for lane in tick.LANES):

@@ -203,6 +203,84 @@ controller writes its scheduler entries key agentihooks:scheduler:probe:entries 
 A command line names the first sending unit. Look up the rest in the
 `redis-commands` artifact.
 
+## Controller grants on hive member records
+
+The `swarm-controller` user's root permissions cover only `~agentihooks:*`.
+Hive member records live under a second root, `agentihooks-hive:`, and the
+controller reaches them only through ACL selectors on its `user` line in
+antoncore's `users.acl.template`. The grant check reads root permissions only,
+so it never sees these selectors and never fails when one is missing.
+
+### Why the tick reads member records
+
+Each tick finds the joined hives before it relays inbox items to the agents
+they run, because a member's agents keep their inbox below that member's key
+(`InboxStore.home` and `InboxStore.worlds`). `scripts.hive.scope.joined` returns, for a process that is
+not itself a hive member, every member in the hive index; `members` reads each
+member's record through `scripts.hive.auth.member`. That read goes to the hive
+credentials state store under `agentihooks-hive:state:credentials:*`, and falls
+back to `HGETALL agentihooks-hive:member:<id>` for a member whose record the
+store does not hold yet. A refused read raises `NoPermissionError`, which ends
+the tick before its master step.
+
+### The grants
+
+On antoncore `dev` the controller's line ends with three selectors:
+
+| Selector | Lets the controller |
+|----------|---------------------|
+| `(~agentihooks-hive:controller ~agentihooks-hive:controller:* +get +set)` | Write its own controller and hub service keys |
+| `(~agentihooks-hive:member:* +exists +hgetall)` | Check a legacy member record exists and read it |
+| `(~agentihooks-hive:state:credentials:* +watch +get +set +del +hget +hmget +hset +hdel +incr +incrby +rpush +ltrim +lrange)` | Read and amend member records in the credentials state store |
+
+The controller cannot write, delete or read single fields of a legacy member
+record (`HSET`, `DEL`, `HGET`), and cannot read ledger credential records
+under `agentihooks-hive:ledger:*`. antoncore's
+`test_ledger_authentication_and_controller_credential_commands_are_scoped`, in
+`tests/unit/swarm_redis_authz/test_acl.py`, loads the real template into Redis
+and asserts both sides: the controller's `EXISTS` and `HGETALL` on a member
+record succeed, and each of those refused commands raises
+`NoPermissionError`.
+
+### The 18 October incident
+
+On 18 October every tick of the distributed proof swarm in Anton logged
+`Redis operation failed: NoPermissionError` from about 09:12 UTC and stopped
+before the master step (agentihooks issue 4447). agentihooks pull request 4360
+had made the tick's inbox relay and command publish list joined hive members
+by sending `EXISTS agentihooks-hive:member:<id>`, and the controller user had
+no grant on that root. The swarm Redis `ACL LOG` recorded the refusal with
+reason `key` for user `swarm-controller`. antoncore pull request 928 added the
+selector `(~agentihooks-hive:member:* +exists)` and the ACL test above. antoncore
+pull request 1464 later added `+hgetall` to it and the credentials state store
+selector, when member records moved to the state store.
+
+### Finding a refused command and key
+
+Read the refusal from Redis, not from the controller log: the log names only
+the exception. From a session with `kubectl` access to the swarm namespace:
+
+```bash
+kubectl -n agentihooks-swarm exec agentihooks-swarm-redis-tls-0 -c redis -- sh -c \
+  'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli --tls --insecure --user swarm --no-auth-warning ACL LOG 10'
+```
+
+Each entry carries `reason` (`key` or `command`), `object` (the refused key or
+command), `username` and `client-info`, whose `cmd=` field names the command.
+Read the user's current grants with its password hash removed:
+
+```bash
+kubectl -n agentihooks-swarm exec agentihooks-swarm-redis-tls-0 -c redis -- sh -c \
+  'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli --tls --insecure --user swarm --no-auth-warning ACL LIST' \
+  | grep '^user swarm-controller ' | sed 's/ #[0-9a-f]*//'
+```
+
+Both commands print no password: the variable is expanded inside the pod and
+the hash is stripped before output. Grant the refused command on the matching
+key pattern in `users.acl.template` through an antoncore pull request, add the
+command to the ACL test, and let the Redis StatefulSet roll out with the new
+template; never run `ACL SETUSER` against the live Redis.
+
 ## Configuration
 
 | Setting | Where | Effect |
@@ -233,7 +311,9 @@ with its role and entry points. A new role also needs a matching
 - The ACL reader raises `ValueError` on category rules other than `+@all` and
   `-@all` (such as `+@read`) and on `%` key permission rules, because it does
   not model them.
-- Only root permissions are checked. Grants inside selectors do not count.
+- Only root permissions are checked. Grants inside selectors do not count,
+  so the controller's hive member grants are covered by the antoncore ACL test
+  instead; see [Controller grants on hive member records](#controller-grants-on-hive-member-records).
 
 ## Troubleshooting
 
@@ -245,6 +325,7 @@ with its role and entry points. A new role also needs a matching
 | Step fails with `N skipped` | `SWARM_REDIS_COMMANDS` was unset or the map step did not run | Read the `Publish the Redis commands each agentihooks consumer issues` step log |
 | `ValueError: ... category rule ... is not modelled` | The ACL template uses a category rule | List the commands one by one |
 | `LookupError: no sample call of ...` | A redis-py upgrade changed a method signature so that no sample call completes | Extend the samples in `scripts.swarm.redis_wire` |
+| A tick logs `Redis operation failed: NoPermissionError` and stops before the master step, while the grant check is green | The refused key is outside `~agentihooks:*`, such as a hive member record, and its grant lives in a selector the check does not read | Read the refused key and command from `ACL LOG` and add them to the matching selector; see [Finding a refused command and key](#finding-a-refused-command-and-key) |
 | A new command appears and turns antoncore red with no antoncore change | The job checks out agentihooks `dev`, so a merged agentihooks change that sends a new command fails the next antoncore run | Grant the command in antoncore. The map artifact names the code that sends it |
 
 ## Delivery evidence

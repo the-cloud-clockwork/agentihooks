@@ -100,6 +100,29 @@ def test_a_controller_off_the_workstation_selects_the_root_hive_for_a_workstatio
     assert setup.launcher.select(setup.config, "eng", TASK).hive == "root"
 
 
+@pytest.mark.feature("hive-workstation-root")
+def test_a_workstation_task_skips_another_headed_hive_for_the_root_hive() -> None:
+    root = {"id": "root", "ui": "yes"}
+    automation = {"id": "automation-vm", "ui": "yes"}
+    own = {"id": "controller", "ui": "no"}
+    assert placement.workstation_hives([automation, root, own], "controller") == [root]
+    assert placement.workstation_hives([automation, own], "controller") == [own]
+    assert placement.workstation_hives([automation], "controller") == []
+
+
+@pytest.mark.feature("hive-workstation-root")
+def test_a_workstation_task_waits_for_a_full_root_hive_over_an_emptier_headed_hive(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(commands, "hive_id", lambda: "anton-controller")
+    write_hive(setup, id="automation-vm", ui="yes", excluded=[], max_agents=20)
+    write_hive(setup, id="root", ui="yes", excluded=[], max_agents=0)
+    selected = setup.launcher.select(setup.config, "eng", TASK)
+    assert isinstance(selected, Wait)
+    write_hive(setup, id="root", ui="yes", excluded=[], max_agents=20)
+    assert setup.launcher.select(setup.config, "eng", TASK).hive == "root"
+
+
 def test_a_distributed_controller_launches_a_workstation_task_on_the_root_hive(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
