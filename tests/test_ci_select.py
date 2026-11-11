@@ -389,6 +389,20 @@ def test_a_markdown_only_change_selects_the_tests_that_glob_markdown(repo: Path,
 
 
 @pytest.mark.feature("ci-select-markdown-glob-tests")
+def test_a_markdown_change_skips_tests_that_glob_other_files(repo: Path) -> None:
+    write(
+        repo,
+        {
+            "tests/test_journal.py": "DOCS = ROOT.rglob( '*.md' )\n",
+            "tests/test_python.py": "FILES = ROOT.glob('*.py')\n",
+            "tests/test_mdx.py": "FILES = ROOT.glob('*.mdx')\n",
+            "tests/test_plain.py": "FILES = ROOT.glob('notes.md')\n",
+        },
+    )
+    assert ci_select.markdown_tests(repo) == {"tests/test_journal.py"}
+
+
+@pytest.mark.feature("ci-select-markdown-glob-tests")
 def test_a_source_change_does_not_select_the_tests_that_glob_markdown(repo: Path) -> None:
     write(repo, {"tests/test_journal.py": "DOCS = sorted(ROOT.rglob('*.md'))\n"})
     assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
