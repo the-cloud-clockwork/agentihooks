@@ -263,6 +263,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     outputs:
       promote: ${{ steps.grade.outputs.promote }}
     steps:

@@ -98,7 +98,7 @@ def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> No
     for event in ("pull_request", "merge_group", "workflow_dispatch"):
         assert not enabled(grade["if"], event, {})
     assert "launch-hotfix" not in jobs["gate-required"]["needs"]
-    assert grade["permissions"] == {"contents": "read", "pull-requests": "read"}
+    assert grade["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "read"}
     step = grade["steps"][-1]
     assert step["run"].startswith("python -m scripts.ci_launch_hotfix ")
     assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"

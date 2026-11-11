@@ -23,6 +23,10 @@ HOTFIX = [
 ]
 PULLS = "repos/o/r/commits/abc/pulls"
 CHECKS = "repos/o/r/commits/h9/check-runs?check_name=Gate%20%E2%80%94%20Required"
+TIMELINE = "repos/o/r/issues/9/timeline?per_page=100"
+LABELLED = {"event": "labeled", "label": {"name": "launch hotfix"}}
+UNLABELLED = {"event": "unlabeled", "label": {"name": "launch hotfix"}}
+QUEUED = {"event": "added_to_merge_queue"}
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -33,13 +37,19 @@ def gh(
     calls: list[tuple[list[str], dict[str, Any]]] | None = None,
     code: int = 0,
     conclusions: str = "success\n",
+    events: tuple[dict[str, Any], ...] = (LABELLED, QUEUED),
 ) -> Runner:
     def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         if calls is not None:
             calls.append((argv, kwargs))
         if code:
             raise subprocess.CalledProcessError(code, argv, "", "boom")
-        out = json.dumps(pulls) if argv[2] == PULLS else conclusions
+        if argv[2] == PULLS:
+            out = json.dumps(pulls)
+        elif argv[2] == TIMELINE:
+            out = "".join(json.dumps(event) + "\n" for event in events)
+        else:
+            out = conclusions
         return subprocess.CompletedProcess(argv, 0, out, "")
 
     return run
@@ -58,8 +68,36 @@ def test_a_labelled_merged_pull_with_a_green_head_and_unit_suite_promotes(capsys
     kwargs = {"capture_output": True, "text": True, "check": True}
     assert calls == [
         (["gh", "api", PULLS], kwargs),
+        (["gh", "api", TIMELINE, "--paginate", "--jq", ".[] | @json"], kwargs),
         (["gh", "api", CHECKS, "--jq", ".check_runs[].conclusion"], kwargs),
     ]
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize(
+    "events",
+    [
+        (QUEUED, LABELLED),
+        (LABELLED, UNLABELLED, QUEUED, LABELLED),
+        (LABELLED,),
+        (QUEUED, LABELLED, {"event": "labeled", "label": {"name": "bug"}}),
+    ],
+    ids=["labelled after queueing", "removed before queueing", "never queued", "other label"],
+)
+def test_a_label_absent_when_the_pull_entered_the_queue_never_promotes(
+    capsys: pytest.CaptureFixture[str], events: tuple[dict[str, Any], ...]
+) -> None:
+    calls = []
+    assert promote(GREEN, gh(HOTFIX, calls, events=events), capsys) == "promote=false\n"
+    assert [argv[2] for argv, _ in calls] == [PULLS, TIMELINE]
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_the_label_on_the_last_queue_entry_counts_after_an_earlier_unlabelled_entry(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events = (QUEUED, LABELLED, QUEUED)
+    assert promote(GREEN, gh(HOTFIX, events=events), capsys) == "promote=true\n"
 
 
 @pytest.mark.feature("launch-hotfix-promotion")

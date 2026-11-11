@@ -1,6 +1,7 @@
 """Grade a dev push for the launch hotfix route: when the pull request merged as this commit carries the launch hotfix
-label, its own required grade passed on its head and this run's unit suite passed, promotion proceeds past unrelated
-red promotion checks. Those checks keep their red result, so the promotion watch still files their fixer tasks.
+label since it last entered the merge queue, its own required grade passed on its head and this run's unit suite
+passed, promotion proceeds past unrelated red promotion checks. Those checks keep their red result, so the promotion
+watch still files their fixer tasks.
 
 Prints ``promote=true`` or ``promote=false`` for the job output; reads the run's job results from ``NEEDS``.
 """
@@ -27,13 +28,32 @@ def suite_passed(needs: Mapping[str, Any]) -> bool:
     return all(results[name] == "success" for name in SUITE) and tuple(results[name] for name in UNIT) == UNIT_PASS
 
 
-def hotfix_heads(pulls: list[dict[str, Any]]) -> list[str]:
-    """The head commits of the commit's merged pull requests that carry the launch hotfix label."""
+def hotfix_pulls(pulls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The commit's merged pull requests that carry the launch hotfix label."""
     return [
-        pull["head"]["sha"]
+        pull
         for pull in pulls
         if pull.get("merged_at") and any(label.get("name") == LABEL for label in pull.get("labels") or [])
     ]
+
+
+def labelled_at_queue(events: list[dict[str, Any]]) -> bool:
+    """Whether the launch hotfix label was on the pull request when it last entered the merge queue."""
+    labelled = queued = False
+    for event in events:
+        kind, name = event.get("event"), (event.get("label") or {}).get("name")
+        if kind in ("labeled", "unlabeled") and name == LABEL:
+            labelled = kind == "labeled"
+        elif kind == "added_to_merge_queue":
+            queued = labelled
+    return queued
+
+
+def timeline_of(repo: str, number: int, run: Callable[..., Any] = subprocess.run) -> list[dict[str, Any]]:
+    """The pull request's timeline events, oldest first."""
+    argv = ["gh", "api", f"repos/{repo}/issues/{number}/timeline?per_page=100", "--paginate", "--jq", ".[] | @json"]
+    done = run(argv, capture_output=True, text=True, check=True)
+    return [json.loads(line) for line in done.stdout.splitlines() if line]
 
 
 def head_green(repo: str, head: str, run: Callable[..., Any] = subprocess.run) -> bool:
@@ -59,8 +79,12 @@ def main(
     args = parser.parse_args(argv)
     needs = json.loads(environ.get("NEEDS") or "{}")
     try:
-        heads = hotfix_heads(pulls_of(args.repo, args.sha, run)) if suite_passed(needs) else []
-        promote = any(head_green(args.repo, head, run) for head in heads)
+        pulls = hotfix_pulls(pulls_of(args.repo, args.sha, run)) if suite_passed(needs) else []
+        promote = any(
+            labelled_at_queue(timeline_of(args.repo, pull["number"], run))
+            and head_green(args.repo, pull["head"]["sha"], run)
+            for pull in pulls
+        )
     except subprocess.CalledProcessError as exc:
         print(f"launch hotfix label unreadable, promoting on the full grade only: {exc.stderr}", file=sys.stderr)
         promote = False
