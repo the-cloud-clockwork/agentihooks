@@ -672,6 +672,7 @@ def looked():
     getattr([], "srandmember")
     getattr(client, name)()
     print(client, "hlen")
+    getattr(client, "hsetnx", None)
 """
 
 
@@ -703,7 +704,9 @@ def test_an_unannotated_parameter_is_typed_from_the_argument_its_caller_passes(
 
 
 def test_a_getattr_call_with_a_literal_redis_method_name_shows_up_in_the_map(passed: code_reach.Program) -> None:
-    assert passed.commands(passed.reach(("scripts.passed:looked",))) == {"HSTRLEN": {"scripts.passed:looked"}}
+    assert passed.commands(passed.reach(("scripts.passed:looked",))) == dict.fromkeys(
+        ("HSTRLEN", "HSETNX"), {"scripts.passed:looked"}
+    )
 
 
 def test_receiver_typing_stops_once_a_pass_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
