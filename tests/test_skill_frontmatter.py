@@ -16,7 +16,7 @@ EVALS = SKILL.parent / "evals"
 RULE = PACKAGE / "rules" / "tick-pattern.md"
 ENGINEER = PACKAGE / "roles" / "engineer" / ".claude" / "skills" / "swarm-engineer" / "SKILL.md"
 MASTER = PACKAGE / "roles" / "master" / ".claude" / "skills" / "swarm-master" / "SKILL.md"
-ROLES = ("master", "engineer", "cicd", "planner", "qa")
+ROLES = tuple(sorted(path.parent.name for path in (PACKAGE / "roles").glob("*/profile.yml")))
 COMMANDS = (
     "python -m scripts.tick.new_step",
     'python -m scripts.tick_pattern --base "$BASE"',
@@ -100,6 +100,14 @@ def test_tick_pattern_rule_carries_package_rule_frontmatter() -> None:
     assert "python -m scripts.tick.catalogue check" in points[3][1]
     assert "equivalence" in points[4][1] and "planted fault" in points[4][1]
     assert not re.search(r"manifesto|§|~/\.claude/skills", RULE.read_text(), re.IGNORECASE)
+
+
+def test_role_list_covers_every_package_role_folder() -> None:
+    folders = [path for path in (PACKAGE / "roles").iterdir() if path.is_dir() and not path.name.startswith("_")]
+
+    assert {"dispatcher", "judge", "documentation"} <= set(ROLES)
+    assert all((path / "profile.yml").is_file() for path in folders)
+    assert ROLES == tuple(sorted(path.name for path in folders))
 
 
 @pytest.mark.parametrize("role", ROLES)
