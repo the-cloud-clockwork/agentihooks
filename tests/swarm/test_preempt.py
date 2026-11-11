@@ -299,14 +299,14 @@ def test_a_lane_focus_covers_a_normal_task_in_that_lane(store):
     assert not preempt.preferred({**lane_task, "lane": "ci"}, focused, graph)
 
 
-@pytest.mark.feature("swarm-preempt-claim-view-once-per-pass")
-def test_run_reads_every_full_lane_from_one_claim_view(store: RedisStore) -> None:
+def test_run_reads_every_full_lane_from_one_claim_view(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(preempt.dispatcher, "claim_key", lambda config, received: lambda task: (2, task["id"]))
     for name, task, lane in (("e1", "t1", "eng"), ("e2", "t2", "eng"), ("c1", "t9", "ci")):
         store.put_agent(SLUG, holder(name, task, lane=lane))
     built, read = [], []
 
     def view(slug: str, received: RedisStore, rows: dict, received_doc: dict, dispatched: Any) -> object:
-        built.append((slug, received is store, rows is ROWS))
+        built.append((slug, received is store, rows is ROWS, dispatched({"id": "t1"})))
         return object()
 
     def ready(
@@ -317,5 +317,5 @@ def test_run_reads_every_full_lane_from_one_claim_view(store: RedisStore) -> Non
 
     seats = preempt.Seats(ROWS, lambda *a: False, lambda *a: True, ready, preempt._places, view)
     assert preempt.run(SLUG, store.config(SLUG), store, doc(), 1, seats) == []
-    assert built == [(SLUG, True, True)]
+    assert built == [(SLUG, True, True, (2, "t1"))]
     assert [lane for lane, _ in read] == ["eng", "ci"] and read[0][1] is read[1][1]
