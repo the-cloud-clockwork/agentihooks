@@ -212,7 +212,7 @@ redis-cli HGET agentihooks:swarm:<slug>:master-retire-requests 'master@<code>-<n
 agentihooks msg inbox --of 'master@<code>-<n>'
 
 # Retire at once without asking, for one tick run
-AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0 agentihooks swarm tick
+AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0 agentihooks swarm <slug> tick
 ```
 
 | Symptom | Cause | Fix |
