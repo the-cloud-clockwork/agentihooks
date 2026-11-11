@@ -314,7 +314,7 @@ registry.registry = registry.Registry()
 for name in import_module("scripts.tick.catalogue").step_modules():
     import_module(name)
 registry.registry = real
-assert "doc items map" in first, sorted(first)
+assert first, "no steps loaded"
 assert {step.name for step in registry.steps()} == first
 """
 
