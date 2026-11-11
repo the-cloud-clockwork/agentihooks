@@ -1631,6 +1631,7 @@
       "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
       "tests": [
         "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply",
+        "tests/swarm/test_waits.py::test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply",
         "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
         "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
       ]
@@ -1696,6 +1697,21 @@
       "tests": [
         "tests/inbox/test_settlement.py::test_information_closes_on_receipt_and_work_needs_explicit_settlement",
         "tests/inbox/test_settlement.py::test_confirmed_work_reminds_its_receiver_until_explicit_settlement"
+      ]
+    },
+    {
+      "id": "controller-drains-pass-on-stop-signal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-sigint-finish",
+      "behaviour": "The controller treats the interrupt signal the swarm image stops it with like the terminate signal: a stop signal during a tick pass lets that pass finish and then exits, a stop signal between passes or a second one exits at once releasing held tick locks, and the controller Pod grace period outlasts the golden pass with margin.",
+      "seam": "scripts.swarm.controller.main run with its stop signal handler, and the agentihooks-swarm chart controller terminationGracePeriodSeconds",
+      "tests": [
+        "tests/swarm/test_controller_drain.py::test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_exit",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_during_a_pass_lets_the_pass_finish_then_exits",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_between_passes_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another",
+        "tests/swarm/test_controller_drain.py::test_a_second_stop_signal_during_a_pass_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_the_controller_grace_period_outlasts_the_golden_pass_with_margin"
       ]
     },
     {
@@ -3367,6 +3383,28 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "tick-status-publish-survives-dropped-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-status-publish-drop",
+      "behaviour": "The closing group runs status publish even when the health findings step it needs was dropped or cut, waiting at most its own budget, so the swarm status is published every pass.",
+      "seam": "engine.run_group on the closing group with the registered status publish step",
+      "tests": [
+        "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
+      ]
+    },
+    {
+      "id": "ledger-row-diff-keyed-lists",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2476",
+      "behaviour": "A freeze or focus insert, clear or only filter stores only the new and removed rows and the position rows of moved siblings: the row diff may visit the whole freezes list, and changes drops every row whose stored tuple is unchanged before write_rows writes.",
+      "seam": "scripts.swarm_ledger.repository.rows.changes over rows.diff, as write_rows stores it",
+      "tests": [
+        "tests/swarm_ledger/test_row_diff.py::test_a_top_focus_insert_into_a_large_freeze_list_writes_only_the_new_row_and_the_moved_focus",
+        "tests/swarm_ledger/test_row_diff.py::test_an_only_focus_filter_deletes_only_the_dropped_focus_rows",
+        "tests/swarm_ledger/test_row_diff.py::test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze"
       ]
     }
   ],
