@@ -50,6 +50,8 @@ See [hive endpoint limits](hives.md#hive-endpoint-limits) for the hive endpoint 
 
 See [headroom](hives.md#headroom) for what a hive's headroom reading holds, how it stays fresh while a launch runs, and why a hive with no fresh reading has no room.
 
+See [workstation admission room and the swarm share](hives.md#workstation-admission-room-and-the-swarm-share) for the limits a local spawn on the workstation meets, how the forty percent swarm share yields to the hive's agent ceiling, and how to run twenty local workers.
+
 See [automatic hive quota refresh](hives.md#automatic-quota-refresh) for subscription configuration, the first heartbeat, background refresh timing and troubleshooting a slot at cap zero.
 
 See [Redis restarts](hives.md#redis-restarts) for how `agentihooks hive run` reconnects after a swarm Redis restart, its backoff, what resumes and troubleshooting.

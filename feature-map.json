@@ -128,6 +128,24 @@
       ]
     },
     {
+      "id": "swarm-tick-claim-after-dependency",
+      "origin": "inventory",
+      "behaviour": "A task whose dependency is still open is not claimed, and the tick pass after that dependency is done claims it and spawns its engineer.",
+      "seam": "the tick claim pass, scripts.swarm.tick.tick over a ledger task carrying depends_on",
+      "tests": [
+        "tests/swarm/test_tick_claims.py::test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done"
+      ]
+    },
+    {
+      "id": "swarm-tick-idle-retire",
+      "origin": "inventory",
+      "behaviour": "A worker whose pane reads idle for IDLE_KILL_TICKS tick passes is retired without a typed nudge and its task is reopened.",
+      "seam": "the tick idle pass, scripts.swarm.tick.tick over an agent the runtime reports idle",
+      "tests": [
+        "tests/swarm/test_tick_idle.py::test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened"
+      ]
+    },
+    {
       "id": "swarm-tick-idle-claim-retire",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-idle-claim-retire",
@@ -167,6 +185,17 @@
         "tests/swarm/test_hive_release.py::test_a_workstation_ready_keeps_its_claim",
         "tests/swarm/test_hive_release.py::test_a_release_names_no_claim_it_does_not_hold",
         "tests/swarm/test_hive_release.py::test_a_release_writes_as_the_leaver_guarded_on_its_own_claim"
+      ]
+    },
+    {
+      "id": "hive-workstation-root",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-workstation-flag-root-hive",
+      "behaviour": "A task marked workstation places only on the root hive, else the controller's own hive, never on another headed hive, and waits while root has no room.",
+      "seam": "hive launcher select through placement workstation hives",
+      "tests": [
+        "tests/hive/test_workstation_tasks.py::test_a_workstation_task_skips_another_headed_hive_for_the_root_hive",
+        "tests/hive/test_workstation_tasks.py::test_a_workstation_task_waits_for_a_full_root_hive_over_an_emptier_headed_hive"
       ]
     },
     {
@@ -925,6 +954,8 @@
         "tests/tick/steps/test_territory.py::test_refund_parked_reads_a_task_missing_from_the_rows_as_not_parked",
         "tests/tick/steps/test_territory.py::test_a_stopping_swarm_ends_awaiting_seats_and_stops_once_no_agent_is_left",
         "tests/tick/steps/test_territory.py::test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_retires_agents_whose_runtime_never_answers_then_stops",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_keeps_a_ghost_while_another_agent_still_answers",
         "tests/tick/steps/test_territory.py::test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks",
         "tests/tick/steps/test_territory.py::test_a_swarm_with_work_or_workers_or_not_running_does_not_drain",
         "tests/tick/steps/test_territory.py::test_settle_hands_its_own_slug_store_ledger_rows_doc_and_config_to_each_seam",
@@ -1871,6 +1902,16 @@
         "tests/tick/steps/test_common.py::test_a_hive_agent_loses_an_emptied_claim",
         "tests/test_claim_watch.py::test_an_absent_pushed_claim_ends_a_hive_session",
         "tests/test_claim_watch.py::test_a_hive_worker_reuses_a_cached_other_claimant_without_a_read"
+      ]
+    },
+    {
+      "id": "tick-inbox-store-lookup",
+      "origin": "inventory",
+      "behaviour": "Preempt, the run window, the dispatcher seat and ledger events keep no inbox store class bound at import, so a first import under a patched store leaves later calls on the real store.",
+      "seam": "Module globals of the tick modules in scripts.swarm",
+      "tests": [
+        "tests/swarm/test_inbox_store_lookup.py::test_a_first_import_under_a_patched_inbox_store_keeps_no_fake",
+        "tests/swarm/test_inbox_store_lookup.py::test_the_run_window_sends_through_the_real_store_after_a_patched_first_import"
       ]
     },
     {
@@ -3439,6 +3480,16 @@
       ]
     },
     {
+      "id": "swarm-archive-terminal-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-executions-archive",
+      "behaviour": "ExecutionRegistry.archive moves a seat's own head row into the archive once it is ended or finished and its name is no longer listed, even with no newer generation superseding it, so a seat that is never reused does not hold its terminal execution in the live fenced executions hash forever.",
+      "seam": "ExecutionRegistry.archive archives a terminal head with no newer generation",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_moves_a_terminal_head_with_no_newer_generation"
+      ]
+    },
+    {
       "id": "swarm-archive-prunes-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
@@ -3635,6 +3686,24 @@
       ]
     },
     {
+      "id": "hive-headed-member-check",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2473",
+      "behaviour": "An agent starting on a headed hive is graded on kubectl listing the cluster nodes and on a global git user name and email, both required, while a headless hive is graded without them.",
+      "seam": "join_checks.startup and join_report.graded for a hive whose registry record carries ui yes",
+      "tests": [
+        "tests/hive/test_join_headed.py::test_a_headed_hive_without_kubectl_or_git_identity_grades_failed",
+        "tests/hive/test_join_headed.py::test_a_headed_hive_with_kubectl_and_git_identity_grades_complete",
+        "tests/hive/test_join_headed.py::test_a_headless_hive_is_not_graded_on_kubectl_or_git_identity",
+        "tests/hive/test_join_headed.py::test_kubectl_is_ready_only_when_it_lists_the_cluster_nodes",
+        "tests/hive/test_join_headed.py::test_kubectl_missing_from_the_hive_fails_the_check",
+        "tests/hive/test_join_headed.py::test_git_identity_needs_both_a_global_name_and_email",
+        "tests/hive/test_join_headed.py::test_startup_runs_the_headed_checks_only_on_a_headed_hive",
+        "tests/hive/test_join_headed.py::test_a_hive_is_headed_when_its_registry_record_carries_the_interface",
+        "tests/hive/test_join_headed.py::test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name"
+      ]
+    },
+    {
       "id": "swarm-exit-after-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-agent-self-exit",
@@ -3642,6 +3711,28 @@
       "seam": "swarm exit against the tick retire path for a finished worker",
       "tests": [
         "tests/swarm/test_cli_self_exit.py::test_a_released_worker_exits_and_the_next_tick_retires_it"
+      ]
+    },
+    {
+      "id": "controller-skips-closed-swarms",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2306",
+      "behaviour": "The controller tick pass runs no tick for a swarm whose ledger is closed or binned, as the host tick does, and still ticks a swarm whose ledger is gone so the pass reports it once.",
+      "seam": "scripts.swarm.controller.run_once and scripts.swarm.controller.tickable",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_the_controller_runs_no_steps_for_a_closed_or_binned_swarm_holding_a_ghost_agent",
+        "tests/swarm/test_stale_swarm_tick.py::test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger"
+      ]
+    },
+    {
+      "id": "swarm-create-refuses-web-repo",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2306",
+      "behaviour": "Swarm create refuses a web address as its repo and creates no swarm, while a local path is kept even when its folder is absent on this host.",
+      "seam": "agentihooks swarm <id> create --repo",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_create_refuses_a_web_address_as_its_repo",
+        "tests/swarm/test_stale_swarm_tick.py::test_create_keeps_a_local_path_even_when_its_folder_is_absent"
       ]
     }
   ],
