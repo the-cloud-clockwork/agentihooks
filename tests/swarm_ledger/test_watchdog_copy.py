@@ -16,8 +16,11 @@ pytestmark = pytest.mark.unit
 
 def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest(live):
     import hashlib
+    from dataclasses import replace
 
+    from scripts.swarm import doc_items
     from scripts.swarm_ledger.api.client import ResourceClient
+    from scripts.tick.adapters.fakes import fake_tools
     from scripts.tick.adapters.ledger import ClientLedger
     from scripts.tick.deadline import Deadline
 
@@ -25,7 +28,7 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
     port = ClientLedger(SLUG, lambda timeout: ResourceClient(ledger.BASE, credentials, timeout))
     assert port.watchdog_copy(deadline=Deadline.after(5)) == {}
     client = ResourceClient(ledger.BASE, credentials)
-    first, newest = "1. [open] First. [Ledger: t1]\n", "1. [open] First. [Ledger: t1]\n2. [open] Next. [Ledger: t1]\n"
+    first, newest = "1. [open] First.\n", "1. [open] First.\n2. [open] Next.\n"
     for number, text in enumerate((first, newest, newest)):
         client.mutate(SLUG, [{"op": "watchdog_copy", "id": f"copy-{number}", "by": "swarm", "text": text}])
     copy = port.watchdog_copy(deadline=Deadline.after(5))
@@ -35,8 +38,13 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
         "by": "swarm",
     }
     assert isinstance(copy["at"], int)
-    stamp = client.request(SLUG, "export", {})["data"]["_meta"]["stamps"]["watchdog_copy"]
-    assert (stamp["by"], stamp["at"]) == ("swarm", copy["at"])
+    state = client.request(SLUG, "export", {})["data"]
+    stamp = state["_meta"]["stamps"]["watchdog_copy"]
+    assert (stamp["by"], stamp["at"], isinstance(stamp["rev"], int)) == ("swarm", copy["at"], True)
+    tools = replace(fake_tools(), ledger=port)
+    assert doc_items.map_changed(state, tools, Deadline.after(5)) == [
+        "mapped watchdog doc items of the ledger copy: 0 items on 0 tasks, updated none"
+    ]
     events = [event for event in client.collection(SLUG, "events") if event.get("kind") == "watchdog copy stored"]
     assert [event["id"] for event in events] == ["copy-0", "copy-1"]
 
