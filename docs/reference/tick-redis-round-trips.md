@@ -83,7 +83,7 @@ The step rows show the median and p95 wall time of each step. See
 Pass duration from the scheduler journal on the host that runs the tick:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now | grep swarm_tick_step | grep run_tick
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now | grep swarm_tick_step | grep run_tick
 ```
 
 A set command, timed end to end:
