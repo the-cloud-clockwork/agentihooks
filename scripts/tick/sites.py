@@ -129,13 +129,18 @@ class TickSites:
 
     def _listed(self) -> bool:
         """Leave the tick's actions out when observation left a value the tick reads."""
-        self.left, self.left_from = not TICK_KEYS <= self.box.keys(), "agents"
-        return not self.left
+        return self._leave(not TICK_KEYS <= self.box.keys(), "agents")
 
     def _configured(self) -> bool:
         """Leave the tick's actions out when the drained resume left the swarm config."""
-        self.left, self.left_from = CONFIG not in self.box, "tasks"
-        return not self.left
+        return self._leave(CONFIG not in self.box, "tasks")
+
+    def _leave(self, missing: bool, site: str) -> bool:
+        """Mark the tick left from ``site`` when ``missing``, keeping the first site that left it; answer whether the
+        site runs."""
+        if missing and not self.left:
+            self.left, self.left_from = True, site
+        return not missing
 
 
 def run_sites(

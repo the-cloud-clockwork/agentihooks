@@ -487,8 +487,9 @@ class _Wrapper:
         return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
-        commands once the ledger was binned or gone, and as the tick's sites say."""
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, from the
+        phases once their hook found the ledger binned or gone, so the probes, health and commands sites the barrier
+        ran before that hook keep running, and as the tick's sites say."""
         stopped = step.group != "wrapper probes" and "stop" in self.box
         ended = self.ended is not None and step.group not in ENDS_AFTER
         return stopped or ended or self.ticks.shut(step)

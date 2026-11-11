@@ -7,7 +7,7 @@ import pytest
 
 import scripts.swarm.cli
 from scripts.tick import engine, registry
-from scripts.tick.sites import TICK_SITES, TickSites
+from scripts.tick.sites import CONFIG, TICK_SITES, TickSites
 from scripts.tick.step import Context, Domain, Lane, Result
 
 pytestmark = pytest.mark.unit
@@ -125,5 +125,15 @@ def test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it() -> None
     sites = TickSites({}, {}, {}, lambda: 0)
     assert sites._listed() is False
     assert not sites.shut(Step("observer", "observe"))
+    assert sites.shut(Step("reaper", "agents"))
+    assert sites.shut(Step("closer", TICK_SITES[-1]))
+
+
+@pytest.mark.feature("swarm-tick-declared-edges")
+def test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site() -> None:
+    sites = TickSites({}, {CONFIG: {}}, {}, lambda: 0)
+    assert sites._listed() is False
+    assert sites._configured() is True
+    assert sites.left_from == "agents"
     assert sites.shut(Step("reaper", "agents"))
     assert sites.shut(Step("closer", TICK_SITES[-1]))

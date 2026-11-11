@@ -480,7 +480,8 @@
         "tests/tick/test_declared_edges.py::test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_not_use",
         "tests/tick/test_declared_edges.py::test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step",
         "tests/tick/test_declared_edges.py::test_a_shut_step_runs_no_hook_of_an_earlier_site",
-        "tests/tick/test_declared_edges.py::test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it"
+        "tests/tick/test_declared_edges.py::test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it",
+        "tests/tick/test_declared_edges.py::test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site"
       ]
     },
     {
