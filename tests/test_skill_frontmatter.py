@@ -103,10 +103,11 @@ def test_tick_pattern_rule_carries_package_rule_frontmatter() -> None:
 
 
 def test_role_list_covers_every_package_role_folder() -> None:
-    folders = {path.parent.name for path in (PACKAGE / "roles").glob("*/profile.yml")}
+    folders = [path for path in (PACKAGE / "roles").iterdir() if path.is_dir() and not path.name.startswith("_")]
 
-    assert {"dispatcher", "judge", "documentation"} <= folders
-    assert sorted(ROLES) == sorted(folders)
+    assert {"dispatcher", "judge", "documentation"} <= set(ROLES)
+    assert all((path / "profile.yml").is_file() for path in folders)
+    assert ROLES == tuple(sorted(path.name for path in folders))
 
 
 @pytest.mark.parametrize("role", ROLES)
