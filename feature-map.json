@@ -3394,6 +3394,18 @@
       "tests": [
         "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
       ]
+    },
+    {
+      "id": "ledger-row-diff-keyed-lists",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2476",
+      "behaviour": "A freeze or focus insert, clear or only filter stores only the new and removed rows and the position rows of moved siblings: the row diff may visit the whole freezes list, and changes drops every row whose stored tuple is unchanged before write_rows writes.",
+      "seam": "scripts.swarm_ledger.repository.rows.changes over rows.diff, as write_rows stores it",
+      "tests": [
+        "tests/swarm_ledger/test_row_diff.py::test_a_top_focus_insert_into_a_large_freeze_list_writes_only_the_new_row_and_the_moved_focus",
+        "tests/swarm_ledger/test_row_diff.py::test_an_only_focus_filter_deletes_only_the_dropped_focus_rows",
+        "tests/swarm_ledger/test_row_diff.py::test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze"
+      ]
     }
   ],
   "unmapped_rules": [
