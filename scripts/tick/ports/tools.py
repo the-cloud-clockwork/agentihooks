@@ -18,7 +18,7 @@ from scripts.tick.ports.contracts import (
 
 _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "ledger": (
-        frozenset([Ledger.export.__name__, Ledger.task.__name__]),
+        frozenset([Ledger.export.__name__, Ledger.task.__name__, Ledger.watchdog_copy.__name__]),
         frozenset(
             [
                 Ledger.mutate.__name__,
@@ -42,6 +42,8 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
             [
                 Coordination.lease.__name__,
                 Coordination.lock.__name__,
+                Coordination.tick_lock.__name__,
+                Coordination.release_tick_lock.__name__,
                 Coordination.configure.__name__,
                 Coordination.mark.__name__,
                 Coordination.store_write.__name__,
@@ -114,13 +116,13 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
             ]
         ),
     ),
-    "processes": (frozenset([Processes.scan.__name__]), frozenset()),
+    "processes": (frozenset([Processes.scan.__name__, Processes.rescan.__name__]), frozenset()),
     "inbox": (
         frozenset([Inbox.read.__name__]),
         frozenset([Inbox.send.__name__, Inbox.close.__name__, Inbox.settle_exit.__name__]),
     ),
     "llm": (frozenset(), frozenset([Llm.classify.__name__])),
-    "metrics": (frozenset(), frozenset([Metrics.emit.__name__])),
+    "metrics": (frozenset(), frozenset([Metrics.emit.__name__, Metrics.log.__name__])),
     "host": (frozenset([Host.read.__name__]), frozenset([Host.run.__name__])),
 }
 

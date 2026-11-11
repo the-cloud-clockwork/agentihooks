@@ -1694,3 +1694,20 @@ def test_a_controller_without_the_workstation_checkout_still_files_fixer_tasks(
     assert "filed promo-900-0 for the failed dev job helm-kind" in actions
     assert kwargs_seen and all("cwd" not in kwargs for kwargs in kwargs_seen)
     assert {kwargs["env"]["GH_REPO"] for kwargs in kwargs_seen} == {"o/r"}
+
+
+HOTFIX_JOBS = [
+    {"name": "Launch hotfix grade", "conclusion": "success"},
+    {"name": "tick-pattern-tree", "conclusion": "failure"},
+    {"name": "Gate — Required", "conclusion": "failure"},
+    {"name": "promote / promote", "conclusion": "success"},
+]
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_closes_nothing(store: RedisStore) -> None:
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], HOTFIX_JOBS))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: tick-pattern-tree"]
+    assert [source for _, source, _ in ledger.raised] == ["promotion"]
+    assert ledger.closed == []

@@ -75,6 +75,7 @@
 /tests/ledger_load/gate.py @nestorcolt
 /tests/ledger_load/paired.py @nestorcolt
 /tests/ledger_load/memory.py @nestorcolt
+/tests/tick_scale/gate.py @nestorcolt
 /tests/ledger_load/hierarchy_paired.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt

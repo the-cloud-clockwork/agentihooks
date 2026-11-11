@@ -148,6 +148,9 @@ class LedgerClient:
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
+            from scripts.tick import view
+
+            view.stopped(exc.__context__)
             refused = str(exc).startswith("server refused: 4")
             unreachable = str(exc).startswith(UNREACHABLE)
             if unreachable and held_offline and ops:
@@ -167,7 +170,13 @@ class LedgerClient:
         if offline():
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
-        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        try:
+            return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        except OSError as exc:
+            from scripts.tick import view
+
+            view.stopped(exc)
+            raise
 
     def state(self, slug):
         return self._call(slug)
@@ -202,6 +211,14 @@ class LedgerClient:
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
         return self.item(slug, f"tasks/{task_id}")
+
+    def watchdog_copy(self, slug: str) -> dict[str, Any]:
+        """The newest watchdog document copy stored on the ledger, empty when none is stored."""
+        copy: dict[str, Any] = self._resource(slug, "watchdog")
+        return copy
+
+    def store_watchdog_copy(self, slug: str, text: str, by: str) -> None:
+        self._call(slug, [_op("watchdog_copy", by, text=text)])
 
     def item(self, slug, path):
         """One item by its list path, or None when the ledger holds no such item."""

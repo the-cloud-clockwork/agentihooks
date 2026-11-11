@@ -466,6 +466,7 @@ def test_the_controller_never_ticks_a_host_ticked_swarm(store, monkeypatch):
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: ticks.append(slug) or [slug])
     monkeypatch.setenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", "workstation,doctor")
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     assert controller.run_once(store) == {"hosted": ["hosted"]}
     assert ticks == ["hosted"]
 
@@ -478,6 +479,7 @@ def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
     monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     assert controller.run_once(store) == {"XXXX": ["XXXX"]}
 
 
@@ -494,6 +496,7 @@ def test_the_host_tick_leaves_a_swarm_the_controller_ticks_so_the_controller_tak
     monkeypatch.setattr(commands, "hive_id", lambda: "controller-hive")
     monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     controller.run_once(store)
 
     assert lease.acquire(store, "proof", "workstation-hive") is None
@@ -518,6 +521,7 @@ def test_the_controller_marks_each_swarm_for_one_lease_ttl_as_it_ticks_it(store,
         lambda saved, slug, *args, **kwargs: marks.append(saved.redis.get(saved.key(slug, "controller-host"))) or [],
     )
 
+    monkeypatch.setattr(controller, "tickable", lambda ledger, slug: True)
     controller.run_once(store)
 
     assert marks == ["controller-hive"]
@@ -544,3 +548,17 @@ def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unre
         assert lease.fenced(store, "sw", held, lambda doc: "written") == "written"
         assert lease.release(store, "sw", held) is True
         assert lease.current(store, "sw") is None
+
+
+@pytest.mark.parametrize(("folder", "address"), [("scratchpad/proof/ledger", "https://ledger.example"), ("ledger", "")])
+def test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, folder: str, address: str
+) -> None:
+    from pathlib import Path
+
+    from scripts.swarm_ledger import ledger_route
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
+    monkeypatch.setenv("LEDGER_DIR", str((Path.home() if folder.startswith("scratchpad") else tmp_path) / folder))
+    with ledger_route.scoped("sw", "https://ledger.example/"):
+        assert lease._address("sw") == address

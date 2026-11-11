@@ -237,7 +237,10 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
-| `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `20` | 7-day left % on the first entry of `AGENTIHOOKS_MASTER_LOGIN_ORDER` at or under which nothing new places there (claude-ai route, master login placement, worker token routing, controller admission); a master already there gets a handoff directive |
+| `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` | `false` | Gates master login placement for swarm masters (see [Master claude ai login](account-login.md#master-claude-ai-login)); route `claude-ai`, front door masters included, works with it on or off |
+| `AGENTIHOOKS_MASTER_LOGIN_ORDER` | — | Comma list of claude ai login emails in preference order, read by `--route claude-ai` and master login placement; logins it does not name follow in slot order (see [Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login)) |
+| `AGENTIHOOKS_MASTER_LOGIN_SLOTS` | `5` | Number of stored claude ai login slots |
+| `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` | `2` | 7-day left % on the first entry of `AGENTIHOOKS_MASTER_LOGIN_ORDER` at or under which nothing new places there (claude-ai route, master login placement, worker token routing, controller admission); a master already there gets a handoff directive |
 | `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |
 | `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
 | `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
@@ -466,6 +469,7 @@ and the step starvation step floors every step's alarm window to it, critical an
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTIHOOKS_TICK_CADENCE` | `1` | Tick cadence in whole minutes, `1` to `5`. `scripts.tick.engine.cadence_s` refuses a value that is not a whole number, is below one, or breaks a guard: from six minutes the delivery guard and heartbeat limit, from eight the stale watcher as well; the lease TTL check does not depend on the cadence. It does not change how often a pass runs — the scheduler cron stays every minute, and a controller install's own per-pass wait stays `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` — only how far `resting` and the step starvation step's alarm windows stretch past a pass |
+| `AGENTIHOOKS_SCHEDULER_UNIT` | unset | Set to `1` only by the `agentihooks-scheduler.service` user unit. A supervisor that sees it marks its runtime folder so `ensure_running` starts the unit instead of a child, and drains a supervisor started outside the unit. Never set it by hand; see [The scheduler runs in its own user unit](../pillars/swarm.md#the-scheduler-runs-in-its-own-user-unit) |
 | `AGENTIHOOKS_TICK_STAGE` | `S1` | Rollout stage whose pass p95 target holds new spawns: `S1` 384, `S2` 240, `S3` 120, `S4` 100 seconds (the golden pass duration, `scripts.tick.engine.GOLDEN_PASS_S`), matched exactly, so `s2` is refused. Any other value makes `update_pass_budget` raise `KeyError` inside the tick pass, before the observe group runs |
 
 Set the stage by adding or editing one `AGENTIHOOKS_TICK_STAGE=S2` line in `~/.agentihooks/.env`; keep a single line

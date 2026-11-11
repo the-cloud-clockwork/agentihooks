@@ -973,7 +973,7 @@ curl -s https://www.githubstatus.com/api/v2/incidents/unresolved.json \
 Find the passes that held findings:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since '-6 hours' --no-pager -o cat \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since '-6 hours' --until now --no-pager -o cat \
   | grep --line-buffered 'rig-grade-swarm-doctor' \
   | grep --line-buffered 'findings held during GitHub incident'
 ```
@@ -1048,7 +1048,7 @@ clock still occurred in that window; this change did not remove them.
 Read the existing timer actions without starting another timer:
 
 ```bash
-journalctl --user -t agentihooks-swarm \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since '2026-10-18 12:53:00 UTC' \
   --until '2026-10-18 13:23:00 UTC' --no-pager -o cat \
   | grep --line-buffered 'rig-grade-swarm-doctor' \
@@ -1122,7 +1122,7 @@ merged on 19 October 2026 and added the bounded slices. Its
 failed the 200 minute gap regression on the old code; its
 [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39225901866)
 passed on the final head. Its source task recorded the live before shape after
-an overnight tick outage from `agentihooks-swarm` journal lines matching
+an overnight tick outage from `agentihooks-swarm.service` journal lines matching
 `doctor CI speed`, 19 October 2026, 05:40–06:15 UTC: 9 of 15 reads
 exhausted the budget and 6 failed pagination, while discovered runs grew
 49, 96, 108, 189, 202, 208, 229, 301 and 305 and runs read rose only from 47
@@ -1583,7 +1583,7 @@ and keep `start` in the filter.
 
 From 10:39 to 12:24 UTC on 20 October 2026 the on premises node
 `k8s-worker-1` could not resolve `ghcr.io`. The home router had leased the
-node's fixed address, `10.10.30.141`, to a phone. While the phone was on Wi-Fi
+node's fixed address, `192.0.2.141`, to a phone. While the phone was on Wi-Fi
 the router sent traffic for `.141`, DNS answers included, to the phone. The
 node's own resolver configuration was correct. The router was fixed by hand at
 12:23 UTC, and
@@ -1610,14 +1610,14 @@ keeps the LAN address plan in git and alerts on any future conflict.
 
 ### Cause
 
-The router's DHCP pool was `10.10.30.130` to `.254`. That range covered the
+The router's DHCP pool was `192.0.2.130` to `.254`. That range covered the
 Anton host, every Kubernetes node, the automation VM and the MetalLB service
 addresses. The nodes use static addresses and had no router reservations, so
 the router could hand `.141` to any device that joined.
 
 `k8s-worker-1` resolves through the systemd stub at `127.0.0.53`, whose uplinks
-are `10.10.30.1` (the router) and `8.8.8.8`. Its netplan sets static
-`10.10.30.141/24` with the router as default gateway. Both DNS paths therefore
+are `192.0.2.1` (the router) and `8.8.8.8`. Its netplan sets static
+`192.0.2.141/24` with the router as default gateway. Both DNS paths therefore
 leave through the router, and the router's ARP entry for `.141` decides whether
 the answers reach the node or the phone.
 
@@ -1632,7 +1632,7 @@ the router clock runs one hour ahead and is corrected here.
 | 12:06 to 12:14 | Still associated | A dip to 10 to 28 failures a minute, then 34 to 80 a minute from 12:15 to 12:22 |
 | 12:20:59 to 12:23:07 | Router reconfigured: pool moved, node addresses reserved, dnsmasq restarted | `NodeNotReady` event at about 12:23 |
 | 12:22:30, 12:23:14, 12:24:24 | Router deauthenticates the phone | Last failure at 12:24:56, none since |
-| 12:30:05 | Phone returns with lease `10.10.30.128` | At 12:51 `ghcr.io` resolves through `10.10.30.1`, `8.8.8.8` and `127.0.0.53` |
+| 12:30:05 | Phone returns with lease `192.0.2.128` | At 12:51 `ghcr.io` resolves through `192.0.2.1`, `8.8.8.8` and `127.0.0.53` |
 
 The partial recovery seen around 12:00 to 12:10 UTC was the dip in the table,
 not a fix. Lookups failed again until the phone left `.141`.
@@ -1654,13 +1654,13 @@ The plan lives in the `lan-plan` ConfigMap in namespace `anton-ops`, file
 
 | Range or address | Use |
 |---|---|
-| `10.10.30.1` | Router |
-| `10.10.30.2` to `.129` | DHCP pool for home devices |
-| `10.10.30.130` | Anton host, reserved to its MAC |
-| `10.10.30.140` to `.143` | `k8s-master`, `k8s-worker-1`, `k8s-worker-2`, `k8s-worker-001`, each reserved to its MAC |
-| `10.10.30.150` | Automation VM, reserved to its MAC |
-| `10.10.30.184` | Workbench, reserved to its MAC |
-| `10.10.30.200` to `.210` | MetalLB service addresses, answered only by node MACs |
+| `192.0.2.1` | Router |
+| `192.0.2.2` to `.129` | DHCP pool for home devices |
+| `192.0.2.130` | Anton host, reserved to its MAC |
+| `192.0.2.140` to `.143` | `k8s-master`, `k8s-worker-1`, `k8s-worker-2`, `k8s-worker-001`, each reserved to its MAC |
+| `192.0.2.150` | Automation VM, reserved to its MAC |
+| `192.0.2.184` | Workbench, reserved to its MAC |
+| `192.0.2.200` to `.210` | MetalLB service addresses, answered only by node MACs |
 
 Infra and MetalLB addresses stay outside the DHCP pool. To add a host, add a
 `host` or `node` row with its address, MAC and name to `lan-plan.txt`, merge
@@ -1679,8 +1679,8 @@ python3 automation/router_lan.py --apply   # write the plan, commit, restart dns
 
 A matching router prints `router matches the LAN plan` and exits 0. Drift
 prints one line per difference, such as
-`reservation missing on router: <MAC> 10.10.30.141` or
-`dhcp_end: router='10.10.30.254' plan='10.10.30.129'`, and exits 1. `--apply` writes every setting, reads the router back and prints
+`reservation missing on router: <MAC> 192.0.2.141` or
+`dhcp_end: router='192.0.2.254' plan='192.0.2.129'`, and exits 1. `--apply` writes every setting, reads the router back and prints
 `applied; router matches the LAN plan`. Run it with `--apply` after a router
 reset or a plan change.
 
@@ -1689,7 +1689,7 @@ reset or a plan change.
 The `lan-ip-conflict` CronJob in `anton-ops` runs every ten minutes on an on
 premises worker: a node without the `anton.io/node-pool` label and without the
 control plane role. It uses the host network and `NET_RAW`, so its ARP probes
-leave the node's LAN interface. Cloud nodes are not on `10.10.30.0/24` and never
+leave the node's LAN interface. Cloud nodes are not on `192.0.2.0/24` and never
 run it.
 
 Each run sends `arping` to the router, then to every `host` and `node` address
@@ -1698,7 +1698,7 @@ and every MetalLB address, 18 in all with the current plan:
 | Result | Output and exit | Alert to ntfy `anton-critical` |
 |---|---|---|
 | Every address answered only by its own MAC, or by any node MAC for MetalLB | `{"checked": 18, "conflicts": []}`, exit 0 | None |
-| A MAC that does not own an address answers for it | Conflict list such as `10.10.30.141 (k8s-worker-1) answered by <MAC>`, exit 1 | `LAN IP conflict on infra address`, urgent, with the MAC and the address |
+| A MAC that does not own an address answers for it | Conflict list such as `192.0.2.141 (k8s-worker-1) answered by <MAC>`, exit 1 | `LAN IP conflict on infra address`, urgent, with the MAC and the address |
 | The router gives no ARP reply, or the check itself fails | `lan-ip-conflict DEGRADED: <reason>; the LAN is unchecked.`, exit 2 | `LAN check degraded`, urgent |
 
 The alert asks the reader to find the MAC in the router's client list and move

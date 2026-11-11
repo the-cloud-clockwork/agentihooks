@@ -886,7 +886,7 @@ def _add_task(args, title, fields):
     return {}
 
 
-def _task_add_fields(args):
+def _task_add_fields(args: argparse.Namespace) -> dict[str, Any]:
     lists = {
         k: comma_list(v)
         for k, v in (
@@ -907,6 +907,7 @@ def _task_add_fields(args):
     options = (
         ("kind", args.kind),
         ("profile", args.profile),
+        ("requires_harness", args.requires_harness),
         ("rank", args.rank),
         ("difficulty", args.difficulty),
         ("plan_url", args.plan),
@@ -1168,6 +1169,11 @@ def build_parser():
         help="the task acts on the workstation checkout, so no remote hive runs it",
     )
     task.add_argument("--profile")
+    task.add_argument(
+        "--requires-harness",
+        choices=("claude", "codex"),
+        help="the only harness that may claim the task, which waits for a free seat of it",
+    )
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
     task.add_argument("--needs", help="comma separated hive capabilities, such as headed, that its hive must declare")
     task.add_argument(

@@ -67,9 +67,9 @@ class Replacements:
 
     def _launch(self, decision: Decision) -> str:
         successor = self.store.execution(self.slug, decision.replacement)
-        occupant = self.store.execution_occupants(self.slug)[successor.seat]
+        occupant = self.store.execution_occupants(self.slug).get(successor.seat)
         self.controller.require()
-        if occupant.execution_id != successor.execution_id:
+        if occupant is None or occupant.execution_id != successor.execution_id:
             self._launched(decision)
             cast(Any, self.store).redis.hset(self._key(RECORDED), decision.execution_id, SUPERSEDED)
             return SUPERSEDED
@@ -108,7 +108,8 @@ class Replacements:
     def _record(self) -> None:
         for execution_id, successor in sorted(self.store.redis.hgetall(self._key(LAUNCHED)).items()):
             agent = self.store.execution(self.slug, successor)
-            if self.store.execution_occupants(self.slug)[agent.seat].execution_id != successor:
+            occupant = self.store.execution_occupants(self.slug).get(agent.seat)
+            if occupant is None or occupant.execution_id != successor:
                 self.store.redis.hset(self._key(RECORDED), execution_id, SUPERSEDED)
                 continue
             outcome = self.recovery.outcome(successor)

@@ -380,7 +380,7 @@ def test_a_failed_pass_logs_the_error_and_records_the_pass_as_an_error(capsys: p
         assert host.failed_pass(RuntimeError("boom")) == ["pass failed: a step raised RuntimeError: boom"]
     finally:
         timing.PASS.reset(token)
-    assert record == {"outcome": "error"}
+    assert record == {"outcome": "error", "error": "RuntimeError: boom"}
     assert capsys.readouterr().err.endswith("RuntimeError: boom\n")
 
 
@@ -412,3 +412,14 @@ def test_end_held_returns_nothing_raises_a_stop_and_fails_an_error() -> None:
     with pytest.raises(SystemExit):
         host.end_held({"raised": SystemExit(2)})
     assert host.end_held({"raised": KeyError("k")}) == ["pass failed: a step raised KeyError: 'k'"]
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_cleartext_refusal_fails_the_pass_held_or_not_and_in_the_closing_group() -> None:
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    refused = Cleartext("a ledger credential off loopback travels only over https")
+    line = ["pass failed: a step raised Cleartext: a ledger credential off loopback travels only over https"]
+    assert host.held_failure(refused) == line
+    assert host.held_failure(refused, {"raised": refused}) == line
+    assert host.end_held({"raised": refused}) == line

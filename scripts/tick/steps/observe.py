@@ -16,7 +16,7 @@ from scripts.swarm.ledger_client import LedgerOffline
 from scripts.swarm.store import EVENTS_ENGINE, MASTER, SwarmConfig, SwarmError
 from scripts.tick import registry
 from scripts.tick.engine import SLOW
-from scripts.tick.steps import CallStep, Left, PassBox, pass_domains
+from scripts.tick.steps import CallStep, Left, pass_domains
 
 reports: Any = import_module("scripts.hive.reports")
 dead_resume: Any = import_module("scripts.swarm.dead_resume")
@@ -37,13 +37,14 @@ PASS_KEYS = ("slug", "store", "ledger", "runtime", "now_ms", "box")
 
 
 def _run(call: Callable[..., Any], _module: Any, get: Callable[[str], Any]) -> Any:
-    """Run the tick step function ``call`` with the pass state, skipping once a step held an exception."""
+    """Run the tick step function ``call`` with the pass state and the box values it declares, skipping once a step
+    held an exception."""
     box = get("box")
     if RAISED in box:
         return []
     try:
-        values = PassBox({**{key: get(key) for key in PASS_KEYS}, **box})
-        return call(**{name: values[name] for name in signature(call).parameters})
+        values = {key: get(key) for key in PASS_KEYS}
+        return call(**{name: values[name] if name in values else box[name] for name in signature(call).parameters})
     except (Left, LedgerOffline):
         return []
     except (Exception, SystemExit) as exc:
@@ -377,7 +378,7 @@ def _failed_launch(
 
 
 def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int) -> bool:
-    local = agent.runtime_backend == "local"
+    local = agent.runtime_backend == "local" and not reports.host(agent)
     exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
     kept = replace(agent, pane_id="") if exited else agent
     gone = retire_watch.reported_gone(store, agent, now_ms)
@@ -464,7 +465,13 @@ def _collect_acks(
 
 
 STEPS = (
-    CallStep("config load", "start", partial(_run, step_config_load), writes=CONFIG),
+    CallStep(
+        "config load",
+        "start",
+        partial(_run, step_config_load),
+        frozenset({"command runner", "reboot pass"}),
+        writes=CONFIG,
+    ),
     CallStep(
         "stopped branch",
         "start",

@@ -88,6 +88,9 @@ class FakeLedger:
     def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
         return _record(self, "task", (task_id,), deadline)
 
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "watchdog_copy", (), deadline)
+
     def notify(self, text: str, *, deadline: Deadline) -> None:
         _record(self, "notify", (text,), deadline)
 
@@ -111,6 +114,12 @@ class FakeCoordination:
 
     def lock(self, name: str, *, deadline: Deadline) -> object:
         return _record(self, "lock", (name,), deadline)
+
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "tick_lock", (held, ttl_ms, caller), deadline)
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
+        _record(self, "release_tick_lock", (token, caller), deadline)
 
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
@@ -318,6 +327,9 @@ class FakeProcesses:
     def scan(self, *, deadline: Deadline) -> object:
         return _record(self, "scan", (), deadline)
 
+    def rescan(self, *, deadline: Deadline) -> object:
+        return _record(self, "rescan", (), deadline)
+
 
 @dataclass
 class FakeInbox:
@@ -366,6 +378,9 @@ class FakeMetrics:
 
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object:
         return _record(self, "emit", (measurements,), deadline)
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
+        return _record(self, "log", (slug, tuple(rows)), deadline)
 
 
 @dataclass

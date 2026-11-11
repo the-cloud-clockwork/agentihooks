@@ -19,7 +19,14 @@ from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import AdmissionCalls, LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
+from scripts.tick.adapters.calls import (
+    AdmissionCalls,
+    LedgerCalls,
+    LocalMetrics,
+    MetricsCalls,
+    SpawnRuntimeCalls,
+    SpawnStoreCalls,
+)
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, SWARM, TASKS, CallStep, budgets, pass_domains
@@ -61,6 +68,7 @@ PLACED = frozenset({AGENTS, TASKS})
 
 _SPAWN_KEYS = ("slug", "config", "store", "ledger", "runtime", "rows", "doc", "now_ms")
 PASS_DEADLINE: ContextVar[Deadline | None] = ContextVar("spawn_pass_deadline", default=None)
+PASS_METRICS: ContextVar[MetricsCalls | None] = ContextVar("spawn_pass_metrics", default=None)
 OFFLINE_HOLD = "the ledger is not answering, so its claim cannot land before the launch"
 
 
@@ -106,7 +114,9 @@ def _preempt(tick: Any, get: Get) -> Any:
     config, store = get("config"), get("store")
     if config.state == "running" and config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:
         placement = partial(tick.preempt.probe, get("runtime"))
-        seats = tick.preempt.Seats(get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement)
+        seats = tick.preempt.Seats(
+            get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement, tick.claim_view
+        )
         return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
     return []
 
@@ -126,10 +136,14 @@ def _spawn_step(tick: Any, get: Get) -> Any:
         bound = {"rows": rows, "store": store, "ledger": ledger, "runtime": runtime}
         args = tuple(bound[key] if key in bound else get(key) for key in _SPAWN_KEYS)
         token = PASS_DEADLINE.set(deadline)
+        ports = MetricsCalls(tools.metrics, tools.processes, recording)
+        measured, logged = PASS_METRICS.set(ports), dispatcher.PORT.set(ports)
         try:
             with tick._placement_pass(runtime):
                 found = tick.skip_refused(tick._spawn, *args)
         finally:
+            dispatcher.PORT.reset(logged)
+            PASS_METRICS.reset(measured)
             PASS_DEADLINE.reset(token)
         get("box")["rows"] = MappingProxyType(rows)
         store.redis.delete(get("due"))
@@ -595,7 +609,7 @@ def _launch(run: Any, launch: Any) -> tuple[Any, Any]:
         if placed.launch_job:
             return placed, None
         launched = timing.timed(
-            codex.admit_legacy, run.store, run.slug, tick.placed_record(record, placed), run.runtime
+            codex.admit_legacy, run.store, run.slug, tick.placed_record(record, placed), run.runtime, _ports().table
         )
         return placed, launched
     except Exception as exc:
@@ -732,10 +746,14 @@ def _lives_spent(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task:
         return tick._claim_cap(slug, store, ledger, rows, task)
     except Exception as exc:
         who = Who(name="swarm", task=task["id"])
-        gate_log.append(
-            slug, gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
-        )
+        row = gate_log.Row.of(claim_cap.GATE.name, "fail-open", who, reason=f"{type(exc).__name__}: {exc}")
+        _ports().log(slug, [row])
         return ""
+
+
+def _ports() -> MetricsCalls | LocalMetrics:
+    """The spawn step's metrics and processes ports, else this host's gate log and process table."""
+    return PASS_METRICS.get() or LocalMetrics(gate_log.append, import_module("hooks.proc").processes)
 
 
 def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: dict[str, Any]) -> str:
@@ -746,7 +764,7 @@ def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: d
     failure = claim_cap.launch_failure(lives, store.launches(slug), task["id"])
     reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
-    gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))
+    _ports().log(slug, [gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason)])
     if kind == "observe":
         return ""
     live = ledger.update_task(slug, task["id"], {"state": "blocked"}, if_state=("open",))
@@ -845,7 +863,7 @@ STEPS = (
         frozenset({AGENTS, TASKS, SWARM}) | TASK_STATE,
         PLACED | pass_domains("rows"),
         lane=CallStep.lane,
-        effects=frozenset({"ledger", "runtime", "coordination", "inbox"}),
+        effects=frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"}),
         feature="swarm-tick-spawn",
     ),
 )

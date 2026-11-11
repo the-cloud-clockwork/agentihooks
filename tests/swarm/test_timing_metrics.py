@@ -40,6 +40,7 @@ def test_a_finished_pass_exports_its_record_before_saving_it(
 ) -> None:
     saved: list[tuple[object, str, dict[str, Any]]] = []
     monkeypatch.setattr(timing, "finish_pass", lambda store, slug, record: saved.append((store, slug, dict(record))))
+    monkeypatch.setattr(timing, "pass_error", lambda store, slug, entry: None)
     store = object()
     with pytest.raises(RuntimeError), timing.pass_record(store, "sw"):
         raise RuntimeError("boom")

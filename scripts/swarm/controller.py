@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import uuid
 from collections.abc import Mapping
 from dataclasses import replace
@@ -10,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from time import monotonic, time
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from scripts.events import nkey
 from scripts.events.config import BACKEND_ENV, BusConfig
@@ -19,7 +20,7 @@ from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
-from scripts.swarm.ledger_client import LedgerUnreachable
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
@@ -550,16 +551,34 @@ def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None
     sys.stderr.flush()
 
 
-def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
+def run_once(
+    store: RedisStore,
+    ledger: Any = None,
+    runtime: Any = None,
+    messenger: Any = None,
+    runtimes: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
     from scripts.swarm.cli import run_tick
     from scripts.swarm.commands import hive_id
 
     runtimes = runtimes or {}
-    host, actions = hive_id(), {}
+    host = hive_id()
+    actions: dict[str, list[str]] = {}
+    reader: Any = ledger or LedgerClient()
     for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, "")):
+        if not tickable(reader, slug):
+            continue
         store.redis.set(store.key(slug, "controller-host"), host, px=lease.ttl_ms())
         actions[slug] = run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
     return actions
+
+
+def tickable(ledger: Any, slug: str) -> bool:
+    """Answer False for a swarm whose ledger is binned or closed; a gone or cleartext ledger ticks so its pass reports it once."""
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except (LedgerGone, ledger_link.Cleartext):
+        return True
 
 
 def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
@@ -586,11 +605,25 @@ def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
     return bus
 
 
-def _stopped(*_) -> None:
-    # The pod grace period can end before the tick's finally reaches its release.
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+RUNNING = threading.Event()
+DRAINING = threading.Event()
+
+
+def _halt() -> NoReturn:
+    """Stop the tick, release every held tick lock and exit as a terminated process."""
     tick_stop.STOP.set()
     tick_stop.release_all()
     sys.exit(143)
+
+
+def _stopped(signum: int, frame: object) -> None:
+    """Let a running pass finish on the first stop signal; exit at once between passes or on a second signal."""
+    if RUNNING.is_set() and not DRAINING.is_set():
+        DRAINING.set()
+        os.write(2, f"controller: stop signal {signum}, finishing the running pass before exit\n".encode())
+        return
+    _halt()
 
 
 def _cadence_wait(started: float) -> None:
@@ -608,6 +641,21 @@ def _pass(store: RedisStore, service: "ControlService | None", proof_swarm: Modu
     if service is not None:
         service.tick()
     proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
+
+
+def _finishing(store: RedisStore, service: "ControlService | None", proof_swarm: ModuleType) -> None:
+    """Run one pass that a stop signal lets finish, then exit once the pass ends."""
+    RUNNING.set()
+    try:
+        _pass(store, service, proof_swarm)
+    except Exception as exc:
+        if not DRAINING.is_set():
+            raise
+        os.write(2, f"controller: the last pass before exit ended: {exc}\n".encode())
+    finally:
+        RUNNING.clear()
+    if DRAINING.is_set():
+        _halt()
 
 
 def _reached(outage: redis_grace.Outage) -> RedisStore:
@@ -638,7 +686,7 @@ def _passes(
     while True:
         started = monotonic()
         try:
-            _pass(store, service, proof_swarm)
+            _finishing(store, service, proof_swarm)
         except LedgerUnreachable as exc:
             print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
             if once:
@@ -701,7 +749,8 @@ def main(argv: list[str]) -> int:
     store = _reached(outage)
     service = None
     bus = open_controller_bus(os.environ)
-    previous = signal.signal(signal.SIGTERM, _stopped)
+    DRAINING.clear()
+    previous = {number: signal.signal(number, _stopped) for number in STOP_SIGNALS}
     try:
         proof_swarm.run(os.environ, store)
         service = control_service.host(os.environ, store, commands.hive_id())
@@ -714,4 +763,5 @@ def main(argv: list[str]) -> int:
             service.stop()
         if bus is not None:
             bus.close()
-        signal.signal(signal.SIGTERM, previous)
+        for number, handler in previous.items():
+            signal.signal(number, handler)

@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -16,6 +17,7 @@ from .entry import Entry
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, TOKEN, Snapshot, SQLiteLedgerRepository
 
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
+SCRATCH_SHARED = "AGENTIHOOKS_SCRATCH_SHARED_DATABASE"
 WRITER_LOCK = 0x4C454447
 LEDGER_LOCK = 0x4C454453
 LEDGER_WRITE = f"SELECT pg_advisory_xact_lock_shared({WRITER_LOCK})"
@@ -114,7 +116,15 @@ def refusal(version: int, required: int) -> str:
 
 
 def url(env: Mapping[str, str]) -> str | None:
-    return env.get(URL) or None
+    address = env.get(URL) or None
+    if address and scratch(env) and env.get(SCRATCH_SHARED) != "1":
+        return None
+    return address
+
+
+def scratch(env: Mapping[str, str]) -> bool:
+    folder = env.get("LEDGER_DIR")
+    return bool(folder) and Path(folder).expanduser().resolve().is_relative_to((Path.home() / "scratchpad").resolve())
 
 
 def translate(sql: str, named: bool = False) -> str:

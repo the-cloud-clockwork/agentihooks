@@ -15,7 +15,7 @@
   "manual": {
     "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
     "label": "devbox",
-    "target": "ssh://operator@devbox.lan",
+    "target": "ssh://operator@devbox.example.internal",
     "session": "default",
     "enabled": true,
     "selected": false

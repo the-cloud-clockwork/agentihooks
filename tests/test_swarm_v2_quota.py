@@ -320,7 +320,18 @@ def test_the_primary_login_is_refused_admission_and_capped_at_its_reserve(world,
     from scripts import master_claude_login as login
 
     monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
-    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 80.0}, account=ACCOUNT)
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 98.0}, account=ACCOUNT)
+    assert world.quota.cap(ACCOUNT, HARNESS) == 0
+    assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
+
+
+def test_the_primary_login_is_refused_above_the_routing_floor_by_its_reserve(world, monkeypatch):
+    from scripts import master_claude_login as login
+    from scripts.routing import reservation
+
+    monkeypatch.setenv(login.ORDER_ENV, ACCOUNT)
+    monkeypatch.setenv(reservation.PRIMARY_RESERVE_ENV, "10")
+    world.publish({**INPUTS["spare"], "five_used": 0.0, "week_used": 92.0}, account=ACCOUNT)
     assert world.quota.cap(ACCOUNT, HARNESS) == 0
     assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
 

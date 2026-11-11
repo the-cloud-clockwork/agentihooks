@@ -1215,8 +1215,9 @@ them.
 Pinned and gated tasks narrow the hives before the role rule runs:
 
 - A task with `hive` set places only on that hive.
-- A task with `workstation=yes` places on the UI hive, or on the controller's own hive when no UI hive is
-  registered, and waits with `the task needs the workstation, so no remote hive takes it` otherwise.
+- A task with `workstation=yes` places only on the `root` hive, or on the controller's own hive when no `root` hive
+  is registered, never on another UI hive, and waits with
+  `the task needs the workstation, so no remote hive takes it` otherwise.
 - A task with `needs` places only on hives that declare every capability; see
   [Capabilities and task needs](#capabilities-and-task-needs).
 
@@ -1421,7 +1422,7 @@ Read the spills of the last hour from the tick journal, and the records the live
 environment agentihooks is installed in, from its checkout:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-1 hour" --no-pager | grep hive_placement_spill
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 hour" --until now --no-pager | grep hive_placement_spill
 python -c '
 from scripts.swarm.store import connect
 s, slug = connect(), "my-swarm"
@@ -1430,14 +1431,14 @@ for a in s.agents(slug):
         print(a.name, a.hive, a.profile_decision["placement_spill"])'
 ```
 
-To confirm the first ranked hive takes launches until its memory line, set the rank and watch both its reading and the
-spills while the swarm fills:
+To confirm the first ranked hive takes launches until its memory line, set the rank, let the swarm fill, then read
+both its reading and the spills of the last ten minutes:
 
 ```bash
 agentihooks hive set worker-1 prefer=eng:1,ci:1,plan:1,dispatch:1
 agentihooks hive set worker-2 prefer=eng:2,ci:2,plan:2,dispatch:2
 agentihooks hive list          # worker-1 available-mb falls as it takes agents
-journalctl --user -t agentihooks-swarm -f --no-pager | grep --line-buffered hive_placement_spill
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10 min" --until now --no-pager | grep --line-buffered hive_placement_spill
 ```
 
 Each spill line while `worker-1` is under its memory line names the other limit that refused it.
@@ -1481,7 +1482,7 @@ An observed account closes for new hive agents, with state `CLOSED` and cap `0`,
 
 Both thresholds are fixed in code; there is no setting for them. An observed row also closes when its latest reading
 is `rejected` by the provider, when it is the primary Claude login (rank zero of `AGENTIHOOKS_MASTER_LOGIN_ORDER`)
-with its week at or under `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` left (default 20), or when it is the Claude account
+with its week at or under `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` left (default 2), or when it is the Claude account
 a live master holds and its week has reached the workers' ceiling (see [reserved
 rows](load-balancing.md#reserved-rows-in-agentihooks-balance)). Any other observed row takes its quota band alone; the
 controller's launch cap does not bound it. A row whose reading is missing, older than fifteen minutes, reported as a
@@ -2522,7 +2523,7 @@ The cap a spawn meets is the smallest of:
 |---|---|
 | `local-max-agents`, stored per swarm, default 15 | `agentihooks swarm <id> set local-max-agents=N` |
 | The machine's hive `max-agents`, when the machine is a hive | `agentihooks hive set <machine> max-agents=N` |
-| The agents running plus the host room the room guard reads from load and available memory | Not set; measured each pass |
+| The agents running plus the [workstation admission room](#workstation-admission-room-and-the-swarm-share) | Not set; measured each pass |
 
 The local count is the union of:
 
@@ -2539,6 +2540,84 @@ session started by hand during a pass is counted on the next pass.
 
 A slot frees once its agent's record reads finished or ended and its session no longer runs, when a failed spawn
 releases its claim, or when a claim whose agent never appeared turns five minutes old.
+
+### Workstation admission room and the swarm share
+
+Each local spawn reads the machine's admission room from a fresh host reading taken in the tick, with the local
+agents already running and the launches still pending on the machine. A disk below the worktree floor gives room 0
+with `disk: <free> GB free on the agent home, below the <floor> GB worktree floor` before any other limit is read.
+Otherwise the room is the smallest of these limits:
+
+| Limit | Rule |
+|---|---|
+| Host CPU | Whole agents at 0.5 CPU each under 80 percent of the CPUs, measured from CPU used when the reading carries it, else from the five minute load. With CPU used in the reading, a five minute load above 80 percent of the CPUs and CPU used at or above 40 percent of them gives room 0. |
+| Host memory | Whole agents at 850 MB each under 80 percent of total memory. |
+| Pod CPU and memory | The same rules on the cgroup limits, when the machine runs in a pod with limits set. |
+| Swarm share, CPU | 40 percent of the CPUs at 0.5 CPU per agent, less the local agents running: 12 agents on 16 CPUs. |
+| Swarm share, memory | 40 percent of total memory at 850 MB per agent, less the local agents running. |
+
+The swarm share yields to the machine's agent ceiling. When the machine is a hive, the tick reads its ceiling, the
+same figure `hive list` shows as max agents: the computed ceiling from the hive's headroom reading, held under the
+operator's `max-agents` cap when one is set. A swarm share limit counts only while it fits at least the agents left
+under that ceiling, and drops out of the room otherwise. The share therefore never holds the machine below its
+ceiling, while the host and pod CPU and memory lines still bind as before. On a machine with no hive record there is
+no ceiling to yield to, and both share limits always count.
+
+These two share limits apply only to local spawns on the workstation. The refusal
+`with CPU used at or above the 40 percent swarm share, fits 0 more` is a different check, part of the host CPU line
+every hive room reads: it refuses while the five minute load is above 80 percent of the CPUs and CPU used is at or
+above 40 percent of them, and the ceiling never removes it.
+
+The room found this way is then held under `local-max-agents` and the hive `max-agents`, as in the table above.
+
+A workstation with 16 CPUs, `max-agents=20`, `local-max-agents=20`, a five minute load of 4.32, a low one minute load
+and ample memory, so the computed ceiling is at least 20, and 12 local agents running:
+
+| Limit | Fits |
+|---|---|
+| Swarm share, CPU | 0 more, below the 8 left under the ceiling of 20, so it drops out |
+| Host CPU | 16 more under the 80 percent line |
+| `max-agents` and `local-max-agents` | 8 more |
+
+The spawn is admitted and the local cap reads 20. Before
+[#7039](https://github.com/the-cloud-clockwork/agentihooks/pull/7039) the share bound regardless of the hive's
+`max-agents`, and the same fallback spawn waited at 12 with:
+
+```text
+no hive for eng has room: ..., and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
+```
+
+A spawn whose placement already chose the machine's own hive waits without the hives' reason in front:
+
+```text
+, and the local machine runs 12 of its 12 agents: cpu: 12 swarm agents at 0.5 CPU each on 16 CPUs, fits 0 more under the 40 percent swarm share
+```
+
+#7039 let the share yield to the stored
+`max-agents`; [#10131](https://github.com/the-cloud-clockwork/agentihooks/pull/10131) changed the figure it yields
+to into the computed ceiling held under that cap, so a host whose own reading allows fewer agents than `max-agents`
+yields only that far.
+
+When the ceiling itself equals what the share fits, the share still names the limit; with 10 agents running under a
+ceiling of 12 the room reads
+`cpu: 10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share`. A busy host binds on
+its own line: at a five minute load of 12.00 on 16 CPUs the room reads
+`cpu: five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line` with 12 agents
+running under any ceiling above 12.
+
+To let the workstation run twenty local workers:
+
+```bash
+agentihooks hive set <machine> max-agents=20
+agentihooks swarm <id> set local-max-agents=20
+agentihooks hive list | grep <machine>
+agentihooks swarm <id> autoscale --json | jq .local_slots
+```
+
+`hive list` shows the hive's max agents. `local_slots` reads 20, the smaller of `local-max-agents` and the hive's
+stored `max-agents`; it does not read the host. The cap a spawn meets reads lower when the computed ceiling or a host
+line is tighter: the spawn's refusal detail names the binding limit, and `autoscale --json` lists each hive's room
+under `hive_admission` and names the binding limit under `binding`.
 
 ### Workstation with eight local agents
 
@@ -2563,7 +2642,7 @@ spawning, as described above.
 ```bash
 agentihooks swarm <id> status
 agentihooks hive list
-journalctl --user -t agentihooks-swarm --since "1 hour ago" -g "local slot claim" --no-pager
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now -g "local slot claim" --no-pager
 ```
 
 An agent placed on a hive shows that hive in `status`; an agent that fell back runs in a local herdr pane. Each
@@ -2583,6 +2662,7 @@ clear; see [The local agent cap hold](swarm.md#the-local-agent-cap-hold).
 | Hive slots are full and the workstation sits idle while eng and ci work waits on `no hive for eng has room` | A condition in step 2 of the placement order fails for this spawn. | Follow the row for this symptom in [Placement by role](#placement-by-role). |
 | Waits read `the local machine runs 8 of its 8 agents` with fewer swarm agents than that | The count includes every swarm on the machine, named non master sessions started by hand, and claims under five minutes old. | Read the names in the `local slot claim` journal line; end the stray session or wait five minutes for a stale claim to lapse. |
 | The cap reads below `local-max-agents` | The machine's hive `max-agents` or the host room is smaller. | `agentihooks hive show <machine>`; `agentihooks swarm <id> autoscale` shows the host room and reason. |
+| Waits read `fits 0 more under the 40 percent swarm share` | The machine has no hive record, so the share has no ceiling to yield to, or the hive's ceiling, its computed figure held under `max-agents`, is at or below the local agents running; see [Workstation admission room and the swarm share](#workstation-admission-room-and-the-swarm-share). | Run the machine as a hive with `agentihooks hive install` and `agentihooks hive set <machine> max-agents=N`; raise `max-agents` when it is the lower figure; when `hive list` shows a computed max agents at the running count, the measured load or memory holds it there. |
 | Waits read `with <r> kept for waiting workstation tasks` | Tasks marked `workstation=yes` wait for the machine, and their seats are kept from fallback spawns. | Expected; those tasks take the seats first. |
 | A qa, frontend or master task never runs locally | The UI host rule: these roles never fall back. | Start a live UI hive that takes the role. |
 

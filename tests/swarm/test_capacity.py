@@ -1680,7 +1680,7 @@ def test_an_auto_swarm_reads_the_host_once_and_autoscales_on_the_stored_room(tmp
 def test_ready_engineers_get_free_seats_instead_of_an_idle_shifted_ci_lane(tmp_path, monkeypatch, scaling):
     seen = [account("a", cap=6, sessions=4), account("b", cap=6), account("c", cap=6)]
     rt = _scaling_runtime(tmp_path, monkeypatch, seen)
-    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling, lane_shift=16)
+    config = SwarmConfig("sw", "/repo", max_eng=8, max_ci=12, max_plan=0, scaling=scaling)
     agents = [AgentRecord("engineer", "eng", "e")] + [
         AgentRecord(f"ci{index}", "ci", f"c{index}") for index in range(3)
     ]

@@ -239,7 +239,7 @@ class DistributedLaunch:
             )
         task: dict[str, Any] = request.task
         planned_harness = None if self.planned_harness is None else self.planned_harness(task["id"])
-        harness: str = task.get("harness") or planned_harness or "claude"
+        harness: str = task.get("requires_harness") or task.get("harness") or planned_harness or "claude"
         if self.accounts is not None:
             planned = None if self.planned is None else self.planned(task["id"], harness)
             account = self.accounts(terms.cap, planned, quota_predecessor(task), harness, request.lane)

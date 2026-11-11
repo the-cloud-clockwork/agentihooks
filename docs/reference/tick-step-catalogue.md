@@ -56,7 +56,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | bottleneck remedy | placement | tick | 2 | 60 | ledger state | none | none |
 | preempt | placement | tick | 18 | 60 | drained resume, prerequisite reopen, reap, recover outages | none | none |
 | rank pass | placement | tick | 7 | 60 | drained resume | none | none |
-| spawn | placement | tick | 33 | 60 | launch checks, orphans, overrun pass, preempt, quiet pass, reap, track outages, verify | coordination, inbox, ledger, runtime | swarm-tick-spawn |
+| spawn | placement | tick | 33 | 60 | launch checks, orphans, overrun pass, preempt, quiet pass, reap, track outages, verify | coordination, inbox, ledger, metrics, runtime | swarm-tick-spawn |
 | codex hook order | placement acks | tick | 2 | 60 | sleeping | none | none |
 | collect acks | placement acks | tick | 7 | 60 | drained resume | none | none |
 | lost runner | placement notices | slow | 2 | 60 | drained resume | none | none |
@@ -67,7 +67,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | prerequisite reopen | reopen passes | tick | 2 | 60 | dev red reopen | none | none |
 | promotion refresh | reopen passes | slow | 2 | 60 | drained resume | none | none |
 | release alert | reopen passes | slow | 2 | 60 | drained resume | none | none |
-| config load | start | tick | 2 | 60 | none | none | none |
+| config load | start | tick | 2 | 60 | command runner, reboot pass | none | none |
 | stopped branch | start | tick | 2 | 60 | config load | none | none |
 | dispatcher group | task passes | tick | 2 | 60 | drained resume | none | none |
 | grouping release | task passes | tick | 2 | 60 | ledger state | none | none |
@@ -97,6 +97,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | intent check | wrapper intent | tick | 8 | 60 | none | none | none |
 | bottleneck status | wrapper metrics | slow | 2 | 120 | none | none | none |
 | inbox wake | wrapper metrics | slow | 2 | 60 | page relay | none | none |
+| knowledge warm | wrapper metrics | slow | 2 | 60 | none | host | tick-knowledge-warm |
 | metrics record | wrapper metrics | slow | 29 | 600 | health findings | none | none |
 | snapshot job | wrapper metrics | tick | 2 | 60 | none | none | none |
 | dependency audit | wrapper phases | tick | 2 | 60 | none | none | swarm-ordering-dependency-audit |

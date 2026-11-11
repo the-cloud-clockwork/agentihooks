@@ -137,6 +137,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -193,7 +194,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import engine, pool
+from scripts.tick import engine, hook_reads, pool
 from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
@@ -209,8 +210,9 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
-from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets
+from scripts.tick.sites import TICK_HOOK_KEYS, TICK_SHUT_KEYS, TICK_SITES, TickSites, run_sites
+from scripts.tick.step import Domain
+from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -254,8 +256,22 @@ WRAPPER_PREFIX = (
     "wrapper reboot",
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
-INTENT_JOINS = {"wrapper intent": "wrapper relay"}
+NONE: frozenset[Domain] = frozenset()
+WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    "wrapper probes": (NONE, NONE),
+    "wrapper commands": (pass_domains("stop"), NONE),
+    "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
+    "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
+    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper metrics": (NONE, hook_domains("count")),
+}
+PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
+PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
+ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
+LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -265,7 +281,6 @@ CONFIG_KEYS = {
     "engine": "engine",
     "tick-mode": "tick_mode",
     "watchdog-address": "watchdog_address",
-    "watchdog-document": "watchdog_document",
     "placement-mode": "placement_mode",
     PLACEMENT_NODES: "placement_nodes",
 }
@@ -275,6 +290,7 @@ TICK_LOCK_MS = 10 * 60 * 1000
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
@@ -417,6 +433,11 @@ def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, conf
     return view, skip_refused(check.run, doc)
 
 
+def _unstopped(owner: Any, hook: Callable[[], bool]) -> Callable[[], bool]:
+    """Return ``hook`` answering false without running once the ledger health probe stopped the pass of ``owner``."""
+    return lambda: "stop" not in owner.box and hook()
+
+
 @dataclass
 class _Wrapper:
     """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
@@ -459,8 +480,10 @@ class _Wrapper:
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
-        later site's step may spawn before its hook runs."""
-        return {
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site; the checks that reach the ledger answer false without running
+        once the ledger health probe stopped the pass, because the sites they open are shut then."""
+        found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
@@ -469,12 +492,17 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
+        guarded = hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        return {site: _unstopped(self, hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
-        commands once the ledger was binned or gone, and as the tick's sites say."""
-        stopped = step.group != "wrapper probes" and "stop" in self.box
-        return stopped or self.ended is not None or self.ticks.shut(step)
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, from the phases once their hook found the ledger binned or gone, so the probes,
+        health and commands sites the barrier ran before that hook keep running, and as the tick's sites say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
+        ended = self.ended is not None and step.group not in ENDS_AFTER
+        return stopped or ended or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:
         """Return the pass actions in the hand written order: health, commands, then the counted actions, then metrics."""
@@ -537,7 +565,7 @@ class _Wrapper:
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
-            self.box["view"] = view.result() if isinstance(view, Future) else view
+            self.box["view"] = host_steps.pass_view(self.slug, view)
         return True
 
     def _reread(self) -> bool:
@@ -567,8 +595,11 @@ class _PassSpool:
         from scripts.swarm import metrics_outbox
 
         spool: Any = metrics_outbox
+        sink = spool.settings(os.environ)
+        if sink is None:
+            return
         if self._box is None:
-            self._box = spool.Outbox(spool.spool_path(), spool.settings(os.environ))
+            self._box = spool.Outbox(spool.spool_path(), sink)
         self._box.append_many(batches, checkpoint)
 
 
@@ -592,6 +623,7 @@ def _fenced(held: object, deployment: str) -> Any:
 
 def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
+    from scripts.swarm import dispatcher
 
     swarm: Any = store
     settings: Any = classifier_settings.load()
@@ -607,7 +639,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),
-        metrics=SpoolMetrics(_PassSpool(), {}),
+        metrics=SpoolMetrics(_PassSpool(), {dispatcher.TABLE.name: dispatcher.TABLE}),
         host=local_host(store, slug, os.environ),
     )
 
@@ -660,7 +692,7 @@ def run_tick(
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     wrapper: _Wrapper | None = None
-    failed: Exception | None = None
+    failed: BaseException | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
@@ -682,12 +714,12 @@ def run_tick(
         ticks = TickSites(state, box, task_steps.appliers(state), now_ms, scanning=True)
         wrapper = _Wrapper(held, beating, state, box, ticks)
         _hold_view(beating, slug, ledger)
-        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen)
+        gate = engine.SiteGate(wrapper.hooks() | ticks.hooks(), wrapper.shut, wrapper.seen, sites=PASS_SITES)
         try:
-            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, INTENT_JOINS)
+            records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
         finally:
             wrapper.watching.close()
-        doc, view = box.get("doc", doc), box.get("view")
+        doc, view = box.get("doc", doc), host_steps.settled_view(box.get("view"))
         try:
             host_steps.raise_held(box)
         finally:
@@ -700,7 +732,7 @@ def run_tick(
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)
-    except Exception as exc:
+    except (Exception, ledger_link.Cleartext) as exc:
         failed = exc
         return host_steps.held_failure(exc, box, getattr(wrapper, "judging", {}))
     finally:
@@ -952,6 +984,8 @@ def cmd_tick_watch(store, args):
 def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
+    if WEB_REPO.match(args.repo):
+        raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
@@ -1191,12 +1225,13 @@ def cmd_agent_up(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def cmd_exit(store, args):
+def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
+    released = agent is not None and agent.lane != MASTER and agent.state == "finished"
+    if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
-    else:
+    elif not released:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
@@ -1294,7 +1329,7 @@ def config_value(key, value):
     if (
         key in default_models.KEYS
         or key in TRANSPORT_KEYS
-        or key in ("engine", "tick-mode", "watchdog-address", "watchdog-document", "placement-mode")
+        or key in ("engine", "tick-mode", "watchdog-address", "placement-mode")
     ):
         return value
     if key == HIVE_PLACEMENT:
@@ -2137,7 +2172,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
     done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2146,6 +2181,9 @@ def cmd_merge(store, args):
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
+        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
@@ -2157,7 +2195,7 @@ def cmd_merge(store, args):
                 admit=lambda head: (
                     (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
                 ),
-                journal=queue_record.Journal(args.url),
+                journal=queue_record.Journal(args.url, context=stalled),
                 attempts=merge_queue.ATTEMPTS,
             )
         else:

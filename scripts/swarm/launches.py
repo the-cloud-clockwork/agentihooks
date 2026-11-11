@@ -1,4 +1,4 @@
-"""The process select-profile runs a swarm agent's launch in, recorded at its start under the agent's name so
+"""The agent process select-profile launches for a swarm agent, recorded at its start under the agent's name so
 retirement can end it when the spawn recorded no validated process id."""
 
 import json
@@ -16,11 +16,12 @@ def _path(name: str, root: Path | None) -> Path:
     return (home() if root is None else root) / "launches" / f"{name}.json"
 
 
-def record(environ: dict[str, str], root: Path | None = None) -> None:
+def record(environ: dict[str, str], root: Path | None = None, pid: int | None = None) -> None:
+    """Record the agent process, this process unless pid names the launched one, under the agent's name."""
     name = environ.get("AGENTIHOOKS_AGENT_NAME")
     if not environ.get("AGENTIHOOKS_SWARM") or not name:
         return
-    own = processes().get(os.getpid())
+    own = processes().get(os.getpid() if pid is None else pid)
     if own is None:
         return
     target = _path(name, root)

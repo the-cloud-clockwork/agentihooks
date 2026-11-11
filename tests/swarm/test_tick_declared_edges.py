@@ -56,7 +56,7 @@ TODAY = {
         "findings pass",
         "doc items map",
     ],
-    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job"],
+    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job", "knowledge warm"],
     "closing": ["last tick", "heartbeat", "status publish", "step starvation"],
 }
 EDGES = (
@@ -117,7 +117,10 @@ def test_the_steps_on_each_edge_declare_what_they_read_and_write() -> None:
         frozenset({AGENTS, TASKS, SWARM}) | state,
         frozenset({AGENTS, TASKS, actions_of("spawn")}) | pass_domains("rows"),
     )
-    assert declared("settle") == (frozenset({AGENTS, TASKS, SWARM}) | state, frozenset({SWARM, actions_of("settle")}))
+    assert declared("settle") == (
+        frozenset({AGENTS, TASKS, SWARM}) | state,
+        frozenset({AGENTS, TASKS, SWARM, actions_of("settle")}),
+    )
 
 
 @pytest.mark.feature("swarm-tick-declared-edges")

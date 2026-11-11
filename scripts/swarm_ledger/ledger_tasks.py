@@ -52,12 +52,14 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
+    "requires_harness",
     "needs",
     "doc_items",
     "watchdog",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
+HARNESSES = ("", "claude", "codex")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -144,6 +146,7 @@ def check(op):
         check_lists(op)
         check_bools(op)
         check_profile(op)
+        check_requires_harness(op)
         check_urls(op)
         check_rank(op)
         check_difficulty(op)
@@ -173,6 +176,7 @@ def check(op):
     check_applied(fields)
     check_bools(fields)
     check_profile(fields)
+    check_requires_harness(fields)
     check_urls(fields)
     check_rank(fields)
     ledger_kinds.check(fields)
@@ -306,17 +310,22 @@ def check_lists(fields):
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
 
-def check_bools(fields):
+def check_bools(fields: dict[str, Any]) -> None:
     for key in BOOL_FIELDS:
         if key in fields and not isinstance(fields[key], bool):
             raise ValueError(f"{key} must be true or false")
 
 
-def check_profile(fields):
+def check_profile(fields: dict[str, Any]) -> None:
     if "profile" in fields and not (
         fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
     ):
         raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
+
+
+def check_requires_harness(fields: dict[str, Any]) -> None:
+    if fields.get("requires_harness", "") not in HARNESSES:
+        raise ValueError("requires_harness must be claude or codex, or empty for any harness")
 
 
 def check_urls(fields):
@@ -337,6 +346,7 @@ def check_task(task):
     check_applied(task)
     check_urls(task)
     check_profile(task)
+    check_requires_harness(task)
     check_rank(task)
     check_difficulty(task)
     ledger_kinds.check(task)
@@ -396,6 +406,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        "requires_harness",
         "needs",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):

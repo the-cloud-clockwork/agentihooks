@@ -107,6 +107,9 @@ computed cap. A lock held until Claude starts keeps two simultaneous launches
 from both taking the last free place.
 
 `agenti --route <slug>` skips all of this and uses `AH_CC_TOKEN_<slug>`.
+`agenti --route claude-ai` skips it too and runs on a stored claude ai login
+instead of a token; see
+[Standalone sessions on a claude ai login](../reference/account-login.md#standalone-sessions-on-a-claude-ai-login).
 
 ```text
 [agenti] account=work routing_left=62% 5h_left=80% 7d_left=62% sessions=1/6 source=cached
@@ -997,7 +1000,7 @@ days, so the refresher below keeps it alive.
 
 - The slug follows the `accounts env` rule: lower cased, `@` becomes `at` and
   every other character outside `a-z` and `0-9` becomes `_`, one for one, so an
-  email works (`nestor.colt@gmail.com` becomes `nestor_coltatgmail_com`, `team-a`
+  email works (`operator@example.com` becomes `operatoratexample_com`, `team-a`
   becomes `team_a`) and the login prints a note recommending the email of the
   target account. A result that is empty, starts with `_`, or is `status`,
   `help`, `default` or `api` is refused. Both logins use this rule. An account
