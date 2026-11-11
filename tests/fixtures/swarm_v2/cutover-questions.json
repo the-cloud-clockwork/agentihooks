@@ -1,0 +1,17 @@
+{
+  "provenance": "Engineering questions reconstructed from repository history: the catalog lock incident fixed by PRAGMA busy_timeout=5000 in the session catalog, and the empty kernel feed before the first brain tick. The sessions are the sanitized session tools fixture; each expected range was checked by hand against the records that fixture commits. No live transcript was read.",
+  "questions": [
+    {
+      "id": "catalog-lock",
+      "text": "\"database is locked\"",
+      "session": "lock",
+      "ranges": [[1, 4]]
+    },
+    {
+      "id": "kernel-feed",
+      "text": "\"kernel feed is empty\"",
+      "session": "kernel",
+      "ranges": [[1, 2]]
+    }
+  ]
+}

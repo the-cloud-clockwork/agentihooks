@@ -1,0 +1,21 @@
+{
+  "capture": "committed",
+  "case": "C",
+  "events_after_capture": 7,
+  "events_before_capture": 6,
+  "evidence_kept": true,
+  "local_dispatch": "consumer 'memory-keeper' routes to 'local.v1', which this caller does not serve",
+  "protected_unchanged": true,
+  "restored": {
+    "action": "rollback",
+    "consumer": "memory-keeper",
+    "endpoint": "local.v1",
+    "operation_id": "shadow-cca8cefe87a06c1c",
+    "revision": 2
+  },
+  "restored_endpoint_is_local": true,
+  "rollback_replay_equal": true,
+  "schema_version": "2.0",
+  "shadow_after_rollback": "accepted",
+  "stale_switch": "the route changed since the given revision; read it again"
+}
