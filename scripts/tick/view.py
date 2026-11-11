@@ -236,6 +236,7 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
         if exc.code != 400:
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
+        queued_file(path).unlink(missing_ok=True)
         view = None
     _hold(slug, view, _kept(refresh), path)
     return view
