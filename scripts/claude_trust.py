@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 WAIT_NOTICE = "the session will wait at Claude's folder trust question until someone answers it in its pane"
+STALE_LOCK_SECONDS = 10.0
 
 
 def _config_path(environ: dict[str, str]) -> Path:
@@ -60,6 +61,21 @@ def _write(config: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def _reclaim(lock: Path) -> bool:
+    """Remove a lock directory left past the Claude lockfile stale bound; True when the lock is gone."""
+    try:
+        age = time.time() - lock.stat().st_mtime
+    except FileNotFoundError:
+        return True
+    if age < STALE_LOCK_SECONDS:
+        return False
+    try:
+        lock.rmdir()
+    except FileNotFoundError:
+        pass
+    return True
+
+
 def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
     # Claude Code guards this file with a proper-lockfile lock directory beside it.
     lock = config.with_name(config.name + ".lock")
@@ -69,6 +85,8 @@ def _mark(config: Path, directory: Path, lock_timeout: float) -> bool:
             lock.mkdir()
             break
         except FileExistsError:
+            if _reclaim(lock):
+                continue
             if time.monotonic() >= deadline:
                 raise OSError(f"{lock} is held") from None
             time.sleep(0.1)
