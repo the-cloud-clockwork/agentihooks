@@ -52,6 +52,11 @@ TICK_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "agents": (steps.pass_domains(*TICK_KEYS), frozenset()),
     "tasks": (steps.pass_domains(CONFIG), frozenset()),
 }
+TICK_SHUT_KEYS: dict[str, frozenset[Domain]] = {
+    site: steps.pass_domains(FINISHED, *((SLEEPING,) if site in ASLEEP_SITES else ()))
+    for site in TICK_SITES
+    if site != START
+}
 
 
 class _GraphView:
@@ -84,6 +89,7 @@ class TickSites:
     clock: Callable[[], int]
     scanning: bool = False
     left: bool = False
+    left_from: str = START
     scan: Token[PassProcesses | None] | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
@@ -94,14 +100,15 @@ class TickSites:
 
     def shut(self, step: Step) -> bool:
         """Return whether ``step`` stays shut: every step once a step held an exception; a tick site past the start
-        once the stopped branch finished the pass or a value the tick reads was left, and a placement site while the
-        swarm sleeps."""
+        once the stopped branch finished the pass, from the site whose hook found a value the tick reads left, and a
+        placement site while the swarm sleeps."""
         if observe_steps.RAISED in self.box:
             return True
         if step.group not in TICK_SITES or step.group == START:
             return False
         asleep = step.group in ASLEEP_SITES and task_steps.sleeping_of(self.box)
-        return FINISHED in self.box or self.left or asleep
+        left = self.left and TICK_SITES.index(step.group) >= TICK_SITES.index(self.left_from)
+        return FINISHED in self.box or left or asleep
 
     def close(self) -> None:
         """End the process table scan the start check began, once."""
@@ -122,13 +129,20 @@ class TickSites:
 
     def _listed(self) -> bool:
         """Leave the tick's actions out when observation left a value the tick reads."""
-        self.left = not TICK_KEYS <= self.box.keys()
-        return not self.left
+        return self._leave(not TICK_KEYS <= self.box.keys(), "agents")
 
     def _configured(self) -> bool:
         """Leave the tick's actions out when the drained resume left the swarm config."""
-        self.left = CONFIG not in self.box
-        return not self.left
+        return self._leave(CONFIG not in self.box, "tasks")
+
+    def _leave(self, missing: bool, site: str) -> bool:
+        """Mark the tick left from ``site`` when ``missing`` and no earlier site left it, clear the mark ``site`` set
+        once its value is back; answer whether the site runs."""
+        if missing and not self.left:
+            self.left, self.left_from = True, site
+        elif not missing and self.left_from == site:
+            self.left = False
+        return not missing
 
 
 def run_sites(
@@ -137,16 +151,18 @@ def run_sites(
     box: dict[str, Any],
     gate: engine.SiteGate,
     apply: engine.Appliers,
-    joins: Mapping[str, str] | None = None,
+    hooks: Mapping[str, step_registry.HookKeys] | None = None,
+    shuts: Mapping[str, frozenset[Domain]] | None = None,
 ) -> tuple[engine.StepRecord, ...]:
-    """Run every registered step of ``sites`` as one pass graph in site order, each site after the one before it.
+    """Run every registered step of ``sites`` as one pass graph, each step after the steps of earlier sites whose
+    declared values it uses, the site ``hooks`` and the ``shuts`` values included.
 
     A step runs as ``gate`` says; slow lane steps that end after the graph returns print their actions.
     """
     order = {site: index for index, site in enumerate(sites)}
     found = sorted((step for step in step_registry.steps() if step.group in order), key=lambda step: order[step.group])
     ctx = Context(_GraphView(state, box), Deadline.after(tick.GROUP_BUDGET_S))
-    edged = step_registry.site_edges(found, sites, joins)
+    edged = step_registry.site_edges(found, sites, hooks, shuts)
     records = engine.run_graph(edged, ctx, apply, partial(tick._print_actions, box), gate)
     steps.note_left(box, records)
     return records

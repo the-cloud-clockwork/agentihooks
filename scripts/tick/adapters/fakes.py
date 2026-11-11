@@ -88,6 +88,9 @@ class FakeLedger:
     def task(self, task_id: str, *, deadline: Deadline) -> dict[str, Any]:
         return _record(self, "task", (task_id,), deadline)
 
+    def watchdog_copy(self, *, deadline: Deadline) -> dict[str, Any]:
+        return _record(self, "watchdog_copy", (), deadline)
+
     def notify(self, text: str, *, deadline: Deadline) -> None:
         _record(self, "notify", (text,), deadline)
 

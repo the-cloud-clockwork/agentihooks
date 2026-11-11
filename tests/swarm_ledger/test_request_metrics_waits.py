@@ -68,6 +68,10 @@ def test_a_write_splits_client_postgres_and_lock_waits_out_of_other_wall(clock):
         "lock_wait_seconds": 4.0,
         "client_wait_seconds": 4.0,
         "postgres_wait_seconds": 2.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
         "other_wall_seconds": 0.0,
     }
     [record] = metrics.records(1.0, None, 10)["routes"][0]["records"]
@@ -145,6 +149,10 @@ def test_a_legacy_journal_sample_reads_with_zero_new_waits(tmp_path, monkeypatch
         "lock_wait_seconds": 0.5,
         "client_wait_seconds": 0.0,
         "postgres_wait_seconds": 0.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
     }
 
 

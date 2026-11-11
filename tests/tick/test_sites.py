@@ -140,7 +140,7 @@ def test_run_sites_runs_the_registered_steps_of_its_sites_in_site_order_through_
     seen = _graphs(monkeypatch)
     gate = engine.SiteGate({"b": lambda: True}, lambda step: step.name == "a2")
     box: dict[str, Any] = {}
-    records = sites.run_sites(("a", "b", "c"), {"slug": "sw"}, box, gate, {}, {"a": "c"})
+    records = sites.run_sites(("a", "b", "c"), {"slug": "sw"}, box, gate, {})
     assert [record.name for record in records] == ["a1", "a2", "b1", "c1"]
     assert [record.rested for record in records] == [False, True, False, False]
     assert ran == ["a1", "b1", "c1"]
