@@ -263,38 +263,6 @@ class ArtifactEndpoint(Endpoint):
         assert code == 403
         assert body == "agent must join this ledger before uploading"
 
-    def upload_like_the_cli(self, agent: str | None, request: dict) -> tuple[int, str]:
-        headers = {
-            "Host": f"127.0.0.1:{server.PORT}",
-            "X-Artifact-Name": "plan.md",
-            "X-Artifact-Request": json.dumps(request),
-            "X-Ledger-Token": self.token,
-            "Content-Type": "application/octet-stream",
-            **({"X-Ledger-Agent": agent} if agent is not None else {}),
-        }
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}/api/artifacts/via-media",
-            data=f"# Host plan {agent}\n".encode(),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req) as resp:
-                return resp.status, resp.read().decode()
-        except urllib.error.HTTPError as exc:
-            return exc.code, exc.read().decode()
-
-    @pytest.mark.feature("operator-host-plan-upload")
-    def test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header(self) -> None:
-        plan = {"task": "", "title": "Plan", "plan": True}
-        for agent in ("operator", None):
-            code, body = self.upload_like_the_cli(agent, plan)
-            assert code == 200, (agent, body)
-            assert json.loads(body)["type"] == "text/markdown"
-        assert self.upload_like_the_cli("operator", {"task": "", "title": "Note"}) == (
-            403,
-            "agent must join this ledger before uploading",
-        )
 
     @pytest.mark.feature("operator-host-plan-upload")
     def test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused(self) -> None:
@@ -467,3 +435,45 @@ def test_upload_artifact_sends_bytes_name_token_and_agent(tmp_path):
     assert req.data == MARKDOWN
     assert req.get_header("X-artifact-name") == "proposal.md"
     assert json.loads(req.get_header("X-artifact-request")) == {"task": "av1", "title": "Proposal", "request": "wanted"}
+
+
+class TestOperatorHostPlanUpload(Endpoint):
+    def upload_like_the_cli(self, agent: str | None, request: dict) -> tuple[int, str]:
+        headers = {
+            "Host": f"127.0.0.1:{server.PORT}",
+            "X-Artifact-Name": "plan.md",
+            "X-Artifact-Request": json.dumps(request),
+            "X-Ledger-Token": self.token,
+            "Content-Type": "application/octet-stream",
+            **({"X-Ledger-Agent": agent} if agent is not None else {}),
+        }
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/artifacts/via-media",
+            data=f"# Host plan {agent}\n".encode(),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, resp.read().decode()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode()
+
+    @pytest.mark.feature("operator-host-plan-upload")
+    def test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header(self) -> None:
+        plan = {"task": "", "title": "Plan", "plan": True}
+        for agent in ("operator", None):
+            code, body = self.upload_like_the_cli(agent, plan)
+            assert code == 200, (agent, body)
+            assert json.loads(body)["type"] == "text/markdown"
+        assert self.upload_like_the_cli("operator", {"task": "", "title": "Note"}) == (
+            403,
+            "agent must join this ledger before uploading",
+        )
+
+    @pytest.mark.feature("operator-host-plan-upload")
+    def test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused(self) -> None:
+        assert self.upload_like_the_cli("host-stranger", {"task": "", "title": "Plan", "plan": True}) == (
+            403,
+            "agent must join this ledger before uploading",
+        )
