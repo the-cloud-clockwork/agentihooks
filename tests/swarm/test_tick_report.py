@@ -215,6 +215,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
         "launch  1  100.00%  1  0  0  2\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
+        "Pass errors, newest first: 0\n"
     )
 
 
