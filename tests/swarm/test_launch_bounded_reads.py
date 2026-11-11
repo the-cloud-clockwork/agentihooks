@@ -89,15 +89,18 @@ def test_fields_reads_every_field_across_pages(store: RedisStore) -> None:
 @pytest.mark.feature("swarm-launch-bounded-reads")
 def test_fields_stops_after_its_page_bound() -> None:
     calls: list[int] = []
+    counts: set[int] = set()
 
     def hscan(key: str, cursor: int, count: int) -> tuple[int, dict[str, str]]:
         calls.append(cursor)
+        counts.add(count)
         return len(calls), {f"f{len(calls)}": "1"}
 
     with pytest.raises(SwarmError, match="hash h holds more than 1000 pages of 1 fields"):
         hash_pages.fields(SimpleNamespace(hscan=hscan), "h", page=1)
     assert len(calls) == hash_pages.PAGES == 1000
     assert calls[:3] == [0, 1, 2]
+    assert counts == {1}
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
