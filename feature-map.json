@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-launch-pane-off-controller-hold",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
+      "behaviour": "Retiring a failed launch whose agent a hive hosts sends its pane with the hive retire and never holds it for the controller failed pane sweep, which reads and closes panes only on its own herdr server.",
+      "seam": "tick observe step retire launch against failed_panes.held",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
