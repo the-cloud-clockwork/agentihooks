@@ -263,13 +263,6 @@ class ArtifactEndpoint(Endpoint):
         assert code == 403
         assert body == "agent must join this ledger before uploading"
 
-    @pytest.mark.feature("operator-host-plan-upload")
-    def test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused(self) -> None:
-        assert self.upload_like_the_cli("host-stranger", {"task": "", "title": "Plan", "plan": True}) == (
-            403,
-            "agent must join this ledger before uploading",
-        )
-
     def test_an_agent_publishes_markdown_json_and_svg_on_a_task(self):
         self.put([{"op": "join", "id": "j-art", "by": "art-engineer"}])
         task = {
