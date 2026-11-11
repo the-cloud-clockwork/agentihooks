@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.801 · 2026-11-11
+
+### 2026-11-10 · 79882da9fbeb · #10512 · @nestorcolt
+
+**Add an opt-in step profiler for named tick steps**
+
+This change adds an opt-in, in-process profiler to `timing.within()`, the single seam where a tick step's body executes, so that steps named in the new `AGENTIHOOKS_TICK_PROFILE_STEPS` env var run under `cProfile` and emit a `swarm_tick_step_profile` JSON line with the top 25 functions by cumulative and own time. It exists to diagnose the `collect acks` step burning 9.8-22.9s of per-thread CPU against a 7s budget, stalling sibling threads, since py-spy can't attach in the pod. With the env var unset, behavior is byte-for-byte identical to before; this is diagnostics only, verified by tests that the profiler is never invoked by default.
+
 ## v2.17.800 · 2026-11-10
 
 ### 2026-11-10 · 725ec6c56d38 · #10523 · @agenticore-app
