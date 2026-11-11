@@ -299,6 +299,7 @@ def test_a_lane_focus_covers_a_normal_task_in_that_lane(store):
     assert not preempt.preferred({**lane_task, "lane": "ci"}, focused, graph)
 
 
+@pytest.mark.feature("swarm-preempt-claim-view-once-per-pass")
 def test_run_reads_every_full_lane_from_one_claim_view(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(preempt.dispatcher, "claim_key", lambda config, received: lambda task: (2, task["id"]))
     for name, task, lane in (("e1", "t1", "eng"), ("e2", "t2", "eng"), ("c1", "t9", "ci")):
