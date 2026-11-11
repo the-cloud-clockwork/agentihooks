@@ -705,6 +705,7 @@ def _assets(hub: Path) -> None:
 @pytest.mark.feature("hub-import-assets")
 def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_path: Path) -> None:
     _assets(hub)
+    (_package(hub) / "docs/logo.png").write_bytes(b"\x89PNG\xff\xfe")
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False, tmp_path / "data")
     profile, package, files = out / "profiles/diagram", _package(hub), report["files"]
@@ -712,6 +713,7 @@ def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_pa
     for relative in ASSETS:
         assert (profile / relative).read_bytes() == (package / relative).read_bytes()
         assert f"profiles/diagram/{relative}" in files
+    assert (profile / "docs/logo.png").read_bytes() == b"\x89PNG\xff\xfe"
     assert (profile / "hooks/render_diagram.py").read_text() == "print('render')\n"
     assert "profiles/diagram/hooks/render_diagram.py" in files
     for relative in SKIPPED:
@@ -719,8 +721,11 @@ def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_pa
 
 
 @pytest.mark.feature("hub-import-assets")
-def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path) -> None:
-    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": "xoxb-" + "1" * 12}}}}
+@pytest.mark.parametrize("value", ["xoxb-" + "1" * 12, "plain-value-123"])
+def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(
+    hub: Path, tmp_path: Path, value: str
+) -> None:
+    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": value}}}}
     (_package(hub) / ".mcp.json").write_text(json.dumps(servers))
     out = tmp_path / "bundle"
     with pytest.raises(ValueError, match=r"literal credential refused.*\.mcp\.json"):

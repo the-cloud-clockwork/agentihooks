@@ -98,7 +98,7 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
             raise ValueError(f"profile name taken: {name}")
         if (data / "profiles" / name).exists():
             raise ValueError(f"profile data taken: {name}")
-        plans[name] = _merge(_plan(package, name, command), _cases(package.parent / CASES), package)
+        plans[name] = _merge(_plan(package, name, command), _cases(package.parent / CASES))
         stores[name] = _collect(package, DATA)
         deps.extend(_deps(package, name))
     manifest = _manifest(out / DEPS, deps)
@@ -201,7 +201,7 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package), package)
+    files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package))
     mcp_path = package / MCP
     if mcp_path.is_file():
         _refuse_literal_credentials(json.loads(mcp_path.read_text()), mcp_path)
@@ -213,7 +213,7 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         _refuse_literal_credentials(settings, settings_path)
         portable = _portable(settings)
         if portable is not _DROP:
-            files = _merge(files, {OVERRIDES: (json.dumps(portable, indent=2) + "\n").encode()}, package)
+            files = _merge(files, {OVERRIDES: (json.dumps(portable, indent=2) + "\n").encode()})
     return files
 
 
@@ -230,18 +230,18 @@ def _assets(package: Path) -> dict[str, bytes]:
             relative = (root / entry).relative_to(package).as_posix()
             if relative not in CONVERTED and entry not in INSTALL_MANIFESTS:
                 files[relative] = (root / entry).read_bytes()
-    files = _merge(files, _collect(package.parent, (AGENT_HOOKS,)), package)
+    files = _merge(files, _collect(package.parent, (AGENT_HOOKS,)))
     for relative, content in files.items():
         if secrets.scan(content.decode(errors="ignore"), mode="strict"):
             raise ValueError(f"literal credential refused: {relative} in {package.parent}")
     return files
 
 
-def _merge(files: dict[str, bytes], added: dict[str, bytes], package: Path) -> dict[str, bytes]:
+def _merge(files: dict[str, bytes], added: dict[str, bytes]) -> dict[str, bytes]:
     """Return both file sets together, refusing a profile path that both of them write."""
     taken = sorted(files.keys() & added.keys())
     if taken:
-        raise ValueError(f"profile file taken twice: {taken[0]} in {package}")
+        raise ValueError(f"profile file taken twice: {taken[0]}")
     return files | added
 
 
