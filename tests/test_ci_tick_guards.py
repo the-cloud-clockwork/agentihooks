@@ -36,6 +36,8 @@ def workflow(name: str) -> dict:
         ("scripts/swarm/ledger_client.py", "true"),
         ("scripts/swarm/health/checks.py", "true"),
         ("tests/swarm/test_tick.py", "true"),
+        ("tests/swarm/test_tick_idle.py", "true"),
+        ("tests/swarm/test_tick_claims.py", "true"),
         ("tests/swarm/test_delivery.py", "true"),
         ("scripts/swarm/cli.py", "false"),
         ("tests/swarm/test_store.py", "false"),

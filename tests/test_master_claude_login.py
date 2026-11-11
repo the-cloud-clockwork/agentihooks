@@ -713,8 +713,8 @@ def test_prepare_skips_the_primary_login_at_its_reserve(
 
     _seed(rendered)
     monkeypatch.setenv(login.ORDER_ENV, "master@example.com")
-    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 20.0)
-    with pytest.raises(login.LoginRefused, match="masteratexample_com reserved at 20% of the week left"):
+    monkeypatch.setattr(master_logins, "week_left", lambda account, now: 2.0)
+    with pytest.raises(login.LoginRefused, match="masteratexample_com reserved at 2% of the week left"):
         login.prepare(_environ(rendered), tmp_path)
 
 

@@ -112,6 +112,12 @@ class FakeCoordination:
     def lock(self, name: str, *, deadline: Deadline) -> object:
         return _record(self, "lock", (name,), deadline)
 
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "tick_lock", (held, ttl_ms, caller), deadline)
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
+        _record(self, "release_tick_lock", (token, caller), deadline)
+
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
 

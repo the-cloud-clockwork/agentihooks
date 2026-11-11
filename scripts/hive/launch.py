@@ -300,7 +300,9 @@ class HiveLaunch:
             self._pass_hives = (self.placement_cache, placement.for_swarm(loaded_hives(self.store), self.slug))
         return self._pass_hives[1]
 
-    def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
+    def _record_wait(
+        self, lane: str, task: dict[str, Any], selected: Selection | placement.Wait
+    ) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
         from scripts.swarm.commands import hive_id
 
@@ -362,7 +364,12 @@ class HiveLaunch:
             return self._record_wait(lane, task, refused)
         listed = tuple(hives)
         hives = [hive for hive in hosting(hives, profile, advertised) if placement.hosts(lane, hive, (profile,))]
-        harness = saved.get("harness") or chosen.get("agent") or "auto"
+        required: str | None = task.get("requires_harness")
+        pinned: str = chosen.get("agent") or "auto"
+        if required and pinned not in ("auto", required):
+            wait = placement.Wait(f"lane harness {pinned} cannot run a task that requires {required}", role)
+            return self._record_wait(lane, task, wait)
+        harness = required or saved.get("harness") or pinned
         auto = harness == "auto"
         if auto:
             harness = getattr(self.herdr, "_quota_tasks", {}).get(task["id"]) or "claude"
@@ -916,6 +923,7 @@ class HiveLaunch:
             launched_at=agent.launched_at,
             overlays=agent.overlays,
             launch_timings=agent.launch_timings,
+            remote_control=agent.remote_control,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 
@@ -946,6 +954,7 @@ class HiveLaunch:
             launched_at=ack.execution.get("launched_at", agent.launched_at),
             launch_timings=ack.execution.get("launch_timings", agent.launch_timings),
             overlays=ack.execution.get("overlays", agent.overlays),
+            remote_control=ack.execution.get("remote_control", agent.remote_control),
         )
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.store.execution_registry.update(self.slug, live)

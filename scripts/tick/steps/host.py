@@ -3,8 +3,11 @@
 import sys
 import traceback
 from collections.abc import Callable
+from concurrent.futures import Future, wait
 from importlib import import_module
-from typing import Any
+from itertools import count
+from threading import Lock
+from typing import Any, cast
 
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
@@ -19,15 +22,21 @@ from scripts.swarm import (
     timing,
 )
 from scripts.swarm.health import prompt_backlog
-from scripts.tick import registry
+from scripts.tick import pool, registry
 from scripts.tick import view as ledger_view
 from scripts.tick.engine import SLOW
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, Left, pass_domains
-from scripts.tick.steps.tasks import PHASES, WriteStep
+from scripts.tick.steps import CallStep, Left, hook_domains, pass_domains
+from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
+REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
+VIEW_RESERVE_S = 20.0
+_LAST_VIEWS: dict[str, Any] = {}
+_VIEW_ORDER: dict[str, int] = {}
+_BUILDS = count()
+_KEEPING = Lock()
 
 
 def held(call: Callable[[Any, Get], Any], box: str = "box") -> Callable[[Any, Get], Any]:
@@ -68,11 +77,15 @@ def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], A
     return run
 
 
-def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
-    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
-    raise it again."""
+def held_failure(exc: BaseException, *boxes: dict[str, Any]) -> list[str]:
+    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes`` or a
+    ledger address refusing the credential over plain http, else raise it again."""
     from redis.exceptions import RedisError
 
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    if isinstance(exc, Cleartext):
+        return failed_pass(exc)
     if isinstance(exc, RedisError) or not any(box.get("raised") is exc for box in boxes):
         raise exc
     return failed_pass(exc)
@@ -88,14 +101,16 @@ def failed_pass(exc: BaseException) -> list[str]:
 
 
 def end_held(box: dict[str, Any]) -> list[str]:
-    """Raise a stop a step held in ``box``, else log the exception it held and return the line ending its pass as
-    failed, nothing when no step raised."""
+    """Raise a stop a step held in ``box``, else log the exception it held, a ledger address refusing the credential
+    over plain http included, and return the line ending its pass as failed, nothing when no step raised."""
     from redis.exceptions import RedisError
+
+    from scripts.swarm_ledger.ledger_link import Cleartext
 
     raised = box.get("raised")
     if raised is None:
         return []
-    if not isinstance(raised, Exception) or isinstance(raised, RedisError):
+    if not isinstance(raised, (Exception, Cleartext)) or isinstance(raised, RedisError):
         raise raised
     return failed_pass(raised)
 
@@ -210,6 +225,41 @@ def _tick_view(cli: Any, get: Get) -> None:
     get("box")["view"] = view
 
 
+def pass_view(slug: str, view: Any) -> Any:
+    """Return the pass view of swarm ``slug``: ``view`` itself unless it is a build, the build's view or error when it
+    ends while both lanes keep ``VIEW_RESERVE_S``, else the last view the swarm completed in this process; a late
+    build replaces that last view once it ends, and a swarm with no earlier view waits for its build."""
+    if not isinstance(view, Future):
+        return view
+    build = cast(Future[Any], view)
+    earlier = _LAST_VIEWS.get(slug)
+    order = next(_BUILDS)
+    build.add_done_callback(lambda built: _keep_view(slug, built, order))
+    if earlier is None:
+        return build.result()
+    wait((build,), timeout=_view_wait_s())
+    return build.result() if build.done() else earlier
+
+
+def _keep_view(slug: str, built: Future[Any], order: int) -> None:
+    """Keep the view ``built`` made as the last view of swarm ``slug`` when the build ended without an error and no
+    build the swarm started after it, by ``order``, is kept already."""
+    if built.cancelled() or built.exception() is not None:
+        return
+    with _KEEPING:
+        if _VIEW_ORDER.get(slug, order) <= order:
+            _LAST_VIEWS[slug], _VIEW_ORDER[slug] = built.result(), order
+
+
+def _view_wait_s() -> float | None:
+    """Return the seconds the pass may wait for its view: the time left in the earlier ending of the critical and
+    slow lanes less ``VIEW_RESERVE_S``, or no bound outside a pass."""
+    current = pool.active()
+    if current is None:
+        return None
+    return max(0.0, min(current.critical.remaining, current.slow.remaining) - VIEW_RESERVE_S)
+
+
 STEPS = (
     CallStep("inbox relay", "wrapper probes", held(_inbox_relay)),
     CallStep("launch slots", "wrapper probes", held(_launch_slots)),
@@ -221,28 +271,46 @@ STEPS = (
     CallStep("ledger probe", "wrapper health", held(_ledger_probe), lane=SLOW),
     CallStep("prompt backlog", "wrapper health", held(_prompt_backlog), lane=SLOW),
     CallStep("command runner", "wrapper commands", held(_command_runner)),
-    CallStep("urgent hold", "wrapper phases", held(_urgent_hold)),
+    CallStep("urgent hold", "wrapper phases", held(_urgent_hold), reads=hook_domains("doc")),
     CallStep(
         "dependency audit",
         "wrapper phases",
         held(_dependency_audit),
         needs=frozenset(),
-        reads=frozenset(),
+        reads=hook_domains("doc"),
         writes=frozenset(),
         lane=CallStep.lane,
         effects=frozenset(),
         feature="swarm-ordering-dependency-audit",
     ),
-    WriteStep("planning and phase pass", "wrapper phases", held(_phase_passes), writes=frozenset({PHASES})),
+    WriteStep(
+        "planning and phase pass",
+        "wrapper phases",
+        held(_phase_passes),
+        reads=hook_domains("doc"),
+        writes=frozenset({PHASES}) | pass_domains(PHASE_CHANGED),
+    ),
     CallStep(
-        "planning after phase", "wrapper phases", held(_planning_after_phase), frozenset({"planning and phase pass"})
+        "planning after phase",
+        "wrapper phases",
+        held(_planning_after_phase),
+        frozenset({"planning and phase pass"}),
+        pass_domains(PHASE_CHANGED),
     ),
     CallStep("refresh job", "wrapper refresh", held(_refresh_job)),
-    CallStep("intent check", "wrapper intent", held(_intent_check, JUDGING), writes=pass_domains("judged")),
+    CallStep(
+        "intent check",
+        "wrapper intent",
+        held(_intent_check, JUDGING),
+        reads=hook_domains("doc", "config"),
+        writes=pass_domains("judged"),
+    ),
     CallStep("reboot pass", "wrapper reboot", held(_reboot_pass)),
     CallStep("outbox migration", "wrapper relay", held(_outbox_migration)),
     CallStep("page relay", "wrapper relay", held(_page_relay), writes=pass_domains("agents")),
-    CallStep("tick view", "wrapper view", held(_tick_view), writes=pass_domains("view"), kept=True),
+    CallStep(
+        "tick view", "wrapper view", held(_tick_view), reads=hook_domains("doc"), writes=pass_domains("view"), kept=True
+    ),
 )
 
 for _step in STEPS:

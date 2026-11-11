@@ -2640,6 +2640,25 @@ def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
     assert result.value.execution == live
 
 
+def test_controller_records_the_remote_control_a_joined_hive_acknowledged(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    target = {"host_id": "remote", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    off = {"state": "off", "detail": "subscription token fallback"}
+    metadata = {"pane_id": "pane", "profile_decision": {"pid": 12}, "remote_control": off}
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", target, "", metadata))
+    result = setup.launcher.wait(order)
+    assert result.ok
+    assert setup.store.execution_registry.get("fixture", order.execution_id).remote_control == off
+    assert result.value.remote_control == off
+
+
 def test_an_acknowledgement_without_metadata_keeps_the_admitted_fields(setup):
     from scripts.hive.orders import Ack
 

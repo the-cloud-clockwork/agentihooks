@@ -47,7 +47,6 @@
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent and the size of one pull request."],
     ['[data-gate-name="stall"]', "Stalled pull requests."],
     ['[data-gate-name="window"]', "Checks the run window at its cutoff: new claims stop and agents in flight hand off."],
-    ['[data-gate-name="lane-split"]', "Seat moves between the eng and ci lanes."],
     ['[data-gate-name="nightwatch"]', "Watches the front door master seat, ready work without a launch and dev merges every tick."],
     ['[data-gate-name="reset"]', "Recycles a master held on a question, permission or interrupted prompt while operator items wait fifteen minutes."],
     ['[data-gate-name="feature"]', "Checks that done on live proof names a mapped feature with tests."],

@@ -147,7 +147,7 @@ speaker ownership changes, service updates and client failures separately.
 On the workstation that ran the tick:
 
 ```bash
-journalctl --user -u agentihooks-swarm \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since '2026-10-20 08:59:00 UTC' --until '2026-10-20 13:10:00 UTC' \
   --no-pager | rg -c 'DatabaseError.*server closed the connection unexpectedly'
 kubectl -n agentihooks-swarm logs agentihooks-swarm-postgres-0 \

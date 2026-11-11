@@ -245,7 +245,7 @@ swarm's identity conflict count and the master seat's execution name, id, genera
 Python environment agentihooks is installed in, from its checkout:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 day" --until now --no-pager \
   | grep -E "adopted live master|stale or changed execution identity"
 python -c '
 from scripts.swarm.store import connect
@@ -321,10 +321,11 @@ recorded launch decision:
 
 | Status or finding | Meaning |
 |---|---|
-| `Remote Control: on (master 1 · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
-| `Remote Control: off (flag)` | The master login option is off. |
-| `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
-| `Remote Control: off (gateway)` | The master uses the API route. |
+| `Remote Control: on (master 1 · <id>), phone access available` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: off (flag), phone access unavailable` | The master login option is off. |
+| `Remote Control: off (fallback auth), phone access unavailable` | The master uses subscription token authentication. |
+| `Remote Control: off (gateway), phone access unavailable` | The master uses the API route. |
+| `Remote Control: off (subscription token fallback), phone access unavailable` | The front door master asked for its native login, but the login chain ended on the subscription token fallback, so it launched without Remote Control. The master card shows the same reason. |
 | `master-fallback-auth/<seat>` | An active master wanted interactive authentication but runs on fallback auth: phone access is lost. Returning to interactive auth removes this finding. |
 | `master-rc/<seat>` | A Remote Control failure notification was recorded since this master started: phone access is lost even if the launch decision was on. A `Remote Control back on` notification clears the recorded failure. |
 
@@ -444,7 +445,7 @@ window applies to a `starting` execution on any seat, engineer seats included; i
 
 ```bash
 # Launch refusals and orphan endings for the master in the last hour
-journalctl --user -t agentihooks-swarm --since "1 hour ago" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now \
   | grep -E "ended orphan execution|startup pending|replacement does not match"
 # The master line lists a live master once the seat binds
 agentihooks swarm <id> status
@@ -999,7 +1000,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> restore [--from FILE]` | After a reboot or a lost Redis: refuse while any agent of the swarm is live, write the newest snapshot back (manual, stop or automatic, by the time it was taken; `--from` names an older file) and leave the swarm paused. Each agent with a conversation id, its worktree still on disk (the master: the swarm repo) and its account not out of quota is relaunched through `init-agent --resume` into its own conversation, with the same pane name, seat, task and account (`--route`) on its lane's current model and effort, never the recorded one (a master on the frontier model at high effort); it counts as resumed only once herdr shows that conversation on the new pane, and its first message tells it to re-read its task folder and the ledger before acting. Every failed resume retains its seat and task as awaiting decision. The tick never starts a fresh replacement until the master or operator chooses Fresh on the page or runs `restore-decision`. Resume retries the old conversation; a failed retry keeps the decision open. Each agent's outcome, resumed or awaiting decision with the reason, shows as a `restored` line in `status`, under `restored` in `status --json` and in the Last restore list of the ledger page swarm panel. The ledger copy is written back only when the ledger file is gone. |
 | `agentihooks swarm <id> restore-decision AGENT resume\|fresh` | The master or operator chooses how an awaiting seat returns. Resume retries the saved conversation; fresh explicitly permits a new successor. The Last restore list offers the same two controls. For a Kubernetes worker attempt the controller applies the choice on its next recovery pass; see [Fenced restore decisions](../swarm-v2/checkpoint-restore.md). |
 | `agentihooks swarm <id> confirm-handoff TRANSFER --next TEXT` | A live successor confirms that it read the handoff and its first Next action. Continuity remains pending until that confirmation; binding independently records live seat occupancy. Both appear in Handoff outcomes on the page and in `status --json`. |
-| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room None: <reason>` when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling, and the tick's master seat too, after the quota seat check. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
+| `agentihooks swarm <id> status [--json]` | Config, task counts, when the last automatic snapshot was taken (`snapshots  last automatic snapshot 2026-10-05 13:15 UTC  every 30 min  kept 4`), one row per agent with its [transport capabilities](#transport-capabilities), and the health findings. An agent's model and effort are what its running session last reported (the Claude status line, a Codex hook) once that differs from the launch, with model source `session`, so a manual `/model` or `/effort` switch shows on the next tick. It also prints the host room (`host room 3: <reason>`, or `host room None: <reason>` when capacity is unavailable; see [Local host room](#local-host-room) and [Deployed host capacity](#deployed-host-capacity)) and, when the last spawn pass stopped at that room, the hold (`holding spawns: host memory room 3, 3 spawned since it was granted: <reason>`). The host room gates every spawn in manual and auto scaling after the quota seat check; master seats pass it, as they pass workstation admission, though each master launch still counts against the room. Spawns from every swarm on the host count against the room from thirty seconds before it was granted, since a new agent takes that long to show in a reading; a room held between the load watermarks keeps its first grant time, so spawns made under it keep counting. An unknown host lets spawns pass and keeps the last known room for the next reading. An operator's own master start and restore relaunches after a reboot are not gated. |
 | `agentihooks swarm <id> autoscale [--fixture <file>] [--json]` | Read only: the autoscale decision (lane ceilings, pending raise, host room and reason) and the local slots, the smaller of `local-max-agents` and this machine's hive `max-agents` (`local_slots` in `--json`), for the live swarm, or for a fixture of accounts and host readings. It never refreshes quota or writes the stored decision; `applied` is false when the swarm runs manual scaling. `swarm create` stores `scaling=auto` and prints it, caps given at create included, so a new swarm's lane ceilings follow free quota seats, host room and ready work; a master keeps it on and reads this preview with `agentihooks balance` before stating capacity. In deployed mode it reads the Kubernetes worker namespace or reports why host room is off; see [Deployed host capacity](#deployed-host-capacity). |
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> merge-path [--hours N] [--json] [--post ITEM]` | The merge path into dev of the swarm's repository over the last N hours (default 24): merges an hour, Tests runs per merge by event, cancelled head runs, reruns, enqueues, queue removals by cause, head failure rate, failed queue runs, queue cycle, standard jobs per queue run, open ready pull requests and lead time. A window GitHub cannot list in full is refused, never undercounted. `--post` writes the plain line as a ledger comment on ITEM. |
@@ -1014,11 +1015,10 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers queue on green checks with `agentihooks swarm <slug> merge queue <url>`; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
 | `agentihooks swarm <id> set effort-min=E effort-max=E` | The effort range every lane agent starts inside, default `medium` to `xhigh`. The classifier's pick, a lane or template effort, a resume and the `init-agent` launch of a swarm lane are each clamped into it; Claude levels are `low`, `medium`, `high`, `xhigh` and `max`, and Codex levels map by rank, so Codex runs `max` as `xhigh`. Setting a lane effort outside the range is refused with the range named. The swarm panel caps row edits both ends. |
-| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `one-push`, `brain`, `claims`, `trace-plan`, `talk`, `stall`, `lane-split`, `nightwatch`, `reset`. The `brain` gate (`python -m scripts.gates brain`) is registered in the gate entry point but no role condition runs it yet, so it judges no agent session until one is added. Given an Edit, Write, MultiEdit, NotebookEdit or Serena edit call of a session bound to a swarm task, it checks the consultation receipt the last delivered task context pack left: it must name purpose `task`, this task, the task's current spec revision (title, description, plan slice, plan lines and phase) and claim generation, the session's brain, an unexpired time (`AGENTIHOOKS_BRAIN_RECEIPT_TTL`, default 14400 seconds) and a delivered or empty result; a brain outage is not consultation. It never queries the brain: the next brain refresh redelivers the pack once the receipt no longer passes. The receipt is an unsigned record in the session's hook state, so the gate guides an agent and is no security boundary against one that controls its own files; server side authority still protects shared mutations. It defaults to `log only`; `deny` is the required mode. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
+| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `one-push`, `brain`, `claims`, `trace-plan`, `talk`, `stall`, `nightwatch`, `reset`. The `brain` gate (`python -m scripts.gates brain`) is registered in the gate entry point but no role condition runs it yet, so it judges no agent session until one is added. Given an Edit, Write, MultiEdit, NotebookEdit or Serena edit call of a session bound to a swarm task, it checks the consultation receipt the last delivered task context pack left: it must name purpose `task`, this task, the task's current spec revision (title, description, plan slice, plan lines and phase) and claim generation, the session's brain, an unexpired time (`AGENTIHOOKS_BRAIN_RECEIPT_TTL`, default 14400 seconds) and a delivered or empty result; a brain outage is not consultation. It never queries the brain: the next brain refresh redelivers the pack once the receipt no longer passes. The receipt is an unsigned record in the session's hook state, so the gate guides an agent and is no security boundary against one that controls its own files; server side authority still protects shared mutations. It defaults to `log only`; `deny` is the required mode. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
 | `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. Cases, limits, the release wait and troubleshooting: [Stall watchdog](#stall-watchdog). |
-| `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `log only`, recording each would-be action in the swarm gate log; `deny` acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past the host hold and a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `skip` runs the checks for their findings only, with no gate log row, action or alert. |
+| `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota`, `tick` for a hold the tick recorded itself, or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, measured whether or not the queue holds entries, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `log only`, recording each would-be action in the swarm gate log; `deny` acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `skip` runs the checks for their findings only, with no gate log row, action or alert. |
 | `agentihooks swarm <id> set reset-gate=deny\|log only\|skip` | Operator or master only. Each tick reads the live front door master pane. A pane on a question panel or a permission prompt, or a Claude pane whose last turn ended on an interrupt or a rejected tool, while an operator item is open on the master or its seat, counts as held from the later of the first held tick and the oldest open operator item. At ten minutes held `deny` asks the master through its inbox for a handoff; at fifteen it recycles the master in its seat through a recovery handoff, the stalled master path, which ends the session and dismisses an open question panel; the respawned master takes the operator items from the seat. Leaving the prompt withdraws the ask. It defaults to `log only`, writing one would-be `wake` and one `recycle` row per held episode to the swarm gate log and acting on nothing; `skip` runs nothing. |
-| `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. No pass reads it: the dispatcher never moves seats between lanes, autoscale ignores any stored lane shift, and lane caps change only when the operator or the master sets `max-eng-agents` or `max-ci-agents` through `swarm set`, the ledger page or the `create` and `doctor start` flags. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
 | `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
@@ -2332,10 +2332,11 @@ files nothing new.
 
 The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
 the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
-its standard error: the user journal (`journalctl --user -t agentihooks-swarm`), or `swarm-tick.log` in the runtime
-directory for a scheduled tick. The run is not marked handled, and the held cause is dropped on the next pass because
-no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
-`promo-<run id>-<n>` task once.
+its standard error: the user journal
+(`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`),
+or `swarm-tick.log` in the runtime directory for a scheduled tick. The run is not marked handled, and the held cause
+is dropped on the next pass because no live task carries it. The next pass by the owner, or by a new owner after a
+handover, files the same `promo-<run id>-<n>` task once.
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
@@ -3056,12 +3057,129 @@ samples included, run at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`
 (default 10) per swarm, and a held sample counts for up to twenty minutes or
 until the next sample.
 
-The same pass writes the ledger probe's latest pass to `ledger_probes`
-(`read_s`, `write_s`, `read_failure`, `write_failure`, `wall_s`; a failure
-reads `timed out`, `gave no answer` or `answered with a server error`) and one
-`hive_samples` row per registered hive (`hive`, `name`, `live`,
-`heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
-`hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
+The same pass writes the ledger probe's latest pass to `ledger_probes` and one
+`hive_samples` row per registered hive. See
+[Ledger response time and hive recovery](#ledger-response-time-and-hive-recovery).
+
+### Ledger response time and hive recovery
+
+Each metrics collector pass writes two tables to the outbox, both with the
+common outbox columns (`event_id`, `ledger`, `ts_ms`, and empty `plan`,
+`phase`, `slice` and `task`).
+
+**`ledger_probes`** holds the ledger probe's latest pass, one row per probe
+pass. The tick's ledger probe step times one ledger read and one ledger
+write; the row keeps the probe's own time in `ts_ms`, so a pass already
+exported is written again under the same `event_id` and collapses in a `FINAL`
+read.
+
+| Column | Meaning |
+|---|---|
+| `read_s` | Seconds the ledger read took, failed or not. |
+| `write_s` | Seconds the ledger write took, failed or not. |
+| `read_failure` | Empty when the read answered or the ledger refused it; otherwise `timed out`, `gave no answer` or `answered with a server error`. |
+| `write_failure` | The same for the write. |
+| `wall_s` | Seconds the whole probe pass took. |
+
+A refused request, such as a 4xx answer, is not a failure: the server
+answered, so its failure column stays empty.
+
+**`hive_samples`** holds one row per registered hive at each pass:
+
+| Column | Meaning |
+|---|---|
+| `hive` | The hive id. |
+| `name` | The hive name, for example `anton-1`. |
+| `live` | 1 when the hive's last heartbeat is within 90 seconds and its last finished beat within 5 minutes of the pass, else 0. |
+| `heartbeat_age_s` | Seconds from the hive's last heartbeat to the pass time. 0 when the beat landed after the pass took its time, -1 when the hive never beat. |
+
+Hives beat on their own clock, so a beat often lands between the moment the
+pass reads its time and the moment it reads the hive registry. That beat is
+newer than the sample and reads age 0, never a negative age. A hive recovery
+is a `hive_samples` row with `live` 1 after one with `live` 0 for the same
+hive.
+
+Check the latest rows for one swarm:
+
+```sql
+SELECT ts_ms, read_s, write_s, read_failure, write_failure, wall_s
+FROM swarm.ledger_probes FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC LIMIT 10;
+
+SELECT ts_ms, name, live, heartbeat_age_s
+FROM swarm.hive_samples FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, name LIMIT 20;
+```
+
+#### Ledger and hives panels
+
+The Swarm Ledger Grafana dashboard, defined in the antoncore observability
+stack, groups eight panels under the **Ledger and hives** row. Each is filtered
+by the dashboard's `ledger` variable and the time range.
+
+| Panel | Source | Shows |
+|---|---|---|
+| Ledger read, p95 | `swarm.ledger_probes` | 95th percentile of `read_s` over passes whose read did not fail. |
+| Ledger write, p95 | `swarm.ledger_probes` | 95th percentile of `write_s` over passes whose write did not fail. |
+| Ledger timeouts | `swarm.ledger_probes` | Reads plus writes whose failure is `timed out`. |
+| Hive recoveries | `swarm.hive_samples` | Rows with `live` 1 whose previous row for the same hive had `live` 0. |
+| Ledger response time | `swarm.ledger_probes` | `read_s` and `write_s` per pass, failed passes included. |
+| Ledger read and write timeouts per hour | `swarm.ledger_probes` | Read timeouts, write timeouts and passes with any failure, per hour. |
+| Hive heartbeat age | `swarm.hive_samples` | `heartbeat_age_s` per hive name; hives that never beat (-1) are left out. |
+| Hive recovery per hive | `swarm.hive_samples` | Per hive: recoveries, samples with `live` 0, `live` at the latest sample and the last sample time. |
+
+The panels draw a point only per metrics pass, so they update at most once per
+`AGENTIHOOKS_METRICS_EVERY_MINUTES` (default 10). A recovery counts only when
+both the down and the up sample fall inside the time range; a hive that went
+down and came back between two passes shows no recovery.
+
+#### Task counts on the dashboard and in status
+
+`agentihooks swarm <slug> status` and the dashboard count the same task set.
+The `tasks` line of status, and the `tasks` object of `status --json`, count
+only in scope tasks by state: `open`, `claimed`, `blocked`, `pr` and `done`.
+The `ledger_snapshots` rows the dashboard reads (measure `tasks`) count an out
+of scope task under the state `out_of_scope` and never under its own state.
+The two therefore agree on each state at the same minute, apart from tasks
+that moved between the snapshot and the status read. A snapshot is written at
+most once every five minutes, on a metrics pass.
+
+Compare them side by side. Read the latest snapshot:
+
+```sql
+SELECT max(ts) AS at,
+       argMaxIf(value, ts_ms, state = 'open') AS open,
+       argMaxIf(value, ts_ms, state = 'claimed') AS claimed,
+       argMaxIf(value, ts_ms, state = 'blocked') AS blocked
+FROM swarm.ledger_snapshots FINAL
+WHERE ledger = 'example-swarm' AND measure = 'tasks' AND item = '' AND lane = '';
+```
+
+Then read status within the same minute:
+
+```bash
+agentihooks swarm example-swarm status | grep '^tasks'
+```
+
+```text
+tasks  open 617  claimed 3  blocked 14  pr 2  done 1480
+```
+
+Matching `open`, `claimed` and `blocked` figures confirm the counts agree; a
+difference of a task or two means a task changed state between the two reads.
+
+#### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Hive heartbeat age is empty while hives are live. | The metrics collectors are on a release older than the zero clamp, which wrote a negative age for every beat newer than the sample. Update agentihooks on the host that runs the tick. |
+| Hive heartbeat age is empty for one hive. | The hive never beat, so its age is -1. Check the hive's registration and its heartbeat with `SELECT name, live, heartbeat_age_s FROM swarm.hive_samples FINAL WHERE ledger = 'example-swarm' ORDER BY ts_ms DESC LIMIT 20`. |
+| Ledger read or write p95 is empty. | Every pass in range failed, or the probe never ran. Read `ledger_probes` for the failure columns. |
+| Ledger timeouts stays above zero. | The ledger server is slow or down; the probe also raises a slow ledger notice to the master after two slow passes. Check the server's process and its database. |
+| Status shows more open or blocked tasks than the dashboard. | The status side is on a release that still counted out of scope tasks. Update agentihooks, then compare again. |
+| The dashboard shows no snapshot for the last minutes. | Snapshots are written at most every five minutes, and only when the metrics outbox has a ClickHouse sink. Compare the snapshot `at` time with the status time. |
 
 ### Admission and hive headroom samples
 
@@ -3652,7 +3770,7 @@ unavailable: <error type>: <message>`, and its other detectors still report.
 | Symptom | Check | Cause and action |
 |---|---|---|
 | The measure or the detection pass says `tick journal unavailable: FileNotFoundError` | `command -v journalctl` in the shell that runs the Doctor | `journalctl` is not on that `PATH`. Run the Doctor on the workstation whose user journal holds the swarm timer, or add the systemd tools to its `PATH`. |
-| The refusal names `CalledProcessError` or `TimeoutExpired` | `journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm --since '1 hour ago' -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
+| The refusal names `CalledProcessError` or `TimeoutExpired` | `TZ=UTC journalctl --user -u agentihooks-swarm.service --since '1 hour ago' --until now -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
 | The measure ends in a Python traceback that names `journalctl` | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8184)'` prints nothing | The Doctor runs code from before [pull request #8184](https://github.com/the-cloud-clockwork/agentihooks/pull/8184). Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | A finding id ends in `:`, such as `failed-spawn/dt2:`, and its reason is cut short | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8039)'` prints nothing | The Doctor runs code from before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039), whose task id match kept the colon of a reason that held colons. Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | The reason reads `the hive launch order ended before its acknowledgement` | The hive acknowledgement, see [A worker that finishes before the tick collects its acknowledgement](hives.md#a-worker-that-finishes-before-the-tick-collects-its-acknowledgement) | Since pull request #8039 this reason means the hive never acknowledged the order. A hive that acknowledged a failure is reported as `hive launch failed: <cause>`. |
@@ -4577,9 +4695,10 @@ workstation's tick (see [Workstation tick retirement](#workstation-tick-retireme
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Each pass considers every step the
-[tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
-([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
+minutes. Tick output goes to the user journal:
+`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
+Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
+whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
@@ -4954,7 +5073,7 @@ systemctl --user status agentihooks-swarm-waits.service --no-pager
 
 # Ticks killed by a service stop in a window. journalctl reads --since and --until in local time, so set TZ
 # to give the window in UTC
-TZ=UTC journalctl --user -t agentihooks-swarm --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
   --no-pager | grep -c "stopped by the service"
 
 # Recycles in the same window, so a zero above covers syncs that did happen
@@ -5092,7 +5211,7 @@ the ten minute expiry. A Doctor start that reopens a closed Doctor ledger goes t
 
 ```bash
 agentihooks swarm <id> reopen
-journalctl --user -t agentihooks-swarm --since "-3 min"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-3 min" --until now
 agentihooks swarm <id> status
 ```
 
@@ -5462,8 +5581,8 @@ rig-grade-swarm: SwarmError: the controller lease is stale
 Find these lines and the step that ran long before them:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease is stale"
-journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-12h" --until now | grep "controller lease is stale"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-12h" --until now | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
 The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
@@ -5629,7 +5748,7 @@ Every step writes a `swarm_tick_step` record to the user journal when it finishe
 
 ```bash
 D=rig-grade-swarm-doctor
-journalctl --user -t agentihooks-swarm --since "-6h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep '"step": "scripts.doctor.cli.timer"' \
   | sed 's/^[^{]*//' \
@@ -5641,7 +5760,7 @@ print(len(w), "steps; median", round(w[len(w) // 2], 1), "max", round(w[-1], 1),
 Read the detector steps of one pass by its `pid`; they finish before their timer step:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-30 min" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-30 min" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep -E '"step": "(scripts.doctor.cli.timer|doctor\.[a-z ]+)"' \
   | sed 's/^[^{]*//'
@@ -5666,7 +5785,7 @@ pools a detector starts.
 Count tick timeouts from the systemd service on an install that still runs it (the journal prints local time):
 
 ```bash
-journalctl --user -u agentihooks-swarm.service --since "-3h" -o short-iso | grep -c "Failed with result 'timeout'"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-3h" --until now -o short-iso | grep -c "Failed with result 'timeout'"
 ```
 
 #### Measured result
@@ -6103,7 +6222,7 @@ threshold delays the recycle.
 
 ```bash
 # Ask, wait, recycle and proof swarm stop lines from the tick journal
-journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 day" --until now --no-pager \
   | grep -E "busy with no tool call|stopped proof swarm"
 
 # Recorded transfers; a stalled master recycle has reason "stalled"
@@ -6217,8 +6336,8 @@ Every local slot claim, granted or refused, writes one line to the tick journal 
 in its own swarm, so a successor does not count its predecessor. Read the lines of the last hour:
 
 ```bash
-journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm \
-  --since "1 hour ago" -g "local slot claim" --no-pager
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
+  --since "1 hour ago" --until now -g "local slot claim" --no-pager
 ```
 
 ```text
@@ -7080,6 +7199,9 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
   master answers with `agentihooks msg reply <message> "<text>"` and posts its own updates with
   `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
+- In a pane: every swarm agent, master included, starts operator off, with replies held to twenty words and the
+  question tool refused, until the operator types `operator on` in that pane. See
+  [Operator presence](../reference/operator-presence.md).
 
 Every addressed message goes through the agent inbox, with one item per recipient, sent by the real author;
 an unaddressed agent line only shows on the page. Items pass from pending to delivered, then confirmed by

@@ -544,3 +544,17 @@ def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unre
         assert lease.fenced(store, "sw", held, lambda doc: "written") == "written"
         assert lease.release(store, "sw", held) is True
         assert lease.current(store, "sw") is None
+
+
+@pytest.mark.parametrize(("folder", "address"), [("scratchpad/proof/ledger", "https://ledger.example"), ("ledger", "")])
+def test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, folder: str, address: str
+) -> None:
+    from pathlib import Path
+
+    from scripts.swarm_ledger import ledger_route
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_DATABASE_URL", "postgresql://swarm@db/swarm")
+    monkeypatch.setenv("LEDGER_DIR", str((Path.home() if folder.startswith("scratchpad") else tmp_path) / folder))
+    with ledger_route.scoped("sw", "https://ledger.example/"):
+        assert lease._address("sw") == address

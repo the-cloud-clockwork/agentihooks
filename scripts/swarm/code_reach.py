@@ -2,6 +2,7 @@
 
 import ast
 import builtins
+import itertools
 import json
 import os
 import re
@@ -25,6 +26,10 @@ PACKAGES = ("scripts", "hooks")
 OWN = ("self", "cls")
 RAW = "execute_command"
 CLIENT_TYPES = frozenset({"Redis", "StrictRedis", "Pipeline"})
+Pairs = list[tuple[str, ast.expr]]
+Shape = tuple[
+    dict[str, bool], list[tuple[str, ast.expr, bool]], Pairs, Pairs, list[ast.expr], list[tuple[str, str, ast.expr]]
+]
 
 
 @dataclass
@@ -156,6 +161,14 @@ def _dunder(name: str) -> bool:
     return name.startswith("__") and name.endswith("__")
 
 
+def _getattr(node: ast.Call) -> tuple[ast.expr, str] | None:
+    """The receiver and method name of a getattr call that names the method with a literal string."""
+    if not (isinstance(node.func, ast.Name) and node.func.id == "getattr" and len(node.args) >= 2):
+        return None
+    receiver, name = node.args[:2]
+    return (receiver, name.value) if isinstance(name, ast.Constant) and isinstance(name.value, str) else None
+
+
 class Program:
     """Every function, method and module body under the packages, with the names each one reads."""
 
@@ -181,8 +194,9 @@ class Program:
         self.shapes = {id(unit): self._shape(unit) for unit in self.units.values()}
         self.clients: set[str] = set()
         self.factories: set[str] = set()
+        self.passed: dict[str, set[str]] = {}
         self._receivers()
-        self.typing = {id(unit): self._typed(unit) for unit in self.units.values()}
+        self.typing = {id(unit): self._typed(key, unit) for key, unit in self.units.items()}
         self.subscribers = self._subscribers()
 
     def _add(self, key: str, module: str, body: list, owner: str = "") -> None:
@@ -304,12 +318,17 @@ class Program:
         for node in unit.nodes:
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sent |= lua(node.value)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if isinstance(node, ast.Call):
                 sent |= self._call(node, local)
         return sent
 
     def _call(self, node: ast.Call, local: dict[str, bool]) -> frozenset[str]:
-        receiver, name = node.func.value, node.func.attr
+        if isinstance(node.func, ast.Attribute):
+            receiver, name = node.func.value, node.func.attr
+        elif found := _getattr(node):
+            receiver, name = found
+        else:
+            return frozenset()
         if name == RAW:
             first = node.args[0] if node.args else None
             return frozenset({str(first.value).upper()}) if isinstance(first, ast.Constant) else frozenset()
@@ -372,9 +391,10 @@ class Program:
         chained = isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
         return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, local)
 
-    def _shape(self, unit: Unit) -> tuple[dict, list, list, list, list]:
+    def _shape(self, unit: Unit) -> Shape:
         """What typing reads from a unit, taken once: annotated parameters, name bindings in source order with
-        whether their callee is unknown, attribute and keyword bindings, and returned values."""
+        whether their callee is unknown, attribute and keyword bindings, returned values, and each argument a call
+        passes to a parameter of a function here."""
         annotated = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
         bindings = sorted(
             (found for found in map(_bindings, unit.nodes) if found[0]),
@@ -389,15 +409,39 @@ class Program:
         attributes = [(t.attr, value) for targets, value in bindings for t in targets if isinstance(t, ast.Attribute)]
         keywords = [(node.arg, node.value) for node in unit.nodes if isinstance(node, ast.keyword) and node.arg]
         returns = [node.value for node in unit.nodes if isinstance(node, ast.Return) and node.value is not None]
-        return annotated, pairs, attributes, keywords, returns
+        passes = [
+            passed
+            for node in unit.nodes
+            if isinstance(node, ast.Call)
+            for key in self.called[id(node.func)] or []
+            for passed in self._arguments(node, key)
+        ]
+        return annotated, pairs, attributes, keywords, returns, passes
 
-    def _typed(self, unit: Unit) -> dict[str, bool]:
-        """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
-        source order once per binding, so a name bound later in a loop still reaches an alias read earlier. A name
-        bound only to a call whose callee cannot be found here, or only as a loop target, gets no entry, so it
-        falls back by name."""
-        annotated, pairs, _, _, _ = self.shapes[id(unit)]
-        local = dict(annotated)
+    def _arguments(self, node: ast.Call, key: str) -> list[tuple[str, str, ast.expr]]:
+        """Each parameter of the function or method a call runs, with the argument the call passes it by position
+        or keyword; a class call passes them to its __init__ and a method call skips self."""
+        key = self.members.get(key, {}).get("__init__", key)
+        unit = self.units[key]
+        definition = unit.nodes[0] if unit.nodes else None
+        if not isinstance(definition, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return []
+        args = definition.args
+        positional = [*args.posonlyargs, *args.args]
+        if unit.owner and not any(_tail(d) == "staticmethod" for d in definition.decorator_list):
+            positional = positional[1:]
+        named = {p.arg for p in (*args.args, *args.kwonlyargs) if p.annotation is None}
+        given = itertools.takewhile(lambda value: not isinstance(value, ast.Starred), node.args)
+        found = [(key, p.arg, value) for p, value in zip(positional, given) if p.annotation is None]
+        return found + [(key, k.arg, k.value) for k in node.keywords if k.arg in named]
+
+    def _typed(self, key: str, unit: Unit) -> dict[str, bool]:
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline. A parameter is also
+        true when a caller here passes it one. Bindings are read in source order once per binding, so a name bound
+        later in a loop still reaches an alias read earlier. A name bound only to a call whose callee cannot be
+        found here, or only as a loop target, gets no entry, so it falls back by name."""
+        annotated, pairs, _, _, _, _ = self.shapes[id(unit)]
+        local = dict(annotated) | dict.fromkeys(self.passed.get(key, ()), True)
         for _ in pairs:
             for target, value, unresolved in pairs:
                 if self._held(value, local):
@@ -407,23 +451,30 @@ class Program:
         return local
 
     def _spread(self, key: str, unit: Unit) -> None:
-        local = self._typed(unit)
-        _, _, attributes, keywords, returns = self.shapes[id(unit)]
-        self.clients |= {name for name, held in local.items() if held}
+        """Grow the shared client names, caller typed parameters and factories from one unit. A parameter typed
+        only from its callers stays local, so its name never makes the same name a client everywhere."""
+        local = self._typed(key, unit)
+        annotated, _, attributes, keywords, returns, passes = self.shapes[id(unit)]
+        local_only = self.passed.get(key, set()) - {name for name, held in annotated.items() if held}
+        self.clients |= {name for name, held in local.items() if held and name not in local_only}
         self.clients |= {attr for attr, value in attributes if self._held(value, local)}
-        self.clients |= {arg for arg, value in keywords if self._held(value, local)}
+        given = {id(value) for _, _, value in passes}
+        self.clients |= {arg for arg, value in keywords if id(value) not in given and self._held(value, local)}
+        for callee, name, value in passes:
+            if self._held(value, local):
+                self.passed.setdefault(callee, set()).add(name)
         if any(self._held(value, local) for value in returns):
             self.factories.add(key)
 
     def _receivers(self) -> None:
-        """Grow the names holding a Redis client and the functions returning one, typed from the client and
-        pipeline constructors and annotations, until neither changes. Passes are capped at one per unit so a run
-        always ends."""
+        """Grow the names holding a Redis client, the parameters callers pass one and the functions returning one,
+        typed from the client and pipeline constructors and annotations, until none changes. Passes are capped at
+        one per unit so a run always ends."""
         for _ in self.units:
-            size = len(self.clients), len(self.factories)
+            size = len(self.clients), len(self.factories), sum(map(len, self.passed.values()))
             for key, unit in self.units.items():
                 self._spread(key, unit)
-            if (len(self.clients), len(self.factories)) == size:
+            if (len(self.clients), len(self.factories), sum(map(len, self.passed.values()))) == size:
                 return
 
     def _subscribers(self) -> set[str]:
