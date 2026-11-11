@@ -247,10 +247,11 @@ Every other launch follows the rules above.
 
 ### Hives
 
-On a hive (`AGENTIHOOKS_HIVE` set) the launch also takes one of that hive's
-account slots for the chosen login, as every routed launch does. A hive with no
-free slot or a failed admission stops the launch with `No account slot
-available` or `Account slot admission failed`.
+On a hive (`AGENTIHOOKS_SLOT_HIVE` set) the launch also takes one of that
+hive's account slots for the chosen login, as every routed launch does. A hive
+with no free slot or a failed admission ends the launch with an uncaught
+`Unavailable` error, `No account slot available` or `Account slot admission
+failed`, and no route report is written.
 
 ### Refusal messages
 
