@@ -1,3 +1,4 @@
+import json
 import subprocess
 from types import SimpleNamespace
 from typing import Any
@@ -474,8 +475,6 @@ class HistoryReads:
 
 @pytest.mark.feature("failed-panes-report-hash-only")
 def test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list(store: RedisStore) -> None:
-    import json
-
     store.redis.hset(store.key("sw", "launches"), "e-1", json.dumps({"agent": "e-1", "task": "t1", "state": "started"}))
     failed = {"agent": "e-2", "task": "t2", "state": "failed", "error": "gone", "pane_id": "w1:p9"}
     store.redis.hset(store.key("sw", "launches"), "e-2", json.dumps(failed))

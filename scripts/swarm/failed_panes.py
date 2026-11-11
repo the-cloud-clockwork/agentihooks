@@ -66,8 +66,7 @@ def sweep(slug, store, runtime, now_ms):
 
 
 def report(store: Any, slug: str) -> list[dict[str, Any]]:
-    """Return the launch rows of swarm ``slug`` that carry pane lines, read from the launches hash alone, the only place
-    pane lines are written, so the whole swarm history list is never read."""
+    """Return the launch rows of swarm ``slug`` that carry pane lines, read from the launches hash."""
     rows = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launches")).values())
     return [row for row in rows if row.get("pane_lines")]
 
