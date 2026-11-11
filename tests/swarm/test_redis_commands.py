@@ -606,6 +606,125 @@ def test_a_receiver_is_a_client_only_when_its_type_traces_to_a_redis_constructor
     assert set(typed.commands([unit])) == commands
 
 
+PASSED = """
+from redis import Redis
+
+
+def connect():
+    return Redis()
+
+
+def take(first, store_handle):
+    store_handle.hdel("h", "f")
+
+
+def named(spare, *, kept_handle=None):
+    kept_handle.hexists("h", "f")
+
+
+def spare_bag(bag):
+    bag.decr("n")
+
+
+def forward(fwd_conn):
+    sink(fwd_conn)
+
+
+def sink(sink_conn):
+    sink_conn.xack("s", "g", "1-0")
+
+
+class Holder:
+    def __init__(self, init_conn):
+        init_conn.xlen("s")
+
+
+def give():
+    take(1, connect())
+    named(None, kept_handle=connect())
+    spare_bag([])
+    forward(connect())
+    Holder(connect())
+
+
+class Keeper:
+    def hold(self, held_conn):
+        held_conn.zcount("z", 0, 1)
+
+    def run(self):
+        self.hold(connect())
+        Keeper.fixed(connect())
+
+    @staticmethod
+    def fixed(fixed_conn):
+        fixed_conn.zlexcount("z", "-", "+")
+
+
+def stray(store_handle, kept_handle, held_conn):
+    store_handle.append("x")
+    kept_handle.keys()
+    held_conn.unlink("k")
+
+
+def looked():
+    client = connect()
+    getattr(client, "hstrlen")("h", "f")
+    getattr([], "srandmember")
+    getattr(client, name)()
+    print(client, "hlen")
+    getattr(client, "hsetnx", None)
+"""
+
+
+@pytest.fixture
+def passed(tmp_path: Path) -> code_reach.Program:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/passed.py").write_text(PASSED)
+    return code_reach.Program(code_reach.parse(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("unit", "commands"),
+    [
+        ("scripts.passed:take", {"HDEL"}),
+        ("scripts.passed:named", {"HEXISTS"}),
+        ("scripts.passed:spare_bag", set()),
+        ("scripts.passed:Keeper.hold", {"ZCOUNT"}),
+        ("scripts.passed:Keeper.fixed", {"ZLEXCOUNT"}),
+        ("scripts.passed:stray", set()),
+        ("scripts.passed:sink", {"XACK"}),
+        ("scripts.passed:Holder.__init__", {"XLEN"}),
+    ],
+)
+def test_an_unannotated_parameter_is_typed_from_the_argument_its_caller_passes(
+    passed: code_reach.Program, unit: str, commands: set[str]
+) -> None:
+    assert set(passed.commands([unit])) == commands
+
+
+def test_a_getattr_call_with_a_literal_redis_method_name_shows_up_in_the_map(passed: code_reach.Program) -> None:
+    assert passed.commands(passed.reach(("scripts.passed:looked",))) == dict.fromkeys(
+        ("HSTRLEN", "HSETNX"), {"scripts.passed:looked"}
+    )
+
+
+def test_receiver_typing_stops_once_a_pass_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/passed.py").write_text(PASSED)
+    spread = code_reach.Program._spread
+    calls: list[str] = []
+
+    def counted(self: code_reach.Program, key: str, unit: code_reach.Unit) -> None:
+        calls.append(key)
+        spread(self, key, unit)
+
+    monkeypatch.setattr(code_reach.Program, "_spread", counted)
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    assert len(calls) // len(program.units) < len(program.units)
+
+
 def test_an_entry_point_missing_from_the_code_is_refused(program):
     with pytest.raises(KeyError, match="no function scripts.app:gone, scripts.app:lost under scripts, hooks"):
         program.reach(("scripts.app:main", "scripts.app:gone", "scripts.app:lost"))
