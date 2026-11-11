@@ -97,6 +97,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | intent check | wrapper intent | tick | 8 | 60 | none | none | none |
 | bottleneck status | wrapper metrics | slow | 2 | 120 | none | none | none |
 | inbox wake | wrapper metrics | slow | 2 | 60 | page relay | none | none |
+| knowledge warm | wrapper metrics | slow | 2 | 60 | none | host | tick-knowledge-warm |
 | metrics record | wrapper metrics | slow | 29 | 600 | health findings | none | none |
 | snapshot job | wrapper metrics | tick | 2 | 60 | none | none | none |
 | dependency audit | wrapper phases | tick | 2 | 60 | none | none | swarm-ordering-dependency-audit |

@@ -73,7 +73,12 @@ def repository(monkeypatch: pytest.MonkeyPatch) -> _Repository:
 @pytest.fixture
 def spawned(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Path, dict[str, str]]]:
     calls: list[tuple[str, Path, dict[str, str]]] = []
-    monkeypatch.setattr(warm_job, "spawn", lambda lock, slug, log, environ: calls.append((slug, log, environ)))
+
+    def record(lock: int, slug: str, log: Path, environ: dict[str, str]) -> None:
+        assert os.fstat(lock).st_ino == warm_job.lock_path(slug, environ).stat().st_ino
+        calls.append((slug, log, environ))
+
+    monkeypatch.setattr(warm_job, "spawn", record)
     return calls
 
 
