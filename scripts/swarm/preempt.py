@@ -5,6 +5,7 @@ the freed seat goes to the waiting task because the spawn order puts urgent work
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatcher, freeze
@@ -34,9 +35,21 @@ class Seats:
     owner: Callable
     ready: Callable
     placement: Callable
+    view: Callable | None = None
 
     def holds(self, agent) -> bool:
         return not self.ended(agent, self.rows) and self.owner(agent, self.rows.get(agent.task, {}))
+
+    def claim_view(self, slug: str, store: Any, doc: dict, dispatched: Callable | None) -> Any:
+        """One claim view for the pass, or None when the seats carry no builder."""
+        return self.view(slug, store, self.rows, doc, dispatched) if self.view else None
+
+    def claimable(
+        self, slug: str, store: Any, doc: dict, lane: str, dispatched: Callable | None, claims: Any
+    ) -> list[dict]:
+        """The lane's ready tasks, read from the pass's claim view when there is one."""
+        extra = {"claims": claims} if claims is not None else {}
+        return self.ready(slug, store, self.rows, doc, lane, dispatched, **extra)
 
 
 def _places(lane: str, task: dict) -> str:
@@ -53,15 +66,17 @@ def probe(runtime, lane: str, task: dict) -> str:
         return f"profile unresolved: {exc}"
 
 
-def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
+def run(slug: str, config: Any, store: Any, doc: dict, now_ms: int, seats: Seats) -> list[str]:
     from scripts.swarm import capacity
 
     caps = capacity.caps(capacity.read(store, slug), config)
     dispatched, agents, full = yielding(store, slug, doc, dispatcher.claim_key(config, doc)), store.agents(slug), {}
+    claims = None
     for lane, cap in caps.items():
         holders = [a for a in agents if a.lane == lane and seats.holds(a)]
         if cap and len(holders) >= cap:
-            full[lane] = (seats.ready(slug, store, seats.rows, doc, lane, dispatched), holders)
+            claims = claims if claims is not None else seats.claim_view(slug, store, doc, dispatched)
+            full[lane] = (seats.claimable(slug, store, doc, lane, dispatched, claims), holders)
     return step(slug, store, seats.rows, doc, full, now_ms, seats.placement)
 
 

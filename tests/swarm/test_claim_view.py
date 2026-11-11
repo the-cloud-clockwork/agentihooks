@@ -1,9 +1,11 @@
 import json
+from typing import Any
 
 import pytest
 
-from scripts.swarm import profile_first, seat_spawn, timing
+from scripts.swarm import preempt, profile_first, seat_spawn, timing
 from scripts.swarm import tick as tick_module
+from scripts.swarm.store import AgentRecord
 from tests.swarm import test_tick
 
 pytestmark = pytest.mark.unit
@@ -54,3 +56,23 @@ def test_placement_times_each_task_decision_and_refusal(store, capsys):
     steps = [row["step"] for row in rows if row.get("event") == "swarm_tick_step" and row["phase"] == "finished"]
     assert steps == [timing.named(profile_first.decided), timing.named(seat_spawn.placed_elsewhere)]
     assert (ids(found), waits) == (["t1"], [])
+
+
+@pytest.mark.feature("swarm-preempt-claim-view-once-per-pass")
+def test_a_preempt_pass_builds_one_claim_view_for_every_full_lane(store: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    owned, calls, read = tick_module._owned_tasks, [], []
+    monkeypatch.setattr(tick_module, "_owned_tasks", lambda *args: calls.append(args) or owned(*args))
+    rows = ledger()
+    doc = rows.state("sw")
+    for name, lane in (("e1", "eng"), ("e2", "eng"), ("c1", "ci")):
+        store.put_agent("sw", AgentRecord(name, lane, f"held-{name}"))
+
+    def ready(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        read.append((args[4], kwargs["claims"]))
+        return tick_module.ready_in_order(*args, **kwargs)
+
+    seats = preempt.Seats(rows.rows, lambda *a: False, lambda *a: True, ready, preempt._places, tick_module.claim_view)
+    preempt.run("sw", store.config("sw"), store, doc, 1, seats)
+    assert calls == [("sw", store)]
+    assert [lane for lane, _ in read] == ["eng", "ci"]
+    assert read[0][1] is read[1][1]
