@@ -278,9 +278,7 @@ Two consumers read it:
 | The tick ledger view (`scripts.tick.view`) | `view.PARTS`, the same tuple object, sent as `parts` on every delta read |
 
 The parts a pass asks for and the parts the server accepts therefore cannot
-drift apart. Before this change each module held its own copy, and a part
-added to one copy only either went missing from every pass document or made
-every delta read answer 400.
+drift apart.
 
 #### Adding a ledger part
 
@@ -292,11 +290,13 @@ every delta read answer 400.
    `schemas.LEDGER_PARTS` and that the schema enum equals the list, so a
    reintroduced copy fails it.
 3. Read the new part in steps through `pass_state`. A view stored before the
-   change lacks the part. Its next delta read carries the part only when the
-   part changed since the stored generation; a change under the missing part
-   does not fit the stored view, so the pass reads every part in full and
-   stores that. Until then a step sees no such part. Delete the view file to
-   force the full read at once (see [Checking it](#checking-it)).
+   change lacks the part. The next delta read returns it only if the part
+   changed after the stored generation. A change to a top level value, such
+   as a string, is patched straight into the stored view. A change under a
+   missing list part, or to a key inside a missing dictionary part, cannot
+   be patched, so the pass reads every part in full and stores that. Until
+   then a step sees no such part. Delete the view file to force the full
+   read at once (see [Checking it](#checking-it)).
 
 A ledger server running code older than the new part refuses it with 400;
 the pass then logs the skipped view line under
@@ -438,7 +438,7 @@ advances with ledger writes.
 | A view looks stale | Delete its file. The next pass reads the parts in full and stores them |
 | A step does not see a write it made earlier in the pass | The write did not go through `LedgerClient` with operations, so `view.wrote()` never marked the view stale. Route the write through the ledger client, or call `view.wrote()` after it |
 | The phase pass misses a task, or ticks a phase early | The projection reads the pass document: check the task's `slice` or `phase` field leads to a phase row. A task whose parent chain loops or names a missing node sits under no phase |
-| A step's `pass_state` result lacks a top level part | The part is not in `LEDGER_PARTS`: add it there (see [Adding a ledger part](#adding-a-ledger-part)). If it is, the stored view predates the part; delete the view file |
+| A step's `pass_state` result lacks a top level part | The part is not in `LEDGER_PARTS`: add it there (see [Adding a ledger part](#adding-a-ledger-part)). If it is listed there, the stored view predates the part; delete the view file |
 | Every delta read answers 400 after a part was added | The ledger server runs code older than the new `LEDGER_PARTS`. Update the server; the pass skips its view meanwhile |
 | Lint fails with `reads the whole ledger state N times` | The change added a whole ledger read in the swarm or tick package. Read through `pass_state` instead |
 | Lint fails with `differs from the head's measurement` | The allowlist was not rerecorded after removing or moving a read. Run `python -m scripts.no_whole_ledger --write` and commit the file |
