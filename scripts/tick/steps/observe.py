@@ -465,7 +465,13 @@ def _collect_acks(
 
 
 STEPS = (
-    CallStep("config load", "start", partial(_run, step_config_load), writes=CONFIG),
+    CallStep(
+        "config load",
+        "start",
+        partial(_run, step_config_load),
+        frozenset({"command runner", "reboot pass"}),
+        writes=CONFIG,
+    ),
     CallStep(
         "stopped branch",
         "start",

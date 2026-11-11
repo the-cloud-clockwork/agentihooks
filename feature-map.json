@@ -11,6 +11,16 @@
       ]
     },
     {
+      "id": "replacement-missing-occupant",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
+      "behaviour": "A controller replacement pass whose launched replacement sits on a seat with no occupant left after the execution archive records the attempt superseded and completes instead of failing the controller.",
+      "seam": "Replacements.__call__ through _launch and _record against the execution occupants",
+      "tests": [
+        "tests/test_swarm_v2_kubernetes_failures.py::test_a_launched_replacement_whose_seat_has_no_occupant_left_is_recorded_superseded"
+      ]
+    },
+    {
       "id": "claude-trust-lock-reclaim",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",
@@ -560,6 +570,29 @@
       ]
     },
     {
+      "id": "swarm-tick-value-edges",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2467",
+      "behaviour": "A tick pass orders each step of a site only after the steps of earlier sites that write a value it reads or writes, read a value it writes, or write a value a site hook up to its own reads or writes, the values its shut check reads included; the gate runs the hooks of earlier sites before a later step, so a step declaring nothing no longer waits for the whole site before it.",
+      "seam": "scripts.tick.registry.site_edges with the site hook and shut keys, and scripts.tick.engine.SiteGate over the site order",
+      "tests": [
+        "tests/tick/test_declared_edges.py::test_a_step_waits_only_for_the_earlier_steps_whose_values_it_uses",
+        "tests/tick/test_declared_edges.py::test_a_hooked_site_and_every_later_site_wait_for_the_writers_of_the_hook_values",
+        "tests/tick/test_declared_edges.py::test_the_values_a_site_shut_check_reads_order_its_steps_after_their_writer",
+        "tests/tick/test_declared_edges.py::test_a_slow_lane_writer_is_no_edge_of_a_later_site",
+        "tests/tick/test_declared_edges.py::test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_not_use",
+        "tests/tick/test_declared_edges.py::test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step",
+        "tests/tick/test_declared_edges.py::test_a_shut_step_runs_no_hook_of_an_earlier_site",
+        "tests/tick/test_declared_edges.py::test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it",
+        "tests/tick/test_declared_edges.py::test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site",
+        "tests/tick/test_declared_edges.py::test_a_missing_config_shuts_the_sites_from_tasks_and_keeps_the_agents_site",
+        "tests/tick/test_declared_edges.py::test_the_site_that_left_the_tick_clears_the_mark_when_its_value_returns",
+        "tests/tick/test_declared_edges.py::test_a_hook_of_the_writer_own_site_orders_no_later_step_after_the_writer",
+        "tests/tick/test_declared_edges.py::test_a_step_outside_the_sites_keeps_every_later_step_in_the_edges",
+        "tests/swarm/test_tick_groups.py::test_the_tick_orders_its_sites_by_the_tick_hook_and_shut_keys"
+      ]
+    },
+    {
       "id": "swarm-tick-step-isolation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-b9",
@@ -570,8 +603,6 @@
         "tests/tick/test_step_isolation.py::test_critical_path_steps_stay_off_the_slow_lane_and_need_no_slow_step",
         "tests/tick/test_step_isolation.py::test_notice_and_watch_steps_declare_the_slow_lane",
         "tests/tick/test_step_isolation.py::test_pass_lanes_are_sized_for_the_minute",
-        "tests/tick/test_step_isolation.py::test_site_edges_keep_every_barrier_step_whatever_the_steps_declare",
-        "tests/tick/test_step_isolation.py::test_a_step_declaring_nothing_still_waits_for_the_site_before_it",
         "tests/tick/test_step_isolation.py::test_the_relay_and_view_sites_wait_for_the_intent_check_their_hooks_read",
         "tests/tick/test_step_isolation.py::test_the_quiet_pass_waits_for_the_steps_of_the_sites_before_it",
         "tests/tick/test_step_isolation.py::test_site_barriers_of_the_pass_graph_hold_no_critical_step_on_a_slow_step",
@@ -937,7 +968,7 @@
         "tests/tick/test_spawn_room.py::test_a_need_through_another_step_is_held_back_by_the_reserve_too",
         "tests/tick/test_spawn_room.py::test_spawn_starts_when_its_needs_are_cut_while_a_step_it_does_not_need_still_runs",
         "tests/tick/test_spawn_room.py::test_a_step_spawn_does_not_need_is_dropped_after_a_need_the_reserve_cut",
-        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_barrier",
+        "tests/tick/test_spawn_room.py::test_the_reserve_reaches_a_slow_step_of_an_earlier_site_through_its_site_edge",
         "tests/tick/test_spawn_room.py::test_a_pass_reserves_the_critical_lane_after_the_spawn_start_bound_for_spawn",
         "tests/tick/test_spawn_room.py::test_a_shorter_critical_lane_reserves_the_same_share_for_spawn",
         "tests/tick/test_spawn_room.py::test_a_lane_less_its_reserve_keeps_the_lane_clock",
@@ -1148,6 +1179,20 @@
         "tests/tick/test_engine_records.py::test_steps_dropped_at_an_expired_lane_read_skipped",
         "tests/tick/test_engine_records.py::test_pass_row_carries_the_critical_lane_end_and_the_report_takes_its_p95",
         "tests/tick/test_engine_records.py::test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_chain"
+      ]
+    },
+    {
+      "id": "swarm-tick-ready-gap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2480",
+      "behaviour": "Each tick step record carries the pass offset at which the step became ready beside the offset at which its run actually began, and the tick report prints each step's median and largest ready to start gap.",
+      "seam": "tick:records rows journaled by the tick engine and swarm tick-report",
+      "tests": [
+        "tests/tick/test_engine_records.py::test_step_row_carries_its_ready_time_beside_the_later_start_of_its_run",
+        "tests/tick/test_engine_records.py::test_step_that_never_ran_starts_at_its_ready_time",
+        "tests/tick/test_engine_records.py::test_abandoned_and_held_rows_keep_their_run_start_apart_from_their_ready_time",
+        "tests/tick/test_engine_records.py::test_step_cut_at_its_lane_end_keeps_the_start_of_its_queued_run",
+        "tests/swarm/test_tick_report.py::test_report_prints_each_step_ready_to_start_gap"
       ]
     },
     {
@@ -3041,19 +3086,22 @@
     {
       "id": "tick-doc-items-map",
       "origin": "inventory",
-      "behaviour": "When the watchdog document copy named by the swarm setting watchdog-document changes, the next tick maps its open items onto their tasks once and records the copy digest; an unchanged, unset or missing copy runs nothing.",
-      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed",
+      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing.",
+      "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed and the ledger port read watchdog_copy of the ledger operation watchdog_copy, stored by python -m scripts.swarm.doc_items --store-as",
       "tests": [
         "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
-        "tests/tick/steps/test_doc_items_map.py::test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once",
+        "tests/tick/steps/test_doc_items_map.py::test_a_new_copy_on_the_ledger_maps_its_items_to_their_tasks_exactly_once",
         "tests/tick/steps/test_doc_items_map.py::test_an_unchanged_copy_runs_nothing",
-        "tests/tick/steps/test_doc_items_map.py::test_an_unset_or_missing_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_ledger_without_a_copy_runs_nothing",
+        "tests/tick/steps/test_doc_items_map.py::test_a_ledger_view_without_a_stored_copy_reads_nothing",
         "tests/tick/steps/test_doc_items_map.py::test_a_copy_already_on_its_tasks_records_its_digest_without_writes",
         "tests/tick/steps/test_doc_items_map.py::test_unknown_tasks_refuse_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
-        "tests/tick/steps/test_doc_items_map.py::test_the_swarm_setting_names_the_watchdog_document"
+        "tests/swarm_ledger/test_watchdog_copy.py::test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest",
+        "tests/swarm_ledger/test_watchdog_copy.py::test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy",
+        "tests/swarm_ledger/test_watchdog_copy.py::test_the_doc_items_command_stores_the_watchdog_copy_from_a_file"
       ]
     },
     {
@@ -3500,6 +3548,26 @@
       ]
     },
     {
+      "id": "swarm-archive-stale-generations-of-a-listed-name",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
+      "behaviour": "ExecutionRegistry.archive moves every ended generation of a seat that is not the seat's current head into the archive, even when the agent's name stays listed through a later generation under the same name, so a reused name's old handoff generations do not pile up forever in the live fenced executions hash.",
+      "seam": "ExecutionRegistry.archive archives old generations of a still listed name",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_moves_older_generations_of_a_name_that_stays_listed"
+      ]
+    },
+    {
+      "id": "swarm-archive-keeps-listed-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-archive-listed-name",
+      "behaviour": "ExecutionRegistry.archive never moves a seat's own head row into the archive while its name stays listed, even when that head row is itself ended, so the live occupant projection always resolves to a row still present in the executions hash.",
+      "seam": "ExecutionRegistry.archive keeps a listed head that is ended and moves its older generation",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_keeps_a_listed_head_that_is_ended"
+      ]
+    },
+    {
       "id": "swarm-archive-prunes-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
@@ -3732,6 +3800,16 @@
       "tests": [
         "tests/swarm/test_stale_swarm_tick.py::test_the_controller_runs_no_steps_for_a_closed_or_binned_swarm_holding_a_ghost_agent",
         "tests/swarm/test_stale_swarm_tick.py::test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger"
+      ]
+    },
+    {
+      "id": "controller-ticks-cleartext-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43001784835-0",
+      "behaviour": "The controller tick pass keeps running and ticks a swarm whose ledger address refuses the credential over plain http, so the pass reports the refusal instead of the controller exiting before it takes the lease.",
+      "seam": "scripts.swarm.controller.run_once and scripts.swarm.controller.tickable",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_the_controller_ticks_a_swarm_whose_ledger_address_refuses_cleartext"
       ]
     },
     {

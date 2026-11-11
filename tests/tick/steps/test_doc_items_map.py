@@ -1,7 +1,6 @@
 """The doc items map tick step maps a changed watchdog document copy onto its tasks once per change."""
 
 from importlib import import_module
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,13 +28,17 @@ def _step() -> CallStep:
     return found
 
 
-def _values(document: str, tasks: list[dict[str, Any]], marked: str | None = None) -> dict[str, Any]:
+def _values(
+    copy: str | None, tasks: list[dict[str, Any]], marked: str | None = None, rev: int | None = 7
+) -> dict[str, Any]:
     tools = fake_tools()
     assert isinstance(tools.coordination, FakeCoordination)
+    assert isinstance(tools.ledger, FakeLedger)
     tools.coordination.answers["marked"] = marked
+    tools.ledger.answers["watchdog_copy"] = {} if copy is None else {"text": copy, "digest": doc_items.digest(copy)}
+    stamps = {} if rev is None else {doc_items.COPY_STAMP: {"rev": rev, "by": "watchdog"}}
     return {
-        "config": SimpleNamespace(watchdog_document=document),
-        "doc": {"tasks": tasks},
+        "doc": {"tasks": tasks, "_meta": {"stamps": stamps}},
         "tools": tools.for_effects(frozenset({"ledger", "coordination"})),
         "deadline": Deadline.after(5),
         "fakes": tools,
@@ -52,10 +55,23 @@ def _ledger(values: dict[str, Any]) -> FakeLedger:
     return ledger
 
 
+def _writes(values: dict[str, Any]) -> list[tuple[str, tuple[object, ...]]]:
+    calls = [(call.operation, call.args) for call in _ledger(values).calls]
+    assert calls[0] == ("watchdog_copy", ())
+    return calls[1:]
+
+
 def _coordination(values: dict[str, Any]) -> list[tuple[str, tuple[object, ...]]]:
     coordination = values["fakes"].coordination
     assert isinstance(coordination, FakeCoordination)
     return [(call.operation, call.args) for call in coordination.calls]
+
+
+READ = ("marked", (doc_items.REVISION_MARK,))
+
+
+def _seen(rev: int = 7) -> tuple[str, tuple[object, ...]]:
+    return ("mark", (doc_items.REVISION_MARK, str(rev)))
 
 
 @pytest.mark.feature("tick-doc-items-map")
@@ -68,108 +84,106 @@ def test_doc_items_map() -> None:
         "tick-doc-items-map",
         frozenset({"coordination", "ledger"}),
     )
-    assert found.reads == pass_domains("config", "doc")
+    assert found.reads == pass_domains("doc")
     assert found.needs == frozenset({"ledger state", "drained resume"})
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_a_changed_copy_maps_its_new_items_to_their_tasks_exactly_once(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY)
-    values = _values(str(copy), _tasks())
+def test_a_new_copy_on_the_ledger_maps_its_items_to_their_tasks_exactly_once() -> None:
+    values = _values(COPY, _tasks())
     assert _step().call(None, values.__getitem__) == [
-        f"mapped watchdog doc items of {copy}: 3 items on 2 tasks, updated t1, t2"
+        "mapped watchdog doc items of the ledger copy: 3 items on 2 tasks, updated t1, t2"
     ]
-    assert [(call.operation, call.args) for call in _ledger(values).calls] == [
+    assert _writes(values) == [
         ("update_task", ("t1", {"doc_items": ["3 Range item.", "1 First item."]}, (), None)),
         ("update_task", ("t2", {"doc_items": ["3 Range item."]}, (), None)),
     ]
     assert _coordination(values) == [
+        READ,
         ("marked", (doc_items.MARK,)),
         ("mark", (doc_items.MARK, doc_items.digest(COPY))),
+        _seen(),
     ]
-    recorded = _coordination(values)[-1][1][1]
-    assert isinstance(recorded, str)
-    again = _values(str(copy), _tasks(), recorded)
+    again = _values(COPY, _tasks(), "7")
     assert _step().call(None, again.__getitem__) == []
     assert _ledger(again).calls == []
-    assert _coordination(again) == [("marked", (doc_items.MARK,))]
-    copy.write_text(COPY + "4. [open] New item. [Ledger: t2]\n")
-    changed = _values(str(copy), _tasks(), recorded)
+    assert _coordination(again) == [READ]
+    newer = COPY + "4. [open] New item. [Ledger: t2]\n"
+    changed = _values(newer, _tasks(), "7", rev=9)
     assert _step().call(None, changed.__getitem__) == [
-        f"mapped watchdog doc items of {copy}: 4 items on 2 tasks, updated t1, t2"
+        "mapped watchdog doc items of the ledger copy: 4 items on 2 tasks, updated t1, t2"
     ]
-    assert [call.args for call in _ledger(changed).calls] == [
+    assert [args for _, args in _writes(changed)] == [
         ("t1", {"doc_items": ["3 Range item.", "1 First item."]}, (), None),
         ("t2", {"doc_items": ["3 Range item.", "4 New item."]}, (), None),
     ]
-    assert _coordination(changed)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy.read_text())))
+    assert _coordination(changed)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(newer))), _seen(9)]
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_an_unchanged_copy_runs_nothing(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY)
-    values = _values(str(copy), _tasks(), doc_items.digest(COPY))
+def test_an_unchanged_copy_runs_nothing() -> None:
+    values = _values(COPY, _tasks(), doc_items.digest(COPY))
     assert _step().call(None, values.__getitem__) == []
-    assert _ledger(values).calls == []
-    assert _coordination(values) == [("marked", (doc_items.MARK,))]
+    assert _writes(values) == []
+    assert _coordination(values) == [READ, ("marked", (doc_items.MARK,)), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
-@pytest.mark.parametrize("document", ["", "missing.md"])
-def test_an_unset_or_missing_copy_runs_nothing(tmp_path: Path, document: str) -> None:
-    values = _values(str(tmp_path / document) if document else "", _tasks())
+@pytest.mark.parametrize("copy", [None, ""])
+def test_a_ledger_without_a_copy_runs_nothing(copy: str | None) -> None:
+    values = _values(copy, _tasks())
+    assert _step().call(None, values.__getitem__) == []
+    assert _writes(values) == []
+    assert _coordination(values) == [READ, _seen()]
+
+
+@pytest.mark.feature("tick-doc-items-map")
+def test_a_ledger_view_without_a_stored_copy_reads_nothing() -> None:
+    values = _values(COPY, _tasks(), rev=None)
     assert _step().call(None, values.__getitem__) == []
     assert _ledger(values).calls == []
     assert _coordination(values) == []
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_a_copy_already_on_its_tasks_records_its_digest_without_writes(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY)
+def test_a_copy_already_on_its_tasks_records_its_digest_without_writes() -> None:
     tasks = [
         {"id": "t1", "doc_items": ["1 First item.", "3 Range item."]},
         {"id": "t2", "doc_items": ["3 Range item."]},
     ]
-    values = _values(str(copy), tasks)
+    values = _values(COPY, tasks)
     assert _step().call(None, values.__getitem__) == [
-        f"mapped watchdog doc items of {copy}: 3 items on 2 tasks, updated none"
+        "mapped watchdog doc items of the ledger copy: 3 items on 2 tasks, updated none"
     ]
-    assert _ledger(values).calls == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(COPY)))
+    assert _writes(values) == []
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(COPY))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_unknown_tasks_refuse_the_copy_once_until_it_changes(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY + "4. [open] Lost item. [Ledger: t9, t8]\n")
-    values = _values(str(copy), _tasks())
+def test_unknown_tasks_refuse_the_copy_once_until_it_changes() -> None:
+    copy = COPY + "4. [open] Lost item. [Ledger: t9, t8]\n"
+    values = _values(copy, _tasks())
     assert _step().call(None, values.__getitem__) == [
-        f"refused watchdog doc items of {copy}: Unknown ledger tasks: t8, t9"
+        "refused watchdog doc items of the ledger copy: Unknown ledger tasks: t8, t9"
     ]
-    assert _ledger(values).calls == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy.read_text())))
+    assert _writes(values) == []
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(copy))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY + "4. [open] Bad tag. [Ledger: nine]\n")
-    values = _values(str(copy), _tasks())
+def test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes() -> None:
+    copy = COPY + "4. [open] Bad tag. [Ledger: nine]\n"
+    values = _values(copy, _tasks())
     assert _step().call(None, values.__getitem__) == [
-        f"refused watchdog doc items of {copy}: Invalid Ledger tag:  nine"
+        "refused watchdog doc items of the ledger copy: Invalid Ledger tag:  nine"
     ]
-    assert _ledger(values).calls == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy.read_text())))
+    assert _writes(values) == []
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(copy))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
-def test_the_step_stops_when_its_deadline_expires(tmp_path: Path) -> None:
-    copy = tmp_path / "watchdog-doc.md"
-    copy.write_text(COPY)
-    values = _values(str(copy), _tasks())
+def test_the_step_stops_when_its_deadline_expires() -> None:
+    values = _values(COPY, _tasks())
     values["deadline"] = Deadline.after(-1)
     with pytest.raises(TimeoutError, match="tool deadline expired"):
         _step().call(None, values.__getitem__)
@@ -197,21 +211,3 @@ def test_the_coordination_store_reads_back_the_mark_it_wrote() -> None:
     assert port.mark(doc_items.MARK, "abc", deadline=deadline) is True
     assert port.marked(doc_items.MARK, deadline=deadline) == "abc"
     assert store.redis.values == {"swarm:sw:doc-items-digest": "abc"}
-
-
-@pytest.mark.feature("tick-doc-items-map")
-def test_the_swarm_setting_names_the_watchdog_document() -> None:
-    from unittest.mock import Mock
-
-    from scripts.swarm.cli import CONFIG_KEYS, config_value
-    from scripts.swarm.store import RedisStore
-
-    assert CONFIG_KEYS["watchdog-document"] == "watchdog_document"
-    assert config_value("watchdog-document", "/copy/watchdog-doc.md") == "/copy/watchdog-doc.md"
-    redis = Mock()
-    raw = {"slug": "sw", "repo": "/repo", "max_eng": "1", "max_ci": "1", "state": "paused"}
-    redis.hgetall.return_value = raw
-    store = RedisStore(redis)
-    assert store.config("sw").watchdog_document == ""
-    raw["watchdog_document"] = "/copy/watchdog-doc.md"
-    assert store.config("sw").watchdog_document == "/copy/watchdog-doc.md"

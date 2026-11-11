@@ -32,6 +32,7 @@ def summarize(
             grouped[row["step"]].append(row)
     costs = {name: sum(row["own_cpu_s"] + row["reaped_child_cpu_s"] for row in rows) for name, rows in grouped.items()}
     cpu = sum(costs.values())
+    kept = [row for row in records if row["pass_id"] in identities]
     gaps = [max(0.0, (right["start_ms"] - left["end_ms"]) / 1000) for left, right in zip(ordered, ordered[1:])]
     return {
         "pass_count": len(ordered),
@@ -52,7 +53,8 @@ def summarize(
         ],
         "lanes": lane_shares([row for rows in grouped.values() for row in rows], cpu),
         "critical_end_p95_s": p95([row["critical_end_s"] for row in ordered if "critical_end_s" in row]),
-        "records": outcomes([row for row in records if row["pass_id"] in identities]),
+        "records": outcomes(kept),
+        "ready_gaps": ready_gaps(kept),
         "rows_read_max": max((row["rows_read"] for row in ordered if "rows_read" in row), default=None),
     }
 
@@ -73,6 +75,19 @@ def outcomes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "dropped": sum(row["dropped"] for row in rows),
         }
         for name, rows in sorted(grouped.items())
+    ]
+
+
+def ready_gaps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return each step's count, median and largest gap from becoming ready to starting its run, read from the
+    ``tick:records`` rows that carry a ready time and whose run started, sorted by name."""
+    grouped: dict[str, list[float]] = defaultdict(list)
+    for row in records:
+        if "ready_s" in row and not row["skipped"] and not row["held"]:
+            grouped[row["step"]].append(row["start_s"] - row["ready_s"])
+    return [
+        {"step": name, "count": len(gaps), "median_s": median(gaps), "max_s": max(gaps)}
+        for name, gaps in sorted(grouped.items())
     ]
 
 
@@ -143,4 +158,7 @@ def command(store: Any, args: argparse.Namespace) -> None:
             f"{row['step']}  {row['records']}  {row['late_share']:.2f}%  {row['abandoned']}  {row['held']}"
             f"  {row['skipped']}  {row['dropped']}"
         )
+    print("Step  Ready to start median  Ready to start max")
+    for row in report.get("ready_gaps", []):
+        print(f"{row['step']}  {seconds(row['median_s'])}  {seconds(row['max_s'])}")
     print("CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.")
