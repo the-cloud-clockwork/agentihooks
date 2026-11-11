@@ -128,9 +128,7 @@ def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> No
     assert grade["permissions"] == {"contents": "read"}
     token = next(step for step in grade["steps"] if step.get("id") == "app-token")["with"]
     assert {key: token[key] for key in token if key.startswith("permission-")} == {
-        "permission-checks": "read",
         "permission-contents": "read",
-        "permission-issues": "read",
         "permission-pull-requests": "read",
     }
     step, confirm = grade["steps"][-2:]
