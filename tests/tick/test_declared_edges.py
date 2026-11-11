@@ -45,7 +45,7 @@ def _pass_needs() -> dict[str, frozenset[str]]:
     return _needs(edged)
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_step_waits_only_for_the_earlier_steps_whose_values_it_uses() -> None:
     writer = Step("writer", "a", writes=frozenset({ROWS}))
     reader = Step("reader", "a", reads=frozenset({DOC}))
@@ -60,7 +60,7 @@ def test_a_step_waits_only_for_the_earlier_steps_whose_values_it_uses() -> None:
     }
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_hooked_site_and_every_later_site_wait_for_the_writers_of_the_hook_values() -> None:
     writer = Step("writer", "a", writes=frozenset({DOC}))
     other = Step("other", "a", writes=frozenset({ROWS}))
@@ -76,7 +76,7 @@ def test_a_hooked_site_and_every_later_site_wait_for_the_writers_of_the_hook_val
     }
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_the_values_a_site_shut_check_reads_order_its_steps_after_their_writer() -> None:
     stopper = Step("stopper", "a", writes=frozenset({FINISHED}))
     shut = Step("shut", "b")
@@ -85,14 +85,14 @@ def test_the_values_a_site_shut_check_reads_order_its_steps_after_their_writer()
     assert _needs(edged) == {"stopper": frozenset(), "shut": frozenset({"stopper"}), "open": frozenset()}
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_slow_lane_writer_is_no_edge_of_a_later_site() -> None:
     slow = Step("slow", "a", writes=frozenset({ROWS}), lane=engine.SLOW)
     reader = Step("reader", "b", reads=frozenset({ROWS}))
     assert _needs(registry.site_edges((slow, reader), ("a", "b"))) == {"slow": frozenset(), "reader": frozenset()}
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_not_use() -> None:
     needs = _pass_needs()
     assert not needs["quota notice"] & {"dispatcher group", "size pass", "grouping release", "run window"}
@@ -101,7 +101,7 @@ def test_the_pass_graph_holds_no_step_on_an_earlier_step_whose_values_it_does_no
     assert "ledger health" in needs["command runner"] and "stopped branch" in needs["quota notice"]
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step() -> None:
     ran: list[str] = []
     hooks = {site: (lambda site=site: ran.append(site) or True) for site in ("a", "b")}
@@ -112,7 +112,7 @@ def test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step() -> None:
     assert ran == ["a", "b"]
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_shut_step_runs_no_hook_of_an_earlier_site() -> None:
     ran: list[str] = []
     gate = engine.SiteGate({"a": lambda: ran.append("a") or True}, lambda step: True, sites=("a", "b"))
@@ -120,7 +120,7 @@ def test_a_shut_step_runs_no_hook_of_an_earlier_site() -> None:
     assert ran == []
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it() -> None:
     sites = TickSites({}, {}, {}, lambda: 0)
     assert sites._listed() is False
@@ -129,7 +129,7 @@ def test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it() -> None
     assert sites.shut(Step("closer", TICK_SITES[-1]))
 
 
-@pytest.mark.feature("swarm-tick-declared-edges")
+@pytest.mark.feature("swarm-tick-value-edges")
 def test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site() -> None:
     sites = TickSites({}, {CONFIG: {}}, {}, lambda: 0)
     assert sites._listed() is False

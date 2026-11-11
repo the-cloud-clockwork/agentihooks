@@ -467,7 +467,7 @@
       ]
     },
     {
-      "id": "swarm-tick-declared-edges",
+      "id": "swarm-tick-value-edges",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2467",
       "behaviour": "A tick pass orders each step of a site only after the steps of earlier sites that write a value it reads or writes, read a value it writes, or write a value a site hook up to its own reads or writes, the values its shut check reads included; the gate runs the hooks of earlier sites before a later step, so a step declaring nothing no longer waits for the whole site before it.",
