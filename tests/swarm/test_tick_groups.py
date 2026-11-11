@@ -203,6 +203,23 @@ def test_a_stopped_swarm_runs_only_the_start_site(store: RedisStore, monkeypatch
     assert _ran(graph) == ["start"]
 
 
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_the_tick_orders_its_sites_by_the_tick_hook_and_shut_keys(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[Any, Any]] = []
+    original = registry.site_edges
+
+    def spy(steps: Any, order: Any, hooks: Any = None, shuts: Any = None) -> Any:
+        seen.append((hooks, shuts))
+        return original(steps, order, hooks, shuts)
+
+    monkeypatch.setattr(registry, "site_edges", spy)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+    assert (sites.TICK_HOOK_KEYS, sites.TICK_SHUT_KEYS) in seen
+
+
 def test_a_registered_step_runs_in_its_tick_site(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     ran: list[str] = []
     needed = (step for step in host.STEPS if step.name in {"command runner", "reboot pass"})

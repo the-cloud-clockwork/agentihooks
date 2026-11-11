@@ -137,3 +137,39 @@ def test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site() -> None
     assert sites.left_from == "agents"
     assert sites.shut(Step("reaper", "agents"))
     assert sites.shut(Step("closer", TICK_SITES[-1]))
+
+
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_a_missing_config_shuts_the_sites_from_tasks_and_keeps_the_agents_site() -> None:
+    sites = TickSites({}, {}, {}, lambda: 0)
+    assert sites._configured() is False
+    assert sites.left_from == "tasks"
+    assert not sites.shut(Step("reaper", "agents"))
+    assert sites.shut(Step("closer", "tasks"))
+
+
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_the_site_that_left_the_tick_clears_the_mark_when_its_value_returns() -> None:
+    box: dict[str, Any] = {}
+    sites = TickSites({}, box, {}, lambda: 0)
+    assert sites._configured() is False
+    box[CONFIG] = 1
+    assert sites._configured() is True
+    assert sites.left is False
+
+
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_a_hook_of_the_writer_own_site_orders_no_later_step_after_the_writer() -> None:
+    writer = Step("writer", "a", writes=frozenset({ROWS}))
+    reader = Step("reader", "b")
+    edged = registry.site_edges((writer, reader), ("a", "b"), {"a": (frozenset({ROWS}), frozenset())})
+    assert _needs(edged) == {"writer": frozenset(), "reader": frozenset()}
+
+
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_a_step_outside_the_sites_keeps_every_later_step_in_the_edges() -> None:
+    outside = Step("outside", "elsewhere")
+    writer = Step("writer", "a", writes=frozenset({ROWS}))
+    reader = Step("reader", "b", reads=frozenset({ROWS}))
+    edged = registry.site_edges((outside, writer, reader), ("a", "b"))
+    assert _needs(edged) == {"outside": frozenset(), "writer": frozenset(), "reader": frozenset({"writer"})}

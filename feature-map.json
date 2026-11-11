@@ -520,7 +520,12 @@
         "tests/tick/test_declared_edges.py::test_the_gate_runs_the_hooks_of_earlier_sites_before_a_later_step",
         "tests/tick/test_declared_edges.py::test_a_shut_step_runs_no_hook_of_an_earlier_site",
         "tests/tick/test_declared_edges.py::test_a_left_value_shuts_only_the_sites_from_the_hook_that_found_it",
-        "tests/tick/test_declared_edges.py::test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site"
+        "tests/tick/test_declared_edges.py::test_a_later_hook_that_finds_its_value_keeps_the_earlier_left_site",
+        "tests/tick/test_declared_edges.py::test_a_missing_config_shuts_the_sites_from_tasks_and_keeps_the_agents_site",
+        "tests/tick/test_declared_edges.py::test_the_site_that_left_the_tick_clears_the_mark_when_its_value_returns",
+        "tests/tick/test_declared_edges.py::test_a_hook_of_the_writer_own_site_orders_no_later_step_after_the_writer",
+        "tests/tick/test_declared_edges.py::test_a_step_outside_the_sites_keeps_every_later_step_in_the_edges",
+        "tests/swarm/test_tick_groups.py::test_the_tick_orders_its_sites_by_the_tick_hook_and_shut_keys"
       ]
     },
     {
