@@ -1122,7 +1122,7 @@ merged on 19 October 2026 and added the bounded slices. Its
 failed the 200 minute gap regression on the old code; its
 [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39225901866)
 passed on the final head. Its source task recorded the live before shape after
-an overnight tick outage from `agentihooks-swarm` journal lines matching
+an overnight tick outage from `agentihooks-swarm.service` journal lines matching
 `doctor CI speed`, 19 October 2026, 05:40–06:15 UTC: 9 of 15 reads
 exhausted the budget and 6 failed pagination, while discovered runs grew
 49, 96, 108, 189, 202, 208, 229, 301 and 305 and runs read rose only from 47

@@ -9,6 +9,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD_TAG = re.compile(r"-t\s+agentihooks-swarm\b|SYSLOG_IDENTIFIER=agentihooks-swarm\b")
+ANY_UNIT = re.compile(r"-u\s+'?agentihooks-swarm(?![-\w])")
 UNIT = "-u agentihooks-swarm.service"
 
 
@@ -23,7 +24,7 @@ def commands(path: Path) -> list[str]:
 
 
 def tick_reads() -> list[tuple[Path, str]]:
-    return [(path, line) for path in documents() for line in commands(path) if UNIT in line or OLD_TAG.search(line)]
+    return [(path, line) for path in documents() for line in commands(path) if ANY_UNIT.search(line) or OLD_TAG.search(line)]
 
 
 def test_tick_journal_reads_exist_in_the_docs() -> None:
@@ -32,6 +33,11 @@ def test_tick_journal_reads_exist_in_the_docs() -> None:
 
 def test_no_tick_journal_read_selects_the_old_tag() -> None:
     offenders = [f"{path.relative_to(ROOT)}: {line.strip()}" for path, line in tick_reads() if OLD_TAG.search(line)]
+    assert offenders == []
+
+
+def test_every_tick_journal_read_selects_the_user_unit() -> None:
+    offenders = [f"{path.relative_to(ROOT)}: {line.strip()}" for path, line in tick_reads() if UNIT not in line]
     assert offenders == []
 
 
