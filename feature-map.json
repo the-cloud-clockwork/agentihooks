@@ -3734,6 +3734,37 @@
         "tests/swarm/test_stale_swarm_tick.py::test_create_refuses_a_web_address_as_its_repo",
         "tests/swarm/test_stale_swarm_tick.py::test_create_keeps_a_local_path_even_when_its_folder_is_absent"
       ]
+    },
+    {
+      "id": "stall-master-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
+      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is focused and urgent and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
+      "seam": "swarm merge queue through cli.cmd_merge and stall_queue.route",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request",
+        "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
+        "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master"
+      ]
+    },
+    {
+      "id": "launch-hotfix-promotion",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
+      "behaviour": "A dev push of a pull request labelled launch hotfix promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request or a red unit suite never takes the route.",
+      "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
+      "tests": [
+        "tests/test_ci_launch_hotfix.py::test_a_labelled_merged_pull_with_a_green_unit_suite_promotes",
+        "tests/test_ci_launch_hotfix.py::test_a_pull_without_the_merged_launch_hotfix_label_never_promotes",
+        "tests/test_ci_launch_hotfix.py::test_a_red_unit_suite_never_promotes_a_labelled_pull",
+        "tests/test_ci_launch_hotfix.py::test_a_unit_shard_recovered_by_its_rerun_counts_as_a_passed_suite",
+        "tests/test_ci_launch_hotfix.py::test_a_red_unit_suite_skips_the_label_read",
+        "tests/test_ci_launch_hotfix.py::test_an_unreadable_label_falls_back_to_the_full_grade",
+        "tests/test_ci_launch_hotfix.py::test_missing_needs_never_promote",
+        "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
+        "tests/contracts/promotion/test_workflow.py::test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes",
+        "tests/swarm/test_promotion_watch.py::test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_closes_nothing"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -73,6 +73,7 @@ PROMOTION = (
     "ledger-load",
     "hierarchy-cpu",
     "tick-pattern-tree",
+    "launch-hotfix",
     "kind-due",
     "helm-kind",
     "stage-budget",

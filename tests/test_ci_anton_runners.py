@@ -112,6 +112,7 @@ MOVED = {
     ("test.yml", "sonar"): QUEUED,
     ("test.yml", "dep-manifest"): QUEUED,
     ("test.yml", "split"): QUEUED,
+    ("test.yml", "launch-hotfix"): LIGHT,
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,
     ("test.yml", "test-summary"): LIGHT,

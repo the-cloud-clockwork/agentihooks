@@ -1,4 +1,8 @@
-async function gradeIsComplete(github, context, api) {
+const GRADE = 'Gate — Required';
+const HOTFIX_GRADE = 'Launch hotfix grade';
+const settled = (job, hotfix) => job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion));
+
+async function gradeIsComplete(github, context, api, hotfix = false) {
   const [jobs, checks, statuses] = await Promise.all([
     github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...api, run_id: context.runId, filter: 'latest', per_page: 100 }),
     github.paginate(github.rest.checks.listForRef, { ...api, ref: context.sha, filter: 'latest', per_page: 100 }),
@@ -14,13 +18,13 @@ async function gradeIsComplete(github, context, api) {
     if (!latest.has(status.context)) latest.set(status.context, status.state);
   }
   return checks.filter(own).length === 1 &&
-    checks.some(check => check.name === 'Gate — Required' && check.status === 'completed' &&
+    checks.some(check => check.name === (hotfix ? HOTFIX_GRADE : GRADE) && check.status === 'completed' &&
       check.conclusion === 'success' && check.details_url.startsWith(runUrl)) &&
-    checks.every(check => own(check) || check.status === 'completed' && ['success', 'skipped'].includes(check.conclusion)) &&
-    [...latest.values()].every(state => state === 'success');
+    checks.every(check => own(check) || settled(check, hotfix)) &&
+    (hotfix || [...latest.values()].every(state => state === 'success'));
 }
 
-async function snapshotGradeComplete(github, context, api, triggering = context) {
+async function snapshotGradeComplete(github, context, api, triggering = context, hotfix = false) {
   const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
     { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
   const selected = context.runId !== triggering.runId;
@@ -28,8 +32,8 @@ async function snapshotGradeComplete(github, context, api, triggering = context)
       job.status === 'completed' && job.conclusion === 'success')) throw new Error('Selected promotion grade is no longer ready');
   const current = jobs.filter(job => job.run_id === context.runId && job.name === 'promote / promote' &&
     (selected || job.status === 'in_progress'));
-  return current.length === 1 && jobs.some(job => job.name === 'Gate — Required' && job.status === 'completed' && job.conclusion === 'success') &&
-    jobs.every(job => job === current[0] || job.status === 'completed' && ['success', 'skipped'].includes(job.conclusion));
+  return current.length === 1 && jobs.some(job => job.name === (hotfix ? HOTFIX_GRADE : GRADE) && job.status === 'completed' && job.conclusion === 'success') &&
+    jobs.every(job => job === current[0] || settled(job, hotfix));
 }
 
 async function snapshotChecksComplete(github, api, snapshot, number) {
@@ -105,7 +109,7 @@ async function endSuperseded(core, graded, main, promoted, reason = 'Main alread
   ]).write();
 }
 
-module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now }) => {
+module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now, hotfix = false }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
   if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
@@ -163,7 +167,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
       if (latest.head.sha !== snapshot) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
-      if (!reported && await snapshotGradeComplete(github, context, api, triggering)) {
+      if (!reported && await snapshotGradeComplete(github, context, api, triggering, hotfix)) {
         await github.rest.repos.createCommitStatus({ ...status, state: 'success', description: 'The integration grade passed for the verified snapshot tree.' });
         reported = true;
       }
@@ -172,7 +176,7 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       const visible = statuses.find(check => check.context === status.context)?.state === 'success';
       const complete = reported && visible && await snapshotChecksComplete(github, api, snapshot, pull.number);
       if (complete && latest.mergeable === true && (latest.mergeable_state === 'clean' ||
-          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, triggering, api))) {
+          latest.mergeable_state === 'unstable' && await gradeIsComplete(github, triggering, api, hotfix))) {
         ready = true;
         break;
       }

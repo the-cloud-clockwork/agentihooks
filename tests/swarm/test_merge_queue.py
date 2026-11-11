@@ -1151,3 +1151,78 @@ def test_cli_target_check_reads_its_task_and_the_tasks_naming_the_pull_only(
     monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: {})
     assert cli.main(["sw", "merge", action, URL]) == 0
     assert reads == [("task", "sw", "t1"), ("targeting", "sw", URL)]
+
+
+STALL_TASK = {"id": "t1", "rank": "urgent", "state": "pr", "pr_url": URL}
+OTHER_TASK = {"id": "t2", "rank": "normal", "state": "open"}
+
+
+def stall_ledger(rows: list[dict], focus: tuple[str, ...] = ()) -> object:
+    from types import SimpleNamespace
+
+    scoped = scoped_ledger(rows)
+    doc = {"tasks": rows, "freezes": [{"verb": "focus", "target": f"tasks/{task}"} for task in focus]}
+    return SimpleNamespace(
+        task=scoped.task, tasks_targeting=scoped.tasks_targeting, tasks=scoped.tasks, state=lambda slug: doc
+    )
+
+
+def plant_stall(store: object, minutes: int) -> None:
+    from scripts.swarm.health import spawn_stall
+
+    state = {"since": 0, "launch": 0, "at": minutes * 60_000}
+    store.redis.set(store.key("sw", spawn_stall.KEY), json.dumps(state))
+
+
+def stalled_master(monkeypatch: pytest.MonkeyPatch, tmp_path: object, rows: list[dict], focus=(), minutes=10) -> list:
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    store = swarm_of(MASTER)
+    plant_stall(store, minutes)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "LedgerClient", lambda: stall_ledger(rows, focus))
+    seen = []
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: seen.append(kwargs) or {"queued": True})
+    return seen
+
+
+@pytest.mark.feature("stall-master-queue")
+def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request(monkeypatch, tmp_path):
+    from scripts.swarm import stall_queue
+
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK], focus=("t1",))
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    journal = seen[0]["journal"]
+    assert journal.context == {"route": stall_queue.ROUTE, "task": "t1"}
+    journal.write("queue", URL, "abc", [], [])
+    record = json.loads((tmp_path / "merge-queue-events.jsonl").read_text().splitlines()[-1])
+    assert (record["route"], record["task"], record["pull"]) == ("spawn stall", "t1", URL)
+
+
+@pytest.mark.feature("stall-master-queue")
+@pytest.mark.parametrize(
+    "rows, focus, minutes",
+    [
+        ([STALL_TASK], (), 9),
+        ([{**STALL_TASK, "rank": "normal"}], (), 10),
+        ([{**STALL_TASK, "state": "done"}], (), 10),
+        ([STALL_TASK, OTHER_TASK], ("t2",), 10),
+        ([], (), 10),
+    ],
+    ids=["no stall yet", "not urgent", "done", "outside the focus", "no task"],
+)
+def test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task(
+    monkeypatch, tmp_path, capsys, rows, focus, minutes
+):
+    seen = stalled_master(monkeypatch, tmp_path, rows, focus=focus, minutes=minutes)
+    assert cli.main(["sw", "merge", "queue", URL]) == 1
+    assert seen == []
+    assert capsys.readouterr().err == "swarm: engineer@a1b2c3-0001 is the swarm master; the master works no task\n"
+
+
+@pytest.mark.feature("stall-master-queue")
+def test_the_stall_route_never_opens_a_dequeue_for_the_master(monkeypatch, tmp_path):
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK])
+    assert cli.main(["sw", "merge", "dequeue", URL]) == 1
+    assert seen == []
