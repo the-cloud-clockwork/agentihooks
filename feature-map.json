@@ -104,6 +104,17 @@
       ]
     },
     {
+      "id": "hub-fan-in-unowned-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-readiness-key-ownership",
+      "behaviour": "The hub's scoped event fan in skips a swarm whose scoped state stream cannot be created over a legacy key value bucket that still holds entries, prints one line naming that swarm and bucket, and keeps fetching every other swarm's events, so one unmigrated swarm cannot stop the readiness offer poll or any other reactor for the rest.",
+      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
+      "tests": [
+        "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",

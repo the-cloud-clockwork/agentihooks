@@ -121,3 +121,20 @@ def test_scoped_state_requires_explicit_legacy_key_ownership(buses):
     hub.migrate_state("rig", "spoke-work", [])
     assert hub.for_swarm("rig").state("spoke-work").get("unknown-owner") is None
     assert legacy.state("spoke-work").get("unknown-owner").value == b"retained"
+
+
+@pytest.mark.feature("hub-fan-in-unowned-state")
+def test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned(buses, capsys):
+    legacy, hub = buses
+    legacy.state("spoke-work").create("unknown-owner", b"retained")
+    hub.migrate_state("rig", "spoke-work", [])
+    with pytest.raises(RuntimeError, match="swarm 'stuck' bucket 'spoke-work'"):
+        hub.for_swarm("stuck")
+    consumer = hub.events.consumer("aggregate", "swarm.*.execution.started")
+    work = Envelope("own", "execution.started", "rig", "execution", "work", 1, 0, "member", {})
+    assert hub.events.publish("swarm.rig.execution.started", work)
+    assert [delivery.event for delivery in consumer.fetch(10, 1000)] == [work]
+    assert (
+        "hub: swarm 'stuck' skipped: legacy state requires explicit key ownership: swarm 'stuck' bucket 'spoke-work'"
+        in capsys.readouterr().err
+    )
