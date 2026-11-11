@@ -139,19 +139,23 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
         "outcome": "success",
     }
     token = PASS.set(record)
+    error = ""
     try:
         yield
     except tick_stop.Stopped:
         record["outcome"] = "stopped"
         raise
-    except BaseException:
+    except BaseException as exc:
         record["outcome"] = "error"
+        error = f"{type(exc).__qualname__}: {exc}"
         raise
     finally:
         try:
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
             tick_metrics.pass_finished(slug, record)
             finish_pass(store, slug, record)
+            if error:
+                pass_error(store, slug, {"pass_id": record["pass_id"], "end_ms": record["end_ms"], "error": error})
         finally:
             PASS.reset(token)
 
@@ -164,6 +168,36 @@ def finish_pass(store: Any, slug: str, record: dict[str, Any]) -> None:
         append_record(store, slug, "tick:passes", record)
     except RedisError:
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": "tick:passes"}))
+
+
+PASS_ERRORS = "tick:pass-errors"
+PASS_ERRORS_KEPT = 200
+PASS_ERROR_CHARS = 2000
+
+
+def pass_error(store: Any, slug: str, entry: dict[str, Any]) -> None:
+    """Push ``entry`` onto the swarm's pass errors, newest first, keeping the newest ``PASS_ERRORS_KEPT``."""
+    from redis.exceptions import RedisError
+
+    key = store.key(slug, PASS_ERRORS)
+    try:
+        pipe = store.redis.pipeline(transaction=False)
+        pipe.lpush(key, json.dumps({**entry, "error": entry["error"][:PASS_ERROR_CHARS]}))
+        pipe.ltrim(key, 0, PASS_ERRORS_KEPT - 1)
+        pipe.execute()
+    except RedisError:
+        emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": PASS_ERRORS}))
+
+
+def pass_errors(store: Any, slug: str) -> list[dict[str, Any]]:
+    """Return the swarm's kept pass errors, newest first, empty when Redis fails."""
+    from redis.exceptions import RedisError
+
+    try:
+        rows = store.redis.lrange(store.key(slug, PASS_ERRORS), 0, PASS_ERRORS_KEPT - 1)
+    except RedisError:
+        return []
+    return [json.loads(row) for row in rows]
 
 
 @contextmanager
