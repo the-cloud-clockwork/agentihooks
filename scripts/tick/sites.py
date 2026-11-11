@@ -136,10 +136,12 @@ class TickSites:
         return self._leave(CONFIG not in self.box, "tasks")
 
     def _leave(self, missing: bool, site: str) -> bool:
-        """Mark the tick left from ``site`` when ``missing``, keeping the first site that left it; answer whether the
-        site runs."""
+        """Mark the tick left from ``site`` when ``missing`` and no earlier site left it, clear the mark ``site`` set
+        once its value is back; answer whether the site runs."""
         if missing and not self.left:
             self.left, self.left_from = True, site
+        elif not missing and self.left_from == site:
+            self.left = False
         return not missing
 
 

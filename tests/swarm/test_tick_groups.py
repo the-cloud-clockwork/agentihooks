@@ -18,7 +18,7 @@ from scripts.tick import engine, registry, sites
 from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.ports import Tools
 from scripts.tick.step import Context, Domain, Lane, Result, Step, Write
-from scripts.tick.steps import PASS, actions_of, observe, report
+from scripts.tick.steps import PASS, actions_of, host, observe, report
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -205,7 +205,9 @@ def test_a_stopped_swarm_runs_only_the_start_site(store: RedisStore, monkeypatch
 
 def test_a_registered_step_runs_in_its_tick_site(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     ran: list[str] = []
-    _with(monkeypatch, *observe.STEPS, _Marker("marker", "agents", _recorder(ran, lambda get: "agents")), real=False)
+    needed = (step for step in host.STEPS if step.name in {"command runner", "reboot pass"})
+    marker = _Marker("marker", "agents", _recorder(ran, lambda get: "agents"))
+    _with(monkeypatch, *observe.STEPS, *needed, marker, real=False)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert ran == ["agents"]
 
