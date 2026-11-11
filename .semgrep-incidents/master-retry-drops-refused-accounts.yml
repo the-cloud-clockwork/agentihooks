@@ -1,0 +1,18 @@
+rules:
+  - id: master-retry-drops-refused-accounts
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Hive master selection must receive the accounts whose reservation already refused this launch. Without them
+      place_master prefers the same native interactive login on every retry and the spawn loops until the tick lock
+      goes stale, burning tens of CPU seconds per pass.
+    paths:
+      include:
+        - /scripts/hive/
+        - master-retry-drops-refused-accounts.py
+    patterns:
+      - pattern-inside: |
+          def _select(...):
+              ...
+      - pattern: self._master_selection(...)
+      - pattern-not: self._master_selection(..., accounts)

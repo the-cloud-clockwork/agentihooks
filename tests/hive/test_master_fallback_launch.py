@@ -762,3 +762,45 @@ def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check
     secondary = replace(admitted, seat="master-2@fixture")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
     assert ack.failure == "unavailable: spawned"
+
+
+@pytest.mark.feature("hive-master-refused-account-retry")
+def test_a_secondary_master_retry_leaves_a_full_native_login_for_a_subscription_slot(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from scripts.hive import launch
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "id": "master-2", "seat": "master-2@fixture", "controller_epoch": setup.held.epoch}
+    write_hive(
+        setup,
+        excluded=[],
+        ui="yes",
+        interactive={"claude": "native"},
+        slots=[{"harness": "claude", "account": "account", "kind": "subscription", "cap": 6}],
+    )
+    assert setup.launcher.slots.reserve("claude:native", "lead", 1, 300000)
+    reselect = setup.launcher._reselect
+    tries: list[frozenset[str]] = []
+
+    def bounded(request: SpawnRequest, accounts: frozenset[str]) -> Any:
+        tries.append(accounts)
+        if len(tries) > 2:
+            pytest.fail(f"the retry chose a refused account again: {tries}")
+        return reselect(request, accounts)
+
+    monkeypatch.setattr(setup.launcher, "_reselect", bounded)
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: "pending")
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    assert setup.launcher.spawn(request) == "pending"
+    assert tries == [frozenset({"claude:native"})]
+    order = setup.launcher.orders_for("master-2")
+    assert (order.slot, order.route_kind) == ("account", "subscription")
+    records = sorted(setup.store.execution_registry.records("fixture"), key=lambda record: record.generation)
+    assert [(record.account, record.state) for record in records] == [("native", "ended"), ("account", "launching")]
+    ending = setup.store.redis.hget(setup.store.key("fixture", launch.ENDINGS), records[0].execution_id)
+    assert json.loads(ending)["reason"] == (
+        "account reservation is full: account=claude:native sessions=1 cap=1 five_left=None week_left=None"
+    )
