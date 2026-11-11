@@ -5109,7 +5109,7 @@ A pass that ends before either event returns normally, and the tick then runs th
    returned, and prints the journal line above with the count it released.
 5. When a pass is still running after the grace, the tick flushes its output and exits through `os._exit` with the
    code above, without waiting for that thread. When every pass returned, a service stop exits with 143 and a
-   deadline stop ends the tick with code 0 and skips the herdr sweep.
+   deadline stop ends the tick with code 0; neither reaches the herdr sweep.
 
 The steps a stopped pass did not reach are skipped; the next minute tick starts a new pass.
 
@@ -5151,8 +5151,11 @@ the other swarms. The herdr sweep after a pass took at most 23 seconds over 139 
 All of these only read.
 
 ```bash
-# Stopped ticks in the last hour, and any start timeout of the fallback unit
+# Stopped ticks in the last hour. The tick holder runs the tick under systemd-cat with the identifier
+# agentihooks-swarm, so -t matches ticks from the scheduler cron and from the fallback unit alike
 TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --no-pager | grep -E "the swarm tick stopped"
+
+# Any start timeout of the fallback unit
 TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --no-pager | grep -E "timed out|Failed with result"
 
 # The installed fallback unit's timeout
