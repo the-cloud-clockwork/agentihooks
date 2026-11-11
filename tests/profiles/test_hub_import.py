@@ -292,3 +292,229 @@ def test_a_profile_folder_that_appeared_since_planning_is_never_overwritten(tmp_
         "profiles/second",
         "profiles/second/CLAUDE.md",
     ]
+
+
+def _package(hub: Path) -> Path:
+    return hub / "agents/diagram/package"
+
+
+@pytest.mark.feature("hub-import-data")
+def test_state_and_reports_move_to_the_data_folder(hub: Path, tmp_path: Path) -> None:
+    package = _package(hub)
+    (package / "state/runs").mkdir(parents=True)
+    (package / "state/runs/last.json").write_text("{}")
+    (package / "reports").mkdir()
+    (package / "reports/week.md").write_text("Week.\n")
+    out, data = tmp_path / "bundle", tmp_path / "data"
+    report = import_hub(hub, out, False, data)
+    assert report["data"] == [
+        str(data / "profiles/diagram/reports/week.md"),
+        str(data / "profiles/diagram/state/runs/last.json"),
+    ]
+    assert (data / "profiles/diagram/state/runs/last.json").read_text() == "{}"
+    assert (data / "profiles/diagram/reports/week.md").read_text() == "Week.\n"
+    assert not (out / "profiles/diagram/state").exists()
+    assert not (out / "profiles/diagram/reports").exists()
+    assert all(not path.startswith(("profiles/diagram/state", "profiles/diagram/reports")) for path in report["files"])
+
+
+@pytest.mark.feature("hub-import-data")
+def test_a_package_without_state_writes_no_data_folder(hub: Path, tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    report = import_hub(hub, tmp_path / "bundle", False, data)
+    assert report["data"] == []
+    assert not data.exists()
+
+
+@pytest.mark.feature("hub-import-data")
+def test_the_data_folder_defaults_under_the_agentihooks_home(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (_package(hub) / "state").mkdir()
+    (_package(hub) / "state/run.json").write_text("{}")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    report = import_hub(hub, tmp_path / "bundle", False)
+    assert report["data"] == [str(tmp_path / "home/hub-data/profiles/diagram/state/run.json")]
+    assert (tmp_path / "home/hub-data/profiles/diagram/state/run.json").read_text() == "{}"
+
+
+@pytest.mark.feature("hub-import-data")
+def test_an_occupied_data_folder_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    (data / "profiles/diagram").mkdir(parents=True)
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="profile data taken: diagram"):
+        import_hub(hub, out, False, data)
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-data")
+def test_the_command_line_takes_the_data_folder(hub: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (_package(hub) / "reports").mkdir()
+    (_package(hub) / "reports/a.md").write_text("A")
+    data = tmp_path / "data"
+    assert main([str(hub), str(tmp_path / "bundle"), "--data", str(data)]) == 0
+    assert json.loads(capsys.readouterr().out)["data"] == [str(data / "profiles/diagram/reports/a.md")]
+    assert (data / "profiles/diagram/reports/a.md").read_text() == "A"
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) -> None:
+    package = _package(hub)
+    (package / "scripts/lib").mkdir(parents=True)
+    node = {"dependencies": {"playwright-core": "^1.52.0", "js-yaml": "^4.1.0"}, "devDependencies": {"x": "1"}}
+    (package / "scripts/package.json").write_text(json.dumps(node))
+    (package / "requirements.txt").write_text("# tools\nrequests>=2.31  # http\n\n-r other.txt\nPyYAML==6.0\n")
+    out = tmp_path / "bundle"
+    out.mkdir()
+    (out / "deps.json").write_text(json.dumps({"deps": [{"id": "serena", "kind": "uv-tool"}]}))
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert report["deps"] == ["diagram-npm-scripts", "diagram-pip-root"]
+    check = "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"
+    assert json.loads((out / "deps.json").read_text()) == {
+        "deps": [
+            {"id": "serena", "kind": "uv-tool"},
+            {
+                "id": "diagram-npm-scripts",
+                "kind": "npm",
+                "check": ["npm", "ls", "--global", "js-yaml", "playwright-core"],
+                "install": ["npm", "install", "--global", "js-yaml@^4.1.0", "playwright-core@^1.52.0"],
+            },
+            {
+                "id": "diagram-pip-root",
+                "kind": "pip",
+                "check": ["python3", "-c", check, "requests", "PyYAML"],
+                "install": ["python3", "-m", "pip", "install", "requests>=2.31", "PyYAML==6.0"],
+            },
+        ]
+    }
+    assert not (out / "profiles/diagram/scripts").exists()
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_a_bundle_without_deps_gets_a_new_manifest(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert report["deps"] == ["diagram-npm-root"]
+    assert [dep["id"] for dep in json.loads((out / "deps.json").read_text())["deps"]] == ["diagram-npm-root"]
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_manifests_without_installs_add_no_entry(hub: Path, tmp_path: Path) -> None:
+    package = _package(hub)
+    (package / "package.json").write_text(json.dumps({"name": "x", "devDependencies": {"x": "1"}}))
+    (package / "node_modules/zod").mkdir(parents=True)
+    (package / "node_modules/zod/package.json").write_text(json.dumps({"dependencies": {"a": "1"}}))
+    (package / "requirements.txt").write_text("# none\n-e .\n")
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert report["deps"] == []
+    assert not (out / "deps.json").exists()
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_a_taken_deps_id_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    out = tmp_path / "bundle"
+    out.mkdir()
+    manifest = json.dumps({"deps": [{"id": "diagram-npm-root", "kind": "npm"}]})
+    (out / "deps.json").write_text(manifest)
+    with pytest.raises(ValueError, match="deps.json entry taken: diagram-npm-root"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "deps.json").read_text() == manifest
+    assert not (out / "profiles").exists()
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_an_install_from_an_absolute_path_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"lib": "file:/home/operator/lib"}}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=r"install with an absolute path refused: .*package\.json"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_a_dry_run_reports_deps_without_writing_the_manifest(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "requirements.txt").write_text("rich\n")
+    out = tmp_path / "bundle"
+    assert import_hub(hub, out, True, tmp_path / "data")["deps"] == ["diagram-pip-root"]
+    assert not out.exists()
+
+
+def _case(hub: Path, name: str, case: object) -> None:
+    cases = hub / "agents/diagram/evaluation/cases"
+    cases.mkdir(parents=True, exist_ok=True)
+    (cases / name).write_text(yaml.safe_dump(case))
+
+
+@pytest.mark.feature("hub-import-evals")
+def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
+    expected = {
+        "tools_required": ["mcp__tools__update_page"],
+        "tools_forbidden": [],
+        "destinations": [{"kind": "confluence_page"}],
+        "error_handling": {"literal_shell": False},
+        "summary": "one page",
+        "skipped": None,
+    }
+    _case(hub, "simple.yaml", {"name": "simple", "description": "Update one page", "expected": expected})
+    _case(hub, "named.yml", {"name": "Draw one box", "expected": {"artifacts": ["box.svg"]}})
+    (hub / "agents/diagram/evaluation/cases/README.md").write_text("Cases.\n")
+    (hub / "agents/diagram/evaluation/eval.yml").write_text("name: diagram\n")
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert report["cases"] == ["profiles/diagram/cases/named.json", "profiles/diagram/cases/simple.json"]
+    assert set(report["cases"]) <= set(report["files"])
+    simple = (out / "profiles/diagram/cases/simple.json").read_text()
+    points = [
+        "tools_required: mcp__tools__update_page",
+        'destinations: {"kind": "confluence_page"}',
+        'error_handling: {"literal_shell": false}',
+        "summary: one page",
+    ]
+    assert simple == json.dumps({"intent": "Update one page", "points": points}, indent=2) + "\n"
+    named = json.loads((out / "profiles/diagram/cases/named.json").read_text())
+    assert named == {"intent": "Draw one box", "points": ["artifacts: box.svg"]}
+
+
+@pytest.mark.feature("hub-import-evals")
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"name": "empty", "expected": {"tools_required": []}},
+        {"name": "none"},
+        {"description": "", "expected": {"a": ["b"]}},
+        {"name": 3, "expected": {"a": ["b"]}},
+        {"name": "list", "expected": ["a"]},
+    ],
+)
+def test_an_eval_case_without_intent_or_points_refuses_the_import(hub: Path, tmp_path: Path, case: object) -> None:
+    _case(hub, "bad.yaml", case)
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=r"eval case needs an intent and points: .*bad\.yaml"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-evals")
+def test_an_eval_case_that_is_not_a_mapping_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    _case(hub, "bad.yaml", ["a"])
+    with pytest.raises(ValueError, match=r"eval case is not a mapping: .*bad\.yaml"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-evals")
+def test_a_symlinked_eval_case_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    _case(hub, "real.yaml", {"name": "real", "expected": {"a": ["b"]}})
+    (hub / "agents/diagram/evaluation/cases/link.yaml").symlink_to(hub / "agents/diagram/evaluation/cases/real.yaml")
+    with pytest.raises(ValueError, match=r"symlink refused: .*link\.yaml"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-evals")
+def test_an_eval_case_holding_a_credential_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    _case(hub, "leak.yaml", {"name": "leak", "expected": {"token": ["xoxb-" + "1" * 12]}})
+    with pytest.raises(ValueError, match=r"literal credential refused: .*leak\.yaml"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")

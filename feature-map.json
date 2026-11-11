@@ -1739,6 +1739,49 @@
       ]
     },
     {
+      "id": "hub-import-data",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package state and reports move to a runtime data folder outside the profile, staged like profiles, refusing an occupied data folder.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_state_and_reports_move_to_the_data_folder",
+        "tests/profiles/test_hub_import.py::test_a_package_without_state_writes_no_data_folder",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_defaults_under_the_agentihooks_home",
+        "tests/profiles/test_hub_import.py::test_an_occupied_data_folder_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_the_command_line_takes_the_data_folder"
+      ]
+    },
+    {
+      "id": "hub-import-deps",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package Node and pip manifests become bundle deps.json entries with check and install commands, refusing a taken id or an install from an absolute path.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_node_and_pip_installs_become_deps_entries",
+        "tests/profiles/test_hub_import.py::test_a_bundle_without_deps_gets_a_new_manifest",
+        "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
+        "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_install_from_an_absolute_path_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_dry_run_reports_deps_without_writing_the_manifest"
+      ]
+    },
+    {
+      "id": "hub-import-evals",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub evaluation cases become judge cases holding intent and points, refusing a case without either, a symlinked case and a case holding a literal credential.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_eval_cases_become_judge_cases",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_without_intent_or_points_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_that_is_not_a_mapping_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_symlinked_eval_case_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_holding_a_credential_refuses_the_import"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
