@@ -3456,6 +3456,21 @@
       ]
     },
     {
+      "id": "lease-cache-records",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2470",
+      "behaviour": "On a swarm whose fencing document moved to per record keys, the cheap controller lease read answers the lease record itself, so a renew inside its margin returns the live lease without reading or writing the whole swarm document, and a lease another owner took is refused.",
+      "seam": "scripts.swarm.fencing.read_lease, used by scripts.swarm.lease.renew and current",
+      "tests": [
+        "tests/swarm/test_lease_cache_records.py::test_the_cheap_lease_read_answers_the_lease_written_through_records",
+        "tests/swarm/test_lease_cache_records.py::test_the_cheap_lease_read_survives_an_unrelated_records_write",
+        "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_inside_its_margin_writes_nothing",
+        "tests/swarm/test_lease_cache_records.py::test_a_renew_on_records_refuses_a_lease_another_owner_took",
+        "tests/swarm/test_lease_cache_records.py::test_a_records_swarm_with_no_lease_reads_none",
+        "tests/swarm/test_lease_cache_records.py::test_a_document_swarm_still_reads_its_lease_from_the_cache"
+      ]
+    },
+    {
       "id": "select-profile-records-the-agent-process",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1779",
