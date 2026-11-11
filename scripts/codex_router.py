@@ -50,6 +50,7 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+RECHECK_SECONDS = 5 * 60
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
@@ -504,7 +505,8 @@ def fresh_quotas(
             seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
         )
         recheck = recheck_expired(account, seen, environ, now)
-        due = force or recheck or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        retry = recheck and now - attempts.get(account.name, 0.0) >= RECHECK_SECONDS
+        due = force or retry or (stale and not session_bands.fresh(attempts.get(account.name), now))
         if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
