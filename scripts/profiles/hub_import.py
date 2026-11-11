@@ -292,16 +292,17 @@ def _pip(path: Path) -> tuple[list[str], list[str]]:
     specs: list[str] = []
     for line in path.read_text().splitlines():
         text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
-        spec, _, option = text.partition(" --")
-        if (spec.startswith("-") and not spec.startswith("--hash")) or (option and not option.startswith("hash")):
+        tokens = text.split()
+        if any(token.startswith("-") and not token.startswith("--hash") for token in tokens):
             raise ValueError(f"requirements option refused: {text} in {path}")
-        if not spec or spec.startswith("-"):
+        spec = " ".join(token for token in tokens if not token.startswith("-"))
+        if not spec:
             continue
         match = REQUIREMENT.match(spec)
         if not match or "@" in spec or "://" in spec:
             raise ValueError(f"requirement without a checkable name refused: {spec} in {path}")
         names.append(match.group())
-        specs.append(spec.strip())
+        specs.append(spec)
     return names, specs
 
 

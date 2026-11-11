@@ -474,6 +474,8 @@ def test_an_npm_install_from_a_local_path_refuses_the_import(hub: Path, tmp_path
         "--index-url https://example.com",
         "-f wheels",
         "rich --no-binary rich",
+        "rich\t--index-url x",
+        "rich -c c.txt",
     ],
 )
 def test_a_requirements_option_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
