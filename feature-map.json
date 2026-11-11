@@ -2255,6 +2255,17 @@
       ]
     },
     {
+      "id": "alert-writer-closes-its-sync-alert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1769",
+      "behaviour": "A seat whose refused write raised a sync alert can claim and close that alert even after the ledger closed it on a later success or expiry, and every refused alert claim or close carries the server's reason without raising a new sync alert.",
+      "seam": "The alert_claim and alert_close ops through ledger_core.sync and the ledger CLI's refused report",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
+      ]
+    },
+    {
       "id": "ledger-artifacts-panel",
       "origin": "inventory",
       "behaviour": "The artifacts panel lists every artifact newest first, renders Markdown, JSON and SVG without running scripts, and offers delete and trash restore.",
