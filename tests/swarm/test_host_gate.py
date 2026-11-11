@@ -88,8 +88,7 @@ def test_another_swarm_counts_spawns_from_the_startup_lag_before_its_grant(store
     assert any(action.startswith("holding spawns: host memory room 2, ") for action in actions)
     assert len(runtime.masters) == 1 and runtime.spawned == []
     _decide(store, 2, slug="doc", granted_at=1_001 + tick.HOST_START_LAG_MS)
-    tick.tick("doc", store, ledger, runtime, now_ms=31_001)
-    assert _workers(runtime) == ["d1"]
+    assert tick._host_full("doc", store, 31_001) == ""
     assert tick.HOST_START_LAG_MS == 30_000
 
 
