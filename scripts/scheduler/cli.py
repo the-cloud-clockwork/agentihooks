@@ -24,7 +24,7 @@ def _targets(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--fleet", dest="target", action="store_const", const=("fleet", ""))
     for target in ("swarm", "seat", "session", "workflow"):
         group.add_argument(f"--{target}", dest="target", type=lambda name, kind=target: (kind, name))
-    parser.add_argument("--case", default="")
+    parser.add_argument("--case")
     parser.add_argument("message", nargs="+")
 
 
@@ -39,7 +39,7 @@ def _owner() -> str:
 
 
 def _slot(args: argparse.Namespace) -> commands.Slot:
-    return commands.target_slot(*args.target, case=args.case)
+    return commands.target_slot(*args.target, case=args.case or "")
 
 
 def _timer_add(scheduler, args):
