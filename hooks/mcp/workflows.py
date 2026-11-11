@@ -60,17 +60,23 @@ def scheduled(name: str, case: str, moment: dict[str, str], timezone: str, owner
     """Arm a cron or timer whose target starts the named workflow on the case file."""
     commands = _module("scripts.scheduler.commands")
     if sum(1 for value in moment.values() if value) != 1:
-        raise commands.CommandError("give one of expression, delay or at")
+        raise commands.CommandError("give one of expression or when")
     slot = commands.target_slot("workflow", name, case)
     scheduler = commands.connect()
     message = f"workflow {name}"
     if moment["expression"]:
         entry = commands.add_cron(scheduler, owner(), slot, message, expression=moment["expression"], timezone=timezone)
-    elif moment["at"]:
-        entry = commands.add_timer(scheduler, owner(), slot, message, at=commands.moment(moment["at"]))
     else:
-        entry = commands.add_timer(scheduler, owner(), slot, message, delay=commands.seconds(moment["delay"]))
+        entry = commands.add_timer(scheduler, owner(), slot, message, **_when(commands, moment["when"]))
     return {"success": True, "entry": entry}
+
+
+def _when(commands: Any, text: str) -> dict[str, float]:
+    """A duration such as 5m as a delay, else an ISO time with an offset as a moment."""
+    try:
+        return {"delay": commands.seconds(text)}
+    except commands.CommandError:
+        return {"at": commands.moment(text)}
 
 
 def unscheduled(schedule_id: str) -> dict[str, Any]:
@@ -117,20 +123,18 @@ def workflow_schedule(
     name: str,
     case: str,
     expression: str = "",
-    delay: str = "",
-    at: str = "",
+    when: str = "",
     timezone: str = "UTC",
     session_id: str = "",
     agent_name: str = "",
 ) -> str:
-    """Start a workflow on a case file on every match of a cron expression, or once after a delay or at a time.
+    """Start a workflow on a case file on every match of a cron expression, or once at a delay or time.
 
     Args:
         name: the workflow name, as workflow_list shows it.
         case: path to the case file the run reads when it fires.
-        expression: five cron fields: minute hour day month weekday. Give one of expression, delay or at.
-        delay: seconds, or a number with s, m, h or d (90, 5m, 2h).
-        at: ISO time such as 2026-10-18T09:30:00+00:00.
+        expression: five cron fields: minute hour day month weekday. Give one of expression or when.
+        when: one firing, after a duration (90, 5m, 2h) or at an ISO time such as 2026-10-18T09:30:00+00:00.
         timezone: time zone the expression is read in.
         session_id: the calling session; required when the server serves many sessions and agent_name is empty.
         agent_name: the calling swarm agent's name; owns the schedule.
@@ -139,7 +143,7 @@ def workflow_schedule(
         JSON with the schedule entry and its id.
     """
     owner = _module("hooks.mcp.scheduler")._owner
-    moment = {"expression": expression, "delay": delay, "at": at}
+    moment = {"expression": expression, "when": when}
     return _respond(lambda: scheduled(name, case, moment, timezone, lambda: owner(session_id, agent_name)))
 
 

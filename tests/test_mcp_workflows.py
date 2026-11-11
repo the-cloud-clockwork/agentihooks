@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
-import hooks.mcp.workflows as workflows
 import pytest
 
+import hooks.mcp.workflows as workflows
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
 from scripts.workflows import cli as workflow_cli
@@ -169,9 +169,15 @@ def test_workflow_schedule_arms_a_timer_after_a_delay(
     case = tmp_path / "case.md"
     case.write_text("Build the sample")
 
-    entry = tools["workflow_schedule"]("sample", str(case), delay="5m", agent_name="eng-1@sw")["entry"]
+    entry = tools["workflow_schedule"]("sample", str(case), when="5m", agent_name="eng-1@sw")["entry"]
+    timed = tools["workflow_schedule"]("sample", str(case), when="2026-10-18T09:30:00+00:00")["entry"]
 
     assert (entry["kind"], entry["owner"], entry["due"]) == ("timer", "eng-1@sw", NOW + 300)
+    assert (timed["kind"], timed["owner"], timed["due"]) == ("timer", SID, 1792315800.0)
+    assert tools["workflow_schedule"]("sample", str(case), when="later") == {
+        "success": False,
+        "error": "later is not an ISO time with an offset such as 2026-10-18T09:30:00+00:00",
+    }
 
 
 def test_workflow_schedule_needs_exactly_one_moment_and_a_case_file(
@@ -179,11 +185,11 @@ def test_workflow_schedule_needs_exactly_one_moment_and_a_case_file(
 ) -> None:
     case = tmp_path / "case.md"
     case.write_text("x")
-    one = {"success": False, "error": "give one of expression, delay or at"}
+    one = {"success": False, "error": "give one of expression or when"}
     assert tools["workflow_schedule"]("sample", str(case)) == one
-    assert tools["workflow_schedule"]("sample", str(case), expression="* * * * *", delay="5m") == one
+    assert tools["workflow_schedule"]("sample", str(case), expression="* * * * *", when="5m") == one
     missing = str(tmp_path / "missing.md")
-    assert tools["workflow_schedule"]("sample", missing, delay="5m") == {
+    assert tools["workflow_schedule"]("sample", missing, when="5m") == {
         "success": False,
         "error": f"{missing} is not a case file",
     }
