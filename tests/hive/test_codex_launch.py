@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -157,7 +158,7 @@ def test_a_hive_launches_a_task_requiring_claude_only_on_claude(setup, pin):
     write_hive(
         setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
     )
-    task = {"id": "task", "requires_harness": "claude"}
+    task: dict[str, Any] = {"id": "task", "requires_harness": "claude"}
     if pin == "saved":
         task["launch_assignment"] = {"harness": "codex", "account": "codex-account"}
     else:

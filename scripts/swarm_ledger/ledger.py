@@ -886,7 +886,7 @@ def _add_task(args, title, fields):
     return {}
 
 
-def _task_add_fields(args):
+def _task_add_fields(args: argparse.Namespace):
     lists = {
         k: comma_list(v)
         for k, v in (

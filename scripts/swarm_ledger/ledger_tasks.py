@@ -310,20 +310,20 @@ def check_lists(fields):
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
 
-def check_bools(fields):
+def check_bools(fields: dict[str, Any]) -> None:
     for key in BOOL_FIELDS:
         if key in fields and not isinstance(fields[key], bool):
             raise ValueError(f"{key} must be true or false")
 
 
-def check_profile(fields):
+def check_profile(fields: dict[str, Any]) -> None:
     if "profile" in fields and not (
         fields["profile"] == "" or isinstance(fields["profile"], str) and ID_RE.match(fields["profile"])
     ):
         raise ValueError("profile must be a profile name such as frontend, or empty for the lane profile")
 
 
-def check_requires_harness(fields):
+def check_requires_harness(fields: dict[str, Any]) -> None:
     if fields.get("requires_harness", "") not in HARNESSES:
         raise ValueError("requires_harness must be claude or codex, or empty for any harness")
 
