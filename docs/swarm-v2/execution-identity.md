@@ -58,6 +58,60 @@ A line like this means a writer that does not take the lock changed the history 
 
 The tests in `tests/swarm/test_execution_concurrency.py` cover this behavior. They check that a sibling admission, update and pane write wait for an admission in flight, that another swarm writes during it, and that each of the four writes holds the lock of its own swarm.
 
+### Timing agent record writes
+
+Since [pull request 8806](https://github.com/the-cloud-clockwork/agentihooks/pull/8806), every `RedisStore.put_agent`
+call made inside a tick pass writes `swarm_tick_step` records for the parts of the write, so a slow agent write can be
+split into lock wait, reads and commit. It changes no behavior and has no setting. Outside a tick pass, such as an
+`agentihooks swarm` command, no record is written.
+
+| Step name in the record | What it times | When it appears |
+|---|---|---|
+| `scripts.swarm.execution.ExecutionRegistry._put` | The body of `ExecutionRegistry.put`, timed after the per swarm lock is taken | Every `put_agent` |
+| `scripts.swarm.execution.ExecutionRegistry._update` | The body of `ExecutionRegistry.update`: validation, the fenced write of the execution and its projection | A record with an execution identity, or a name the swarm already manages |
+| `redis.client.Pipeline.execute` | One commit of the watched `agents` projection transaction, repeated on every watched retry | Every projection that writes; an identified record whose fields did not change commits nothing |
+
+A legacy record, one with no execution identity and no managed name, writes `_put` and one or more commits from the
+legacy projection. An identified record writes `_put`, `_update` and the commits of its projection.
+
+Read the parts as differences:
+
+- Lock wait: `put_agent` itself has no record. Its wait for the per swarm lock is the wall of the step that called
+  it minus that step's own work and the `_put` wall; a calling step much slower than its `_put` records points at the
+  lock. The managed check that decides the path runs before the lock and is in no part.
+- Reads inside the write: the `_put` or `_update` wall time minus the sum of its `Pipeline.execute` walls. The
+  watched reads and the fenced document read are not timed on their own.
+- Contention: several `Pipeline.execute` records for one write mean watched retries. A projection gives up after
+  `PROJECTION_ATTEMPTS` (5) watched attempts.
+
+These parts are timed with `report=False`: a part that raises is recorded with outcome `error` but is not reported as
+a step failure, so the step that called `put_agent` reports the failure once.
+
+Read the parts for one swarm over the last thirty minutes:
+
+```bash
+SLUG=rig-grade-swarm
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-30min" --until now \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' | grep "\"slug\": \"$SLUG\"" \
+  | grep -E '"step": "(scripts.swarm.execution.ExecutionRegistry._(put|update)|redis.client.Pipeline.execute)"' \
+  | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json, collections
+walls = collections.defaultdict(list)
+for line in sys.stdin:
+    row = json.loads(line)
+    walls[row["step"]].append(row["wall_s"])
+for step, w in sorted(walls.items()):
+    w.sort()
+    print(step, len(w), "calls; median", round(w[len(w) // 2], 2), "s; max", round(w[-1], 2), "s")'
+```
+
+Each record also carries `pass_id`, and `agent` when the write ran for one agent's launch, so the parts of one write
+can be matched by pass and agent. The record name of the commit comes from the installed redis client; the tests
+derive it with `timing.named(pipe.execute)` rather than a fixed string.
+
+The tests in `tests/swarm/test_execution_archive.py` cover these records: a legacy write records `_put` and its
+commit, and an identified write records `_put`, `_update` and its commit and still stores the new pane.
+
 ## Current execution reads
 
 Each swarm's fencing document holds its current executions in `executions` and its superseded attempts in
