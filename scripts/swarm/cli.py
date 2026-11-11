@@ -595,8 +595,11 @@ class _PassSpool:
         from scripts.swarm import metrics_outbox
 
         spool: Any = metrics_outbox
+        sink = spool.settings(os.environ)
+        if sink is None:
+            return
         if self._box is None:
-            self._box = spool.Outbox(spool.spool_path(), spool.settings(os.environ))
+            self._box = spool.Outbox(spool.spool_path(), sink)
         self._box.append_many(batches, checkpoint)
 
 
@@ -620,6 +623,7 @@ def _fenced(held: object, deployment: str) -> Any:
 
 def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
+    from scripts.swarm import dispatcher
 
     swarm: Any = store
     settings: Any = classifier_settings.load()
@@ -635,7 +639,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),
-        metrics=SpoolMetrics(_PassSpool(), {}),
+        metrics=SpoolMetrics(_PassSpool(), {dispatcher.TABLE.name: dispatcher.TABLE}),
         host=local_host(store, slug, os.environ),
     )
 

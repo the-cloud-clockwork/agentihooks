@@ -3808,6 +3808,26 @@
       ]
     },
     {
+      "id": "tick-spawn-metrics-processes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-spawn-pass-ports",
+      "behaviour": "The spawn pass writes its claim cap and dispatcher gate log rows and its dispatch metrics rows only through the Tools metrics port, and reads a launched Codex agent's process only through a processes port rescan: the gate log write is a metrics write a step must declare, the spawn step declares it and hands the pass its metrics and processes ports under the recording deadline, a failed metrics emit reports like the outbox, and helpers run outside a step use this host's gate log and process table.",
+      "seam": "scripts.tick.ports.contracts.Metrics.log and Processes.rescan, bound for the spawn helpers by scripts.tick.adapters.calls.MetricsCalls",
+      "tests": [
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_outside_a_pass_writes_the_host_gate_log_and_outbox",
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failed_metrics_emit_reports_like_the_outbox",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spool_metrics_appends_each_gate_row_to_the_gate_log",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_launch_reads_the_process_table_through_the_processes_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_codex_legacy_admission_reads_the_table_it_is_given",
+        "tests/tick/test_spawn_metrics_ports.py::test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-errors",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-pass-error-store",

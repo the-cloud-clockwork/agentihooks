@@ -10,7 +10,7 @@ import pytest
 import scripts.swarm.cli  # noqa: F401
 from scripts.swarm import bottleneck_remedy, panic
 from scripts.tick import engine, registry
-from scripts.tick.adapters.calls import LedgerCalls, SpawnRuntimeCalls, SpawnStoreCalls
+from scripts.tick.adapters.calls import LedgerCalls, LocalMetrics, SpawnRuntimeCalls, SpawnStoreCalls
 from scripts.tick.adapters.fakes import fake_tools
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
@@ -409,7 +409,7 @@ def test_the_tick_module_holds_no_spawn_definition() -> None:
 @pytest.mark.feature("swarm-tick-spawn")
 def test_the_spawn_step_declares_its_ports_feature_and_lane() -> None:
     spawn = next(step for step in place.STEPS if step.name == "spawn")
-    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox"})
+    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"})
     assert (spawn.feature, spawn.lane, spawn.group) == ("swarm-tick-spawn", CallStep.lane, place.PLACEMENT)
 
 
@@ -488,7 +488,9 @@ def test_a_legacy_launch_is_admitted_with_the_pass_runtime(monkeypatch: pytest.M
     run = SimpleNamespace(runtime=runtime, config="config", store="store", slug="sw")
     launch = SimpleNamespace(record=record, primed={})
     assert place._launch(run, launch) == (placed, "admitted")
-    assert admitted == [("store", "sw", ("placed", record, placed), runtime)]
+    [(store, slug, agent, given, table)] = admitted
+    assert (store, slug, agent, given) == ("store", "sw", ("placed", record, placed), runtime)
+    assert (type(table.__self__), table.__func__) == (LocalMetrics, LocalMetrics.table)
 
 
 class _ReadyRead(Exception):
