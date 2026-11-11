@@ -533,11 +533,11 @@ def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
     assert set(report["cases"]) <= set(report["files"])
     simple = (out / "profiles/diagram/cases/simple.json").read_text()
     points = [
-        "tools_required: mcp__tools__update_page",
         'destinations: {"kind": "confluence_page"}',
+        'due: "2026-01-01"',
         'error_handling: {"literal_shell": false}',
         "summary: one page",
-        'due: "2026-01-01"',
+        "tools_required: mcp__tools__update_page",
     ]
     assert simple == json.dumps({"intent": "Update one page", "points": points}, indent=2) + "\n"
     named = json.loads((out / "profiles/diagram/cases/named.json").read_text())
