@@ -158,7 +158,8 @@ def test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none() -
     with pytest.raises(UndeclaredEffect):
         tools.metrics.log("sw", ["row"], deadline=DEADLINE)
     assert tools.processes.rescan(deadline=DEADLINE) is None
-    assert [call.operation for call in cast(FakeProcesses, cast(Any, tools.processes).adapter).calls] == ["rescan"]
+    calls = cast(FakeProcesses, cast(Any, tools.processes).adapter).calls
+    assert [(call.operation, call.args, call.deadline) for call in calls] == [("rescan", (), DEADLINE)]
 
 
 @pytest.mark.feature("tick-spawn-metrics-processes")
@@ -183,7 +184,7 @@ def test_the_spawn_launch_reads_the_process_table_through_the_processes_port(
 
     _, scanned = held
     assert tables == [{41: "agent"}]
-    assert [(call.operation, call.deadline) for call in scanned.calls] == [("rescan", DEADLINE)]
+    assert [(call.operation, call.args, call.deadline) for call in scanned.calls] == [("rescan", (), DEADLINE)]
 
 
 @pytest.mark.feature("tick-spawn-metrics-processes")
