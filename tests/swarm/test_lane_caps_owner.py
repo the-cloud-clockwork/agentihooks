@@ -29,8 +29,13 @@ def test_autoscale_splits_the_ceilings_by_lane_demand():
 
 
 @pytest.mark.feature("swarm-manual-caps")
-def test_manual_caps_hold_against_lane_demand():
-    inputs = capacity.ScaleInputs([account(cap=6)], [], DEMAND, lambda: None, PREVIOUS)
+@pytest.mark.parametrize(
+    "demand",
+    [DEMAND, {"eng": 0, "ci": 9, "plan": 0}, {"eng": 9, "ci": 0, "plan": 2}, {"eng": 0, "ci": 0, "plan": 0}],
+    ids=str,
+)
+def test_manual_caps_hold_against_lane_demand(demand):
+    inputs = capacity.ScaleInputs([account(cap=6)], [], demand, lambda: None, PREVIOUS)
     config = SwarmConfig(SLUG, "/repo", max_eng=6, max_ci=1, max_plan=0, scaling=MANUAL_SCALING)
     scaled, decision = capacity.autoscaled(config, inputs)
     assert (scaled.max_eng, scaled.max_ci, scaled.max_plan) == (6, 1, 0)
@@ -42,14 +47,15 @@ def test_the_swarm_config_carries_no_lane_shift_or_lane_split_gate():
     assert "lane-split" not in catalog.defaults()
 
 
-def test_a_stored_config_saves_without_the_lane_shift_and_loads_one_left_by_an_older_writer():
+@pytest.mark.parametrize("shift", ["-16", "0", "2", "16"])
+def test_a_stored_config_saves_without_the_lane_shift_and_loads_one_left_by_an_older_writer(shift):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig(SLUG, "/repo", max_eng=4, max_ci=2))
     key = store.key(SLUG, "config")
     assert "lane_shift" not in store.redis.hgetall(key)
-    store.redis.hset(key, mapping={"lane_shift": "16", "gates": json.dumps({"lane-split": "enforce"})})
+    store.redis.hset(key, mapping={"lane_shift": shift, "gates": json.dumps({"lane-split": "enforce"})})
     config = store.config(SLUG)
     assert (config.max_eng, config.max_ci) == (4, 2)
     assert "lane-split" not in catalog.current(config.gates)

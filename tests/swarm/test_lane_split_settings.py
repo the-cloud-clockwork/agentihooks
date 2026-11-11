@@ -35,7 +35,7 @@ def test_caps_given_at_create_are_pinned(env, monkeypatch, flag):
     assert store.config("sw").caps_pinned is True
 
 
-@pytest.mark.parametrize("mode", ["deny", "log only", "skip"])
+@pytest.mark.parametrize("mode", ["deny", "log only", "skip", "enforce", "observe", "off"])
 def test_the_lane_split_switch_is_gone(created, mode):
     assert "lane-split" not in status.status_report(created, "sw", {"tasks": [], "_meta": {"events": []}})["gate_modes"]
     assert test_cli.run("sw", "set", f"lane-split-gate={mode}") != 0
