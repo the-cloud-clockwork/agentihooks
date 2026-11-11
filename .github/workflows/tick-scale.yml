@@ -1,0 +1,65 @@
+name: Tick scale
+
+on:
+  workflow_call:
+    inputs:
+      plant:
+        description: Apply the planted whole hash execution update fault, which must turn the gate red
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'Tick scale' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('tick-scale-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Tick scale' && 'max' || 'single' }}
+
+jobs:
+  tick-scale:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Start Redis on this runner
+        run: |
+          if command -v redis-server >/dev/null; then
+            echo "redis-server comes from the runner image; no package fetch"
+            redis-server --version
+          else
+            archive=/etc/apt/sources.list.d/ubuntu.sources
+            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
+            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+          fi
+          redis-server --port 6379 --save '' --appendonly no --daemonize yes
+          for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
+          exit 1
+      - name: Install dependencies
+        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Plant the whole hash execution update fault
+        if: inputs.plant
+        run: git apply tests/tick_scale/whole_hash.patch
+      - name: Seed a production sized store and fail when a launch path step outruns its budgets floor
+        run: python -m tests.tick_scale.gate --redis redis://127.0.0.1:6379/1 --report tick-scale.json
+      - name: Stop Redis
+        if: always()
+        run: redis-cli -p 6379 shutdown nosave || true
+      - name: Preserve the gated step walls
+        if: always()
+        uses: ./.github/actions/retry-upload
+        with:
+          after-cancel: true
+          name: tick-scale${{ inputs.plant && '-planted' || '' }}
+          path: tick-scale.json
+          if-no-files-found: warn
+          retention-days: 7

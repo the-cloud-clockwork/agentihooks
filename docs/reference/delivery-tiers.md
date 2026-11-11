@@ -44,6 +44,23 @@ separate load comparison.
 cannot authorize promotion even if `Gate — Required` is green. `main` retains
 its last promoted tree while ordinary pull requests keep merging into `dev`.
 
+## Tick scale gate at promotion
+
+The Tests workflow calls `Tick scale` as `tick-scale` on a push to `dev`, and
+`promotion-ready` and `promote` require it to succeed. It seeds a real Redis
+store at production size: 20 thousand archived executions, 2 thousand freeze
+records and a ledger view of 6 thousand tasks. It then runs three whole tick
+passes against it. Every step on the spawn chain (the steps `SPAWN_NEEDS`
+names, then `spawn`) and the `tick view` must end ok within its
+`budgets.FLOORS` floor on every pass it runs. A step that is cut off,
+abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
+few rows, so they cannot catch a step whose cost grows with stored data.
+
+The Proofs workflow runs the same gate with `proof: tick-scale`. With
+`plant: true` it first applies the planted fault in
+`tests/tick_scale/whole_hash.patch`, where every fenced write rewrites every
+record it loaded. This planted fault must turn the gate red.
+
 ### Scheduling and runner isolation
 
 Tests puts every dev push in one of three promotion lanes,

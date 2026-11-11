@@ -45,6 +45,28 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
+def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    scale = jobs["tick-scale"]
+    assert scale["uses"] == "./.github/workflows/tick-scale.yml"
+    assert "tick-scale" not in jobs["gate-required"]["needs"]
+    assert enabled(scale["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(scale["if"], event, {})
+    for consumer in ("promotion-ready", "promote"):
+        assert "tick-scale" in jobs[consumer]["needs"]
+        for result in ("failure", "skipped", "cancelled"):
+            needs = _graded_needs(jobs[consumer])
+            needs["tick-scale"].result = result
+            assert not enabled(jobs[consumer]["if"], "push", needs)
+    callee = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    assert "workflow_call" in callee[True]
+    steps = callee["jobs"]["tick-scale"]["steps"]
+    assert any(str(step.get("run", "")).startswith("python -m tests.tick_scale.gate") for step in steps)
+    plant = next(step for step in steps if step.get("run") == "git apply tests/tick_scale/whole_hash.patch")
+    assert plant["if"] == "inputs.plant"
+
+
 def _graded_needs(promote, analysis="A1"):
     return {
         name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis)) for name in promote["needs"]
@@ -61,6 +83,7 @@ def _graded_needs(promote, analysis="A1"):
         "flake-budget",
         "sonar",
         "hierarchy-cpu",
+        "tick-scale",
         "tick-pattern-tree",
     ],
 )

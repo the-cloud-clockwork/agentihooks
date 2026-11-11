@@ -23,6 +23,7 @@
   "hierarchy-cpu.yml/grade": "light",
   "hierarchy-cpu.yml/hierarchy": "batch",
   "hierarchy-cpu.yml/load": "batch",
+  "tick-scale.yml/tick-scale": "batch",
   "hive-join.yml/smoke": "standard",
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
