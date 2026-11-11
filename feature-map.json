@@ -3884,6 +3884,18 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
       ]
+    },
+    {
+      "id": "track-outages-claims-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2487",
+      "behaviour": "The track outages tick step judges each agent's recovery ownership and identity from the claims section alone, so a swarm whose fenced archive holds tens of thousands of executions never loads that archive per agent and the step ends inside its pass.",
+      "seam": "scripts.swarm.fencing.read_claims, used by scripts.swarm.resume.track_outages through its owner and identity checks",
+      "tests": [
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_answers_the_claims_section_without_the_archive",
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
+        "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
+      ]
     }
   ],
   "unmapped_rules": [
