@@ -7082,6 +7082,9 @@ The default is `redis://127.0.0.1:6379/0`; set `AGENTIHOOKS_SWARM_REDIS_URL` to 
   master answers with `agentihooks msg reply <message> "<text>"` and posts its own updates with
   `agentihooks swarm <id> say --to operator "<text>"`.
 - Agents: `agentihooks swarm <id> say "<text>"`, optionally `--to <agent name>`, `master`, `eng` or `ci`.
+- In a pane: every swarm agent, master included, starts operator off, with replies held to twenty words and the
+  question tool refused, until the operator types `operator on` in that pane. See
+  [Operator presence](../reference/operator-presence.md).
 
 Every addressed message goes through the agent inbox, with one item per recipient, sent by the real author;
 an unaddressed agent line only shows on the page. Items pass from pending to delivered, then confirmed by
