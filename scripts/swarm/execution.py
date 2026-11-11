@@ -77,6 +77,13 @@ def _archivable(row: dict) -> bool:
     )
 
 
+def _stale(row: dict[str, Any], head: dict[str, Any], listed: set[str]) -> bool:
+    current = row["generation"] >= head["generation"] and row["name"] in listed
+    if row.get("state") in TERMINAL_STATES:
+        return not current
+    return row["generation"] < head["generation"] and row["name"] not in listed
+
+
 class ExecutionRegistry:
     def __init__(self, store: RedisStore) -> None:
         self.store = store
@@ -124,12 +131,7 @@ class ExecutionRegistry:
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
             heads = latest(rows.values(), "seat")
-            old = [
-                key
-                for key, row in rows.items()
-                if row.get("state") in TERMINAL_STATES
-                and not (row["generation"] >= heads[row["seat"]]["generation"] and row["name"] in listed)
-            ]
+            old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
             if not old and "archive_ref" in doc:
                 return 0
             fencing.hydrate_archive(self.store, doc)
