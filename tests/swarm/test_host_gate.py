@@ -1,5 +1,8 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
+from typing import Any
 
 import pytest
 
@@ -35,6 +38,10 @@ def _decide(store, room, reason=MEMORY, limit="memory", slug="sw", granted_at=1_
 
 def _ledger():
     return FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}, {"id": "t3", "lane": "ci"}])
+
+
+def _as_sw(method: Callable[..., Any], ledger: FakeLedger, slug: str, *args: Any, **kwargs: Any) -> Any:
+    return method(ledger, "sw", *args, **kwargs)
 
 
 def _workers(runtime):
@@ -74,6 +81,7 @@ def test_another_swarm_counts_spawns_from_the_startup_lag_before_its_grant(store
     store.create(SwarmConfig("doc", "/repo", max_eng=2, max_ci=1))
     ledger = FakeLedger([{"id": "d1", "lane": "eng"}])
     ledger.notify = lambda slug, text: None
+    ledger.update_task = partial(_as_sw, FakeLedger.update_task, ledger)
     runtime = FakeRuntime()
     _decide(store, 2, slug="doc", granted_at=1_000 + tick.HOST_START_LAG_MS)
     actions = tick.tick("doc", store, ledger, runtime, now_ms=31_000)
