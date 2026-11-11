@@ -226,6 +226,35 @@ def test_the_drill_reads_the_ledger_document_to_see_a_starting_master_hold_the_s
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
+def test_the_drill_passes_five_minutes_apart_and_keeps_every_pass_action(rig: dict[str, Any]) -> None:
+    passes: list[int] = []
+
+    def watch_pass(*args: Any) -> list[str]:
+        passes.append(args[5])
+        return [f"pass at {args[5]}"]
+
+    found = night_watch_drill.Drill(
+        rig["store"], SCRATCH, rig["ledger"], rig["runtime"], {"tasks": []}, NOW, watch_pass
+    )
+    record = night_watch_drill.run(found)
+    assert passes == [NOW - 10 * 60_000, NOW - 5 * 60_000, NOW]
+    assert record["actions"] == [f"pass at {at}" for at in passes]
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+@pytest.mark.parametrize(("slug", "scratch"), [("unnamed-scratch", True), ("proof-def456-eng-2", False)])
+def test_the_drill_needs_both_the_scratch_flag_and_a_proof_swarm_name(
+    rig: dict[str, Any], slug: str, scratch: bool
+) -> None:
+    store = rig["store"]
+    store.create(SwarmConfig(slug, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling=MANUAL_SCALING, scratch=scratch))
+    store.update(slug, state="running")
+    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_SCRATCH.format(slug=slug)}$"):
+        drill(store, slug)
+    assert store.config(slug).gates == {} and rig["started"] == []
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
 def test_a_master_retired_with_no_new_tasks_leaves_the_drill_without_a_recovery(
     rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
