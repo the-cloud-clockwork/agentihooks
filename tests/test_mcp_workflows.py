@@ -29,7 +29,10 @@ workflow:
 stages:
   build:
     profile: engineer
-    next: {pass: exit, retry: exit, enhance: exit}
+    next:
+      pass: exit
+      retry: exit
+      enhance: exit
 """
 
 
