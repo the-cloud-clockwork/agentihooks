@@ -1,6 +1,16 @@
 {
   "features": [
     {
+      "id": "hive-launch-pane-off-controller-hold",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
+      "behaviour": "Retiring a failed launch whose agent a hive hosts sends its pane with the hive retire and never holds it for the controller failed pane sweep, which reads and closes panes only on its own herdr server.",
+      "seam": "tick observe step retire launch against failed_panes.held",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
@@ -3811,6 +3821,20 @@
       "tests": [
         "tests/swarm/test_stale_swarm_tick.py::test_create_refuses_a_web_address_as_its_repo",
         "tests/swarm/test_stale_swarm_tick.py::test_create_keeps_a_local_path_even_when_its_folder_is_absent"
+      ]
+    },
+    {
+      "id": "ledger-write-substep-timing",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
+      "behaviour": "Every ledger write times its hierarchy sync, outbox write, refresh record and event append into the current request, so each write record in the request metrics writes view carries the four substep times, the summary totals them across writes, and the journal keeps them across a restore.",
+      "seam": "scripts.swarm_ledger.request_metrics.step and the write records of scripts.swarm_ledger.request_metrics.records, fed by SQLiteLedgerRepository._write",
+      "tests": [
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_ledger_write_metrics_row_carries_each_substep_time",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_substeps_outside_a_measured_request_are_not_counted",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
       ]
     }
   ],

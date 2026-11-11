@@ -44,7 +44,7 @@ def test_scan_keeps_the_reusable_workflow_steps():
     assert [step.get("name") for step in steps[2:]] == [
         "Install Semgrep",
         "Own rules hold on their fixtures and the code",
-        "Source control exceptions only shrink",
+        "Rule exceptions only shrink",
         "Resolve the merge base of the head and the base",
         "Fail on findings new against the base",
     ]
@@ -136,10 +136,28 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
 
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
     steps = _jobs()["scan"]["steps"]
-    step = next(step for step in steps if step.get("name") == "Source control exceptions only shrink")
+    step = next(step for step in steps if step.get("name") == "Rule exceptions only shrink")
     assert step["env"]["BASE"] == "${{ inputs.base }}"
-    assert 'git show "$BASE:.semgrep/source-control-allowlist.json"' in step["run"]
+    assert "for list in .semgrep/*-allowlist.json; do" in step["run"]
+    assert 'git show "$BASE:$list"' in step["run"]
     assert "current <= previous" in step["run"]
+    lists = sorted(path.name for path in (_ROOT / ".semgrep").glob("*-allowlist.json"))
+    assert lists == ["source-control-allowlist.json", "tick-unbounded-read-allowlist.json"]
+
+
+def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_task() -> None:
+    rule = yaml.safe_load((_ROOT / ".semgrep/tick-unbounded-read.yml").read_text())["rules"][0]
+    assert rule["id"] == "tick-unbounded-store-read"
+    assert rule["languages"] == ["python"]
+    assert rule["severity"] == "ERROR"
+    assert rule["paths"]["include"] == ["/scripts/swarm/**", "/scripts/tick/**", "*.test.py"]
+    allowed = json.loads((_ROOT / ".semgrep/tick-unbounded-read-allowlist.json").read_text())
+    assert rule["paths"]["exclude"] == sorted(allowed)
+    assert all(path.endswith(".py") and "*" not in path for path in allowed)
+    assert all(isinstance(task, str) and task.startswith("t-") for task in allowed.values())
+    fixture = (_ROOT / ".semgrep/tick-unbounded-read.test.py").read_text()
+    assert fixture.count("# ruleid: tick-unbounded-store-read") == 12
+    assert fixture.count("# ok: tick-unbounded-store-read") == 10
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():

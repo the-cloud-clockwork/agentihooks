@@ -543,10 +543,12 @@ grades the pattern shapes; the repository scan in the same step grades the path 
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
-`Source control exceptions only shrink` reads the list from the base commit and fails with
-`source control exceptions grew: [<paths>]` when the head list holds a path the base list lacks; otherwise it prints
-`source control exceptions: <head count> of <base count>`. A base without the file passes with
-`The base holds no source control exception list; the head list starts it`. A unit test in
+`Rule exceptions only shrink` reads every `.semgrep/*-allowlist.json` from the base commit and fails with
+`<list> exceptions grew: [<paths>]` when a head list holds a path its base list lacks; otherwise it prints
+`<list> exceptions: <head count> of <base count>`. A base without a list passes with
+`The base holds no <list>; the head list starts it`. The same step grades
+`.semgrep/tick-unbounded-read-allowlist.json`, the modules the `tick-unbounded-store-read` rule still excludes, each
+mapped to the task that removes its whole hash reads or unpaged key scans. A unit test in
 `tests/test_ci_semgrep.py` requires every entry to be one `.py` path with no wildcard, and names files that have left
 the list, such as `scripts/swarm/stack.py`, so they cannot return.
 
