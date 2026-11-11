@@ -387,7 +387,7 @@ class HiveLaunch:
         rows = capacity.unreserved(rows) if lane == "master" else rows
         if lane == "master" and not task.get("route_kind"):
             front = front_door.holds(self.slug, task.get("seat", ""))
-            selected = self._master_selection(config, decision, hives, now, rows, front)
+            selected = self._master_selection(config, decision, hives, now, rows, front, accounts)
             return self._record_wait(lane, task, selected)
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
@@ -451,11 +451,13 @@ class HiveLaunch:
         now: int,
         rows: list[capacity.Account],
         front: bool,
+        refused: frozenset[str] = frozenset(),
     ) -> Selection | placement.Wait:
-        """Place a master on a hive, refusing every Claude account its capacity rows mark closed."""
+        """Place a master on a hive, refusing every Claude account its capacity rows mark closed or this spawn's
+        reservation refused, named as harness:account in ``refused``."""
         closed = frozenset(
             placement.account_key(row.name) for row in rows if row.harness == "claude" and row.state == CLOSED
-        )
+        ) | frozenset(placement.account_key(slot.split(":", 1)[1]) for slot in refused if slot.startswith("claude:"))
         accounts = {
             placement.account_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)
         }

@@ -1,0 +1,1 @@
+A master launch refused by a full account reservation no longer selects the same hive interactive login again in the same spawn, which had admitted and ended a new execution several times a second for the second master seat.
