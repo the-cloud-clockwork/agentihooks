@@ -185,7 +185,7 @@
       "outcome": "passed"
     },
     {
-      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[loop ::1 and fe80::1-loop <redacted-ip> and <redacted-ip>]",
+      "test": "tests/test_swarm_v2_baseline.py::test_sanitize_redacts_ssh_and_ipv6_addresses[loop ::1 and link-local-loop <redacted-ip> and <redacted-ip>]",
       "outcome": "passed"
     },
     {

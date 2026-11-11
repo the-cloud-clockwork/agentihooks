@@ -1,0 +1,428 @@
+{
+  "changelog.d/5611.added.md": {
+    "lab-name": 1
+  },
+  "changelog.d/6295.added.md": {
+    "lab-name": 1
+  },
+  "changelog.d/6848.fixed.md": {
+    "lab-name": 1
+  },
+  "changelog.d/7023.fixed.md": {
+    "lab-name": 1
+  },
+  "changelog.d/8729.fixed.md": {
+    "lab-name": 1
+  },
+  "changelog.d/ci-323133-1604.md": {
+    "lab-name": 1
+  },
+  "changelog.d/ci-323133-2731.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-2297.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-2539.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-3009.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-3028.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-6159.md": {
+    "lab-name": 2
+  },
+  "changelog.d/engineer-323133-7878.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-7887.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-7934.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-323133-7956.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-d44a5a-0707.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-d44a5a-0987.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-d44a5a-1045.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-d44a5a-1046.md": {
+    "lab-name": 1
+  },
+  "changelog.d/engineer-d44a5a-2120.md": {
+    "lab-name": 1
+  },
+  "changelog.d/session-3f015002.md": {
+    "lab-name": 1
+  },
+  "changelog.d/workstation-agents-headed-hives.md": {
+    "lab-name": 1
+  },
+  "docs/ci-timing.md": {
+    "lab-name": 83
+  },
+  "docs/getting-started/compose-quick-start.md": {
+    "lab-name": 2
+  },
+  "docs/getting-started/portability.md": {
+    "lab-name": 2
+  },
+  "docs/getting-started/profiles.md": {
+    "lab-name": 16
+  },
+  "docs/hooks/broadcast.md": {
+    "lab-name": 1
+  },
+  "docs/hooks/conditions.md": {
+    "lab-name": 1
+  },
+  "docs/pillars/channels.md": {
+    "lab-name": 4
+  },
+  "docs/pillars/context.md": {
+    "lab-name": 1
+  },
+  "docs/pillars/guardrails.md": {
+    "lab-name": 1
+  },
+  "docs/pillars/hives.md": {
+    "lab-name": 61
+  },
+  "docs/pillars/identity.md": {
+    "lab-name": 11
+  },
+  "docs/pillars/index.md": {
+    "lab-name": 1
+  },
+  "docs/pillars/swarm.md": {
+    "lab-name": 35
+  },
+  "docs/reference/ci-result-cache.md": {
+    "lab-name": 1
+  },
+  "docs/reference/cli-commands.md": {
+    "lab-name": 10
+  },
+  "docs/reference/delivery-tiers.md": {
+    "lab-name": 12
+  },
+  "docs/reference/deployment-modes.md": {
+    "lab-name": 22
+  },
+  "docs/reference/grafana-bottleneck-alerts.md": {
+    "lab-name": 1
+  },
+  "docs/reference/hive-enablement-record.md": {
+    "lab-name": 17
+  },
+  "docs/reference/hosted-ledger-auth.md": {
+    "lab-name": 2
+  },
+  "docs/reference/index.md": {
+    "lab-name": 8
+  },
+  "docs/reference/ledger-load-gate.md": {
+    "lab-name": 1
+  },
+  "docs/reference/mutation-gate.md": {
+    "lab-name": 1
+  },
+  "docs/reference/observability-langfuse.md": {
+    "lab-name": 35
+  },
+  "docs/reference/presentation-layer.md": {
+    "lab-name": 1
+  },
+  "docs/reference/project-scoped-brain-memory.md": {
+    "lab-name": 2
+  },
+  "docs/reference/redis-command-map.md": {
+    "lab-name": 26
+  },
+  "docs/reference/reproducible-hive.md": {
+    "lab-name": 14
+  },
+  "docs/reference/service-split.md": {
+    "lab-name": 2
+  },
+  "docs/reference/sonar-gate.md": {
+    "lab-name": 2
+  },
+  "docs/reference/swarm-bus-scope.md": {
+    "lab-name": 14
+  },
+  "docs/reference/swarm-lan-services.md": {
+    "lab-name": 9
+  },
+  "docs/reference/tick-otel-metrics.md": {
+    "lab-name": 3
+  },
+  "docs/reference/tick-redis-round-trips.md": {
+    "lab-name": 4
+  },
+  "docs/swarm-v2/architecture.json": {
+    "lab-name": 22
+  },
+  "docs/swarm-v2/baseline-sources.json": {
+    "lab-name": 8
+  },
+  "docs/swarm-v2/baseline.json": {
+    "lab-name": 4
+  },
+  "docs/swarm-v2/baseline.md": {
+    "lab-name": 7
+  },
+  "docs/swarm-v2/checkpoint-restore.md": {
+    "lab-name": 1
+  },
+  "docs/swarm-v2/decisions.md": {
+    "lab-name": 19
+  },
+  "docs/swarm-v2/ledger-durability.md": {
+    "lab-name": 1
+  },
+  "docs/swarm-v2/metrics-contract.md": {
+    "lab-name": 2
+  },
+  "docs/swarm-v2/operator-guide.md": {
+    "lab-name": 2
+  },
+  "docs/swarm-v2/plan-snapshot.json": {
+    "lab-name": 1
+  },
+  "docs/swarm-v2/search-migration.md": {
+    "lab-name": 11
+  },
+  "docs/swarm-v2/startup-diagnostics.md": {
+    "lab-name": 1
+  },
+  "docs/swarm-v2/startup-results.md": {
+    "lab-name": 16
+  },
+  "docs/swarm-v2/two-hive-proof.md": {
+    "lab-name": 7
+  },
+  "evidence/SV2-ACC-01/a-result.json": {
+    "lab-name": 3
+  },
+  "evidence/SV2-ACC-01/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-ACC-05/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-CKP-01/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-CKP-03/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-CKP-05/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-CTL-01/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-FND-01/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-FND-01/result.json": {
+    "lab-name": 5
+  },
+  "evidence/SV2-FSY-05/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-GIT-01/b-result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-GIT-01/manifest.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-GIT-01/result.json": {
+    "lab-name": 17
+  },
+  "evidence/SV2-HDR-01/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-HDR-02/live-proof.jsonl": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-02/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-HDR-03/a-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-03/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-03/c-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-03/hdr02-live-rerun.jsonl": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-03/live-proof.jsonl": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-03/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-HDR-04/a-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-04/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-04/c-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-04/manifest.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-04/result.json": {
+    "lab-name": 3
+  },
+  "evidence/SV2-HDR-05/a-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-05/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-05/c-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-05/manifest.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-HDR-05/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-IDN-04/generate_case_results.py": {
+    "lab-name": 1
+  },
+  "evidence/SV2-IMG-01/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-IMG-02/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-IMG-03/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-IMG-04/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-IMG-05/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-KUB-01/a-result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-KUB-01/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-KUB-02/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-KUB-04/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-KUB-05/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-LDG-02/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-MIG-01/result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-MST-03/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-MST-04/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-MST-05/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-OBS-04/result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-OBS-05/a-result.json": {
+    "lab-name": 7
+  },
+  "evidence/SV2-OBS-05/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-OBS-05/c-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-OBS-05/manifest.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-OBS-05/result.json": {
+    "lab-name": 9
+  },
+  "evidence/SV2-PRF-01/a-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-PRF-01/b-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-PRF-01/c-result.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-PRF-01/result.json": {
+    "lab-name": 6
+  },
+  "evidence/SV2-PRF-02/a-result.json": {
+    "lab-name": 17
+  },
+  "evidence/SV2-PRF-02/anton-outage-1-fixture.json": {
+    "lab-name": 1
+  },
+  "evidence/SV2-PRF-02/b-result.json": {
+    "lab-name": 5
+  },
+  "evidence/SV2-PRF-02/c-result.json": {
+    "lab-name": 5
+  },
+  "evidence/SV2-PRF-02/manifest.json": {
+    "lab-name": 7
+  },
+  "evidence/SV2-PRF-02/result.json": {
+    "lab-name": 15
+  },
+  "evidence/SV2-RUN-02/a-result.json": {
+    "lab-name": 4
+  },
+  "evidence/SV2-UX-01/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-UX-02/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-UX-03/result.json": {
+    "lab-name": 3
+  },
+  "evidence/SV2-UX-04/result.json": {
+    "lab-name": 2
+  },
+  "evidence/SV2-UX-05/result.json": {
+    "lab-name": 3
+  },
+  "evidence/SV2-UX-05/rollback-rehearsal.txt": {
+    "lab-name": 1
+  }
+}

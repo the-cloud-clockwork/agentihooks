@@ -76,10 +76,10 @@ Suite `worker-resources`, generation 110. Source: Worker resources run 381498551
 
 | Node | Free memory MiB | Free CPU millis | Workers that fit | All profiles at once |
 |---|---|---|---|---|
-| anton-ec2-0396dfd54e94477e5 | 15645 | 3984 | browser 1, compiler 1, general 1, memory 5 | no |
-| anton-ec2-0447e2769b1a3084a | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
-| anton-ec2-0af3a8fe7769581ef | 4893 | 1234 | browser 0, compiler 0, general 0, memory 1 | no |
-| anton-ec2-0c9b3493a0ef846f4 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
+| pool-node-1 | 15645 | 3984 | browser 1, compiler 1, general 1, memory 5 | no |
+| pool-node-2 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
+| pool-node-4 | 4893 | 1234 | browser 0, compiler 0, general 0, memory 1 | no |
+| pool-node-5 | 5405 | 1484 | browser 0, compiler 0, general 0, memory 1 | no |
 | k8s-master | 6208 | 3783 | browser 1, compiler 1, general 1, memory 2 | no |
 | k8s-worker-1 | 6276 | 1362 | browser 0, compiler 0, general 0, memory 2 | no |
 | k8s-worker-2 | 10252 | 1417 | browser 0, compiler 0, general 0, memory 3 | no |
