@@ -4082,9 +4082,7 @@
       "tests": [
         "tests/workflows/test_scheduled.py::test_a_fired_schedule_starts_a_workflow_defined_only_in_its_scheduling_project",
         "tests/workflows/test_scheduled.py::test_a_workflow_record_stored_without_a_project_runs_in_the_scheduler_folder",
-        "tests/workflows/test_scheduled.py::test_the_workflow_kind_round_trips_its_record",
-        "tests/scheduler/test_commands.py::test_the_workflow_target_names_its_slot_with_the_case",
-        "tests/scheduler/test_commands.py::test_a_relative_case_is_kept_as_its_absolute_path"
+        "tests/workflows/test_scheduled.py::test_the_workflow_kind_round_trips_its_record"
       ]
     },
     {
@@ -4105,7 +4103,7 @@
       ]
     },
     {
-      "id": "tick-scale-promotion-wiring",
+      "id": "tick-scale-gate-wiring",
       "origin": "inventory",
       "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch.",
       "seam": "tests/contracts/promotion/test_workflow.py reading .github/workflows/test.yml, .github/actions/tick-scale/action.yml and .github/workflows/tick-scale.yml",
@@ -4134,7 +4132,7 @@
       ]
     },
     {
-      "id": "scheduler-workflow-target",
+      "id": "scheduler-workflow-target-case",
       "origin": "inventory",
       "behaviour": "The scheduler timer, stopwatch and cron commands accept a --workflow target with a --case file, refuse a case on any other target, and refuse a workflow target with no name, no case, or a case that is not a file.",
       "seam": "scripts.scheduler.cli._slot and commands.target_slot against WorkflowSlot",
@@ -4143,7 +4141,9 @@
         "tests/scheduler/test_cli.py::test_a_case_on_another_target_is_refused",
         "tests/scheduler/test_commands.py::test_a_case_fits_only_a_named_workflow_target",
         "tests/scheduler/test_commands.py::test_the_workflow_target_needs_a_case",
-        "tests/scheduler/test_commands.py::test_a_case_that_is_not_a_file_is_refused"
+        "tests/scheduler/test_commands.py::test_a_case_that_is_not_a_file_is_refused",
+        "tests/scheduler/test_commands.py::test_the_workflow_target_names_its_slot_with_the_case",
+        "tests/scheduler/test_commands.py::test_a_relative_case_is_kept_as_its_absolute_path"
       ]
     },
     {
@@ -4157,7 +4157,7 @@
       ]
     },
     {
-      "id": "restore-wait-finding",
+      "id": "restore-wait-health-finding",
       "origin": "inventory",
       "behaviour": "A health finding for the master names a seat whose restore decision, resume or fresh, has waited past one tick window, counted from its first restore record even on a retried decision, naming the restore outcome and task, and a wait within the window or a decided restore raises no finding without hiding a later seat's finding.",
       "seam": "scripts.swarm.health.restore_wait.findings through scripts.swarm.status.findings and the tick's master notice",
@@ -4244,7 +4244,7 @@
       ]
     },
     {
-      "id": "scratch-ledger-ignores-shared-database",
+      "id": "scratch-ledger-folder-skips-shared-database",
       "origin": "inventory",
       "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1, and the swarm lease's ledger address follows the same url() check so a scratch ledger's lease never routes through the shared server; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
       "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm.lease._address and scripts.swarm_ledger.storage.build",
@@ -4285,7 +4285,7 @@
       ]
     },
     {
-      "id": "native-master-token-fallback-phone-unavailable",
+      "id": "remote-control-token-fallback-reason",
       "origin": "inventory",
       "behaviour": "When a front door master asks for its native claude.ai login but the login chain lands on the subscription token fallback, its recorded Remote Control decision downgrades to off with reason subscription token fallback instead of staying on, both for a fresh launch and a resume, and a hive worker's acknowledgement carries the landed remote_control decision back to the controller's execution record.",
       "seam": "scripts.swarm.remote_control.landed through scripts.swarm.runtime.HerdrRuntime.spawn/resume and scripts.hive.orders.Ack/HiveLaunch",
@@ -4334,7 +4334,7 @@
       ]
     },
     {
-      "id": "tick-step-opt-in-profiler",
+      "id": "tick-step-profiler",
       "origin": "inventory",
       "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
       "seam": "scripts.swarm.timing.within through _profiled_steps and _profile_call",
@@ -4347,7 +4347,7 @@
       ]
     },
     {
-      "id": "runner-trust-admits-hosted-docs-sanity-workflow",
+      "id": "runner-trust-hosted-only-docs-sanity",
       "origin": "inventory",
       "behaviour": "The runner trust gate admits a job that calls the hosted only agentihooks docs-sanity reusable workflow at its exact owner, repository, path and ref with no runner input required, including under a pull_request_target event, while a lookalike call with a different ref, path, owner, or case anywhere but the ref itself is still red.",
       "seam": "scripts.ci_runner_trust._hosted_shared and _trusted_runner through check",
@@ -4358,7 +4358,7 @@
       ]
     },
     {
-      "id": "mutation-replan-all-killed-plan-passes",
+      "id": "mutation-replan-all-killed-plan",
       "origin": "inventory",
       "behaviour": "The mutation replan's budget_overrun check passes a plan the probe killed whole, whose slowest shard needs zero worker seconds, even when the budget left after setup time is negative, instead of flagging it as overrunning a negative shard capacity.",
       "seam": "scripts.ci_mutation.measured.budget_overrun",
@@ -4367,7 +4367,7 @@
       ]
     },
     {
-      "id": "admission-outcome-totals-counted",
+      "id": "admission-outcome-totals",
       "origin": "inventory",
       "behaviour": "Placement waits count each hive admission refusal category once per task until it changes or clears, count each successful admission once, and metrics_service.admission_rows sums both the pending admission gate's totals and these hive outcome totals into one admission_samples row per outcome.",
       "seam": "scripts.hive.placement_waits.observe/admitted against scripts.swarm.metrics_service.admission_rows",
@@ -4382,7 +4382,7 @@
       ]
     },
     {
-      "id": "admitted-count-only-on-launch-success",
+      "id": "hive-launch-admission-count-once",
       "origin": "inventory",
       "behaviour": "A hive launch counts an admission only once its order is placed, a workstation or local launch counts it where the controller records workstation admission, and a failed local or hive runtime spawn counts no admission.",
       "seam": "scripts.hive.launch.HiveLaunch.spawn and scripts.swarm.controller.FencedRuntime.spawn against scripts.hive.placement_waits.admitted",
@@ -4395,7 +4395,7 @@
       ]
     },
     {
-      "id": "github-reads-snapshot-custom-ttl",
+      "id": "tick-view-pull-batch-cache-ttl",
       "origin": "inventory",
       "behaviour": "github_reads.snapshot, ledger_events.views and tick_view accept an optional ttl longer than the default run ttl, so tick_view's pull request batch cache survives across tick passes spaced further apart than the default 60 second snapshot ttl instead of refetching cold every pass.",
       "seam": "scripts.swarm.github_reads.snapshot and scripts.swarm.ledger_events.views/tick_view ttl parameter",
@@ -4406,7 +4406,7 @@
       ]
     },
     {
-      "id": "hive-naming-derives-unique-name-on-collision",
+      "id": "hive-registry-unique-name-suffix",
       "origin": "inventory",
       "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
       "seam": "scripts.hive.registry.update through _settle, _read_name, _held and _unique",
@@ -4427,7 +4427,7 @@
       ]
     },
     {
-      "id": "hive-create-atomic-name-reservation",
+      "id": "hive-create-name-reservation",
       "origin": "inventory",
       "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
       "seam": "scripts.hive.create._reserve, _release, _reclaimed and _named through create()",

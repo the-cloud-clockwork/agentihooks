@@ -117,7 +117,7 @@ TOKEN_OFF = {"state": "off", "detail": "subscription token fallback"}
 
 
 @pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
-@pytest.mark.feature("native-master-token-fallback-phone-unavailable")
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_a_front_door_master_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
     passed, placed = _spawn(tmp_path, "master", "claude", "interactive", reported=f"placement={placement}\n")
     assert passed[:6] == ["--route", "claude-ai", *RC]
@@ -125,7 +125,7 @@ def test_a_front_door_master_records_remote_control_by_where_its_login_landed(tm
 
 
 @pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
-@pytest.mark.feature("native-master-token-fallback-phone-unavailable")
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_a_front_door_resume_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
     runtime, config, agent, _ = _resuming(tmp_path, "c0ffee", "claude")
     config.slug = "proof"
