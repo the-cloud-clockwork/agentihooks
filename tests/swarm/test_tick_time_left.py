@@ -25,7 +25,8 @@ def test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running(
         raise SystemExit("server refused: 500 storage_error")
 
     monkeypatch.setattr(ledger_client._ledger(), "call", refused)
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger: Any = tasks(("t1", "eng"))
+    runtime = FakeRuntime()
     ledger.time_left = ledger_client.LedgerClient(service=True).time_left
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert "spawned engineer@a1b2c3-0001 for t1" in actions
