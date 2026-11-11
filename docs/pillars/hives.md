@@ -1376,9 +1376,8 @@ Every Redis call the daemon makes now ends in bounded time:
 - A connection attempt to an unreachable host fails after 3 seconds.
 
 The beat loop treats that `TimeoutError` as a lost connection. It prints the reconnect line, backs off, opens a new
-pair of clients and beats at once, as in [Reconnect and backoff](#reconnect-and-backoff). The tests for this drive a
-real TCP socket that accepts the connection and never answers, once during a beat and once during the wait, and
-assert the reconnected beat lands within one beat interval.
+pair of clients and beats at once, as in [Reconnect and backoff](#reconnect-and-backoff). A connection that stops
+answering during a beat or during the wait ends in a reconnected beat within one beat interval.
 
 The scheduled waits stay shorter than the read timeout they run under, so a healthy wake always arrives before the
 socket times out and a read timeout always means a dead connection:
@@ -1399,7 +1398,7 @@ To see whether a running hive sits on a dead connection, list its Redis sockets 
 ss -tnp | grep -E "python|agentihooks"
 ```
 
-An established connection to the Redis port whose `Send-Q` stays above 0 across several runs is not being answered.
+An established connection to the Redis port whose `Send-Q` stays above 0 across several consecutive checks is not being answered.
 On current code the daemon drops it within 15 seconds and the journal shows the reconnect.
 
 ### Troubleshooting
