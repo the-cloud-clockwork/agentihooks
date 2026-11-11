@@ -86,6 +86,7 @@ def test_fields_reads_every_field_across_pages(store: RedisStore) -> None:
     assert hash_pages.fields(store.redis, "missing") == {}
 
 
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_fields_stops_after_its_page_bound() -> None:
     calls: list[int] = []
 
