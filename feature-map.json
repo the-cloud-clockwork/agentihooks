@@ -2319,6 +2319,19 @@
       ]
     },
     {
+      "id": "operator-host-plan-upload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2482",
+      "behaviour": "Plan ingest run by the operator on the host passes: its plan upload, carrying the operator credential with no Origin, passes the ledger server upload check with the operator agent header or none, and its source records the session Claude Code injects; a non plan upload by the operator, a plan upload by an agent that never joined and a plan upload carrying a tick credential are still refused.",
+      "seam": "ledger server receive upload check on the artifact upload route, and plan ingest source",
+      "tests": [
+        "tests/plans/test_ingest.py::test_source_records_the_session_claude_code_injects",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_tick_credential_plan_upload_is_never_taken_as_the_operator"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
