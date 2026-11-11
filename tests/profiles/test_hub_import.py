@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts.profiles.hub_import import import_hub, main
+from scripts.profiles.hub_import import _write, import_hub, main
 
 
 @pytest.fixture
@@ -197,12 +197,12 @@ def test_command_line_prints_the_dry_run_report(hub: Path, tmp_path: Path, capsy
 @pytest.mark.feature("hub-import-core")
 @pytest.mark.parametrize(
     "env",
-    [{"GITHUB_TOKEN": "plain-value-123"}, {"DOCS": "ghp_" + "a" * 36}, {"DB_PASSWORD": "hunter2" + "-literal"}],
+    [{"GITHUB_TOKEN": "plain-value-123"}, {"DOCS": "xoxb-" + "1" * 12}, {"DB_PASSWORD": "hunter2" + "-literal"}],
 )
 def test_literal_credential_values_refuse_the_import(hub: Path, tmp_path: Path, env: dict[str, str]) -> None:
     (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
     out = tmp_path / "bundle"
-    with pytest.raises(ValueError, match="literal credential"):
+    with pytest.raises(ValueError, match=r"literal credential .*settings\.json"):
         import_hub(hub, out, False)
     assert not out.exists()
 
@@ -247,10 +247,11 @@ def test_a_write_error_leaves_no_profile_behind(
         return real(self, arg)
 
     monkeypatch.setattr(Path, method, failing)
-    out = tmp_path / "bundle"
+    out = tmp_path / "nested/bundle"
     with pytest.raises(OSError, match="disk full"):
         import_hub(hub, out, False)
     assert [path for path in out.rglob("*") if path.is_file()] == []
+    assert all(path.is_relative_to(out) for path in calls)
 
 
 @pytest.mark.feature("hub-import-core")
@@ -274,3 +275,20 @@ def test_a_failed_rollback_names_the_profile_left_behind(
     with pytest.raises(OSError, match="disk full") as raised:
         import_hub(hub, out, False)
     assert raised.value.__notes__ == [f"remove left over profile: {out / 'profiles/diagram'}"]
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_profile_folder_that_appeared_since_planning_is_never_overwritten(tmp_path: Path) -> None:
+    out = tmp_path / "bundle"
+    existing = out / "profiles/second"
+    existing.mkdir(parents=True)
+    (existing / "CLAUDE.md").write_text("Existing")
+    with pytest.raises(ValueError, match="profile name taken: second"):
+        _write(out, {"first": {"CLAUDE.md": b"First"}, "second": {"CLAUDE.md": b"Second"}})
+    assert sorted(path.name for path in (out / "profiles").iterdir()) == ["second"]
+    assert (existing / "CLAUDE.md").read_text() == "Existing"
+    assert sorted(path.relative_to(out).as_posix() for path in out.rglob("*")) == [
+        "profiles",
+        "profiles/second",
+        "profiles/second/CLAUDE.md",
+    ]

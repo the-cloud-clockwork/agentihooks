@@ -208,8 +208,9 @@ def _refuse_literal_credentials(settings: object, path: Path) -> None:
 
 def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
     """Stage every planned profile, then move them into place together, leaving none on failure or naming the one left behind."""
-    out.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".hub-import-", dir=out))
+    profiles = out / "profiles"
+    profiles.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=out))
     committed: list[Path] = []
     try:
         for name, files in plans.items():
@@ -217,9 +218,8 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
                 target = staging / name / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
-        (out / "profiles").mkdir(exist_ok=True)
         for name in plans:
-            target = out / "profiles" / name
+            target = profiles / name
             if target.exists():
                 raise ValueError(f"profile name taken: {name}")
             (staging / name).rename(target)
