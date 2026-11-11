@@ -6,12 +6,14 @@ are copied, and Claude settings become overrides with absolute paths removed.
 Secret files, symlinks, unsafe names and taken names refuse the whole import
 before any file is read for content or written; literal credential values and
 guard hooks the import would drop refuse it before any write. Profiles are
-staged and moved into place together.
+staged first and moved into place only once all are written; an error while
+moving them moves the moved ones back.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import shutil
@@ -46,7 +48,9 @@ SECRET_NAMES = frozenset(
 SECRET_SUFFIXES = (".env", ".key", ".p12", ".pem", ".pfx")
 RESTRICTIONS = ("deny", "ask")
 GUARD_EVENTS = ("PreToolUse", "PermissionRequest", "UserPromptSubmit")
-CREDENTIAL_KEY = re.compile(r"TOKEN|SECRET|PASSW|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL|AUTH", re.IGNORECASE)
+CREDENTIAL_KEY = re.compile(
+    r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIALS?)$", re.IGNORECASE
+)
 ENV_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 ENV_TEMPLATES = frozenset({"dist", "example", "sample", "template"})
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -223,7 +227,8 @@ def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
             committed.append(target)
     except BaseException:
         for target in committed:
-            target.rename(staging / target.name)
+            with contextlib.suppress(OSError):
+                target.rename(staging / target.name)
         raise
     finally:
         shutil.rmtree(staging)

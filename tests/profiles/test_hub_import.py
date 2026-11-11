@@ -210,6 +210,7 @@ def test_literal_credential_values_refuse_the_import(hub: Path, tmp_path: Path, 
 @pytest.mark.feature("hub-import-core")
 def test_credential_environment_references_are_kept(hub: Path, tmp_path: Path) -> None:
     env = {"GITHUB_TOKEN": "${GITHUB_TOKEN}", "API_KEY": "$DIAGRAM_KEY", "AUTH_MODE": ""}
+    env |= {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000", "CLAUDE_CODE_DISABLE_AUTH_CHECK": "1"}
     (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
     out = tmp_path / "bundle"
     import_hub(hub, out, False)
@@ -228,21 +229,24 @@ def test_a_guard_hook_that_import_would_drop_refuses_the_import(hub: Path, tmp_p
 
 
 @pytest.mark.feature("hub-import-core")
-def test_a_write_error_leaves_no_profile_behind(hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("method", "fail_after"), [("write_bytes", 5), ("rename", 1)])
+def test_a_write_error_leaves_no_profile_behind(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str, fail_after: int
+) -> None:
     second = hub / "agents/second/package"
     second.mkdir(parents=True)
     (second / "command.yml").write_text(yaml.safe_dump({"name": "second"}))
     (second / "CLAUDE.md").write_text("Second.\n")
-    real = Path.write_bytes
+    real = getattr(Path, method)
     calls: list[Path] = []
 
-    def failing(self: Path, data: bytes) -> int:
+    def failing(self: Path, arg: object) -> object:
         calls.append(self)
-        if len(calls) > 5:
+        if len(calls) == fail_after + 1:
             raise OSError("disk full")
-        return real(self, data)
+        return real(self, arg)
 
-    monkeypatch.setattr(Path, "write_bytes", failing)
+    monkeypatch.setattr(Path, method, failing)
     out = tmp_path / "bundle"
     with pytest.raises(OSError, match="disk full"):
         import_hub(hub, out, False)
