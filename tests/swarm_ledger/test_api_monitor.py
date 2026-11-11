@@ -304,6 +304,19 @@ def test_a_herdr_label_matching_a_hive_no_longer_live_is_not_listed():
     assert data["agents"] == {"total": 6, "source": "herdr", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
 
 
+@pytest.mark.feature("monitor-every-interface-hive")
+def test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts() -> None:
+    dead = {"id": "dead-id", "name": "dead-hive", "ui": "no", "live": False}
+    published = {
+        "machines": {"dead-hive": {"claude": 9}, "spare": {"claude": 2}, "master": {"claude": 6}},
+        "silent": [],
+        "measured_at": NOW,
+    }
+    data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}, {"name": "spare", "agents": 2}]
+    assert data["agents"] == {"total": 8, "source": "herdr", "reporting": 2, "of": 2, "claude": 8, "codex": 0}
+
+
 DESK = {"id": "desk", "name": "swarm-master", "ui": "yes", "live": True}
 HIVE_003 = {"id": "w3", "name": "swarm-hive-003", "ui": "no", "live": True}
 ROOT_BRIDGE = {
