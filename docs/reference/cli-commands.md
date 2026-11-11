@@ -393,7 +393,13 @@ agenti                          # fewest live sessions among accounts below thei
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 agenti --route api              # force the api side; fails when no api endpoint is configured
+agenti --route claude-ai        # a stored claude ai login; only a front door master falls back to a token
 ```
+
+`--route claude-ai` picks a stored claude ai login by
+`AGENTIHOOKS_MASTER_LOGIN_ORDER` and prints
+`[agenti] account=<name> route=claude-ai slot=<n>`; see
+[Standalone sessions on a claude ai login](account-login.md#standalone-sessions-on-a-claude-ai-login).
 
 The launch line reports `account`, `routing_left` and `sessions=n/cap`, or
 `account=api kind=api` for the api side. The api weight decides which side a
