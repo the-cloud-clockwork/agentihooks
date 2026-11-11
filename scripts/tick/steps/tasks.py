@@ -565,7 +565,7 @@ STEPS = (
         held(_settle),
         frozenset({"spawn"}),
         frozenset({AGENTS, TASKS, SWARM}) | pass_domains("config", "rows", "doc"),
-        frozenset({SWARM}),
+        frozenset({AGENTS, TASKS, SWARM}),
     ),
     CallStep("close space", CLOSE, held(_close_space), RESUMED, pass_domains("config")),
 )

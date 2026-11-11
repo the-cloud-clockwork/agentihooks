@@ -252,7 +252,7 @@ def test_a_stopping_swarm_retires_agents_whose_runtime_never_answers_then_stops(
 
     def drop(slug: str, store: object, ledger: object, rows: object, agent: AgentRecord, reason: str) -> str:
         dropped.append((agent.name, reason))
-        return ""
+        return f"retired {agent.name}: {reason}"
 
     monkeypatch.setattr(tick, "_drop_remote", drop)
     ghosts = [_agent("master@1-1", "master", tick.SUSPECT), _agent("engineer@1-1", "eng", tick.SUSPECT)]

@@ -20,7 +20,7 @@ from scripts.gates import intent
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, redis_grace, tick_stop, timing
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
-from scripts.swarm.ledger_client import LedgerUnreachable
+from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerUnreachable
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, Unreachable, connect, store_errors
 from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
@@ -557,10 +557,21 @@ def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runti
 
     runtimes = runtimes or {}
     host, actions = hive_id(), {}
+    reader = ledger or LedgerClient()
     for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, "")):
+        if not tickable(reader, slug):
+            continue
         store.redis.set(store.key(slug, "controller-host"), host, px=lease.ttl_ms())
         actions[slug] = run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
     return actions
+
+
+def tickable(ledger: Any, slug: str) -> bool:
+    """Answer False for a swarm whose ledger is binned or closed; a gone ledger ticks so its pass reports it once."""
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
 
 
 def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
