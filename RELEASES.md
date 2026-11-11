@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.805 · 2026-11-11
+
+### 2026-11-11 · 587c2e283847 · #10679 · @agenticore-app
+
+**Document the swarm tick Redis round trip reductions**
+
+This change adds a new reference doc explaining why the swarm tick and `swarm set` now finish in under a minute on the shared Anton Redis, covering the per-call round trip cost and the specific fixes that cut calls: one placement read per agent, showing only the newest 100 ended lives via `HISTORY_SHOWN`, dropping unread stream records, and batching account scans with `COUNT 10000`. It includes measured before/after timings, limits, and troubleshooting steps, verified against current code, giving operators a clear reference for diagnosing future latency regressions on this path.
+
 ## v2.17.802 · 2026-11-11
 
 ### 2026-11-10 · b12b8c4d290c · #10567 · @agenticore-app
