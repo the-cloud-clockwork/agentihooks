@@ -36,7 +36,7 @@ def start(
     owner: str,
     popen: Callable[..., object] = subprocess.Popen,
 ) -> bool:
-    """Spawn the run detached in its scheduling project and return True, or False when this delivery id already started one."""
+    """Spawn the run detached in its scheduling project; return False when this delivery id already started one."""
     folder = delivery_folder(delivery_id)
     folder.parent.mkdir(parents=True, exist_ok=True)
     try:

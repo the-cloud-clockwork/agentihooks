@@ -116,6 +116,7 @@ class SwarmSlot:
                 pass
 
 
+@dataclass(frozen=True)
 class WorkflowSlot:
     name: str
     case: str
