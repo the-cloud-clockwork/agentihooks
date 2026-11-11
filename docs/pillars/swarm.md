@@ -310,7 +310,7 @@ swarm's identity conflict count and the master seat's execution name, id, genera
 Python environment agentihooks is installed in, from its checkout:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-1 day" --until now --no-pager \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 day" --until now --no-pager \
   | grep -E "adopted live master|stale or changed execution identity"
 python -c '
 from scripts.swarm.store import connect
@@ -510,7 +510,7 @@ window applies to a `starting` execution on any seat, engineer seats included; i
 
 ```bash
 # Launch refusals and orphan endings for the master in the last hour
-TZ=UTC journalctl --user -t agentihooks-swarm --since "1 hour ago" --until now \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now \
   | grep -E "ended orphan execution|startup pending|replacement does not match"
 # The master line lists a live master once the seat binds
 agentihooks swarm <id> status
@@ -2398,7 +2398,7 @@ files nothing new.
 The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
 the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
 its standard error: the user journal
-(`TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`),
+(`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`),
 or `swarm-tick.log` in the runtime directory for a scheduled tick. The run is not marked handled, and the held cause
 is dropped on the next pass because no live task carries it. The next pass by the owner, or by a new owner after a
 handover, files the same `promo-<run id>-<n>` task once.
@@ -3835,7 +3835,7 @@ unavailable: <error type>: <message>`, and its other detectors still report.
 | Symptom | Check | Cause and action |
 |---|---|---|
 | The measure or the detection pass says `tick journal unavailable: FileNotFoundError` | `command -v journalctl` in the shell that runs the Doctor | `journalctl` is not on that `PATH`. Run the Doctor on the workstation whose user journal holds the swarm timer, or add the systemd tools to its `PATH`. |
-| The refusal names `CalledProcessError` or `TimeoutExpired` | `TZ=UTC journalctl --user -t agentihooks-swarm --since '1 hour ago' --until now -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
+| The refusal names `CalledProcessError` or `TimeoutExpired` | `TZ=UTC journalctl --user -u agentihooks-swarm.service --since '1 hour ago' --until now -o cat --no-pager \| tail` | The user journal could not be read, for example with no user session bus, or took over thirty seconds. Fix the journal read, then measure again over the same window. |
 | The measure ends in a Python traceback that names `journalctl` | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8184)'` prints nothing | The Doctor runs code from before [pull request #8184](https://github.com/the-cloud-clockwork/agentihooks/pull/8184). Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | A finding id ends in `:`, such as `failed-spawn/dt2:`, and its reason is cut short | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8039)'` prints nothing | The Doctor runs code from before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039), whose task id match kept the colon of a reason that held colons. Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
 | The reason reads `the hive launch order ended before its acknowledgement` | The hive acknowledgement, see [A worker that finishes before the tick collects its acknowledgement](hives.md#a-worker-that-finishes-before-the-tick-collects-its-acknowledgement) | Since pull request #8039 this reason means the hive never acknowledged the order. A hive that acknowledged a failure is reported as `hive launch failed: <cause>`. |
@@ -4806,9 +4806,11 @@ workstation's tick (see [Workstation tick retirement](#workstation-tick-retireme
 installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
-minutes (see [The tick holder](#the-tick-holder)). Tick output goes to the user journal under the
-`agentihooks-swarm` identifier when `systemd-cat` is on the path, whether the scheduler cron or the fallback service
-ran it; without `systemd-cat` a scheduler cron run writes to `swarm-tick.log` and the fallback to its unit journal; a hand run prints to its terminal: `TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`.
+minutes (see [The tick holder](#the-tick-holder)). With `systemd-cat` on the path each pass logs under the
+`agentihooks-swarm` identifier, in the journal of the unit that started it. A fallback pass is read from the swarm
+unit: `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`. A scheduler cron pass is
+read from the scheduler unit: `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-1h" --until now`.
+Without `systemd-cat` a scheduler cron pass writes to `swarm-tick.log`; a hand run prints to its terminal.
 Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
 whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
@@ -4940,8 +4942,8 @@ retries it.
 
 | What | Where |
 |---|---|
-| Tick pass output | `journalctl --user -t agentihooks-swarm`; when `systemd-cat` is missing, `swarm-tick.log` for a scheduler cron run and `journalctl --user -u agentihooks-swarm.service` for the fallback |
-| Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder for a holder the scheduler cron started; `journalctl --user -u agentihooks-swarm.service` for the fallback holder |
+| Tick pass output | A scheduler cron pass: `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now`, or `swarm-tick.log` when `systemd-cat` is missing. A fallback pass: `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10min" --until now`. Both carry the `agentihooks-swarm` identifier. |
+| Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder for a holder the scheduler cron started; `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10min" --until now` for the fallback holder |
 | Scheduler supervisor output | `scheduler.log` in the scheduler runtime folder when the supervisor was not started by `agentihooks-scheduler.service`; that unit's journal otherwise |
 
 The runtime folder is `~/.cache/agentihooks/scheduler/` for the local Redis at `127.0.0.1:6379/0` on a machine that
@@ -4949,7 +4951,7 @@ is not a hive member; another Redis endpoint, a hive member or the bus backend u
 
 ```bash
 find ~/.cache/agentihooks/scheduler -name 'swarm-tick.log' -o -name 'scheduler.log'
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-10min" --until now --no-pager | tail
+TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now --no-pager | tail
 ```
 
 On a machine that ticks, the journal shows a pass every minute, and `systemctl --user list-timers 'agentihooks-*'`
@@ -4960,7 +4962,7 @@ no tick at all (see [Workstation tick retirement](#workstation-tick-retirement))
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `journalctl --user -u agentihooks-swarm.service` shows nothing new | Scheduled ticks log under the identifier, not the unit; the timer and its service are retired once delivery is proven, and while the delivery guard keeps them the fallback's pass output logs under the identifier too. | Read `journalctl --user -t agentihooks-swarm`. |
+| The swarm unit journal shows no new pass | Passes the scheduler cron started run under the scheduler supervisor's unit, not the swarm unit; the timer and its service are retired once delivery is proven. | Read `TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-10min" --until now`, or `swarm-tick.log` when `systemd-cat` is missing. |
 | `another swarm tick is running on this machine` from a hand run | A scheduled pass holds the machine lock. | Expected. Wait for the pass to end, or read its output in the journal. |
 | A pass ends every minute near the nine minute mark | The pass ran past 540 seconds and the holder stopped it. | Read the pass's output for the slow step; [Tick report](../reference/tick-report.md) times each step. |
 | A setting exported in a shell has no effect on scheduled ticks | The holder passes only its fixed environment. | Record the setting in `~/.agentihooks/.env`. |
@@ -5053,7 +5055,7 @@ agentihooks gc --json | jq .herdr
 Read the tick's closes from the tick journal:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now | grep 'herdr: closed'
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now | grep 'herdr: closed'
 ```
 
 #### Configuration
@@ -5486,7 +5488,7 @@ systemctl --user status agentihooks-swarm-waits.service --no-pager
 
 # Ticks killed by a service stop in a window. journalctl reads --since and --until in local time, so set TZ
 # to give the window in UTC
-TZ=UTC journalctl --user -t agentihooks-swarm --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
   --no-pager | grep -c "stopped by the service"
 
 # Recycles in the same window, so a zero above covers syncs that did happen
@@ -5599,7 +5601,7 @@ TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-1h" --until 
   | grep -E "takes over|still held its lock|stops on|already running"
 
 # Finished tick passes after a restart of the waits unit
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-15min" --until now --no-pager | tail -20
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-15min" --until now --no-pager | tail -20
 ```
 
 The cgroup line ends in `agentihooks-scheduler.service`. A restart of `agentihooks-swarm-waits.service` or
@@ -5732,7 +5734,7 @@ the ten minute expiry. A Doctor start that reopens a closed Doctor ledger goes t
 
 ```bash
 agentihooks swarm <id> reopen
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-3 min" --until now
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-3 min" --until now
 agentihooks swarm <id> status
 ```
 
@@ -6103,8 +6105,8 @@ rig-grade-swarm: SwarmError: the controller lease is stale
 Find these lines and the step that ran long before them:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-12h" --until now | grep "controller lease is stale"
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-12h" --until now | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-12h" --until now | grep "controller lease is stale"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-12h" --until now | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
 The finished step records carry each step's name, outcome and `wall_s` duration. The pass lease heartbeat keeps
@@ -6191,7 +6193,7 @@ nothing there, so the file grows only when a job fails.
 Find the tick actions with:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-2h" --until now --no-pager | grep "started automatic snapshot"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-2h" --until now --no-pager | grep "started automatic snapshot"
 ```
 
 `tests/swarm/test_snapshot_job.py` pins this behaviour.
@@ -6346,7 +6348,7 @@ Every step writes a `swarm_tick_step` record to the user journal when it finishe
 
 ```bash
 D=rig-grade-swarm-doctor
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-6h" --until now \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep '"step": "scripts.doctor.cli.timer"' \
   | sed 's/^[^{]*//' \
@@ -6358,7 +6360,7 @@ print(len(w), "steps; median", round(w[len(w) // 2], 1), "max", round(w[-1], 1),
 Read the detector steps of one pass by its `pid`; they finish before their timer step:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-30 min" --until now \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-30 min" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep -E '"step": "(scripts.doctor.cli.timer|doctor\.[a-z ]+)"' \
   | sed 's/^[^{]*//'
@@ -6820,7 +6822,7 @@ threshold delays the recycle.
 
 ```bash
 # Ask, wait, recycle and proof swarm stop lines from the tick journal
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-1 day" --until now --no-pager \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 day" --until now --no-pager \
   | grep -E "busy with no tool call|stopped proof swarm"
 
 # Recorded transfers; a stalled master recycle has reason "stalled"
@@ -6934,7 +6936,7 @@ Every local slot claim, granted or refused, writes one line to the tick journal 
 in its own swarm, so a successor does not count its predecessor. Read the lines of the last hour:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since "1 hour ago" --until now -g "local slot claim" --no-pager
 ```
 

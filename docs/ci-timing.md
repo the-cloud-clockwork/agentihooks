@@ -973,7 +973,7 @@ curl -s https://www.githubstatus.com/api/v2/incidents/unresolved.json \
 Find the passes that held findings:
 
 ```bash
-TZ=UTC journalctl --user -t agentihooks-swarm --since '-6 hours' --until now --no-pager -o cat \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since '-6 hours' --until now --no-pager -o cat \
   | grep --line-buffered 'rig-grade-swarm-doctor' \
   | grep --line-buffered 'findings held during GitHub incident'
 ```
