@@ -5255,7 +5255,9 @@ KillMode=process
 ```
 
 When the pass ends, systemd stops only its main process, `agentihooks swarm waits`. The supervisor, its runner and
-any tick in flight keep running, and later passes find the supervisor holding its lock and leave it alone.
+any tick in flight keep running, and later passes find the supervisor holding its lock and leave it alone. On a
+workstation with the scheduler unit installed, the pass starts that unit instead and no supervisor joins the waits
+group; see [The scheduler runs in its own user unit](#the-scheduler-runs-in-its-own-user-unit).
 
 Without the setting, systemd's default `KillMode=control-group` sent SIGTERM to every process in the group at the end
 of each pass. Every main checkout sync moved the installed revision, the next pass recycled the supervisor, started
@@ -5317,6 +5319,114 @@ and asserts that `timer.reconcile` writes it back and reloads systemd. Red on th
 | `systemctl --user show -p KillMode agentihooks-swarm-waits.service` prints `KillMode=control-group` | The unit file predates the setting and no host tick has run the installed code since. | Wait one scheduled minute; the tick rewrites the unit. When it persists, read the tick journal for `the swarm user services could not be installed or enabled`. |
 | `stopped by the service` ticks a few seconds into each wait pass, right after a `recycling the scheduler supervisor` line | The waits service still runs with the old kill mode. | Check the setting as above. A hand edited unit is replaced on the next tick, so fix the unit text in `timer.units`, never on disk. |
 | `systemctl --user stop agentihooks-swarm-waits.service` leaves the supervisor running | Stopping the unit stops only its main process under `KillMode=process`. | Expected: the supervisor is meant to outlive every pass, so stopping the waits unit does not stop the scheduler. |
+
+#### The scheduler runs in its own user unit
+
+`KillMode=process` keeps a waits pass from killing the supervisor it started, but the supervisor still lived in the
+control group of whichever unit called `ensure_running` first. On 29 October a systemd reload removed the swarm tick
+unit and the live supervisor ran inside the `agentihooks-swarm-waits.service` group, later inside
+`agentihooks-hive.service`; a restart of either unit took the scheduler and the tick with it, and the main swarm
+finished no pass for over 28 minutes. Since
+[pull request 8658](https://github.com/the-cloud-clockwork/agentihooks/pull/8658) the scheduler has a user unit of its
+own, so restarting, reloading or stopping any unit that starts it leaves the tick running.
+
+**The unit.** Every install of the swarm services (`swarm <id> start`, `master up`, `take-master` and each host tick
+through `timer.reconcile`) writes and enables `agentihooks-scheduler.service` with `systemctl --user enable --now`,
+beside the waits, tick watch, inbox waker and quota prober units. The text comes from `timer.units`:
+
+```ini
+[Unit]
+Description=agentihooks scheduler, apart from the units that start it
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=AGENTIHOOKS_SCHEDULER_UNIT=1
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.agentihooks/.env
+ExecStart="<installed python>" -m scripts.scheduler.service supervise
+Restart=always
+RestartSec=5
+RestartPreventExitStatus=2
+KillMode=process
+
+[Install]
+WantedBy=default.target
+```
+
+- `ExecStart` names the Python interpreter of the installed agentihooks.
+- `Restart=always` brings a supervisor that exits or is recycled back after five seconds.
+- `RestartPreventExitStatus=2`: a supervisor that finds the machine lock held prints
+  `scheduler supervisor is already running` and exits 2, and systemd does not restart it in a loop. The next
+  `ensure_running` call starts the unit again.
+- `AGENTIHOOKS_SCHEDULER_UNIT=1` tells the supervisor that systemd started it. Only the unit sets it; never set it by
+  hand.
+- [Workstation tick retirement](#workstation-tick-retirement) keeps this unit: a workstation whose swarms are all
+  served in Anton still runs its scheduler.
+
+**The runtime folder mark.** A supervisor started with `AGENTIHOOKS_SCHEDULER_UNIT` set loads the
+`~/.agentihooks/*.env` files, so it resolves the same scheduler runtime folder as the commands that call it, creates
+the folder when missing and writes a file named `agentihooks-scheduler.service` into it, before it takes the machine
+lock. A supervisor started any other way writes no mark.
+
+**Taking over.** A supervisor started by the unit first drains a lock holder started outside it: it prints
+`the scheduler unit takes over from supervisor <pid>, started outside it`, sends that supervisor SIGTERM and waits
+up to 30 seconds for the lock. When the holder still has the lock after that, it prints
+`the scheduler supervisor <pid> still held its lock after 30 seconds` and exits 2.
+
+**How callers start it.** `ensure_running` runs when a process waits on a scheduler timer, connects to the scheduler
+for a command, or a wait pass finds no supervisor (step 2 of [The wait pass guard](#the-wait-pass-guard)). With no
+supervisor holding the lock it chooses:
+
+| Runtime folder holds the mark, and `~/.config/systemd/user/agentihooks-scheduler.service` exists | `systemctl --user start --no-block agentihooks-scheduler.service` | Result |
+|---|---|---|
+| Yes | Exits 0 | The unit starts the supervisor; no child is spawned. |
+| Yes | Exits non zero, raises, or takes over 30 seconds | A detached child supervisor is spawned, as before the unit existed. |
+| No | Not run | A detached child supervisor is spawned. |
+
+A scratch ledger proof or any caller on another Redis endpoint has its own runtime folder without the mark, so it
+still spawns its own child, tied to its starter as described in
+[A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter).
+
+Check it on a live machine, read only:
+
+```bash
+systemctl --user is-enabled agentihooks-scheduler.service       # enabled
+systemctl --user is-active agentihooks-scheduler.service        # active
+systemctl --user show -p MainPID,Restart,KillMode agentihooks-scheduler.service
+
+# The supervisor's control group names the scheduler unit, not the waits or hive unit
+cat "/proc/$(systemctl --user show -p MainPID --value agentihooks-scheduler.service)/cgroup"
+
+# The mark in the runtime folder; a non default Redis endpoint keeps it in a hashed subfolder
+ls ~/.cache/agentihooks/scheduler/agentihooks-scheduler.service \
+  ~/.cache/agentihooks/scheduler/*/agentihooks-scheduler.service 2>/dev/null
+
+# Take overs, stops and restarts of the unit
+TZ=UTC journalctl --user -u agentihooks-scheduler.service --since "-1h" --until now --no-pager \
+  | grep -E "takes over|still held its lock|stops on|already running"
+
+# Finished tick passes after a restart of the waits unit
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-15min" --until now --no-pager | tail -20
+```
+
+The cgroup line ends in `agentihooks-scheduler.service`. A restart of `agentihooks-swarm-waits.service` or
+`agentihooks-hive.service` leaves the scheduler's `MainPID` unchanged, and tick passes keep finishing every minute.
+
+Tests: `tests/scheduler/test_service.py` pins that a folder the unit owns starts the unit instead of a child, that a
+failed or raising `systemctl` start falls back to a child, that a folder missing the mark or the unit file spawns a
+child, and that only a supervisor started by its unit writes the mark, creating the folder when needed.
+`tests/swarm/test_timer_install.py` pins the unit text and that `timer.ensure` writes and enables it. Red: Proofs run
+[40832818662](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40832818662) on the tests only commit,
+the new seam tests failing. Green: Proofs run
+[40834075702](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40834075702) across `tests/scheduler` and
+`tests/swarm`. Issue [8631](https://github.com/the-cloud-clockwork/agentihooks/issues/8631).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| The tick stops when `agentihooks-swarm-waits.service` or `agentihooks-hive.service` restarts | The supervisor runs as a child in that unit's group: the scheduler unit is missing or was never started | Run `agentihooks swarm tick` once from the installed agentihooks, or wait for the next host tick; `timer.reconcile` writes and enables the unit |
+| `agentihooks-scheduler.service` is inactive with exit status 2 | Another supervisor held the machine lock past the 30 second take over | The next wait pass starts the unit again; when it repeats, list supervisors with the `ps` check in [A supervisor started off the installed code exits with its starter](#a-supervisor-started-off-the-installed-code-exits-with-its-starter) |
+| The unit is active but `scheduler.log` keeps getting new supervisors | The runtime folder has no mark, so callers spawn children: the unit's supervisor resolves another folder | Keep the Redis settings in `~/.agentihooks/.env`, which the unit loads, rather than only in a shell profile |
 
 #### The Doctor finding
 
