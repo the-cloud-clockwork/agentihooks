@@ -29,7 +29,7 @@ STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
 JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9 + len(STEPS)}
 LEGACY_SAMPLE_WIDTHS = frozenset((7, 9))
 CURRENT = ContextVar("ledger_request_timing", default=None)
-Row = tuple[float, str, str, *tuple[float, ...]]
+Row = tuple[float, str, str, float, float, float, float, float, float, float, float, float]
 SAMPLES: deque[Row] = deque(maxlen=MAX_SAMPLES)
 PENDING: list[Row] = []
 GUARD = threading.Lock()
@@ -160,9 +160,10 @@ def record(
     global EVICTED_THROUGH
 
     waits = Timing() if waits is None else waits
+    hierarchy, outbox, refresh, events = (waits.steps.get(name, 0.0) for name in STEPS)
     with GUARD:
         ended = time.time()
-        row = (
+        row: Row = (
             ended,
             method,
             route,
@@ -171,7 +172,10 @@ def record(
             lock_wait,
             waits.client_wait,
             waits.postgres_wait,
-            *(waits.steps.get(name, 0.0) for name in STEPS),
+            hierarchy,
+            outbox,
+            refresh,
+            events,
         )
         hold(row)
         if JOURNAL is not None:
@@ -458,7 +462,7 @@ def records(hours: float, end: float | None, limit: int) -> dict:
                 "lock_wait_seconds": lock_wait,
                 "client_wait_seconds": client_wait,
                 "postgres_wait_seconds": postgres_wait,
-                **{f"{name}_seconds": seconds for name, seconds in zip(STEPS, steps, strict=True)},
+                **{f"{name}_seconds": steps[index] for index, name in enumerate(STEPS)},
             }
         )
     return {
