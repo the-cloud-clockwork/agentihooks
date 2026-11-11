@@ -202,3 +202,26 @@ def test_runtime_command_validates_a_file(tmp_path: Path, capsys: pytest.Capture
     assert capsys.readouterr().err == ""
     assert delivery.main(["runtime", str(bad)], {}) == 1
     assert "budget.shed.queue" in capsys.readouterr().err
+
+
+def test_error_messages_name_the_file_and_path(tmp_path: Path) -> None:
+    budget = {"coreMinutesPerDay": 1, "shed": {"queue": 1.5}}
+    with pytest.raises(delivery.DeliveryError) as runtime_error:
+        delivery.runtime({**RUNTIME, "budget": budget})
+    assert str(runtime_error.value) == "runtime budget.shed.queue: 1.5 is greater than the maximum of 1"
+    root = tree(tmp_path / "missing", block())
+    (root / "delivery.yaml").write_text(yaml.safe_dump({"queue": []}))
+    with pytest.raises(delivery.DeliveryError) as missing:
+        delivery.lab(root)
+    assert str(missing.value) == "delivery.yaml : 'lab' is a required property"
+    ghosts = tree(tmp_path / "ghosts", block(authoritative=["phantom", "ghost", "lint"]))
+    with pytest.raises(delivery.DeliveryError) as unknown:
+        delivery.lab(ghosts)
+    assert str(unknown.value) == "lab.authoritative names unknown gates: ghost, phantom"
+
+
+@pytest.mark.parametrize("argv", [[], ["cutover"]])
+def test_command_and_grader_root_are_required(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        delivery.main(argv, {})
+    assert exited.value.code == 2

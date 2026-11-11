@@ -16,6 +16,7 @@ WORKFLOW_SUFFIXES = (".yml", ".yaml")
 LAB_OFF = "AGENTIHOOKS_LAB_OFF"
 OUTPUT = "GITHUB_OUTPUT"
 ALL_MUTANTS = "all"
+PROG = "python -m scripts.ci_lab"
 CLASSES = ("hotfix", "pull_request", "queue", "promotion", "backfill")
 SHEDDABLE = ("backfill", "promotion", "queue")
 FRACTION = {"type": "number", "minimum": 0, "maximum": 1}
@@ -157,7 +158,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
 
     Either exits 1 when its input is invalid.
     """
-    parser = argparse.ArgumentParser(prog="python -m scripts.ci_lab")
+    parser = argparse.ArgumentParser(prog=PROG)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("cutover").add_argument("--grader-root", type=Path, required=True)
     commands.add_parser("runtime").add_argument("path", type=Path)
