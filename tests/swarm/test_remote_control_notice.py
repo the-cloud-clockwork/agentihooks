@@ -165,13 +165,16 @@ def test_status_text_and_json_show_the_master_remote_control_line(env, capsys):
     rt.live = {master.name, engineer.name}
     shown = {a["name"]: a["remote_control"] for a in status.status_report(store, "sw", {"tasks": []}, rt)["agents"]}
     assert shown == {master.name: ON, engineer.name: {}}
-    assert cli._remote_control_text([master, engineer]) == "Remote Control: on (master 1 · sw)\n"
+    assert (
+        cli._remote_control_text([master, engineer]) == "Remote Control: on (master 1 · sw), phone access available\n"
+    )
     second = AgentRecord("m2", "master", "master", remote_control={"state": "off", "detail": "flag"})
     assert cli._remote_control_text([master, second]) == (
-        "Remote Control: on (master 1 · sw)\nRemote Control: off (flag)\n"
+        "Remote Control: on (master 1 · sw), phone access available\n"
+        "Remote Control: off (flag), phone access unavailable\n"
     )
     capsys.readouterr()
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     lines = capsys.readouterr().out.splitlines()
-    at = lines.index("Remote Control: on (master 1 · sw)")
+    at = lines.index("Remote Control: on (master 1 · sw), phone access available")
     assert lines[at - 1].startswith("master affinity") and lines[at + 1] != ""
