@@ -251,7 +251,8 @@ On a hive (`AGENTIHOOKS_SLOT_HIVE` set) the launch also takes one of that
 hive's account slots for the chosen login, as every routed launch does. A hive
 with no free slot or a failed admission ends the launch with an uncaught
 `Unavailable` error, `No account slot available` or `Account slot admission
-failed`, and no route report is written.
+failed`. The `[agenti] account=` line has already printed and the route
+report already says `status=routed`.
 
 ### Refusal messages
 
