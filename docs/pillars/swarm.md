@@ -6963,10 +6963,11 @@ and says so: `with 3 frozen tasks holding 90m of work left out`.
 
 ### How a freeze hold is named
 
-Every claim filter asks one place why an open task may not be claimed: its phase, a freeze or a focus, or an open
-dependency. The tick's ready work, which the night watch's held spawn check counts, asks only whether a hold exists
-and reads no target title. The reason text is built only where it is shown: the urgent hold finding, a withdrawn
-claim offer and the refusal to rank a held task `urgent`. For a freeze, that text names one record:
+Every claim filter asks one place why an open task may not be claimed: its post merge proof window, its phase, a
+freeze or a focus, or an open dependency. The tick's ready work, which the night watch's held spawn check counts,
+asks only whether a hold exists and reads no target title. The reason text is built only where it is shown: the
+`urgent hold` step's finding, a withdrawn claim offer and the refusal to rank a held task `urgent`. For a freeze,
+that text names one record:
 
 1. The filter walks `freezes` in ledger order and stops at the first record whose verb is `freeze` and whose target
    covers the task: the task itself, an ancestor slice, phase or plan, its lane or its kind. `focus` records are
@@ -6987,9 +6988,11 @@ tasks and one `freeze lane:eng` resolves only `lane:eng`, at most once per task.
 open eng tasks on such a ledger reads no other target title; `tests/swarm/test_night_watch_reads.py` holds that bound.
 
 Before this, the filter built the display name of every freeze record for every task it judged and kept the first
-covering one. Each task, slice or phase target is a scan of its collection, so a long freeze history multiplied every
-readiness read. On 20 October the `night watch` step took 292 s of a 450 s tick deadline while its gate was in
-`log only` mode. The wording of each reason is unchanged.
+covering one, and the tick's ready work asked for the full reason text. Each task, slice or phase target is a scan of
+its collection, so a long freeze history multiplied every readiness read. On 20 October the `night watch` step took
+292 s of a 450 s tick deadline while its gate was in `log only` mode. Resolving only the covering record bounded those
+reads; ready work later moved to the yes or no check, so it now reads no title at all. The wording of each reason is
+unchanged.
 
 Read the step's wall from the tick report, where it shows as `night watch`:
 
