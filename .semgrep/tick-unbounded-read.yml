@@ -1,0 +1,123 @@
+rules:
+  - id: tick-unbounded-store-read
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Per pass tick code never reads a whole Redis hash or scans the whole key space: hgetall, hscan_iter, and hscan,
+      scan, scan_iter or keys without a count page grow with every row nothing removes, and the tick pass slows with
+      them. Read the fields the pass needs, page the scan with count, or call the archive or expiry that bounds the
+      store in the same function. A file still doing so stays listed in tick-unbounded-read-allowlist.json with the
+      task that removes it.
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-either:
+                  - pattern: $STORE.hgetall($KEY)
+                  - pattern: $STORE.hgetall(name=$KEY)
+                  - pattern: $STORE.hscan_iter($KEY, ...)
+                  - pattern: $STORE.hscan_iter(..., name=$KEY, ...)
+                  - patterns:
+                      - pattern-either:
+                          - pattern: $STORE.hscan($KEY, ...)
+                          - pattern: $STORE.hscan(..., name=$KEY, ...)
+                      - pattern-not: $STORE.hscan(..., count=$PAGE, ...)
+              - pattern-not-inside:
+                  patterns:
+                    - pattern-either:
+                        - pattern: |
+                            def $FUNCTION(...):
+                              ...
+                              $OWNER.$EXPIRE($KEY, ...)
+                              ...
+                        - pattern: |
+                            async def $FUNCTION(...):
+                              ...
+                              $OWNER.$EXPIRE($KEY, ...)
+                              ...
+                    - metavariable-regex:
+                        metavariable: $EXPIRE
+                        regex: ^p?expire(at)?$
+          - patterns:
+              - pattern-either:
+                  - pattern: $STORE.scan()
+                  - pattern: $STORE.scan($CURSOR, ...)
+                  - pattern: $STORE.scan(..., cursor=$CURSOR, ...)
+                  - pattern: $STORE.scan(..., match=$MATCH, ...)
+                  - pattern: $STORE.scan_iter(...)
+                  - pattern: $STORE.keys($MATCH, ...)
+                  - pattern: $STORE.keys(..., pattern=$MATCH, ...)
+              - pattern-not: $STORE.$READ(..., count=$PAGE, ...)
+      - pattern-not-inside:
+          patterns:
+            - pattern-either:
+                - pattern: |
+                    def $FUNCTION(...):
+                      ...
+                      $OWNER.$BOUND(...)
+                      ...
+                - pattern: |
+                    def $FUNCTION(...):
+                      ...
+                      $BOUND(...)
+                      ...
+                - pattern: |
+                    async def $FUNCTION(...):
+                      ...
+                      $OWNER.$BOUND(...)
+                      ...
+                - pattern: |
+                    async def $FUNCTION(...):
+                      ...
+                      $BOUND(...)
+                      ...
+            - metavariable-regex:
+                metavariable: $BOUND
+                regex: (?i)^\w*archive\w*$
+    paths:
+      include:
+        - "/scripts/swarm/**"
+        - "/scripts/tick/**"
+        - "*.test.py"
+      exclude:
+        - "/scripts/swarm/blockers.py"
+        - "/scripts/swarm/bottleneck_remedy.py"
+        - "/scripts/swarm/commands.py"
+        - "/scripts/swarm/context_view.py"
+        - "/scripts/swarm/dev_red.py"
+        - "/scripts/swarm/dispatch_seat.py"
+        - "/scripts/swarm/drain_watch.py"
+        - "/scripts/swarm/failed_panes.py"
+        - "/scripts/swarm/fencing.py"
+        - "/scripts/swarm/health/standing.py"
+        - "/scripts/swarm/health/verdicts.py"
+        - "/scripts/swarm/idle.py"
+        - "/scripts/swarm/incidents.py"
+        - "/scripts/swarm/launch_check.py"
+        - "/scripts/swarm/launch_job.py"
+        - "/scripts/swarm/ledger_cutover.py"
+        - "/scripts/swarm/ledger_events.py"
+        - "/scripts/swarm/ledger_probe.py"
+        - "/scripts/swarm/lifecycle.py"
+        - "/scripts/swarm/live_binding.py"
+        - "/scripts/swarm/local_slots.py"
+        - "/scripts/swarm/master_wake.py"
+        - "/scripts/swarm/metrics_fleet.py"
+        - "/scripts/swarm/metrics_service.py"
+        - "/scripts/swarm/metrics_swarm.py"
+        - "/scripts/swarm/naming.py"
+        - "/scripts/swarm/overrun.py"
+        - "/scripts/swarm/pr_wait.py"
+        - "/scripts/swarm/preempt.py"
+        - "/scripts/swarm/prerequisite_wait.py"
+        - "/scripts/swarm/promotion_owner.py"
+        - "/scripts/swarm/promotion_watch.py"
+        - "/scripts/swarm/queue_priority.py"
+        - "/scripts/swarm/recovery_view.py"
+        - "/scripts/swarm/remote_control.py"
+        - "/scripts/swarm/retire_watch.py"
+        - "/scripts/swarm/run_window.py"
+        - "/scripts/swarm/stall_watch.py"
+        - "/scripts/swarm/store.py"
+        - "/scripts/swarm/timing.py"
+        - "/scripts/tick/adapters/records_redis.py"
+        - "/scripts/tick/steps/place.py"
