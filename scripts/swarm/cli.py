@@ -137,6 +137,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -2167,7 +2168,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
     done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2176,6 +2177,9 @@ def cmd_merge(store, args):
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
+        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
@@ -2187,7 +2191,7 @@ def cmd_merge(store, args):
                 admit=lambda head: (
                     (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
                 ),
-                journal=queue_record.Journal(args.url),
+                journal=queue_record.Journal(args.url, context=stalled),
                 attempts=merge_queue.ATTEMPTS,
             )
         else:

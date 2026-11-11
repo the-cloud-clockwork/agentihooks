@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import yaml
@@ -45,9 +46,10 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
-def _graded_needs(promote, analysis="A1"):
+def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, SimpleNamespace]:
     return {
-        name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis)) for name in promote["needs"]
+        name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis, promote="false"))
+        for name in promote["needs"]
     }
 
 
@@ -70,6 +72,49 @@ def test_a_red_or_cancelled_promotion_dependency_prevents_all_promotion_writes(j
     assert enabled(promote["if"], "push", needs)
     needs[job].result = result
     assert not enabled(promote["if"], "push", needs)
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize("job", ["gate-required", "coverage-baseline", "flake-budget", "sonar", "promotion-ready"])
+def test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode(job: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    promote = jobs["promote"]
+    needs = _graded_needs(promote)
+    needs[job].result = "failure"
+    assert not enabled(promote["if"], "push", needs)
+    needs["launch-hotfix"].outputs.promote = "true"
+    assert enabled(promote["if"], "push", needs)
+    assert not enabled(promote["if"], "pull_request", needs)
+    assert "with" not in promote
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    grade = jobs["launch-hotfix"]
+    assert grade["name"] == "Launch hotfix grade"
+    assert set(grade["needs"]) == {"select", "split", "unit", "unit-lost", "unit-rerun", "shard-check", "test-count"}
+    assert enabled(grade["if"], "push", {})
+    for event in ("pull_request", "merge_group", "workflow_dispatch"):
+        assert not enabled(grade["if"], event, {})
+    assert "launch-hotfix" not in jobs["gate-required"]["needs"]
+    assert grade["permissions"] == {"contents": "read"}
+    token = next(step for step in grade["steps"] if step.get("id") == "app-token")["with"]
+    assert {key: token[key] for key in token if key.startswith("permission-")} == {
+        "permission-checks": "read",
+        "permission-contents": "read",
+        "permission-issues": "read",
+        "permission-pull-requests": "read",
+    }
+    step, confirm = grade["steps"][-2:]
+    assert step["id"] == "grade"
+    assert step["run"].startswith("python -m scripts.ci_launch_hotfix ")
+    assert step["env"] == {"NEEDS": "${{ toJSON(needs) }}", "GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
+    assert confirm["name"] == "Confirm the launch hotfix route"
+    assert confirm["if"] == "steps.grade.outputs.promote == 'true'"
+    script = (ROOT / ".github/scripts/promote.cjs").read_text()
+    assert "const HOTFIX_STEP = 'Confirm the launch hotfix route';" in script
+    assert "const HOTFIX_GRADE = 'Launch hotfix grade';" in script
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
