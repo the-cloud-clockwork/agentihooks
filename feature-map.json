@@ -3739,7 +3739,7 @@
       "id": "stall-master-queue",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and inside the open focus, or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
+      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
       "seam": "swarm merge queue through cli.cmd_merge and stall_queue.route",
       "tests": [
         "tests/swarm/test_merge_queue.py::test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request",
