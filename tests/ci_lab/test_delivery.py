@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.ci_lab import __main__ as entry
 from scripts.ci_lab import delivery
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -191,6 +192,13 @@ def test_module_entry_runs_cutover(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         runpy.run_module("scripts.ci_lab", run_name="__main__")
     assert exited.value.code == 0
     assert output.read_text() == "skip=[]\n"
+
+
+def test_entry_main_dispatches_to_delivery(tmp_path: Path) -> None:
+    grader = tree(tmp_path / "grader", block(authoritative=["unit"]))
+    output = tmp_path / "output"
+    assert entry.main(["cutover", "--grader-root", str(grader)], {"GITHUB_OUTPUT": str(output)}) == 0
+    assert output.read_text() == 'skip=["unit"]\n'
 
 
 def test_runtime_command_validates_a_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
