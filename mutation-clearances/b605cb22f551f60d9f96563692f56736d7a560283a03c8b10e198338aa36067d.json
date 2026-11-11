@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/local_slots.py:scripts.swarm.local_slots.x_occupancy:f46c3631e95713ae0cc679b5b43a7126e0ce11d72bf81adb86660fae0a70fe3e": {
+    "reader": "standards_reader",
+    "reason": "lease.now_ms returns document.now_ms() and never reads its store argument, so lease.now_ms(None) returns the same value as lease.now_ms(store) and occupancy returns identical output."
+  }
+}
