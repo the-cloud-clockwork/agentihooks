@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -1174,7 +1175,9 @@ def plant_stall(store: object, minutes: int) -> None:
     store.redis.set(store.key("sw", spawn_stall.KEY), json.dumps(state))
 
 
-def stalled_master(monkeypatch: pytest.MonkeyPatch, tmp_path: object, rows: list[dict], focus=(), minutes=10) -> list:
+def stalled_master(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rows: list[dict], focus: tuple[str, ...] = (), minutes: int = 10
+) -> list[dict]:
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "master-session")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
@@ -1188,7 +1191,9 @@ def stalled_master(monkeypatch: pytest.MonkeyPatch, tmp_path: object, rows: list
 
 
 @pytest.mark.feature("stall-master-queue")
-def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request(monkeypatch, tmp_path):
+def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm import stall_queue
 
     seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK], focus=("t1",))
@@ -1201,7 +1206,9 @@ def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_reque
 
 
 @pytest.mark.feature("stall-master-queue")
-def test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_route(monkeypatch, tmp_path):
+def test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_route(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK])
     assert cli.main(["sw", "merge", "queue", URL]) == 0
     assert seen[0]["journal"].context == {"route": "spawn stall", "task": "t1"}
@@ -1220,8 +1227,13 @@ def test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_ro
     ids=["no stall yet", "not urgent", "done", "outside the focus", "no task"],
 )
 def test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task(
-    monkeypatch, tmp_path, capsys, rows, focus, minutes
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    rows: list[dict],
+    focus: tuple[str, ...],
+    minutes: int,
+) -> None:
     seen = stalled_master(monkeypatch, tmp_path, rows, focus=focus, minutes=minutes)
     assert cli.main(["sw", "merge", "queue", URL]) == 1
     assert seen == []
@@ -1229,7 +1241,7 @@ def test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task(
 
 
 @pytest.mark.feature("stall-master-queue")
-def test_the_stall_route_never_opens_a_dequeue_for_the_master(monkeypatch, tmp_path):
+def test_the_stall_route_never_opens_a_dequeue_for_the_master(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK])
     assert cli.main(["sw", "merge", "dequeue", URL]) == 1
     assert seen == []

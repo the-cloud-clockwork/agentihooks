@@ -2166,7 +2166,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
     done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)

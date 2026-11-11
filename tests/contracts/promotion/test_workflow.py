@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import yaml
@@ -45,7 +46,7 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
         assert resolve(callee["jobs"][job]["runs-on"], **push) == "anton-oss-batch"
 
 
-def _graded_needs(promote, analysis="A1"):
+def _graded_needs(promote: dict[str, Any], analysis: str = "A1") -> dict[str, SimpleNamespace]:
     return {
         name: SimpleNamespace(result="success", outputs=SimpleNamespace(analysis=analysis, promote="false"))
         for name in promote["needs"]

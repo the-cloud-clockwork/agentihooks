@@ -1705,7 +1705,7 @@ HOTFIX_JOBS = [
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
-def test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_closes_nothing(store):
+def test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_closes_nothing(store: RedisStore) -> None:
     ledger = Ledger()
     refresh(store, ledger, gh([RED], HOTFIX_JOBS))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: tick-pattern-tree"]
