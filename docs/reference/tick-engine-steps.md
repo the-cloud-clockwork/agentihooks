@@ -418,11 +418,13 @@ CallStep(
     "metrics record",
     "wrapper metrics",
     held(viewed("metrics record", _metrics)),
-    frozenset({"health findings"}),
+    FOUND,
     pass_domains("found", "view") | hook_domains("doc", "count"),
     lane=SLOW,
 )
 ```
+
+`FOUND` in `scripts.tick.steps.report` is `frozenset({"health findings"})`.
 
 Turn parallel mode on, or back off, per swarm:
 
@@ -440,13 +442,13 @@ How the needed step ended decides the dependent:
 | Recorded `held`: its earlier run was still alive | Runs |
 | Recorded `skipped`: its interval had not elapsed | Runs |
 | Left running at its budget (`late`), cut at its lane deadline, or dropped before it started | Dropped and recorded `late`, without running |
-| Not ended before the dependent's lane deadline | Dropped and recorded `late` |
+| Not ended before the dependent's lane deadline | Dropped and recorded `late`, without running |
 | Ran critical in its own group | Already ended; the need is met at once |
 
 A dropped dependent drops every step of its group that needs it and, when it
-was handed off, every step of a later group that needs it. When a group returns, its handed off steps that need a step of the group
-that was dropped are marked ended and dropped at once, so a later group does
-not wait on them.
+was handed off, every step of a later group that needs it. When a group
+returns, its handed off steps that need a step of the group that was dropped
+are marked ended and dropped at once, so a later group does not wait on them.
 
 A kept step (`kept=True`), such as `status publish`, waits at most its own
 budget for the steps it needs and runs even when one of them was dropped,
@@ -472,8 +474,11 @@ A test that holds the dependent back until the step it needs ends, after
 from threading import Event
 
 from scripts.tick import engine, pool
+from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Result
+from tests.tick.test_cross_group_needs import Step, View
 
+ctx = Context(View(), Deadline.after(10.0))
 release, started = Event(), Event()
 
 
@@ -497,8 +502,7 @@ with pool.running(workers=4, slow_s=3.0):
 assert started.is_set()
 ```
 
-`Step` there is the test's step double, slow lane by default, and `ctx` a
-`Context` with a ten second deadline. A sequential pass runs
+`Step` and `View` are the test's doubles; `Step` is slow lane by default. A sequential pass runs
 the same two groups in order with no handoff.
 
 | Symptom | Cause | Check |
@@ -614,7 +618,7 @@ closing group stamps last tick and the heartbeat afterwards.
 
 The closing lane exists for a pass whose critical lane ran out. Before it, the
 three steps sat in the `wrapper metrics`, `after` and `wrapper status` groups
-on the critical lane, so a pass that spent its 110 critical seconds dropped
+on the critical lane, so a pass that spent its critical lane seconds dropped
 them and wrote no heartbeat, and the stale watcher then judged a live tick
 stale. Now a pass with a hung step still stamps and publishes: in
 `tests/tick/test_closing_lane.py` a reboot pass planted to hang for 300
