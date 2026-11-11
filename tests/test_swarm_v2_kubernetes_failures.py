@@ -1758,7 +1758,7 @@ def test_a_launched_replacement_whose_seat_has_no_occupant_left_is_recorded_supe
     world: Any, launched: bool
 ) -> None:
     recovery, ledger, relaunch = world.recovery(world.live, automatic=False), _Ledger(), _Relaunch()
-    replacements = replacement.Replacements(recovery, relaunch, ledger, placed=True)
+    replacements = replacement.Replacements(recovery, cast(Any, relaunch), ledger, placed=True)
     world.show(world.old, "oom_killed")
     world.reconcile(recovery)
     replacements()
