@@ -40,7 +40,7 @@ See [one push per pull request](swarm.md#one-push-per-pull-request) for when a w
 
 See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion-fixer-tasks) for usage, gate modes and the limits on run numbers in ledger prose, and [plan refusals in the gate log](swarm.md#plan-refusals-in-the-gate-log) for the row each refused plan writes and how Doctor rates counts it.
 
-See [intent verdict timing](swarm.md#intent-verdict-timing) for why a ready pull request is judged before agent launches, the `at` and `persisted_at` verdict fields and how to measure ready to verdict, and [tick lock holder record](swarm.md#tick-lock-holder-record) for how a killed tick's lock is replaced at once.
+See [intent verdict timing](swarm.md#intent-verdict-timing) for why a ready pull request is judged before agent launches, the `at` and `persisted_at` verdict fields and how to measure ready to verdict, and [tick lock holder record](swarm.md#tick-lock-holder-record) for how a killed tick's lock is replaced at once, and [stop inside the service timeout](swarm.md#stop-inside-the-service-timeout) for the 450 second tick deadline, how a stopped tick releases its locks and how its timeouts fit the tick holder.
 
 See [the tick holder](swarm.md#the-tick-holder) for how the scheduler cron runs the minute tick under one machine lock, its stop times, the environment it passes and where its output goes.
 
