@@ -506,7 +506,7 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not mutation_wait.backing_off():
-            read.update(views([url, *shared], source, cache, ttl=0))
+            read.update(views(shared, source, cache, ttl=0))
         pull = read.get(url)
         return pull if pull is not None else view(url, source)
 

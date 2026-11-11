@@ -66,8 +66,8 @@ def port(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def test_a_pass_rereads_every_open_pull_request_in_one_batched_request(port: Any) -> None:
     reread = ledger_events.fresh_reader(held(*URLS), port.source)
-    assert head(reread(URLS[1])) == "fresh0"
-    assert (head(reread(URLS[0])), head(reread(URLS[2])), head(reread(URLS[1]))) == ("fresh1", "fresh2", "fresh0")
+    assert head(reread(URLS[1])) == "fresh1"
+    assert (head(reread(URLS[0])), head(reread(URLS[2])), head(reread(URLS[1]))) == ("fresh0", "fresh2", "fresh1")
     assert len(port.calls) == 1
     assert port.calls[0].count("resource(url:") == 3
     assert all(json.dumps(url) in port.calls[0] for url in URLS)
@@ -121,4 +121,4 @@ def test_the_batch_forwards_its_source_cache_and_a_zero_ttl(monkeypatch: pytest.
     monkeypatch.setattr(ledger_events, "views", views)
     reread = ledger_events.fresh_reader(held(URLS[0], URLS[1]), "source", "cache")  # pyright: ignore[reportArgumentType]
     assert reread(URLS[1]) is pull
-    assert seen == [([URLS[1], URLS[0], URLS[1]], "source", "cache", 0)]
+    assert seen == [([URLS[0], URLS[1]], "source", "cache", 0)]
