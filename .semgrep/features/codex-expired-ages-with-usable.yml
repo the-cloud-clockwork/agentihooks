@@ -1,0 +1,27 @@
+rules:
+  - id: feature-codex-expired-ages-with-usable
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A cached Codex quota reading's `expired` flag must not outlive its usable age: check `usable()` (or
+      `codex_router.usable()`) before trusting `.expired`, so one transient dead-account answer decays to an
+      unknown/stale verdict like every other reading instead of reporting EXPIRED and a zero cap forever.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              if $Q.expired:
+                  return $X
+              ...
+              if not usable($Q, $NOW, $ENV):
+                  return $Y
+          - pattern: |
+              if $Q.expired:
+                  return $X
+              ...
+              if not codex_router.usable($Q, $NOW, $ENV):
+                  return $Y
+    paths:
+      include:
+        - /scripts/codex_router.py
+        - /scripts/agents_quota.py
+        - "*.test.py"

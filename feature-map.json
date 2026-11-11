@@ -4064,6 +4064,18 @@
         "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
         "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
+    },
+    {
+      "id": "codex-expired-cap-ages-out-with-usable",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/chat/codex-balance-expired-regression",
+      "behaviour": "A Codex account whose cached quota reading carries a transient dead-account expired answer keeps reporting EXPIRED and a zero routing cap forever, because codex_router.account_cap and agents_quota._codex_state trust the expired flag before checking the reading's own usable age; once that single reading is older than the configured max age it now ages into an unknown/stale verdict exactly like every other reading, instead of blocking the account past its usable life.",
+      "seam": "scripts.codex_router.account_cap and scripts.agents_quota._codex_state against scripts.codex_router.usable",
+      "semgrep_rule": "feature-codex-expired-ages-with-usable",
+      "tests": [
+        "tests/test_codex_router.py::test_an_expired_reading_ages_into_unknown_like_any_other_once_past_its_max_age",
+        "tests/test_agents_quota.py::test_an_aged_expired_reading_reports_stale_not_expired"
+      ]
     }
   ],
   "unmapped_rules": [
