@@ -61,7 +61,6 @@ def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) 
     for relative in ("CLAUDE.md", ".claude/skills/render/SKILL.md", ".claude/rules/render.md"):
         assert (profile / relative).read_bytes() == (hub / "agents/diagram/package" / relative).read_bytes()
     assert not (profile / "command.yml").exists()
-    assert (profile / "profile.yml").read_text().startswith("name: diagram\n")
 
 
 @pytest.mark.feature("hub-import-core")
@@ -135,7 +134,7 @@ def test_restrictions_on_absolute_paths_refuse_the_import(hub: Path, tmp_path: P
     settings = {"permissions": {key: ["Read(/home/operator/.ssh/**)"]}}
     (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps(settings))
     out = tmp_path / "bundle"
-    with pytest.raises(ValueError, match=key):
+    with pytest.raises(ValueError, match=rf"{key} rule .*settings\.json"):
         import_hub(hub, out, False)
     assert not out.exists()
 

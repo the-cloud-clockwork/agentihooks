@@ -143,7 +143,7 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = {"profile.yml": yaml.safe_dump(_profile(command, name), sort_keys=False).encode()}
+    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}
     for relative in COPIED:
         source = package / relative
         paths = [source] if source.is_file() else sorted(source.rglob("*"))
