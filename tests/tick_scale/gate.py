@@ -15,7 +15,7 @@ from tests.tick_scale.seed import SLUG, ScaleLedger, seed_store
 
 GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
 PASSES = 3
-OK = "ok"
+OK = "success"
 
 
 def miss(record: Mapping[str, Any]) -> str:
@@ -43,7 +43,7 @@ def step_records(store: RedisStore) -> list[dict[str, Any]]:
     return [json.loads(fields["record"]) for _, fields in store.redis.xrange(store.key(SLUG, "tick:steps"))]
 
 
-def run_passes(store: RedisStore) -> None:
+def run_passes(store: RedisStore) -> int:
     """Run ``PASSES`` scheduled tick passes through the tick command over the seeded store and full size ledger,
     with every GitHub and terminal reach replaced by the recorded fakes the tick command tests use."""
     import pytest
@@ -66,8 +66,10 @@ def run_passes(store: RedisStore) -> None:
         patch.setattr(cli, "pull_branch", lambda url: ("", ""))
         patch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
         patch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 1, 1, False))
-        for _ in range(PASSES):
-            cli.run_tick(store, SLUG, ledger, runtime, FakeHerdr({}), scheduled=True)
+        for index in range(PASSES):
+            actions = cli.run_tick(store, SLUG, ledger, runtime, FakeHerdr({}), scheduled=True)
+            print(json.dumps({"pass": index, "spawned": len(runtime.spawned), "actions": actions}), flush=True)
+    return len(runtime.spawned)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,9 +82,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     now_ms = time.time_ns() // 1_000_000
     store = seed_store(redis.Redis.from_url(args.redis, decode_responses=True), now_ms)
-    run_passes(store)
+    launched = run_passes(store)
     records = step_records(store)
-    found = misses(records)
+    found = misses(records) + ([] if launched else ["no agent launched, so the passes measured no launch path"])
     gated = [record for record in records if record.get("step") in GATED]
     args.report.write_text(json.dumps({"gated": gated, "misses": found}, indent=2) + "\n")
     for record in gated:

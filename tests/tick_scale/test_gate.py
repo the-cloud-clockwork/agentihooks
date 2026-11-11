@@ -7,7 +7,7 @@ pytestmark = pytest.mark.unit
 
 
 def _record(step: str, wall_s: float, **fields: object) -> dict[str, object]:
-    return {"step": step, "wall_s": wall_s, "outcome": "ok", "rested": False, "abandoned": False, **fields}
+    return {"step": step, "wall_s": wall_s, "outcome": "success", "rested": False, "abandoned": False, **fields}
 
 
 def _all_kept() -> list[dict[str, object]]:
