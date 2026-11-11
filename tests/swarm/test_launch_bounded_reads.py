@@ -87,6 +87,19 @@ def test_fields_reads_every_field_across_pages(store: RedisStore) -> None:
 
 
 @pytest.mark.feature("swarm-launch-bounded-reads")
+def test_fields_stops_after_its_page_bound() -> None:
+    calls: list[int] = []
+
+    def hscan(key: str, cursor: int, count: int) -> tuple[int, dict[str, str]]:
+        calls.append(cursor)
+        return len(calls), {f"f{len(calls)}": "1"}
+
+    found = hash_pages.fields(SimpleNamespace(hscan=hscan), "h", page=1)
+    assert len(calls) == hash_pages.PAGES == len(found) == 1000
+    assert calls[:3] == [0, 1, 2]
+
+
+@pytest.mark.feature("swarm-launch-bounded-reads")
 def test_picked_returns_only_the_named_fields_that_are_set(store: RedisStore) -> None:
     store.redis.hset("h", mapping={"a": "1", "b": "2", "c": "3"})
     assert hash_pages.picked(store.redis, "h", ["a", "c", "z", "a"]) == {"a": "1", "c": "3"}

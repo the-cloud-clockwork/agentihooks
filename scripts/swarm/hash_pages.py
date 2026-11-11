@@ -4,17 +4,19 @@ from collections.abc import Iterable
 from typing import Any
 
 PAGE = 200
+PAGES = 1000
 
 
 def fields(client: Any, key: str, page: int = PAGE) -> dict[Any, Any]:
-    """Every field of the hash at key, read page by page with a counted hash scan."""
+    """Every field of the hash at key, read with counted hash scans of at most PAGES pages."""
     found: dict[Any, Any] = {}
     cursor = 0
-    while True:
+    for _ in range(PAGES):
         cursor, chunk = client.hscan(key, cursor, count=page)
         found.update(chunk)
         if not cursor:
-            return found
+            break
+    return found
 
 
 def picked(client: Any, key: str, names: Iterable[Any]) -> dict[Any, Any]:

@@ -3835,6 +3835,7 @@
       "seam": "hash_pages.fields and hash_pages.picked through each launch path reader on a store that refuses a whole hash read",
       "tests": [
         "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
         "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set",
         "tests/swarm/test_launch_bounded_reads.py::test_place_holds_spawns_for_another_swarms_waiting_master",
         "tests/swarm/test_launch_bounded_reads.py::test_launch_check_reads_pending_checks_and_reports_paged",
