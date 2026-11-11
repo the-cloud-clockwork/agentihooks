@@ -1,7 +1,7 @@
 ---
 title: Tick Redis round trips
 parent: Reference
-nav_order: 71
+nav_order: 79
 ---
 
 # Tick Redis round trips
@@ -10,21 +10,31 @@ The swarm keeps one shared Redis in Anton. A tick pass or a `swarm set` command
 that runs on another machine pays a network round trip on every Redis call,
 about eight milliseconds from the workstation after the Redis moved to Anton.
 At that cost a pass that made thousands of calls ran for several minutes, and
-one `agentihooks swarm <id> set` took nine minutes to return.
+at 02:17 UTC one `agentihooks swarm <id> set` took nine minutes
+to return.
 
-The tick and the set command now make fewer Redis calls and send smaller
-payloads, so both finish in under a minute against the remote Redis. The
-database and the Redis stay shared: no process copies, syncs or caches swarm
-state in a second store.
+Three changes cut the tick's Redis calls, the Redis server time its scripts
+hold and the payloads it writes, with the target that a tick pass and a set
+command each finish in under a minute against the remote Redis. The database
+and the Redis stay shared: no process copies, syncs or caches swarm state in a
+second store. The table below covers the third change; the
+[measurements](#measured-results) cover all three.
 
 ## What changed
 
 | Area | Before | Now |
 |------|--------|-----|
-| Hive placement of one agent | Each lookup read every agent and every hive member record, about 65 ms per lookup, repeated per agent many times in a pass. | One read of the agent's `hosts` projection field, or of its latest execution record when the projection is off or empty. The joined member list is read once per pass. See [Hive placement reads](../swarm-v2/execution-identity.md#hive-placement-reads). |
-| Published swarm status | Carried the whole ended lives list, 18.7 MB on the measured swarm, rewritten on every pass. | Carries the newest 100 ended lives (`HISTORY_SHOWN` in `scripts.swarm.status`). The status payload fell from 25.2 MB to 6.4 MB. |
-| Page stream | Sent the status as published. | Drops `history`, `transfers` and `launch_checks` (`STREAM_UNREAD` in the ledger server), which the page never reads. |
-| Stored account scans | `SCAN` in default pages of ten keys: 162 calls over a 161 thousand key keyspace. | `SCAN` with `COUNT 10000`: 17 calls over the same keyspace. Used by `stored_accounts` and `fleet_held` in `scripts.swarm_v2.accounts`. |
+| Hive placement of one agent | Each lookup read every agent and every hive member record, about 65 ms per lookup, repeated per agent many times in a pass. | `scope.host` reads the agent's field in the `hosts` projection hash. Only when that field is absent, or `SWARM_HOST_PROJECTION_ENABLED` is off, does it fall back to `ExecutionRegistry.hive`, one read of the agent's latest execution placement. Inside a tick pass the joined member list is read once per Redis client. See [Hive placement reads](../swarm-v2/execution-identity.md#hive-placement-reads). |
+| Agent execution read | The `_LATEST` Lua script decoded every execution record on each call. | In name mode it decodes only the records whose leading name is a current agent, and falls back to a full decode when that pattern does not match. Its output is unchanged. Pull request 8616 later moved executions onto the fenced state records read by `scripts.swarm.fencing`, and `_LATEST` no longer exists. |
+| Published swarm status | Carried the whole ended lives list, 18.7 MB on the measured swarm, rewritten on every pass. | Carries the newest 100 ended lives (`HISTORY_SHOWN` in `scripts.swarm.status`). |
+| Stored account list | `stored_accounts` scanned with `COUNT 1000`: 162 calls over a 161 thousand key keyspace. | `COUNT 10000`: 17 calls over the same keyspace. `fleet_held` already scanned with `COUNT 10000`. |
+
+`SWARM_HOST_PROJECTION_ENABLED` defaults to on; its values, rollout and checks
+are in [Hive placement reads](../swarm-v2/execution-identity.md#hive-placement-reads).
+
+The page stream already dropped `history`, `transfers` and `launch_checks`
+(`STREAM_UNREAD` in the ledger server) before this change, so the ledger page
+never carried the ended lives list.
 
 ## Ended lives in swarm status
 
@@ -73,7 +83,7 @@ The step rows show the median and p95 wall time of each step. See
 Pass duration from the scheduler journal on the host that runs the tick:
 
 ```bash
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now | grep swarm_tick_step
+TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now | grep swarm_tick_step | grep run_tick
 ```
 
 A set command, timed end to end:
@@ -82,26 +92,35 @@ A set command, timed end to end:
 time agentihooks swarm <id> set max-eng-agents=8
 ```
 
-Measured on rig-grade-swarm with the workstation tick and the Anton Redis:
+### Measured results
 
-| Measurement | Start | After the first two changes | Delivered change |
-|-------------|-------|-----------------------------|------------------|
-| `swarm set max-eng-agents=8` | 3.9 s | 2.3 s | under 60 s held |
-| Tick `run_tick` median | 428.95 s | 109.3 s (n=18) | hot spots below removed |
-| Status report build | 10.5 s | | 4.8 to 6.9 s |
-| Status payload | 25.2 MB | | 6.4 MB |
-| Execution read script server time | 32.4 ms | | 16.0 ms |
-| `quiet_minutes` | 1.18 s | | 0.44 s |
+Measured on rig-grade-swarm, with the tick on the workstation and the Redis in
+Anton, using the journal and `time` commands above. The tick figures are the
+median of the `run_tick` row.
 
-The execution read script ran on every call as a 25 to 30 ms Redis `SLOWLOG`
-entry, and Redis serves no other client while a script runs, so halving it
-shortens every other swarm client's waits too.
+| Measurement | Before | After |
+|-------------|--------|-------|
+| `swarm set max-eng-agents=8` | 3.9 s | 2.3 s |
+| Tick pass, first change | 428.95 s | 122.96 s |
+| Tick pass, second change | 122.96 s | 109.3 s (n=18) |
+| Tick pass, latest window before the third change reached the workstation | 109.3 s | 78.8 s (n=15) |
+| Status report build, third change | 10.5 s | 4.8 to 6.9 s |
+| Status payload, third change | 25.2 MB | 6.4 MB |
+| `_LATEST` script server time, third change | 32.4 ms | 16.0 ms |
+
+The set command is under the one minute target. The last recorded tick median,
+78.8 s, predates the third change running on the workstation; the third change
+removes the hot spots measured in that pass.
+
+Redis serves no other client while a Lua script runs. At the time of this change `_LATEST` showed as a
+25 to 30 ms `SLOWLOG` entry on every call, with 32.4 ms measured server time,
+so halving it also shortens every other swarm client's waits.
 
 ## Limits
 
 - The cap applies to readers of the status. A reader that needs a life older
   than the newest 100 reads the `history` list.
-- The page never showed ended lives, so the page is unchanged.
+- The ledger page never received ended lives, so the page is unchanged.
 - The round trip cost still scales with the number of calls. A new tick step
   that reads per agent or per task in a loop brings the cost back; batch the
   reads in a pipeline or one script. The
@@ -120,6 +139,7 @@ shortens every other swarm client's waits too.
 ## Delivery evidence
 
 Delivered by pull request 5491, "Cut swarm tick Redis server time and payloads",
-for the task to finish the swarm tick on the Anton Redis in under a minute.
-Red runs per seam: 39564777096, 39565304405, 39565648988, 39565917005. Green
-proofs run 39571102885 (2617 passed).
+merged as commit 4938721ed, the third change for the task to finish the swarm
+tick on the Anton Redis in under a minute. The CI runs it cites are no longer
+retained by GitHub; the timings come from the source task's proof, measured with
+the journal and `time` commands on this page.
