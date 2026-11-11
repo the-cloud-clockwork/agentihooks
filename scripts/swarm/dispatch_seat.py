@@ -176,9 +176,9 @@ def run(slug: str, config, store, runtime, doc: dict, now_ms: int, sleeping: boo
         return [_end(slug, store, seat) for seat in seats]
     gone = [seat for seat in seats if left(seat, doc)]
     if gone:
-        if seen := set(store.redis.hkeys(store.key(slug, SENT))) & {
-            trigger["id"] for trigger in found if trigger.get("kind") != "inbox"
-        }:
+        if seen := set(
+            hash_pages.picked(store.redis, store.key(slug, SENT), [t["id"] for t in found if t.get("kind") != "inbox"])
+        ):
             store.redis.sadd(store.key(slug, LEFT), *seen)
         return [_end(slug, store, seat, DEPARTED) for seat in gone]
     if seats:
@@ -264,8 +264,9 @@ def _move_mail_home(store: RedisStore, record: AgentRecord) -> None:
 
 
 def _wake(slug: str, store: RedisStore, seat: AgentRecord, found: list[dict[str, Any]]) -> list[str]:
-    sent = set(store.redis.hkeys(store.key(slug, SENT)))
-    new = [trigger for trigger in found if trigger["id"] not in sent and trigger.get("kind") != "inbox"]
+    candidates = [trigger for trigger in found if trigger.get("kind") != "inbox"]
+    sent = hash_pages.picked(store.redis, store.key(slug, SENT), [trigger["id"] for trigger in candidates])
+    new = [trigger for trigger in candidates if trigger["id"] not in sent]
     if not new:
         return []
     lines = "\n".join(line(trigger) for trigger in new)

@@ -29,12 +29,38 @@ SLUG = "sw"
 FEATURE = pytest.mark.feature("swarm-launch-bounded-reads")
 
 
+GUARDED = (
+    "h",
+    swarm_tick.MASTER_WAITING,
+    "launch-checks",
+    "launch-check-reports",
+    launch_job.KEY,
+    preempt.ASKED,
+    "prerequisite-waits",
+    failed_panes.HELD,
+    run_window.KEY,
+    "dev-red",
+    dispatch_seat.SENT,
+    remote_control.FAILURES,
+)
+
+
+def _guarded(name: Any) -> bool:
+    return ":local-slots:" in name or any(name == key or name.endswith(f":{key}") for key in GUARDED)
+
+
 class Refusing(fakeredis.FakeRedis):
-    """A Redis double whose whole hash read fails the test."""
+    """A Redis double whose whole read of a launch path hash fails the test."""
 
     def hgetall(self, name: Any) -> Any:
-        """Refuse every whole hash read."""
-        raise AssertionError(f"whole hash read of {name}")
+        """Refuse a whole read of a launch path hash."""
+        assert not _guarded(name), f"whole hash read of {name}"
+        return super().hgetall(name)
+
+    def hkeys(self, name: Any) -> Any:
+        """Refuse a whole field listing of a launch path hash."""
+        assert not _guarded(name), f"whole hash field listing of {name}"
+        return super().hkeys(name)
 
 
 @pytest.fixture
@@ -100,7 +126,7 @@ def test_local_slots_count_and_claim_held_slots_paged(store: RedisStore, monkeyp
     assert local_slots.held(store, "m", SLUG, "t1") == 1
     assert local_slots.occupancy(store, "m") == (0, 1)
     assert local_slots.claim(store, "m", SLUG, "t1", "c", 5) == 1
-    assert sorted(store.redis.hkeys(local_slots.key("m"))) == [f"{SLUG}/a", f"{SLUG}/c"]
+    assert sorted(hash_pages.fields(store.redis, local_slots.key("m"))) == [f"{SLUG}/a", f"{SLUG}/c"]
 
 
 @FEATURE
@@ -110,7 +136,7 @@ def test_preempt_keeps_only_asks_of_live_holders(store: RedisStore, monkeypatch:
     store.redis.hset(key, mapping={"engineer@1-1": json.dumps(["t9", 1]), "engineer@1-2": json.dumps(["t8", 1])})
     full = {"eng": ([], [_agent("engineer@1-1", "t1")])}
     assert preempt.step(SLUG, store, {}, {"tasks": []}, full, 2) == []
-    assert store.redis.hkeys(key) == ["engineer@1-1"]
+    assert sorted(hash_pages.fields(store.redis, key)) == ["engineer@1-1"]
 
 
 @FEATURE
@@ -118,7 +144,7 @@ def test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record(store: Redis
     record = {"agent": "engineer@1-1", "generation": 1, "target": "x", "blocked": True}
     store.redis.hset(prerequisite_wait.key(SLUG), mapping={"t1": json.dumps(record), "t2": json.dumps({})})
     assert prerequisite_wait.reopen_pass(SLUG, store, None, {"t1": {"state": "open"}}) == []
-    assert store.redis.hkeys(prerequisite_wait.key(SLUG)) == ["t2"]
+    assert sorted(hash_pages.fields(store.redis, prerequisite_wait.key(SLUG))) == ["t2"]
 
 
 @FEATURE
@@ -155,3 +181,34 @@ def test_run_window_reads_its_marks_by_field(store: RedisStore) -> None:
     assert run_window.step(SLUG, config, store, None, {}, 5 * run_window.MINUTE_MS) == []
     assert store.redis.hget(key, "alerted") == "1"
     assert store.redis.hget(key, "stray") is None
+
+
+@FEATURE
+def test_dispatch_seat_wake_reads_sent_triggers_by_id(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, str]] = []
+    inbox = SimpleNamespace(send=lambda sender, address, text: sent.append((address, text)))
+    monkeypatch.setattr(dispatch_seat.inbox_store, "InboxStore", lambda redis: inbox)
+    store.redis.hset(store.key(SLUG, dispatch_seat.SENT), mapping={"t1": "{}", "old": "{}"})
+    seat = _agent("dispatcher@1-1", "", seat="dispatcher@sw")
+    found = [
+        {"id": "t1", "kind": "priority", "item": "tasks/t1", "minutes": 15, "text": "a"},
+        {"id": "t2", "kind": "priority", "item": "tasks/t2", "minutes": 15, "text": "b"},
+    ]
+    assert dispatch_seat._wake(SLUG, store, seat, found) == ["woke dispatcher@1-1 with 1 new trigger"]
+    assert [address for address, _ in sent] == ["dispatcher@sw"]
+    assert sorted(hash_pages.fields(store.redis, store.key(SLUG, dispatch_seat.SENT))) == ["old", "t1", "t2"]
+
+
+@FEATURE
+def test_dispatch_seat_departed_seat_holds_only_sent_triggers(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.redis.hset(store.key(SLUG, dispatch_seat.SENT), mapping={"t1": "{}", "old": "{}"})
+    store.put_agent(SLUG, replace(_agent("dispatcher@1-1", ""), lane=dispatch_seat.LANE))
+    found = [{"id": "t1", "kind": "freeze"}, {"id": "t2", "kind": "freeze"}, {"id": "i1", "kind": "inbox"}]
+    monkeypatch.setattr(dispatch_seat, "open_triggers", lambda *args, **kwargs: found)
+    monkeypatch.setattr(dispatch_seat, "left", lambda seat, doc: True)
+    assert dispatch_seat.run(SLUG, store.config(SLUG), store, None, {}, 1) == [
+        f"ended dispatcher dispatcher@1-1: {dispatch_seat.DEPARTED}"
+    ]
+    assert store.redis.smembers(store.key(SLUG, dispatch_seat.LEFT)) == {"t1"}
