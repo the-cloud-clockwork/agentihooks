@@ -116,18 +116,18 @@ class SwarmSlot:
                 pass
 
 
-@dataclass(frozen=True)
 class WorkflowSlot:
     name: str
     case: str
+    project: str
 
     def record(self) -> dict[str, str]:
-        return {"kind": "workflow", "name": self.name, "case": self.case}
+        return {"kind": "workflow", "name": self.name, "case": self.case, "project": self.project}
 
     def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
         from scripts.workflows import scheduled
 
-        scheduled.start(self.name, self.case, delivery_id, str(event["owner"]))
+        scheduled.start(self.name, self.case, self.project, delivery_id, str(event["owner"]))
 
 
 KINDS = {

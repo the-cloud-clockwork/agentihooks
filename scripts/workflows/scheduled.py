@@ -28,8 +28,15 @@ def command(name: str, case: Path, delivery_id: str, owner: str) -> list[str]:
     return [sys.executable, "-m", "scripts.workflows.scheduled", owner, name, str(case), delivery_id]
 
 
-def start(name: str, case: str, delivery_id: str, owner: str, popen: Callable[..., object] = subprocess.Popen) -> bool:
-    """Spawn the run detached and return True, or False when this delivery id already started one."""
+def start(
+    name: str,
+    case: str,
+    project: str,
+    delivery_id: str,
+    owner: str,
+    popen: Callable[..., object] = subprocess.Popen,
+) -> bool:
+    """Spawn the run detached in its scheduling project and return True, or False when this delivery id already started one."""
     folder = delivery_folder(delivery_id)
     folder.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -40,6 +47,7 @@ def start(name: str, case: str, delivery_id: str, owner: str, popen: Callable[..
         with (folder / LOG).open("ab") as log:
             popen(
                 command(name, Path(case).resolve(), delivery_id, owner),
+                cwd=project,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
