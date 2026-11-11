@@ -407,7 +407,7 @@ def test_the_tick_module_holds_no_spawn_definition() -> None:
 @pytest.mark.feature("swarm-tick-spawn")
 def test_the_spawn_step_declares_its_ports_feature_and_lane() -> None:
     spawn = next(step for step in place.STEPS if step.name == "spawn")
-    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox"})
+    assert spawn.effects == frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"})
     assert (spawn.feature, spawn.lane, spawn.group) == ("swarm-tick-spawn", CallStep.lane, place.PLACEMENT)
 
 
@@ -486,7 +486,7 @@ def test_a_legacy_launch_is_admitted_with_the_pass_runtime(monkeypatch: pytest.M
     run = SimpleNamespace(runtime=runtime, config="config", store="store", slug="sw")
     launch = SimpleNamespace(record=record, primed={})
     assert place._launch(run, launch) == (placed, "admitted")
-    assert admitted == [("store", "sw", ("placed", record, placed), runtime)]
+    assert admitted == [("store", "sw", ("placed", record, placed), runtime, place._ports().table)]
 
 
 class _ReadyRead(Exception):

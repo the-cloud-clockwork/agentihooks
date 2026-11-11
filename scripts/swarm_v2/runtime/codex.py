@@ -55,13 +55,13 @@ def admit_legacy(
     slug: str,
     agent: AgentRecord,
     runtime: Runtime,
-    table: Callable[[], Mapping[int, Process]] = processes,
+    table: Callable[[], Mapping[int, Process]] | None = None,
 ) -> AgentRecord:
     if agent.harness != "codex" or agent.transport != LEGACY_TRANSPORT or agent.execution_id:
         return agent
     try:
         pid = agent.profile_decision.get("validation", {}).get("pid")
-        target = process.launch_target(pid, process.local_namespace(), table())
+        target = process.launch_target(pid, process.local_namespace(), (table or processes)())
         previous = store.execution_occupants(slug).get(agent.seat)
         from scripts.swarm.commands import hive_id
 

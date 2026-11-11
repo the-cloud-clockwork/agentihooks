@@ -751,7 +751,7 @@ def _lives_spent(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task:
 
 def _ports() -> MetricsCalls | LocalMetrics:
     """The spawn step's metrics and processes ports, else this host's gate log and process table."""
-    return PASS_METRICS.get() or LocalMetrics()
+    return PASS_METRICS.get() or LocalMetrics(gate_log.append, import_module("hooks.proc").processes)
 
 
 def _claim_cap(slug: str, store: Any, ledger: Any, rows: dict[str, Any], task: dict[str, Any]) -> str:

@@ -208,7 +208,9 @@ def test_the_codex_legacy_admission_reads_the_table_it_is_given(monkeypatch: pyt
     runtime = SimpleNamespace(retire=retired.append)
 
     with pytest.raises(codex.SpawnError, match="stop here"):
-        codex.admit_legacy(cast(Any, None), "sw", cast(Any, agent), cast(Any, runtime), lambda: {41: "agent"})
+        codex.admit_legacy(
+            cast(Any, None), "sw", cast(Any, agent), cast(Any, runtime), cast(Any, lambda: {41: "agent"})
+        )
 
     assert seen == [(41, "ns", {41: "agent"})]
     assert retired == [agent]

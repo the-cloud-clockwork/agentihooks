@@ -2,7 +2,8 @@
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from scripts.tick.deadline import Deadline
 
@@ -39,8 +40,7 @@ class SpoolMetrics:
 
     def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
         """Append each gate log row of swarm ``slug`` to its gate log and return how many landed."""
-        from scripts.gates import log as gate_log
-
+        gate_log: Any = import_module("scripts.gates.log")
         deadline.live()
         for row in rows:
             gate_log.append(slug, row)

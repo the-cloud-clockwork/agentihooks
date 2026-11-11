@@ -197,16 +197,16 @@ class MetricsCalls:
         return self.processes.rescan(deadline=self.deadline)
 
 
+@dataclass(frozen=True)
 class LocalMetrics:
     """The gate log and process table of spawn helpers run outside a tick step, on this host."""
 
-    def log(self, slug: str, rows: Sequence[object]) -> None:
-        from scripts.gates import log as gate_log
+    append: Callable[[str, Any], object]
+    scan: Callable[[], Any]
 
+    def log(self, slug: str, rows: Sequence[object]) -> None:
         for row in rows:
-            gate_log.append(slug, row)
+            self.append(slug, row)
 
     def table(self) -> Any:
-        from hooks.proc import processes
-
-        return processes()
+        return self.scan()
