@@ -16,16 +16,21 @@ GREEN = {
     "shard-check": {"result": "success"},
     "test-count": {"result": "success"},
 }
-HOTFIX = [{"number": 9, "merged_at": "2026-11-11T10:00:00Z", "labels": [{"name": "launch hotfix"}]}]
+HOTFIX = [
+    {"number": 9, "merged_at": "2026-11-11T10:00:00Z", "labels": [{"name": "launch hotfix"}], "head": {"sha": "h9"}}
+]
+PULLS = "repos/o/r/commits/abc/pulls"
+CHECKS = "repos/o/r/commits/h9/check-runs?check_name=Gate%20%E2%80%94%20Required"
 
 
-def gh(pulls: list[dict], calls: list | None = None, code: int = 0):
+def gh(pulls: list[dict], calls: list | None = None, code: int = 0, conclusions: str = "success\n"):
     def run(argv, **kwargs):
         if calls is not None:
             calls.append((argv, kwargs))
         if code:
             raise subprocess.CalledProcessError(code, argv, "", "boom")
-        return subprocess.CompletedProcess(argv, 0, json.dumps(pulls), "")
+        out = json.dumps(pulls) if argv[2] == PULLS else conclusions
+        return subprocess.CompletedProcess(argv, 0, out, "")
 
     return run
 
@@ -37,12 +42,20 @@ def promote(needs: dict, run, capsys) -> str:
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
-def test_a_labelled_merged_pull_with_a_green_unit_suite_promotes(capsys):
+def test_a_labelled_merged_pull_with_a_green_head_and_unit_suite_promotes(capsys):
     calls = []
     assert promote(GREEN, gh(HOTFIX, calls), capsys) == "promote=true\n"
+    kwargs = {"capture_output": True, "text": True, "check": True}
     assert calls == [
-        (["gh", "api", "repos/o/r/commits/abc/pulls"], {"capture_output": True, "text": True, "check": True})
+        (["gh", "api", PULLS], kwargs),
+        (["gh", "api", CHECKS, "--jq", ".check_runs[].conclusion"], kwargs),
     ]
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize("conclusions", ["", "failure\n", "cancelled\nneutral\n"])
+def test_a_labelled_pull_whose_own_grade_did_not_pass_never_promotes(capsys, conclusions):
+    assert promote(GREEN, gh(HOTFIX, conclusions=conclusions), capsys) == "promote=false\n"
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
@@ -56,7 +69,9 @@ def test_a_labelled_merged_pull_with_a_green_unit_suite_promotes(capsys):
     ids=["no pull", "other label", "unmerged"],
 )
 def test_a_pull_without_the_merged_launch_hotfix_label_never_promotes(capsys, pulls):
-    assert promote(GREEN, gh(pulls), capsys) == "promote=false\n"
+    calls = []
+    assert promote(GREEN, gh(pulls, calls), capsys) == "promote=false\n"
+    assert [argv[2] for argv, _ in calls] == [PULLS]
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
@@ -69,6 +84,7 @@ def test_a_pull_without_the_merged_launch_hotfix_label_never_promotes(capsys, pu
         ("test-count", "cancelled"),
         ("unit", "failure"),
         ("unit-lost", "success"),
+        ("unit-rerun", "success"),
     ],
 )
 def test_a_red_unit_suite_never_promotes_a_labelled_pull(capsys, job, result):
@@ -77,10 +93,9 @@ def test_a_red_unit_suite_never_promotes_a_labelled_pull(capsys, job, result):
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
-@pytest.mark.parametrize("unit", ["failure", "cancelled"])
-def test_a_unit_shard_recovered_by_its_rerun_counts_as_a_passed_suite(capsys, unit):
-    needs = {**GREEN, "unit": {"result": unit}, "unit-lost": {"result": "success"}, "unit-rerun": {"result": "success"}}
-    assert promote(needs, gh(HOTFIX), capsys) == "promote=true\n"
+def test_a_rerun_shard_never_turns_a_red_unit_suite_green(capsys):
+    rerun = {"unit": {"result": "failure"}, "unit-lost": {"result": "success"}, "unit-rerun": {"result": "success"}}
+    assert promote({**GREEN, **rerun}, gh(HOTFIX), capsys) == "promote=false\n"
 
 
 @pytest.mark.feature("launch-hotfix-promotion")

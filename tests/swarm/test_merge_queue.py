@@ -1201,6 +1201,13 @@ def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_reque
 
 
 @pytest.mark.feature("stall-master-queue")
+def test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_route(monkeypatch, tmp_path):
+    seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK, OTHER_TASK])
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert seen[0]["journal"].context == {"route": "spawn stall", "task": "t1"}
+
+
+@pytest.mark.feature("stall-master-queue")
 @pytest.mark.parametrize(
     "rows, focus, minutes",
     [
