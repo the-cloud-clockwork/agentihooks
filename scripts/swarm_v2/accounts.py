@@ -20,6 +20,8 @@ WRITE_ATTEMPTS = 5
 MAX_RESERVATION_MS = MAX_TTL_SECONDS * 1000
 FROZEN = f"{ROOT}:accounts-frozen"
 CONFLICTS = f"{ROOT}:account-reservation-conflicts"
+INDEX = f"{ROOT}:accounts-index"
+INDEX_BUILT = f"{ROOT}:accounts-index-built"
 ACCOUNT_FULL = "account_full"
 
 
@@ -51,8 +53,21 @@ def seat_holder(name: str) -> str:
 
 
 def stored_accounts(store: RedisStore) -> list[str]:
+    """Every account with a slot hash, read from the account index; the first read on a Redis without one builds it."""
+    if not store.redis.exists(INDEX_BUILT):
+        _backfill_index(store)
+    return sorted(store.redis.smembers(INDEX))
+
+
+def _backfill_index(store: RedisStore) -> None:
+    """Index the account hashes written before the index existed, with one keyspace walk, and mark the index built."""
     prefix = account_key("")
-    return sorted(key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=10000))
+    found = [key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=10000)]
+    with store.redis.pipeline() as pipe:
+        if found:
+            pipe.sadd(INDEX, *found)
+        pipe.set(INDEX_BUILT, 1)
+        pipe.execute()
 
 
 def encode(slot: Slot) -> str:
@@ -74,8 +89,8 @@ def fleet_held(store: RedisStore, now: int) -> dict[str, int]:
     """Per account, the slots a local process table cannot see: every live reservation and every occupancy whose
     registry record runs outside the local backend."""
     held: dict[str, int] = {}
-    for key in store.redis.scan_iter(match=account_key("*"), count=10000):
-        for slot in map(decode, store.redis.hvals(key)):
+    for account in stored_accounts(store):
+        for slot in map(decode, store.redis.hvals(account_key(account))):
             if slot.state == OCCUPIED:
                 record = live_record(store, store.redis, slot)
                 remote = record is not None and record.scope.backend != LOCAL
@@ -152,6 +167,8 @@ class AccountCapacity:
                             pipe.hdel(key, *dropped)
                         for slot in written:
                             pipe.hset(key, slot.holder, encode(slot))
+                        if written:
+                            pipe.sadd(INDEX, account)
                         pipe.execute()
                     return result
                 except WatchError:

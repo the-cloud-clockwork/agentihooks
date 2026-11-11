@@ -9,6 +9,9 @@
       "tests": [
         "tests/test_swarm_v2_accounts.py::test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists",
         "tests/test_swarm_v2_accounts.py::test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill"
+      ],
+      "rules": [
+        "account-keys-scanned"
       ]
     },
     {
