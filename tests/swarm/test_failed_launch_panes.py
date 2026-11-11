@@ -454,3 +454,37 @@ def test_closing_a_pane_that_herdr_refuses_raises(tmp_path):
 def test_lines_drop_trailing_blanks_and_keep_the_last_ones():
     assert failed_panes.lines("a\nb  \n\nc\n\n\n", 2) == ["", "c"]
     assert failed_panes.lines("", 20) == []
+
+
+class HistoryReads:
+    """Wrap a Redis client and record each range read of a key."""
+
+    def __init__(self, redis: object) -> None:
+        self.redis, self.ranged = redis, []
+
+    def lrange(self, key: str, start: int, end: int) -> list[str]:
+        self.ranged.append(key)
+        return self.redis.lrange(key, start, end)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.redis, name)
+
+
+@pytest.mark.feature("failed-panes-report-hash-only")
+def test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list(store: RedisStore) -> None:
+    import json
+
+    store.redis.hset(store.key("sw", "launches"), "e-1", json.dumps({"agent": "e-1", "task": "t1", "state": "started"}))
+    failed = {"agent": "e-2", "task": "t2", "state": "failed", "error": "gone", "pane_id": "w1:p9"}
+    store.redis.hset(store.key("sw", "launches"), "e-2", json.dumps(failed))
+    store.note_launch_pane("sw", "e-2", ["$ codex", "account not found"])
+    validated = {"validation": {"state": "validated"}}
+    old = {"name": "e-0", "task": "t0", "started_at": 5, "profile_decision": validated}
+    store.redis.rpush(store.key("sw", "history"), json.dumps(old))
+    reads = HistoryReads(store.redis)
+    store.redis = reads
+
+    rows = failed_panes.report(store, "sw")
+
+    assert rows == [{**failed, "pane_lines": ["$ codex", "account not found"]}]
+    assert reads.ranged == []

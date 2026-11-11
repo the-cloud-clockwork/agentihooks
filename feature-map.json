@@ -23,6 +23,16 @@
       ]
     },
     {
+      "id": "failed-panes-report-hash-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-share",
+      "behaviour": "The failed launch panes report in the published tick status reads only the launches hash, where pane lines are written, and never reads the whole swarm history list, which cost the closing status publish step about a second each pass.",
+      "seam": "scripts.swarm.failed_panes.report against the store launches hash and history list",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
