@@ -32,6 +32,10 @@ on:
         type: boolean
         required: false
         default: false
+      profile:
+        description: Comma separated tick steps the tick scale proof profiles
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
@@ -49,6 +53,7 @@ jobs:
     uses: ./.github/workflows/tick-scale.yml
     with:
       plant: ${{ inputs.plant }}
+      profile: ${{ inputs.profile }}
 
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'

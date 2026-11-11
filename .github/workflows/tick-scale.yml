@@ -8,6 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+      profile:
+        description: Comma separated step names to profile with cProfile while the gate runs; profiled walls are evidence only
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -50,6 +55,8 @@ jobs:
         if: inputs.plant
         run: git apply tests/tick_scale/whole_hash.patch
       - name: Seed a production sized store and fail when a launch path step outruns its budgets floor
+        env:
+          AGENTIHOOKS_TICK_PROFILE_STEPS: ${{ inputs.profile }}
         run: python -m tests.tick_scale.gate --redis redis://127.0.0.1:6379/1 --report tick-scale.json
       - name: Stop Redis
         if: always()
