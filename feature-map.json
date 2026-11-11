@@ -943,6 +943,8 @@
         "tests/tick/steps/test_territory.py::test_refund_parked_reads_a_task_missing_from_the_rows_as_not_parked",
         "tests/tick/steps/test_territory.py::test_a_stopping_swarm_ends_awaiting_seats_and_stops_once_no_agent_is_left",
         "tests/tick/steps/test_territory.py::test_a_stopping_swarm_waits_for_a_live_master_or_a_working_agent",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_retires_agents_whose_runtime_never_answers_then_stops",
+        "tests/tick/steps/test_territory.py::test_a_stopping_swarm_keeps_a_ghost_while_another_agent_still_answers",
         "tests/tick/steps/test_territory.py::test_a_running_swarm_with_nothing_claimable_drains_and_counts_blocked_tasks",
         "tests/tick/steps/test_territory.py::test_a_swarm_with_work_or_workers_or_not_running_does_not_drain",
         "tests/tick/steps/test_territory.py::test_settle_hands_its_own_slug_store_ledger_rows_doc_and_config_to_each_seam",
@@ -3680,6 +3682,28 @@
       "seam": "swarm exit against the tick retire path for a finished worker",
       "tests": [
         "tests/swarm/test_cli_self_exit.py::test_a_released_worker_exits_and_the_next_tick_retires_it"
+      ]
+    },
+    {
+      "id": "controller-skips-closed-swarms",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2306",
+      "behaviour": "The controller tick pass runs no tick for a swarm whose ledger is closed or binned, as the host tick does, and still ticks a swarm whose ledger is gone so the pass reports it once.",
+      "seam": "scripts.swarm.controller.run_once and scripts.swarm.controller.tickable",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_the_controller_runs_no_steps_for_a_closed_or_binned_swarm_holding_a_ghost_agent",
+        "tests/swarm/test_stale_swarm_tick.py::test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger"
+      ]
+    },
+    {
+      "id": "swarm-create-refuses-web-repo",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2306",
+      "behaviour": "Swarm create refuses a web address as its repo and creates no swarm, while a local path is kept even when its folder is absent on this host.",
+      "seam": "agentihooks swarm <id> create --repo",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_create_refuses_a_web_address_as_its_repo",
+        "tests/swarm/test_stale_swarm_tick.py::test_create_keeps_a_local_path_even_when_its_folder_is_absent"
       ]
     }
   ],
