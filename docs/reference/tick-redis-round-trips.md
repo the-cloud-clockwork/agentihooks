@@ -24,7 +24,7 @@ second store. The table below covers the third change; the
 
 | Area | Before | Now |
 |------|--------|-----|
-| Hive placement of one agent | Each lookup read every agent and every hive member record, about 65 ms per lookup, repeated per agent many times in a pass. | `scope.host` reads the agent's field in the `hosts` projection hash. Only when that field is absent, or `SWARM_HOST_PROJECTION_ENABLED` is off, does it fall back to `ExecutionRegistry.hive`, one read of the agent's latest execution placement. Inside a tick pass the joined member list is read once per Redis client. See [Hive placement reads](../swarm-v2/execution-identity.md#hive-placement-reads). |
+| Hive placement of one agent | Each lookup read every agent and every hive member record, about 65 ms per lookup, repeated per agent many times in a pass. | `scope.host` reads the agent's field in the `hosts` projection hash. Only when that field is absent, or `SWARM_HOST_PROJECTION_ENABLED` is off, does it fall back to `ExecutionRegistry.hive`, a fenced lookup of the agent's latest execution record that takes a few reads: the listed agents, the by-name head and that one execution record. Inside a tick pass the joined member list is read once per Redis client. See [Hive placement reads](../swarm-v2/execution-identity.md#hive-placement-reads). |
 | Agent execution read | The `_LATEST` Lua script decoded every execution record on each call. | In name mode it decodes only the records whose leading name is a current agent, and falls back to a full decode when that pattern does not match. Its output is unchanged. Pull request 8616 later moved executions onto the fenced state records read by `scripts.swarm.fencing`, and `_LATEST` no longer exists. |
 | Published swarm status | Carried the whole ended lives list, 18.7 MB on the measured swarm, rewritten on every pass. | Carries the newest 100 ended lives (`HISTORY_SHOWN` in `scripts.swarm.status`). |
 | Stored account list | `stored_accounts` scanned with `COUNT 1000`: 162 calls over a 161 thousand key keyspace. | `COUNT 10000`: 17 calls over the same keyspace. `fleet_held` already scanned with `COUNT 10000`. |
@@ -101,16 +101,17 @@ median of the `run_tick` row.
 | Measurement | Before | After |
 |-------------|--------|-------|
 | `swarm set max-eng-agents=8` | 3.9 s | 2.3 s |
-| Tick pass, first change | 428.95 s | 122.96 s |
-| Tick pass, second change | 122.96 s | 109.3 s (n=18) |
-| Tick pass, last window before the third change (workstation) | 109.3 s | 78.8 s (n=15) |
-| Status report build, third change | 10.5 s | 4.8 to 6.9 s |
-| Status payload, third change | 25.2 MB | 6.4 MB |
-| `_LATEST` script server time, third change | 32.4 ms | 16.0 ms |
+| Tick pass, change one | 428.95 s | 122.96 s |
+| Tick pass, change two | 122.96 s | 109.3 s (n=18) |
+| Tick pass, change two, last window before change three ran | 109.3 s | 78.8 s (n=15) |
+| Status report build, change three | 10.5 s | 4.8 to 6.9 s |
+| Status payload, change three | 25.2 MB | 6.4 MB |
+| `_LATEST` script server time, change three | 32.4 ms | 16.0 ms |
 
-The set command is under the one minute target. The last recorded tick median,
-78.8 s, predates the third change running on the workstation; the third change
-removes the hot spots measured in that pass.
+The set command meets the one minute target. The tick does not yet: its last
+recorded median, 78.8 s, is above sixty seconds and predates change three
+running on the workstation, which removes the hot spots measured in that pass.
+No tick median after change three is recorded.
 
 Redis serves no other client while a Lua script runs. At the time of this
 change `_LATEST` showed as a 25 to 30 ms `SLOWLOG` entry on every call, with
