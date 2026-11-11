@@ -56,6 +56,7 @@ def run_passes(store: RedisStore) -> int:
     ledger, runtime = ScaleLedger(), FakeRuntime()
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
+        patch.setenv("AGENTIHOOKS_DEPLOYMENT", "kubernetes")
         patch.setattr(
             merge_stall,
             "observe",
