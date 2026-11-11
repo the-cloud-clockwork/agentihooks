@@ -4826,8 +4826,9 @@ Each recorded pane goes through these checks in order. The first one that applie
 | Launched inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) | Kept: inside the launch grace. |
 | The swarm store cannot be read, or a legacy `withheld` record's store does not hold the swarm | Kept. |
 | Its owner is an unfinished agent of a running swarm | Kept: its agent is live. A live master pane stays this way. |
+| An `init-agent` pane at a bare shell (every foreground process is a shell with no arguments but flags) whose record never reported a started route | Gone: a failed launch, whatever the swarm says of its agent. |
 | Its owner is not an unfinished agent of the swarm, the swarm is stopped, or the swarm is gone from the store | Gone: its agent was retired, its swarm stopped, or its swarm was removed. |
-| Every foreground process in the pane is a shell with no arguments but flags | Gone: a bare shell. If the record never reported a started route, the reason is a failed launch. |
+| The pane is at a bare shell | Gone: its agent or command exited and left a bare shell. |
 | Otherwise | Kept: its agent is live. |
 | A gone pane whose input line holds text | Kept. |
 | A gone pane idle under five minutes | Kept: used inside the quiet window. |
