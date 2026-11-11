@@ -375,6 +375,25 @@ def test_a_change_no_test_reaches_outside_the_sources_runs_nothing(repo):
     assert decide(repo, ["docs/unnamed.md"]) == ("none", [])
 
 
+@pytest.mark.feature("ci-select-markdown-glob-tests")
+@pytest.mark.parametrize("changed", [["docs/pillars/swarm.md", "docs/pillars/index.md"], ["README.md"]])
+def test_a_markdown_only_change_selects_the_tests_that_glob_markdown(repo: Path, changed: list[str]) -> None:
+    write(
+        repo,
+        {
+            "tests/test_journal.py": "DOCS = sorted(ROOT.rglob('*.md'))\n",
+            "tests/test_roles.py": 'PAGES = ROOT.glob("profiles/**/*.md")\n',
+        },
+    )
+    assert decide(repo, changed) == ("selected", [["tests/test_journal.py", "tests/test_roles.py"]])
+
+
+@pytest.mark.feature("ci-select-markdown-glob-tests")
+def test_a_source_change_does_not_select_the_tests_that_glob_markdown(repo: Path) -> None:
+    write(repo, {"tests/test_journal.py": "DOCS = sorted(ROOT.rglob('*.md'))\n"})
+    assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
 @pytest.mark.parametrize("name", ["hooks/new.py", "scripts/static/new.js"])
 def test_a_covered_source_no_test_reaches_runs_the_full_suite(repo, name):
     write(repo, {name: "x = 1\n"})

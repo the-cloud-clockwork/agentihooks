@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "ci-select-markdown-glob-tests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
+      "behaviour": "A pull request that changes markdown selects every test module that globs markdown files, so a markdown only change runs the docs tests that read it before the merge queue does, and a change with no markdown leaves them out.",
+      "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
+      "tests": [
+        "tests/test_ci_select.py::test_a_markdown_only_change_selects_the_tests_that_glob_markdown",
+        "tests/test_ci_select.py::test_a_source_change_does_not_select_the_tests_that_glob_markdown"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
