@@ -3335,6 +3335,16 @@
       ]
     },
     {
+      "id": "swarm-archive-terminal-head",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-executions-archive",
+      "behaviour": "ExecutionRegistry.archive moves a seat's own head row into the archive once it is ended or finished and its name is no longer listed, even with no newer generation superseding it, so a seat that is never reused does not hold its terminal execution in the live fenced executions hash forever.",
+      "seam": "ExecutionRegistry.archive archives a terminal head with no newer generation",
+      "tests": [
+        "tests/swarm/test_execution_archive.py::test_archive_moves_a_terminal_head_with_no_newer_generation"
+      ]
+    },
+    {
       "id": "swarm-archive-prunes-intents",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-intents-prune-on-archive",
