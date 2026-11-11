@@ -174,7 +174,7 @@ controller:
     periodSeconds: 10
     timeoutSeconds: 8
     failureThreshold: 3
-  terminationGracePeriodSeconds: 30
+  terminationGracePeriodSeconds: 300
   env:
     LANGFUSE_MCP_URL: ""
   # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.

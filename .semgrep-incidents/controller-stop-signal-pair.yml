@@ -1,0 +1,19 @@
+rules:
+  - id: controller-stop-signal-pair
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The swarm image stops its containers with SIGINT (STOPSIGNAL), so a controller that installs its stop handler
+      for SIGTERM alone lets SIGINT raise KeyboardInterrupt inside the running tick pass and every rollout records
+      that pass as an error. Install one stop handler for both signals, as STOP_SIGNALS does.
+    paths:
+      include:
+        - /scripts/swarm/controller.py
+        - controller-stop-signal-pair.py
+    patterns:
+      - pattern: signal.signal(signal.SIGTERM, $HANDLER)
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              signal.signal(signal.SIGINT, ...)
+              ...
