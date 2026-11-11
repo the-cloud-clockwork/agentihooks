@@ -25,10 +25,7 @@ def commands(path: Path) -> list[str]:
 
 def tick_reads() -> list[tuple[Path, str]]:
     return [
-        (path, line)
-        for path in documents()
-        for line in commands(path)
-        if ANY_UNIT.search(line) or OLD_TAG.search(line)
+        (path, line) for path in documents() for line in commands(path) if ANY_UNIT.search(line) or OLD_TAG.search(line)
     ]
 
 
