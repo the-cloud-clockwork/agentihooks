@@ -40,8 +40,8 @@ class SpoolMetrics:
 
     def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
         """Append each gate log row of swarm ``slug`` to its gate log and return how many landed."""
-        gate_log: Any = import_module("scripts.gates.log")
         deadline.live()
+        gate_log: Any = import_module("scripts.gates.log")
         for row in rows:
             gate_log.append(slug, row)
         return len(rows)

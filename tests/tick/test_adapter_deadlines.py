@@ -184,6 +184,7 @@ OTHER_CALLS: dict[str, Callable[[], object]] = {
     "host.read": lambda: JobHost({"x": BOOM}, {}).read("x", deadline=EXPIRED),
     "host.run": lambda: JobHost({}, {"x": BOOM}).run({"job": "x"}, deadline=EXPIRED),
     "metrics.emit": lambda: SpoolMetrics(BOOM, {}).emit({}, deadline=EXPIRED),
+    "metrics.log": lambda: SpoolMetrics(BOOM, {}).log("sw", [BOOM], deadline=EXPIRED),
     "llm.classify": lambda: ApiLlm("m", "u", BOOM).classify({}, deadline=EXPIRED),
     "processes.scan": lambda: PassProcesses(BOOM).scan(deadline=EXPIRED),
     "processes.rescan": lambda: PassProcesses(BOOM).rescan(deadline=EXPIRED),
