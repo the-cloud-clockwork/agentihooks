@@ -254,7 +254,7 @@ def test_night_watch_runs_the_watch_with_a_respawn_that_places_the_master_past_t
     assert fields == [store, "sw", "ledger", "runtime", "doc", 7, True]
     assert respawn() == ["spawned"]
     assert store.redis.deleted == deleted
-    assert started == [("sw", "config of sw", store, "runtime", 7, {"past_host": True})]
+    assert started == [("sw", "config of sw", store, "runtime", 7, {})]
 
 
 @pytest.mark.feature("swarm-tick-masters-moved")
