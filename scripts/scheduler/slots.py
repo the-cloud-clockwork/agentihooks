@@ -143,6 +143,8 @@ KINDS = {
 def restore(record: dict[str, Any]) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
+    if kind == "workflow":
+        fields.setdefault("project", "")
     return KINDS[kind](**fields)
 
 

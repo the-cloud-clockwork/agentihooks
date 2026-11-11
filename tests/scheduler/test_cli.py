@@ -207,7 +207,8 @@ def test_help_names_the_command_and_every_target(capsys, command, prog):
     )
 
 
-def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path):
+def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     case = tmp_path / "case.json"
     case.write_text("{}")
     code, view, err = run(
@@ -215,7 +216,7 @@ def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path)
     )
     assert (code, err) == (0, "")
     assert view is not None
-    assert view["targets"] == [{"kind": "workflow", "name": "nightly", "case": str(case)}]
+    assert view["targets"] == [{"kind": "workflow", "name": "nightly", "case": str(case), "project": str(tmp_path)}]
     assert (view["payload"], view["due"]) == ("run it", NOW + 3600)
 
 

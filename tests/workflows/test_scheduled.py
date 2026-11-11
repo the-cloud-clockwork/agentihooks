@@ -47,6 +47,7 @@ def test_start_spawns_one_detached_run_named_by_the_delivery_id(
     assert options["cwd"] == "/project"
     assert argv == [
         sys.executable,
+        "-P",
         "-m",
         "scripts.workflows.scheduled",
         "me",
@@ -110,6 +111,16 @@ def test_the_workflow_kind_round_trips_its_record() -> None:
     assert slots.restore(slot.record()) == slot
 
 
+def test_a_workflow_record_stored_without_a_project_runs_in_the_scheduler_folder(home: Path) -> None:
+    slot = slots.restore({"kind": "workflow", "name": "tiny", "case": "/case.md"})
+    spawn = Spawn()
+
+    assert slot == slots.WorkflowSlot("tiny", "/case.md", "")
+    assert slots.restore({"kind": "swarm", "slug": "sw"}) == slots.SwarmSlot("sw")
+    assert scheduled.start("tiny", "/case.md", "", "entry-1:slot-1", "me", popen=spawn) is True
+    assert spawn.calls[0][1]["cwd"] is None
+
+
 def test_the_workflow_slot_delivers_through_start(monkeypatch: pytest.MonkeyPatch) -> None:
     started = []
     monkeypatch.setattr(scheduled, "start", lambda *args: started.append(args) or True)
@@ -155,7 +166,7 @@ def test_a_fired_schedule_starts_a_workflow_defined_only_in_its_scheduling_proje
 
     def spawn(argv: list[str], **options: object) -> None:
         monkeypatch.chdir(str(options["cwd"]))
-        assert scheduled.main(argv[3:]) == 0
+        assert scheduled.main(argv[4:]) == 0
 
     monkeypatch.setattr(scheduled.cli, "execute", execute)
     monkeypatch.setattr(scheduled, "notify", lambda owner, delivery_id: None)

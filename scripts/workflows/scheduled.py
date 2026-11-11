@@ -25,7 +25,7 @@ def delivery_folder(delivery_id: str) -> Path:
 
 def command(name: str, case: Path, delivery_id: str, owner: str) -> list[str]:
     """The detached process line that runs one delivery and reports it to the owner."""
-    return [sys.executable, "-m", "scripts.workflows.scheduled", owner, name, str(case), delivery_id]
+    return [sys.executable, "-P", "-m", "scripts.workflows.scheduled", owner, name, str(case), delivery_id]
 
 
 def start(
@@ -47,7 +47,7 @@ def start(
         with (folder / LOG).open("ab") as log:
             popen(
                 command(name, Path(case).resolve(), delivery_id, owner),
-                cwd=project,
+                cwd=project or None,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
