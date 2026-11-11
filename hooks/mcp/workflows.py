@@ -42,9 +42,9 @@ def start(name: str, case: str, wait: bool) -> Any:
         raise ValueError(NESTED)
     cli = _module("scripts.workflows.cli")
     store = _module("scripts.workflows.store")
-    found, errors = _module("scripts.workflows.loader").resolve(Path.cwd())
+    found, _ = _module("scripts.workflows.loader").resolve(Path.cwd())
     if name not in found:
-        raise ValueError("\n".join([*errors, f"no workflow named {name}"]))
+        raise ValueError(f"no workflow named {name}")
     definition = found[name].workflow
     folder = cli.run_folder(uuid4().hex)
     state = store.create(folder, definition, case)

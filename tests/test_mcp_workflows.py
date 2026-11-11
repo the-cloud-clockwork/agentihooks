@@ -12,7 +12,7 @@ import hooks.mcp.workflows as workflows
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
 from scripts.workflows import cli as workflow_cli
-from scripts.workflows import store
+from scripts.workflows import loader, store
 from scripts.workflows.runner import StageResult
 
 pytestmark = pytest.mark.unit
@@ -53,6 +53,7 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     (folder / ".agentihooks" / "workflows").mkdir(parents=True)
     (folder / ".agentihooks" / "workflows" / "sample.yml").write_text(WORKFLOW)
     monkeypatch.chdir(folder)
+    monkeypatch.setattr(loader, "repo_root", lambda cwd: folder)
     monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
     monkeypatch.setattr(store, "default_root", lambda: tmp_path / "runs")
     return folder
