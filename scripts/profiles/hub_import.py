@@ -68,6 +68,9 @@ CHECKS = {
 }
 INSTALL_COMMANDS = {"npm": ("npm", "install", "--global"), "pip": ("python3", "-m", "pip", "install")}
 REQUIREMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+PIP_INCLUDES = ("-r", "-c", "-e", "--requirement", "--constraint", "--editable")
+LOCAL_VERSIONS = ("file:", "link:", ".")
+EMPTY: tuple[object, ...] = (None, "", [], {})
 _DROP = object()
 
 
@@ -247,8 +250,8 @@ def _points(expected: dict[str, object]) -> list[str]:
     points: list[str] = []
     for key, value in expected.items():
         for item in value if _is_list(value) else [value]:
-            if item is not None:
-                points.append(f"{key}: {item if isinstance(item, str) else json.dumps(item)}")
+            if item not in EMPTY:
+                points.append(f"{key}: {item if isinstance(item, str) else json.dumps(item, default=str)}")
     return points
 
 
@@ -260,8 +263,6 @@ def _deps(package: Path, name: str) -> list[dict[str, object]]:
             if "node_modules" in path.relative_to(package).parts:
                 continue
             names, specs = _npm(path) if kind == "npm" else _pip(path)
-            if any(ABSOLUTE.search(spec) for spec in specs):
-                raise ValueError(f"install with an absolute path refused: {path}")
             folder = path.parent.relative_to(package).as_posix()
             if specs:
                 entries.append(
@@ -276,23 +277,31 @@ def _deps(package: Path, name: str) -> list[dict[str, object]]:
 
 
 def _npm(path: Path) -> tuple[list[str], list[str]]:
-    """Return the package names and install specs of a ``package.json``'s dependencies."""
+    """Return the package names and install specs of a ``package.json``'s dependencies, refusing local paths."""
     loaded: object = json.loads(path.read_text())
     dependencies = loaded.get("dependencies") if _is_mapping(loaded) else None
     pairs = sorted(dependencies.items()) if _is_mapping(dependencies) else []
+    for _, version in pairs:
+        if not isinstance(version, str) or ABSOLUTE.search(version) or version.startswith(LOCAL_VERSIONS):
+            raise ValueError(f"install from a local path refused: {path}")
     return [package for package, _ in pairs], [f"{package}@{version}" for package, version in pairs]
 
 
 def _pip(path: Path) -> tuple[list[str], list[str]]:
-    """Return the distribution names and install specs of a ``requirements.txt``, skipping options."""
+    """Return the distribution names and install specs of a ``requirements.txt``, refusing what a name cannot check."""
     names: list[str] = []
     specs: list[str] = []
     for line in path.read_text().splitlines():
-        spec = line.split("#", 1)[0].strip()
+        spec = line.split("#", 1)[0].strip().removesuffix("\\").split(" --", 1)[0].strip()
+        if spec.startswith(PIP_INCLUDES):
+            raise ValueError(f"requirements include refused: {spec} in {path}")
+        if not spec or spec.startswith("-"):
+            continue
         match = REQUIREMENT.match(spec)
-        if match:
-            names.append(match.group())
-            specs.append(spec)
+        if not match or "@" in spec or "://" in spec:
+            raise ValueError(f"requirement without a checkable name refused: {spec} in {path}")
+        names.append(match.group())
+        specs.append(spec)
     return names, specs
 
 

@@ -1,3 +1,4 @@
+import datetime
 import json
 import shutil
 from pathlib import Path
@@ -366,7 +367,10 @@ def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) ->
     (package / "scripts/lib").mkdir(parents=True)
     node = {"dependencies": {"playwright-core": "^1.52.0", "js-yaml": "^4.1.0"}, "devDependencies": {"x": "1"}}
     (package / "scripts/package.json").write_text(json.dumps(node))
-    (package / "requirements.txt").write_text("# tools\nrequests>=2.31  # http\n\n-r other.txt\nPyYAML==6.0\n")
+    requirements = (
+        "# tools\n--index-url https://pypi.org/simple\nrequests>=2.31  # http\n\nPyYAML==6.0 \\\n    --hash=sha256:ab\n"
+    )
+    (package / "requirements.txt").write_text(requirements + "rich[jupyter]>=13 --no-binary rich\n")
     out = tmp_path / "bundle"
     out.mkdir()
     (out / "deps.json").write_text(json.dumps({"deps": [{"id": "serena", "kind": "uv-tool"}]}))
@@ -385,8 +389,8 @@ def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) ->
             {
                 "id": "diagram-pip-root",
                 "kind": "pip",
-                "check": ["python3", "-c", check, "requests", "PyYAML"],
-                "install": ["python3", "-m", "pip", "install", "requests>=2.31", "PyYAML==6.0"],
+                "check": ["python3", "-c", check, "requests", "PyYAML", "rich"],
+                "install": ["python3", "-m", "pip", "install", "requests>=2.31", "PyYAML==6.0", "rich[jupyter]>=13"],
             },
         ]
     }
@@ -408,7 +412,7 @@ def test_manifests_without_installs_add_no_entry(hub: Path, tmp_path: Path) -> N
     (package / "package.json").write_text(json.dumps({"name": "x", "devDependencies": {"x": "1"}}))
     (package / "node_modules/zod").mkdir(parents=True)
     (package / "node_modules/zod/package.json").write_text(json.dumps({"dependencies": {"a": "1"}}))
-    (package / "requirements.txt").write_text("# none\n-e .\n")
+    (package / "requirements.txt").write_text("# none\n--index-url https://pypi.org/simple\n")
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False, tmp_path / "data")
     assert report["deps"] == []
@@ -451,12 +455,36 @@ def test_two_profiles_with_one_install_folder_get_separate_ids(hub: Path, tmp_pa
 
 
 @pytest.mark.feature("hub-import-deps")
-def test_an_install_from_an_absolute_path_refuses_the_import(hub: Path, tmp_path: Path) -> None:
-    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"lib": "file:/home/operator/lib"}}))
+@pytest.mark.parametrize(
+    "version", ["file:/home/operator/lib", "/home/operator/lib", "file:../lib", "link:../lib", "./lib", 3]
+)
+def test_an_npm_install_from_a_local_path_refuses_the_import(hub: Path, tmp_path: Path, version: object) -> None:
+    (_package(hub) / "package.json").write_text(json.dumps({"dependencies": {"lib": version}}))
     out = tmp_path / "bundle"
-    with pytest.raises(ValueError, match=r"install with an absolute path refused: .*package\.json"):
+    with pytest.raises(ValueError, match=r"install from a local path refused: .*package\.json"):
         import_hub(hub, out, False, tmp_path / "data")
     assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-deps")
+@pytest.mark.parametrize(
+    "line", ["-r other.txt", "-c pins.txt", "-e .", "--requirement other.txt", "--constraint pins.txt", "--editable ."]
+)
+def test_a_requirements_include_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
+    (_package(hub) / "requirements.txt").write_text(f"rich\n{line}\n")
+    with pytest.raises(ValueError, match=r"requirements include refused: .*requirements\.txt"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-deps")
+@pytest.mark.parametrize(
+    "line",
+    ["https://example.com/a.tar.gz", "pkg @ https://example.com/a.whl", "git+ssh://host/repo", "./local", "/opt/a.whl"],
+)
+def test_a_requirement_without_a_checkable_name_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
+    (_package(hub) / "requirements.txt").write_text(f"{line}\n")
+    with pytest.raises(ValueError, match=r"requirement without a checkable name refused: .*requirements\.txt"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
 
 
 @pytest.mark.feature("hub-import-deps")
@@ -482,6 +510,8 @@ def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
         "error_handling": {"literal_shell": False},
         "summary": "one page",
         "skipped": None,
+        "blank": ["", [], {}],
+        "due": datetime.date(2026, 1, 1),
     }
     _case(hub, "simple.yaml", {"name": "simple", "description": "Update one page", "expected": expected})
     _case(hub, "named.yml", {"name": "Draw one box", "expected": {"artifacts": ["box.svg"]}})
@@ -499,6 +529,7 @@ def test_eval_cases_become_judge_cases(hub: Path, tmp_path: Path) -> None:
         'destinations: {"kind": "confluence_page"}',
         'error_handling: {"literal_shell": false}',
         "summary: one page",
+        'due: "2026-01-01"',
     ]
     assert simple == json.dumps({"intent": "Update one page", "points": points}, indent=2) + "\n"
     named = json.loads((out / "profiles/diagram/cases/named.json").read_text())
