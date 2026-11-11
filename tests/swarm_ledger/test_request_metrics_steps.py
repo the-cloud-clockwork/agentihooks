@@ -86,6 +86,7 @@ def test_a_ledger_write_metrics_row_carries_each_substep_time(
     assert record["wall_seconds"] == 15.0
 
 
+@pytest.mark.feature("ledger-write-substep-timing")
 def test_substeps_outside_a_measured_request_are_not_counted(clock: Clock) -> None:
     with metrics.step("hierarchy_sync"):
         clock.wall += 1.0
