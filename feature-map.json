@@ -3612,6 +3612,16 @@
         "tests/tick/test_master_placement_coordination.py::test_the_master_placement_waits_when_the_port_refuses_the_tick_lock",
         "tests/tick/test_master_placement_coordination.py::test_respawn_master_drops_a_gone_master_through_the_coordination_port"
       ]
+    },
+    {
+      "id": "swarm-exit-after-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-agent-self-exit",
+      "behaviour": "A tick launched worker that already handed off its seat with ready, park or handoff, so the tick already counts it ended, can run swarm exit to end its own session without the swarm up refusal; the claim the swarm carries for its pull request stays in place and the next tick pass retires the finished agent and closes its pane.",
+      "seam": "swarm exit against the tick retire path for a finished worker",
+      "tests": [
+        "tests/swarm/test_cli_self_exit.py::test_a_released_worker_exits_and_the_next_tick_retires_it"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -1207,12 +1207,13 @@ def cmd_agent_up(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def cmd_exit(store, args):
+def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
+    released = agent is not None and agent.lane != MASTER and agent.state == "finished"
+    if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
-    else:
+    elif not released:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
