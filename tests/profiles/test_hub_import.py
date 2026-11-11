@@ -367,10 +367,8 @@ def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) ->
     (package / "scripts/lib").mkdir(parents=True)
     node = {"dependencies": {"playwright-core": "^1.52.0", "js-yaml": "^4.1.0"}, "devDependencies": {"x": "1"}}
     (package / "scripts/package.json").write_text(json.dumps(node))
-    requirements = (
-        "# tools\n--index-url https://pypi.org/simple\nrequests>=2.31  # http\n\nPyYAML==6.0 \\\n    --hash=sha256:ab\n"
-    )
-    (package / "requirements.txt").write_text(requirements + "rich[jupyter]>=13 --no-binary rich\n")
+    requirements = "# tools\nrequests>=2.31  # http\n\nPyYAML==6.0 \\\n    --hash=sha256:ab\n"
+    (package / "requirements.txt").write_text(requirements + "rich[jupyter]>=13 --hash=sha256:cd\n")
     out = tmp_path / "bundle"
     out.mkdir()
     (out / "deps.json").write_text(json.dumps({"deps": [{"id": "serena", "kind": "uv-tool"}]}))
@@ -412,7 +410,7 @@ def test_manifests_without_installs_add_no_entry(hub: Path, tmp_path: Path) -> N
     (package / "package.json").write_text(json.dumps({"name": "x", "devDependencies": {"x": "1"}}))
     (package / "node_modules/zod").mkdir(parents=True)
     (package / "node_modules/zod/package.json").write_text(json.dumps({"dependencies": {"a": "1"}}))
-    (package / "requirements.txt").write_text("# none\n--index-url https://pypi.org/simple\n")
+    (package / "requirements.txt").write_text("# none\n    --hash=sha256:ab\n")
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False, tmp_path / "data")
     assert report["deps"] == []
@@ -468,11 +466,19 @@ def test_an_npm_install_from_a_local_path_refuses_the_import(hub: Path, tmp_path
 
 @pytest.mark.feature("hub-import-deps")
 @pytest.mark.parametrize(
-    "line", ["-r other.txt", "-c pins.txt", "-e .", "--requirement other.txt", "--constraint pins.txt", "--editable ."]
+    "line",
+    [
+        "-r other.txt",
+        "-e .",
+        "--constraint pins.txt",
+        "--index-url https://example.com",
+        "-f wheels",
+        "rich --no-binary rich",
+    ],
 )
-def test_a_requirements_include_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
-    (_package(hub) / "requirements.txt").write_text(f"rich\n{line}\n")
-    with pytest.raises(ValueError, match=r"requirements include refused: .*requirements\.txt"):
+def test_a_requirements_option_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
+    (_package(hub) / "requirements.txt").write_text(f"click\n{line}\n")
+    with pytest.raises(ValueError, match=r"requirements option refused: .*requirements\.txt"):
         import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
 
 

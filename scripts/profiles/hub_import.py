@@ -68,7 +68,6 @@ CHECKS = {
 }
 INSTALL_COMMANDS = {"npm": ("npm", "install", "--global"), "pip": ("python3", "-m", "pip", "install")}
 REQUIREMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-PIP_INCLUDES = ("-r", "-c", "-e", "--requirement", "--constraint", "--editable")
 LOCAL_VERSIONS = ("file:", "link:", ".")
 EMPTY: tuple[object, ...] = (None, "", [], {})
 _DROP = object()
@@ -292,16 +291,17 @@ def _pip(path: Path) -> tuple[list[str], list[str]]:
     names: list[str] = []
     specs: list[str] = []
     for line in path.read_text().splitlines():
-        spec = line.split("#", 1)[0].strip().removesuffix("\\").split(" --", 1)[0].strip()
-        if spec.startswith(PIP_INCLUDES):
-            raise ValueError(f"requirements include refused: {spec} in {path}")
+        text = line.split("#", 1)[0].strip().removesuffix("\\").strip()
+        spec, _, option = text.partition(" --")
+        if (spec.startswith("-") and not spec.startswith("--hash")) or (option and not option.startswith("hash")):
+            raise ValueError(f"requirements option refused: {text} in {path}")
         if not spec or spec.startswith("-"):
             continue
         match = REQUIREMENT.match(spec)
         if not match or "@" in spec or "://" in spec:
             raise ValueError(f"requirement without a checkable name refused: {spec} in {path}")
         names.append(match.group())
-        specs.append(spec)
+        specs.append(spec.strip())
     return names, specs
 
 
