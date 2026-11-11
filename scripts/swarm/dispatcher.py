@@ -174,13 +174,17 @@ def _merged(task, known):
     return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
 
 
-def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
+def chain_claimed(
+    slug: str, config: Any, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
+) -> list[str]:
     if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
         return []
     return _chain_report(slug, ledger, doc, task, lane, now_ms)
 
 
-def _chain_report(slug, ledger, doc, task, lane, now_ms):
+def _chain_report(
+    slug: str, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
+) -> list[str]:
     known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
     times = [
         (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
