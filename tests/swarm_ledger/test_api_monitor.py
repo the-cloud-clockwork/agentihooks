@@ -308,15 +308,17 @@ PRESENT = [
 
 def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry():
     published = {"machines": {"master": {"claude": 99}}, "silent": [], "measured_at": NOW}
-    readings = {"pod": {**POD, "agents": {"claude": 50}}}
-    data = viewed(Store({}), *ports_for([ROOT, POD_HIVE], readings, published=published, present=PRESENT))
-    assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 3, "claude": 7, "codex": 1}
+    readings = {"anton-1": {**POD, "agents": {"claude": 50}}}
+    hives = [ROOT, {**POD_HIVE, "id": "anton-1"}, {"id": "gone", "name": "gone", "live": False}]
+    data = viewed(Store({}), *ports_for(hives, readings, published=published, present=PRESENT))
+    assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 4, "claude": 7, "codex": 1}
     assert data["hives"]["rows"] == [
         {"name": "automation", "agents": 5},
         {"name": "dark-hive", "agents": 0},
+        {"name": "root", "agents": None},
         {"name": "swarm-hive-001", "agents": 3},
     ]
-    assert data["hives"]["live"] == 3
+    assert data["hives"]["live"] == 4
     assert data["hives"]["measured"] == 1
 
 

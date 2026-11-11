@@ -115,7 +115,9 @@ def view(store: object, now_ms: int) -> dict:
     machines = herdr_machines(store.redis, hives, live, now_ms)
     present = ports.hive().presence.read(os.environ, now_ms / 1000)
     if present:
-        agents, rows = tally("otel", [(hive["name"], hive["agents"]) for hive in present])
+        seen = {hive["id"] for hive in present}
+        silent = [(hive["name"], None) for hive in live if hive["id"] not in seen]
+        agents, rows = tally("otel", [(hive["name"], hive["agents"]) for hive in present] + silent)
     elif machines is None or all(counts is None for _, counts in machines):
         agents, rows = tally("hives", hive_machines(store, live, readings))
     else:

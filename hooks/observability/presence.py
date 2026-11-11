@@ -15,8 +15,13 @@ HIVE_AGENTS = "agentihooks.presence.hive.agents"
 
 
 def hive_id(environ: Mapping[str, str]) -> str:
-    """The hive this process runs on: the member credential's hive, the seeded hive id, else the host name."""
-    return environ.get("AGENTIHOOKS_HIVE_ID") or environ.get("SWARM_HIVE_ID") or socket.gethostname()
+    """The hive this process runs on, resolved as the hive daemon resolves its own id."""
+    explicit = environ.get("AGENTIHOOKS_HIVE_ID") or environ.get("SWARM_HIVE_ID")
+    if explicit:
+        return explicit
+    from scripts.hive.registry import seeded_id
+
+    return seeded_id() or socket.gethostname()
 
 
 def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
