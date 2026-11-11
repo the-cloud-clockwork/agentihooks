@@ -577,6 +577,7 @@
         "tests/tick/test_agents.py::test_the_reap_step_declares_its_ports_feature_and_lane",
         "tests/tick/test_agents.py::test_a_moved_reap_helper_reaches_a_patched_tick_seam",
         "tests/tick/steps/test_reap.py::test_reap_keeps_an_agent_whose_drop_the_store_refuses_for_the_next_pass",
+        "tests/tick/steps/test_reap.py::test_a_refused_drop_skips_the_reopen_for_any_caller_and_the_next_pass_retries_it",
         "tests/tick/steps/test_reap_watch.py::test_the_operator_holds_the_pane_while_typing_or_inside_the_quiet_window",
         "tests/tick/steps/test_reap_watch.py::test_a_content_refusal_is_due_only_for_the_claimant_away_from_the_operator",
         "tests/tick/steps/test_reap_watch.py::test_an_agent_is_stuck_on_its_provider_when_recovery_is_spent_or_the_idle_outage_ran_past_its_limit",

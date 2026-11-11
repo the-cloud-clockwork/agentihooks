@@ -15,7 +15,7 @@ from scripts.tick.adapters.calls import LedgerCalls, RuntimeCalls
 from scripts.tick.deadline import Deadline
 from scripts.tick.engine import SLOW
 from scripts.tick.steps import AGENTS, DEADLINE, TASKS, CallStep, pass_domains
-from scripts.tick.steps.common import DropRefused
+from scripts.tick.steps.common import DROP_REFUSED
 
 Get = Callable[[str], Any]
 _IDENTITY_CONFLICT = "stale or changed execution identity"
@@ -53,9 +53,7 @@ def _reap(
             agent = agents[index]
             with tick.timing.acting(agent.name):
                 try:
-                    judged.append((index, tick._reap_agent(judging, agent)))
-                except DropRefused:
-                    judged.append((index, [f"kept {agent.name}, the store refused its drop, retrying next pass"]))
+                    judged.append((index, _kept_on_refusal(agent.name, tick._reap_agent(judging, agent))))
                 except tick.SwarmError as exc:
                     if _IDENTITY_CONFLICT not in str(exc):
                         raise
@@ -70,6 +68,11 @@ def _reap(
     if left:
         actions.append(f"reap stopped at the pass deadline, {left} of {len(agents)} agents left for the next pass")
     return actions
+
+
+def _kept_on_refusal(name: str, actions: list[str]) -> list[str]:
+    """Report an agent whose drop the store refused as kept for the next pass, never as retired or lost."""
+    return [f"kept {name}{DROP_REFUSED}" if action.endswith(DROP_REFUSED) else action for action in actions]
 
 
 def _strays(slug: Any, config: Any, store: Any, runtime: Any) -> Any:

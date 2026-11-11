@@ -12,8 +12,7 @@ from typing import Any
 from scripts.swarm import claim_lost
 
 
-class DropRefused(Exception):
-    """The store refused to drop the named agent, so its record stays for the next pass to judge again."""
+DROP_REFUSED = ", the store refused its drop, retrying next pass"
 
 
 def skip_refused(function: Callable[..., Any], *args: Any) -> Any:
@@ -65,7 +64,7 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
         store.refund_held_claim(slug, agent.task, agent.name, generation)
     store.release(slug, agent.task, agent.name)
     if store.drop_agent(slug, agent.name) is False:
-        raise DropRefused(agent.name)
+        return DROP_REFUSED
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     _settle_exit(store, agent.name, agent.seat if reopen else "")
     return f", task {agent.task} reopened" if reopen else ""
