@@ -4917,10 +4917,11 @@ cat ~/.cache/agentihooks/scheduler/swarm-tick.lock; echo
 # per runtime folder, and a holder only as the parent of that tick
 ps -eo pid,ppid,etimes,args | grep -E "swarm tick$|scripts.swarm.scheduled_tick" | grep -v grep
 
-# Refused starts and reaped leftovers in the last hour: scheduled ticks write to the journal tag, timer ticks to
-# the unit, and holders without systemd-cat to swarm-tick.log
-journalctl --user -t agentihooks-swarm --since "-1h" --no-pager | grep -E "another swarm tick|reaped leftover"
-journalctl --user -u agentihooks-swarm.service --since "-1h" --no-pager | grep -E "another swarm tick|reaped leftover"
+# Refused starts and reaped leftovers in the last hour: timer ticks write to the unit, scheduled ticks to the user
+# journal through systemd-cat, and holders without systemd-cat to swarm-tick.log
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now --no-pager \
+  | grep -E "another swarm tick|reaped leftover"
+TZ=UTC journalctl --user --since "-1h" --until now --no-pager | grep -E "another swarm tick|reaped leftover"
 grep -E "another swarm tick|reaped leftover" ~/.cache/agentihooks/scheduler/swarm-tick.log
 
 # Drain results of recent retire attempts
