@@ -2732,7 +2732,7 @@ def cmd_terminal(store, args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from scripts.swarm import tick_report
+    from scripts.swarm import night_watch_drill, tick_report
 
     parser = argparse.ArgumentParser(
         prog="agentihooks swarm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -2769,6 +2769,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("save-template").add_argument("template_name", metavar="name")
     sub.add_parser("status").add_argument("--json", action="store_true")
     sub.add_parser("probe").set_defaults(handler=probe_command)
+    sub.add_parser("night-watch-drill").set_defaults(handler=night_watch_drill.command)
     sub.add_parser("tick").set_defaults(handler=cmd_swarm_tick)
     report = sub.add_parser("tick-report")
     report.add_argument("--passes", type=tick_report.pass_count, default=100)
