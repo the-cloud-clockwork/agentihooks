@@ -3782,7 +3782,7 @@
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
-      "behaviour": "The docs sanity scanner flags private IPv4 addresses, real looking emails, private host name suffixes, token and key shapes and caller supplied private keywords in public files, prints each hit as file, line and rule without the matched text, and exits 1 on any hit.",
+      "behaviour": "The docs sanity scanner flags private IPv4 and IPv6 addresses, real looking emails, private host name suffixes, cloud host names, home lab names, password and token like values, token and key shapes and caller supplied private keywords in public files, prints each hit beyond a shrink only baseline of lab name and keyword counts as file, line and rule without the matched text, and exits 1 on any such hit.",
       "seam": "scripts.docs_sanity.main",
       "tests": [
         "tests/test_docs_sanity.py::test_the_red_fixture_fails_with_every_hit_as_file_line_rule",
@@ -3797,7 +3797,14 @@
         "tests/test_docs_sanity.py::test_every_missing_path_is_named_on_standard_error",
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
-        "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+        "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules",
+        "tests/test_docs_sanity.py::test_each_edge_of_the_lab_host_and_ipv6_rules",
+        "tests/test_docs_sanity.py::test_a_password_or_token_like_value_is_flagged",
+        "tests/test_docs_sanity.py::test_a_placeholder_reference_or_version_is_not_a_secret",
+        "tests/test_docs_sanity.py::test_a_baseline_holds_existing_lab_names_and_fails_only_on_growth",
+        "tests/test_docs_sanity.py::test_a_baseline_never_holds_addresses_or_secrets",
+        "tests/test_docs_sanity.py::test_the_public_docs_pass_and_the_baseline_matches_them_exactly",
+        "tests/test_docs_sanity.py::test_a_written_baseline_sorts_rules_and_indents_two_spaces"
       ]
     },
     {
@@ -4079,6 +4086,19 @@
         "tests/hub/test_stale_offers.py::test_an_offer_whose_task_turned_workstation_is_withdrawn",
         "tests/hub/test_stale_offers.py::test_a_nats_sweep_leaves_an_offer_published_while_it_runs_for_the_next_sweep",
         "tests/hub/test_stale_offers.py::test_a_swarm_scoped_queue_withdraws_through_its_lane_queue"
+      ]
+    },
+    {
+      "id": "monitor-every-interface-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-monitor-one-hive",
+      "behaviour": "The HOME resource monitor counts the herdr reading of every live interface hive, so a second headed hive publishing only its own panes never hides the hives the other reading counts, and a hive two readings name is counted once, from its own reading unless that one is silent.",
+      "seam": "scripts.swarm_ledger.api.monitor.view",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_two_readings_count_is_counted_once_from_its_own_reading",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
       ]
     },
     {

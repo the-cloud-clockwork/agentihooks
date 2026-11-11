@@ -3,6 +3,7 @@ from each live hive's headroom reading, and running swarms."""
 
 import json
 import time
+from typing import Any
 
 from redis import RedisError
 
@@ -50,31 +51,34 @@ def processes(store: object, hive: str, measured: dict | None) -> dict[str, int]
 
 
 def herdr_machines(
-    redis: object, hives: list[dict], live: list[dict], now_ms: int
-) -> list[tuple[str, dict | None]] | None:
-    """Each machine the master herdr client on a live interface hive last counted, by name, with None for one that
-    did not answer. A label matching a known hive is shown under that hive's current name and dropped if the hive
-    is no longer live; a label matching nothing in the registry is kept as herdr reported it."""
+    redis: object, hives: list[dict[str, Any]], live: list[dict[str, Any]], now_ms: int
+) -> list[tuple[str, dict[str, int] | None]] | None:
+    """Each machine the herdr client on every live interface hive last counted, by name, with None for one that did
+    not answer. A hive two readings name is counted once, from its own reading unless that one is silent. A label
+    matching a known hive is shown under that hive's current name and dropped if the hive is no longer live; a label
+    matching nothing in the registry is kept as herdr reported it."""
     stats = ports.hive().herdr_stats
-    readings = (stats.read(redis, hive["id"], now_ms) for hive in live if hive.get("ui") == "yes")
-    published = next((reading for reading in readings if reading is not None), None)
-    if published is None:
+    readings = [(hive, stats.read(redis, hive["id"], now_ms)) for hive in live if hive.get("ui") == "yes"]
+    published = [(hive, reading) for hive, reading in readings if reading is not None]
+    if not published:
         return None
-    named = {**published["machines"], **dict.fromkeys(published["silent"])}
     live_ids = {hive["id"] for hive in live}
     by_id = {hive["id"]: hive for hive in hives}
     by_name = {hive["name"]: hive for hive in hives}
-    machines = []
-    for name, counts in named.items():
-        if name == stats.MASTER:
-            machines.append((LOCAL, counts))
-            continue
-        hive = by_name.get(name) or by_id.get(name)
-        if hive is None:
-            machines.append((name, counts))
-        elif hive["id"] in live_ids:
-            machines.append((LOCAL if hive.get("ui") == "yes" else hive["name"], counts))
-    return machines
+    counted: dict[str, tuple[str, dict[str, int] | None]] = {}
+    for publisher, reading in published:
+        for name, counts in {**reading["machines"], **dict.fromkeys(reading["silent"])}.items():
+            own = name == stats.MASTER
+            hive = publisher if own else by_name.get(name) or by_id.get(name)
+            if hive is not None and hive["id"] not in live_ids:
+                continue
+            key, row = (
+                (name, name) if hive is None else (hive["id"], LOCAL if hive.get("ui") == "yes" else hive["name"])
+            )
+            held = counted.get(key)
+            if held is None or held[1] is None or (own and counts is not None):
+                counted[key] = (row, counts)
+    return list(counted.values())
 
 
 def hive_machines(store: object, live: list[dict], readings: dict) -> list[tuple[str, dict | None]]:
