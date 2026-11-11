@@ -245,6 +245,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "launch  1  100.00%  1  0  0  2\n"
         "Step  Ready to start median  Ready to start max\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
+        "Pass errors, newest first: 0\n"
     )
 
 
@@ -280,3 +281,24 @@ def test_report_command_prints_measured_gaps(capsys: pytest.CaptureFixture[str])
         store.redis.xadd(store.key("sw", "tick:passes"), {"record": json.dumps(row)})
     tick_report.command(store, argparse.Namespace(slug="sw", passes=2))
     assert "Gap p95: 9.000s; largest gap: 9.000s\n" in capsys.readouterr().out
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
+def test_tick_report_prints_each_kept_pass_error(capsys: pytest.CaptureFixture[str]) -> None:
+    report = {
+        "pass_count": 0,
+        "pass_p95_s": None,
+        "gap_p95_s": None,
+        "gap_max_s": None,
+        "passes_without_steps": 0,
+        "steps": [],
+        "lanes": [],
+        "critical_end_p95_s": None,
+        "records": [],
+        "pass_errors": [{"pass_id": "abc", "end_ms": 1794377295000, "error": "LedgerUnreachable: refused"}],
+    }
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    out = capsys.readouterr().out
+    assert "Pass errors, newest first: 1\n" in out
+    assert "abc  2026-11-11T06:08:15Z  LedgerUnreachable: refused\n" in out
