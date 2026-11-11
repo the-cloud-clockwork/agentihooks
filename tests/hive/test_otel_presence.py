@@ -80,7 +80,7 @@ def test_fetch_returns_none_when_the_collector_does_not_answer(monkeypatch):
         assert timeout == otel_presence.TIMEOUT_S
         raise OSError("refused")
 
-    monkeypatch.setattr(otel_presence.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(otel_presence, "urllib", SimpleNamespace(request=SimpleNamespace(urlopen=refuse)))
     assert otel_presence.fetch("http://c/metrics") is None
 
 
@@ -95,5 +95,6 @@ def test_fetch_returns_the_decoded_body(monkeypatch):
         def read(self):
             return b"m 1\n"
 
-    monkeypatch.setattr(otel_presence.urllib.request, "urlopen", lambda url, timeout: Response())
+    opener = SimpleNamespace(urlopen=lambda url, timeout: Response())
+    monkeypatch.setattr(otel_presence, "urllib", SimpleNamespace(request=opener))
     assert otel_presence.fetch("http://c/metrics") == "m 1\n"

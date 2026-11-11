@@ -60,6 +60,14 @@ def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypa
     assert calls == [("sess-3", presence.os.environ, 9.5), ("", presence.os.environ, 9.5)]
 
 
+def test_a_failing_mark_never_raises_into_the_hook(monkeypatch):
+    def fail(*args):
+        raise RuntimeError("seat unreadable")
+
+    monkeypatch.setattr(presence, "agent", fail)
+    assert presence.mark({"session_id": "sess-4"}) is None
+
+
 def test_the_hook_manager_marks_presence_for_every_event():
     import inspect
 
@@ -73,7 +81,7 @@ def test_the_hive_id_falls_back_to_the_seeded_id_then_the_host_name(monkeypatch)
 
     seeded = iter(["seeded-1", ""])
     monkeypatch.setattr(registry, "seeded_id", lambda: next(seeded))
-    monkeypatch.setattr(presence.socket, "gethostname", lambda: "pod-a")
+    monkeypatch.setattr(presence, "socket", SimpleNamespace(gethostname=lambda: "pod-a"))
     assert presence.hive_id({"AGENTIHOOKS_HIVE_ID": "h1", "SWARM_HIVE_ID": "h2"}) == "h1"
     assert presence.hive_id({"SWARM_HIVE_ID": "h2"}) == "h2"
     assert presence.hive_id({}) == "seeded-1"

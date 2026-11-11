@@ -48,8 +48,11 @@ def agent(session_id: str, environ: Mapping[str, str], now_s: float) -> None:
 
 
 def mark(payload: Mapping[str, object]) -> None:
-    """Marks the session a hook payload names seen now, under this process's environment."""
-    agent(str(payload.get("session_id") or ""), os.environ, time.time())
+    """Marks the session a hook payload names seen now, under this process's environment; never raises."""
+    try:
+        agent(str(payload.get("session_id") or ""), os.environ, time.time())
+    except Exception:
+        return
 
 
 def hive(hive: str, name: str, headed: bool, release: str, agents: Mapping[str, int], now_s: float) -> None:

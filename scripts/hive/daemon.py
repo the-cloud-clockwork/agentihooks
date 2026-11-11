@@ -238,12 +238,16 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
         try:
             now_ms = int(time.time() * 1000)
             headroom.publish(redis, local_id, now_ms)
-            emit_presence(redis, local_id, now_ms)
             registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            continue
+        try:
+            emit_presence(redis, local_id, now_ms)
+        except Exception as exc:
+            print(f"hive presence emit failed ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
 def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:

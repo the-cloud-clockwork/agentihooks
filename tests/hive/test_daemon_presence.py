@@ -46,3 +46,26 @@ def test_the_headroom_thread_emits_presence_after_each_reading(monkeypatch):
     monkeypatch.setattr(daemon, "refresh_ready", lambda: None)
     daemon.publish_headroom(object(), object(), "hive-9", stop)
     assert order == [("headroom", "hive-9", 3000), ("presence", "hive-9", 3000)]
+
+
+def test_a_failed_presence_emit_is_logged_after_the_liveness_touch(monkeypatch, capsys):
+    touched = []
+    stop = daemon.threading.Event()
+    monkeypatch.setattr(daemon, "scheduled_wait", lambda *args, **kwargs: None)
+    monkeypatch.setattr(daemon, "timer_state", lambda waiter: None)
+    monkeypatch.setattr(daemon, "time", SimpleNamespace(time=lambda: 3.0))
+
+    from scripts.hive import headroom, orders
+
+    def fail(redis, hive, now):
+        stop.set()
+        raise OSError("proc gone")
+
+    monkeypatch.setattr(headroom, "publish", lambda redis, hive, now: None)
+    monkeypatch.setattr(daemon, "emit_presence", fail)
+    monkeypatch.setattr(daemon.registry, "touch", lambda redis, hive, now: touched.append(hive))
+    monkeypatch.setattr(orders, "alive", lambda redis, hive: None)
+    monkeypatch.setattr(daemon, "refresh_ready", lambda: None)
+    daemon.publish_headroom(object(), object(), "hive-9", stop)
+    assert touched == ["hive-9"]
+    assert capsys.readouterr().err == "hive presence emit failed (OSError: proc gone)\n"
