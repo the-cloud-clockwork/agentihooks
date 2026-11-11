@@ -85,7 +85,7 @@ def test_select_profile_records_the_launched_agent_process_and_retire_ends_it(
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "crew")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", NAME)
     ended = []
-    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "end", lambda *args: ended.append(args) or reaper.Outcome())
     launched: list[subprocess.Popen] = []
     seen = []
     start = _sleeping_popen(launched)
