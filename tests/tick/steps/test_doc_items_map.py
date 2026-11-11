@@ -89,7 +89,7 @@ def test_doc_items_map() -> None:
         frozenset({"coordination", "ledger"}),
     )
     assert found.reads == pass_domains("doc")
-    assert found.needs == frozenset({"ledger state", "drained resume"})
+    assert found.needs == frozenset({"ledger state", "drained resume", "tick view"})
 
 
 @pytest.mark.feature("tick-doc-items-map")
