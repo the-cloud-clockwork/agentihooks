@@ -1031,8 +1031,15 @@ that makes the change.
 
 A write with no `expected` fields sends no `if_match` to `update_task`, and
 the server then applies it unguarded. The group applier always sends one; a
-write with no `expected` sends an empty member list, which a lead holding
-members refuses.
+write with no `expected` sends an empty member list. When the held view shows
+the lead with members, the applier's own compare raises `RevisionConflict`
+before any ledger call; the server refusal of a lead holding members covers a
+stale view.
+
+The server accepts these `task_update` guard fields, each compared against its
+default when the task lacks it: `claimed_by`, `pr_url`, `awaiting` and
+`difficulty` (`""`), `claim_generation` (`0`) and `group_members` (`[]`). Any
+other field is rejected with `if_match must contain task ownership fields`.
 
 Because a guarded `task_update` that misses is skipped without a refusal, the
 size applier checks the task the call returns: a field that is both guarded
@@ -1065,7 +1072,7 @@ From Python, through the swarm's ledger client:
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 
 try:
-    LedgerClient().ungroup_tasks("rig-grade-swarm", "t1", if_match={"group_members": ["t2", "t3"]})
+    LedgerClient().ungroup_tasks("example-swarm", "t1", if_match={"group_members": ["t2", "t3"]})
 except LedgerRefused as exc:
     print(exc)
 ```
@@ -1077,7 +1084,8 @@ The server answers each case this way:
 | The lead holds `["t2", "t3"]` and the guard expects `["t2", "t3"]` | Released: the lead loses `group_members`, each member whose `merged_into` names the lead loses it, and an `ungrouped` event lists the released members |
 | The lead holds `["t2", "t3"]` and the guard expects `["t2"]`, or `["t3", "t2"]` | Refused: `tasks/t1 changed its group members`; the group is unchanged |
 | The lead holds no group | Refused: `tasks/t1 leads no group`, checked before the guard |
-| `by` is an engineer or planner | Refused: `<name> works in the <lane> lane and cannot release a task group` |
+| `by` is an agent of the `eng`, `ci` or `plan` lane | Refused: `<name> works in the <lane> lane and cannot release a task group` |
+| `by` is missing, not an agent name, or `operator` | Rejected before apply: ``task_ungroup needs `by`, an agent name other than operator``, checked first |
 | `if_match` is not an object, holds a key other than `group_members`, or `group_members` is not a list of task ids | Rejected before apply: `task_ungroup if_match holds only group_members, a list of task ids` |
 | Any key other than `op`, `id`, `by`, `item` and `if_match` | Rejected before apply: `task_ungroup takes only an id, by, an item tasks/<lead id> and an if_match` |
 
