@@ -85,6 +85,12 @@ def archived_by_function(store, slug):
     return store.redis.hgetall(store.key(slug, "executions"))
 
 
+def named_expiry_on_another_key(redis, key, index):
+    redis.expire(index, 3600)
+    # ok: tick-unbounded-store-read
+    return redis.hgetall(key)
+
+
 def plain_dict(rows):
     # ok: tick-unbounded-store-read
     return sorted(rows.keys())

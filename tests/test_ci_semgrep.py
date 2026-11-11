@@ -157,7 +157,7 @@ def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_ta
     assert all(isinstance(task, str) and task.startswith("t-") for task in allowed.values())
     fixture = (_ROOT / ".semgrep/tick-unbounded-read.test.py").read_text()
     assert fixture.count("# ruleid: tick-unbounded-store-read") == 8
-    assert fixture.count("# ok: tick-unbounded-store-read") == 8
+    assert fixture.count("# ok: tick-unbounded-store-read") == 9
 
 
 def test_scan_excludes_only_the_mutable_action_tag_rule():
