@@ -399,7 +399,7 @@ def test_a_markdown_change_skips_tests_that_glob_other_files(repo: Path) -> None
             "tests/test_plain.py": "FILES = ROOT.glob('notes.md')\n",
         },
     )
-    assert ci_select.markdown_tests(repo) == {"tests/test_journal.py"}
+    assert decide(repo, ["docs/x.md"]) == ("selected", [["tests/test_journal.py"]])
 
 
 @pytest.mark.feature("ci-select-markdown-glob-tests")
