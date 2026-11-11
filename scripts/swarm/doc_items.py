@@ -10,6 +10,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.ports.tools import Tools
 
 MARK = "doc-items-digest"
+REVISION_MARK = "doc-items-copy-revision"
+COPY_STAMP = "watchdog_copy"
 
 
 def task_ids(tag: str) -> list[str]:
@@ -68,7 +70,19 @@ def digest(document: str) -> str:
     return hashlib.sha256(document.encode()).hexdigest()
 
 
-def map_changed(tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
+def map_changed(doc: dict[str, Any], tools: Tools, deadline: Deadline) -> list[str]:
+    """Read the watchdog copy from the ledger only when the stamp of its last store in the held ledger view moved
+    since the last read, map it with ``map_copy`` and record that stamp revision through the coordination port."""
+    stamps: dict[str, dict[str, Any]] = doc.get("_meta", {}).get("stamps", {})
+    revision = str((stamps.get(COPY_STAMP) or {}).get("rev", ""))
+    if not revision or revision == tools.coordination.marked(REVISION_MARK, deadline=deadline):
+        return []
+    lines = map_copy(doc["tasks"], tools, deadline)
+    tools.coordination.mark(REVISION_MARK, revision, deadline=deadline)
+    return lines
+
+
+def map_copy(tasks: list[dict[str, Any]], tools: Tools, deadline: Deadline) -> list[str]:
     """Map the newest watchdog document copy on the ledger onto ``tasks`` when its digest differs from the last
     mapped one, write the new items through the ledger port and record the digest through the coordination port;
     return the line naming the run."""

@@ -35,6 +35,8 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
         "by": "swarm",
     }
     assert isinstance(copy["at"], int)
+    stamp = client.request(SLUG, "export", {})["data"]["_meta"]["stamps"]["watchdog_copy"]
+    assert (stamp["by"], stamp["at"]) == ("swarm", copy["at"])
     events = [event for event in client.collection(SLUG, "events") if event.get("kind") == "watchdog copy stored"]
     assert [event["id"] for event in events] == ["copy-0", "copy-1"]
 

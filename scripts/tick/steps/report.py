@@ -346,7 +346,7 @@ for _step in STEPS:
 
 def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
     """Map the newest watchdog document copy on the ledger onto its tasks once each time the copy changes."""
-    return doc_items.map_changed(get("doc")["tasks"], get("tools"), get("deadline"))
+    return doc_items.map_changed(get("doc"), get("tools"), get("deadline"))
 
 
 registry.register(

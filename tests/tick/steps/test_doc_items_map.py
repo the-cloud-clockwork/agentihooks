@@ -28,14 +28,17 @@ def _step() -> CallStep:
     return found
 
 
-def _values(copy: str | None, tasks: list[dict[str, Any]], marked: str | None = None) -> dict[str, Any]:
+def _values(
+    copy: str | None, tasks: list[dict[str, Any]], marked: str | None = None, rev: int | None = 7
+) -> dict[str, Any]:
     tools = fake_tools()
     assert isinstance(tools.coordination, FakeCoordination)
     assert isinstance(tools.ledger, FakeLedger)
     tools.coordination.answers["marked"] = marked
     tools.ledger.answers["watchdog_copy"] = {} if copy is None else {"text": copy, "digest": doc_items.digest(copy)}
+    stamps = {} if rev is None else {doc_items.COPY_STAMP: {"rev": rev, "by": "watchdog"}}
     return {
-        "doc": {"tasks": tasks},
+        "doc": {"tasks": tasks, "_meta": {"stamps": stamps}},
         "tools": tools.for_effects(frozenset({"ledger", "coordination"})),
         "deadline": Deadline.after(5),
         "fakes": tools,
@@ -64,6 +67,13 @@ def _coordination(values: dict[str, Any]) -> list[tuple[str, tuple[object, ...]]
     return [(call.operation, call.args) for call in coordination.calls]
 
 
+READ = ("marked", (doc_items.REVISION_MARK,))
+
+
+def _seen(rev: int = 7) -> tuple[str, tuple[object, ...]]:
+    return ("mark", (doc_items.REVISION_MARK, str(rev)))
+
+
 @pytest.mark.feature("tick-doc-items-map")
 def test_doc_items_map() -> None:
     """The doc items map step registers in group wrapper events on the slow lane with its feature and ports."""
@@ -89,17 +99,17 @@ def test_a_new_copy_on_the_ledger_maps_its_items_to_their_tasks_exactly_once() -
         ("update_task", ("t2", {"doc_items": ["3 Range item."]}, (), None)),
     ]
     assert _coordination(values) == [
+        READ,
         ("marked", (doc_items.MARK,)),
         ("mark", (doc_items.MARK, doc_items.digest(COPY))),
+        _seen(),
     ]
-    recorded = _coordination(values)[-1][1][1]
-    assert isinstance(recorded, str)
-    again = _values(COPY, _tasks(), recorded)
+    again = _values(COPY, _tasks(), "7")
     assert _step().call(None, again.__getitem__) == []
-    assert _writes(again) == []
-    assert _coordination(again) == [("marked", (doc_items.MARK,))]
+    assert _ledger(again).calls == []
+    assert _coordination(again) == [READ]
     newer = COPY + "4. [open] New item. [Ledger: t2]\n"
-    changed = _values(newer, _tasks(), recorded)
+    changed = _values(newer, _tasks(), "7", rev=9)
     assert _step().call(None, changed.__getitem__) == [
         "mapped watchdog doc items of the ledger copy: 4 items on 2 tasks, updated t1, t2"
     ]
@@ -107,7 +117,7 @@ def test_a_new_copy_on_the_ledger_maps_its_items_to_their_tasks_exactly_once() -
         ("t1", {"doc_items": ["3 Range item.", "1 First item."]}, (), None),
         ("t2", {"doc_items": ["3 Range item.", "4 New item."]}, (), None),
     ]
-    assert _coordination(changed)[-1] == ("mark", (doc_items.MARK, doc_items.digest(newer)))
+    assert _coordination(changed)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(newer))), _seen(9)]
 
 
 @pytest.mark.feature("tick-doc-items-map")
@@ -115,7 +125,7 @@ def test_an_unchanged_copy_runs_nothing() -> None:
     values = _values(COPY, _tasks(), doc_items.digest(COPY))
     assert _step().call(None, values.__getitem__) == []
     assert _writes(values) == []
-    assert _coordination(values) == [("marked", (doc_items.MARK,))]
+    assert _coordination(values) == [READ, ("marked", (doc_items.MARK,)), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
@@ -124,6 +134,14 @@ def test_a_ledger_without_a_copy_runs_nothing(copy: str | None) -> None:
     values = _values(copy, _tasks())
     assert _step().call(None, values.__getitem__) == []
     assert _writes(values) == []
+    assert _coordination(values) == [READ, _seen()]
+
+
+@pytest.mark.feature("tick-doc-items-map")
+def test_a_ledger_view_without_a_stored_copy_reads_nothing() -> None:
+    values = _values(COPY, _tasks(), rev=None)
+    assert _step().call(None, values.__getitem__) == []
+    assert _ledger(values).calls == []
     assert _coordination(values) == []
 
 
@@ -138,7 +156,7 @@ def test_a_copy_already_on_its_tasks_records_its_digest_without_writes() -> None
         "mapped watchdog doc items of the ledger copy: 3 items on 2 tasks, updated none"
     ]
     assert _writes(values) == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(COPY)))
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(COPY))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
@@ -149,7 +167,7 @@ def test_unknown_tasks_refuse_the_copy_once_until_it_changes() -> None:
         "refused watchdog doc items of the ledger copy: Unknown ledger tasks: t8, t9"
     ]
     assert _writes(values) == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy)))
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(copy))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
@@ -160,7 +178,7 @@ def test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes() -> None:
         "refused watchdog doc items of the ledger copy: Invalid Ledger tag:  nine"
     ]
     assert _writes(values) == []
-    assert _coordination(values)[-1] == ("mark", (doc_items.MARK, doc_items.digest(copy)))
+    assert _coordination(values)[-2:] == [("mark", (doc_items.MARK, doc_items.digest(copy))), _seen()]
 
 
 @pytest.mark.feature("tick-doc-items-map")
