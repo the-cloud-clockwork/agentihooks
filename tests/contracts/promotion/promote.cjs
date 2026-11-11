@@ -755,16 +755,17 @@ for (const context of [
   });
 }
 
-function hotfixRun(f, hotfixConclusion = 'success') {
+function hotfixRun(f, hotfixConclusion = 'success', confirmed = 'success') {
   f.jobs[1].conclusion = 'failure';
-  f.jobs.push({ id: 73, run_id: 42, name: 'Launch hotfix grade', status: 'completed', conclusion: hotfixConclusion },
+  f.jobs.push({ id: 73, run_id: 42, name: 'Launch hotfix grade', status: 'completed', conclusion: hotfixConclusion,
+    steps: [{ name: 'Confirm the launch hotfix route', conclusion: confirmed }] },
     { id: 74, run_id: 42, name: 'coverage-baseline', status: 'completed', conclusion: 'failure' });
 }
 
 test('promotes a launch hotfix past an unrelated red promotion check', async () => {
   const f = fixture();
   hotfixRun(f);
-  await promote({ ...f, hotfix: true });
+  await promote(f);
   assert.equal(f.outputs.main, 'rebased');
   assert.ok(f.writes.some(([kind]) => kind === 'merge'));
   assert.equal(f.grades.at(-1).state, 'success');
@@ -772,7 +773,7 @@ test('promotes a launch hotfix past an unrelated red promotion check', async () 
 
 test('never promotes a red grade outside the launch hotfix route', async () => {
   const f = fixture();
-  hotfixRun(f);
+  hotfixRun(f, 'success', 'skipped');
   await assert.rejects(promote(f), /thirty minutes/);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
   assert.ok(f.grades.every(grade => grade.state !== 'success'));
@@ -781,7 +782,7 @@ test('never promotes a red grade outside the launch hotfix route', async () => {
 test('never promotes a launch hotfix whose own grade failed', async () => {
   const f = fixture();
   hotfixRun(f, 'failure');
-  await assert.rejects(promote({ ...f, hotfix: true }), /thirty minutes/);
+  await assert.rejects(promote(f), /thirty minutes/);
   assert.ok(f.writes.every(([kind]) => kind !== 'merge'));
 });
 
@@ -795,7 +796,7 @@ test('waits for every launch hotfix run job to finish before promoting', async (
     await sleep(ms);
     if (f.now() >= 15000) f.jobs[3].status = 'completed';
   };
-  await promote({ ...f, hotfix: true });
+  await promote(f);
   assert.equal(f.now(), 15000);
   assert.equal(f.outputs.main, 'rebased');
 });

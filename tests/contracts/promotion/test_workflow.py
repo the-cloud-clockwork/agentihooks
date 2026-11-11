@@ -85,7 +85,7 @@ def test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode
     needs["launch-hotfix"].outputs.promote = "true"
     assert enabled(promote["if"], "push", needs)
     assert not enabled(promote["if"], "pull_request", needs)
-    assert promote["with"] == {"hotfix": "${{ needs.launch-hotfix.outputs.promote == 'true' }}"}
+    assert "with" not in promote
 
 
 @pytest.mark.feature("launch-hotfix-promotion")
@@ -99,11 +99,15 @@ def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> No
         assert not enabled(grade["if"], event, {})
     assert "launch-hotfix" not in jobs["gate-required"]["needs"]
     assert grade["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "read"}
-    step = grade["steps"][-1]
+    step, confirm = grade["steps"][-2:]
+    assert step["id"] == "grade"
     assert step["run"].startswith("python -m scripts.ci_launch_hotfix ")
     assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"
-    callee = yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())
-    assert callee[True]["workflow_call"]["inputs"]["hotfix"]["default"] is False
+    assert confirm["name"] == "Confirm the launch hotfix route"
+    assert confirm["if"] == "steps.grade.outputs.promote == 'true'"
+    script = (ROOT / ".github/scripts/promote.cjs").read_text()
+    assert "const HOTFIX_STEP = 'Confirm the launch hotfix route';" in script
+    assert "const HOTFIX_GRADE = 'Launch hotfix grade';" in script
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])

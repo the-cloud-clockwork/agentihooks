@@ -49,8 +49,6 @@ jobs:
     needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree, promotion-ready, launch-hotfix]
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && (needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' || needs.launch-hotfix.outputs.promote == 'true') }}
     uses: ./.github/workflows/promote.yml
-    with:
-      hotfix: ${{ needs.launch-hotfix.outputs.promote == 'true' }}
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
       TCC_CI_APP_PRIVATE_KEY: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
@@ -282,6 +280,10 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci_launch_hotfix --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm the launch hotfix route
+        if: steps.grade.outputs.promote == 'true'
+        run: echo 'The labelled pull request and the unit suite open the launch hotfix route.'
 
   tick-pattern-tree:
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}

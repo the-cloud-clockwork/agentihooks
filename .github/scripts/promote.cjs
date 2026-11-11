@@ -1,5 +1,6 @@
 const GRADE = 'Gate — Required';
 const HOTFIX_GRADE = 'Launch hotfix grade';
+const HOTFIX_STEP = 'Confirm the launch hotfix route';
 const settled = (job, hotfix) => job.status === 'completed' && (hotfix || ['success', 'skipped'].includes(job.conclusion));
 
 async function gradeIsComplete(github, context, api, hotfix = false) {
@@ -109,13 +110,21 @@ async function endSuperseded(core, graded, main, promoted, reason = 'Main alread
   ]).write();
 }
 
-module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now, hotfix = false }) => {
+async function hotfixRoute(github, context, api) {
+  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+    { ...api, run_id: context.runId, filter: 'latest', per_page: 100 });
+  return jobs.some(job => job.run_id === context.runId && job.name === HOTFIX_GRADE && job.status === 'completed' &&
+    job.conclusion === 'success' && (job.steps || []).some(step => step.name === HOTFIX_STEP && step.conclusion === 'success'));
+}
+
+module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
   if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
       context.payload.repository.full_name !== repository) return;
   const api = { owner, repo };
   const triggering = context;
+  const hotfix = await hotfixRoute(github, triggering, api);
   const newer = await newerGreenGrade(github, triggering, api);
   if (newer) {
     core.setOutput('superseded', newer.head_sha);
