@@ -1296,3 +1296,19 @@ def test_a_task_harness_wins_over_the_plan_and_an_unplanned_task_launches_claude
 
     [sent] = world.runtime.requests
     assert sent.task["harness"] == harness
+
+
+@pytest.mark.feature("task-requires-harness")
+@pytest.mark.parametrize(("task", "plan"), [({"harness": "codex"}, "codex"), ({}, "codex"), ({}, None)])
+def test_a_task_requiring_claude_launches_claude_over_its_harness_and_plan(
+    world: World, task: dict[str, str], plan: str | None
+) -> None:
+    world.launcher.planned_harness = lambda task_id: plan
+    config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=OTHER_API)
+    task = {"id": "task", "seat": FIRST, "requires_harness": "claude", **task}
+    request = SpawnRequest(config, "eng", world.store.next_name(SLUG, "eng"), task)
+
+    world.launcher.from_tick(request, world.terms, pod_target)
+
+    [sent] = world.runtime.requests
+    assert sent.task["harness"] == "claude"
