@@ -74,15 +74,21 @@ def case(tmp_path):
     return path
 
 
-def test_the_workflow_target_names_its_slot_with_the_case(case):
-    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot("nightly", str(case))
+def test_the_workflow_target_names_its_slot_with_the_case(case, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot("nightly", str(case), str(tmp_path))
 
 
 def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
     monkeypatch.chdir(case.parent)
     slot = commands.target_slot("workflow", "nightly", "case.json")
-    assert slot == WorkflowSlot("nightly", str(case.resolve()))
-    assert slot.record() == {"kind": "workflow", "name": "nightly", "case": str(case.resolve())}
+    assert slot == WorkflowSlot("nightly", str(case.resolve()), str(case.parent))
+    assert slot.record() == {
+        "kind": "workflow",
+        "name": "nightly",
+        "case": str(case.resolve()),
+        "project": str(case.parent),
+    }
 
 
 @pytest.mark.parametrize(

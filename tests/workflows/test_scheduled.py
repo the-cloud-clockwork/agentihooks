@@ -11,8 +11,8 @@ from hooks import config
 from scripts.inbox import outbox
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import DuplicateItem
-from scripts.scheduler import slots
-from scripts.workflows import scheduled, store
+from scripts.scheduler import commands, slots
+from scripts.workflows import loader, scheduled, store
 
 
 class Spawn:
@@ -40,10 +40,11 @@ def test_start_spawns_one_detached_run_named_by_the_delivery_id(
     (tmp_path / "case.md").write_text("case")
     spawn = Spawn()
 
-    assert scheduled.start("tiny", "case.md", "entry-1:slot-1", "me", popen=spawn) is True
+    assert scheduled.start("tiny", "case.md", "/project", "entry-1:slot-1", "me", popen=spawn) is True
 
     folder = home / "workflows" / "deliveries" / "entry-1:slot-1"
     [(argv, options)] = spawn.calls
+    assert options["cwd"] == "/project"
     assert argv == [
         sys.executable,
         "-m",
@@ -69,22 +70,22 @@ def test_start_spawns_through_popen_by_default() -> None:
 def test_a_redelivery_of_the_same_id_spawns_nothing(home: Path) -> None:
     spawn = Spawn()
 
-    assert scheduled.start("tiny", "/case.md", "entry-1:slot-1", "me", popen=spawn) is True
-    assert scheduled.start("tiny", "/case.md", "entry-1:slot-1", "me", popen=spawn) is False
-    assert scheduled.start("tiny", "/case.md", "entry-2:slot-1", "me", popen=spawn) is True
+    assert scheduled.start("tiny", "/case.md", "/project", "entry-1:slot-1", "me", popen=spawn) is True
+    assert scheduled.start("tiny", "/case.md", "/project", "entry-1:slot-1", "me", popen=spawn) is False
+    assert scheduled.start("tiny", "/case.md", "/project", "entry-2:slot-1", "me", popen=spawn) is True
 
     assert [argv[-1] for argv, _ in spawn.calls] == ["entry-1:slot-1", "entry-2:slot-1"]
 
 
 def test_a_failed_spawn_leaves_the_delivery_free_for_a_retry(home: Path) -> None:
     with pytest.raises(OSError) as raised:
-        scheduled.start("tiny", "/case.md", "entry-1:slot-1", "me", popen=Spawn(OSError("no python")))
+        scheduled.start("tiny", "/case.md", "/project", "entry-1:slot-1", "me", popen=Spawn(OSError("no python")))
 
     assert str(raised.value) == "no python"
 
     assert not (home / "workflows" / "deliveries" / "entry-1:slot-1").exists()
     retry = Spawn()
-    assert scheduled.start("tiny", "/case.md", "entry-1:slot-1", "me", popen=retry) is True
+    assert scheduled.start("tiny", "/case.md", "/project", "entry-1:slot-1", "me", popen=retry) is True
     assert len(retry.calls) == 1
 
 
@@ -93,7 +94,7 @@ def test_a_delivery_id_that_is_not_one_name_is_refused(home: Path, delivery_id: 
     spawn = Spawn()
 
     with pytest.raises(ValueError) as raised:
-        scheduled.start("tiny", "/case.md", delivery_id, "me", popen=spawn)
+        scheduled.start("tiny", "/case.md", "/project", delivery_id, "me", popen=spawn)
 
     assert str(raised.value) == "run identifier must be a single name"
 
@@ -102,10 +103,10 @@ def test_a_delivery_id_that_is_not_one_name_is_refused(home: Path, delivery_id: 
 
 
 def test_the_workflow_kind_round_trips_its_record() -> None:
-    slot = slots.WorkflowSlot("tiny", "/case.md")
+    slot = slots.WorkflowSlot("tiny", "/case.md", "/project")
 
     assert slots.KINDS["workflow"] is slots.WorkflowSlot
-    assert slot.record() == {"kind": "workflow", "name": "tiny", "case": "/case.md"}
+    assert slot.record() == {"kind": "workflow", "name": "tiny", "case": "/case.md", "project": "/project"}
     assert slots.restore(slot.record()) == slot
 
 
@@ -113,9 +114,56 @@ def test_the_workflow_slot_delivers_through_start(monkeypatch: pytest.MonkeyPatc
     started = []
     monkeypatch.setattr(scheduled, "start", lambda *args: started.append(args) or True)
 
-    assert slots.WorkflowSlot("tiny", "/case.md").deliver({"owner": "me"}, "entry-1:slot-1", cast(Any, None)) is None
+    slot = slots.WorkflowSlot("tiny", "/case.md", "/project")
+    assert slot.deliver({"owner": "me"}, "entry-1:slot-1", cast(Any, None)) is None
 
-    assert started == [("tiny", "/case.md", "entry-1:slot-1", "me")]
+    assert started == [("tiny", "/case.md", "/project", "entry-1:slot-1", "me")]
+
+
+PROJECT_ONLY = (
+    "workflow:\n"
+    "  name: project-only\n"
+    "  intent: Build it.\n"
+    "  head: build\n"
+    "  exit: build.pass\n"
+    "stages:\n"
+    "  build:\n"
+    "    profile: engineer\n"
+    "    next:\n"
+    "      pass: exit\n"
+)
+
+
+def test_a_fired_schedule_starts_a_workflow_defined_only_in_its_scheduling_project(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    (project / loader.PROJECT_WORKFLOWS).mkdir(parents=True)
+    (project / loader.PROJECT_WORKFLOWS / "project-only.yaml").write_text(PROJECT_ONLY)
+    (project / "case.md").write_text("case")
+    monkeypatch.setattr(loader.profile_chain, "read_state", lambda: {})
+    monkeypatch.chdir(project)
+    record = commands.target_slot("workflow", "project-only", "case.md").record()
+    (tmp_path / "scheduler").mkdir()
+    monkeypatch.chdir(tmp_path / "scheduler")
+    started: list[tuple[Path, str]] = []
+
+    def execute(folder: Path, state: dict[str, Any]) -> dict[str, str]:
+        started.append((folder, state["definition"]["workflow"]["name"]))
+        return {"status": "passed"}
+
+    def spawn(argv: list[str], **options: object) -> None:
+        monkeypatch.chdir(str(options["cwd"]))
+        assert scheduled.main(argv[3:]) == 0
+
+    monkeypatch.setattr(scheduled.cli, "execute", execute)
+    monkeypatch.setattr(scheduled, "notify", lambda owner, delivery_id: None)
+    slot = cast(slots.WorkflowSlot, slots.restore(record))
+
+    assert scheduled.start(slot.name, slot.case, slot.project, "entry-1:slot-1", "me", popen=spawn) is True
+
+    assert started == [(home / "workflows" / "runs" / "entry-1:slot-1", "project-only")]
 
 
 class Inbox:
