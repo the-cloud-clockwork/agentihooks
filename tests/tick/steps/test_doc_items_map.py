@@ -1,15 +1,19 @@
 """The doc items map tick step maps a changed watchdog document copy onto its tasks once per change."""
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from importlib import import_module
+from time import sleep
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from scripts.swarm import doc_items
-from scripts.tick import registry
+from scripts.tick import engine, pool, registry
 from scripts.tick.adapters.fakes import FakeCoordination, FakeLedger, fake_tools
 from scripts.tick.deadline import Deadline
+from scripts.tick.step import Context, Domain, Lane, Result
 from scripts.tick.steps import CallStep, pass_domains
 
 pytestmark = pytest.mark.unit
@@ -211,3 +215,61 @@ def test_the_coordination_store_reads_back_the_mark_it_wrote() -> None:
     assert port.mark(doc_items.MARK, "abc", deadline=deadline) is True
     assert port.marked(doc_items.MARK, deadline=deadline) == "abc"
     assert store.redis.values == {"swarm:sw:doc-items-digest": "abc"}
+
+
+HOOK_S = 0.4
+
+
+@dataclass
+class _Timed:
+    name: str
+    group: str
+    needs: frozenset[str] = frozenset()
+    lane: Lane = Lane("critical")
+    budget_s: float = 6 * HOOK_S
+    action: Callable[[Context], Result] = field(default=lambda ctx: Result())
+    interval_s: float = 0.0
+    reads: frozenset[Domain] = frozenset()
+    writes: frozenset[Domain] = frozenset()
+    effects: frozenset[str] = frozenset()
+    feature: str = ""
+
+    def run(self, ctx: Context) -> Result:
+        return self.action(ctx)
+
+
+class _View:
+    def read(self, domain: Domain, key: str) -> object | None:
+        return None
+
+
+def _pause(ctx: Context) -> Result:
+    sleep(HOOK_S / 8)
+    return Result()
+
+
+def _late_view_hook() -> bool:
+    sleep(HOOK_S)
+    return True
+
+
+def _never_shut(step: object) -> bool:
+    return False
+
+
+@pytest.mark.feature("tick-doc-items-map")
+def test_the_step_runs_when_the_wrapper_view_hook_answers_past_its_budget() -> None:
+    real = _step()
+    view = {step.name: step for step in registry.steps()}["tick view"]
+    steps = (
+        _Timed("ledger state", "observe", lane=engine.SLOW, action=_pause),
+        _Timed("drained resume", "observe", lane=engine.SLOW, action=_pause),
+        _Timed("tick view", view.group),
+        _Timed(real.name, real.group, real.needs, real.lane, HOOK_S / 4),
+    )
+    gate = engine.SiteGate({view.group: _late_view_hook}, _never_shut, sites=("observe", view.group, real.group))
+    later: list[tuple[engine.StepRecord, ...]] = []
+    with pool.running(workers=2, critical_s=6 * HOOK_S, slow_s=6 * HOOK_S):
+        records = engine.run_graph(steps, Context(_View(), Deadline.after(10.0)), finished=later.append, gate=gate)
+    found = {record.name: record for record in (*records, *later[0])}
+    assert (found[real.name].outcome, found[real.name].rested) == (engine.OK, False)
