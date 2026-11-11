@@ -1,6 +1,17 @@
 {
   "features": [
     {
+      "id": "swarm-master-skips-host-hold",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
+      "behaviour": "An over budget host room never holds a master spawn, the lead launch or an extra seat, the same way workstation admission passes the master lane; the master launch still counts against the room and an over budget engineer spawn stays held.",
+      "seam": "master_fill.run and the masters step master launch against the tick spawn stop host check",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_an_over_budget_host_launches_the_master_and_still_holds_an_engineer",
+        "tests/swarm/test_master_fill.py::test_a_full_host_never_holds_the_seat"
+      ]
+    },
+    {
       "id": "local-enforcements-store-ignored",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
@@ -626,7 +637,7 @@
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_starts_only_once_the_old_lead_ended",
         "tests/tick/steps/test_master_placement_ops.py::test_a_seated_non_lead_master_never_holds_the_start",
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_without_a_slot_is_recorded_as_waiting",
-        "tests/tick/steps/test_master_placement_ops.py::test_a_host_hold_stops_the_master_unless_it_starts_past_the_host",
+        "tests/tick/steps/test_master_placement_ops.py::test_a_host_hold_never_stops_the_master",
         "tests/tick/steps/test_master_placement_ops.py::test_a_master_refused_for_room_withdraws_its_start",
         "tests/tick/steps/test_master_placement_ops.py::test_a_failed_master_spawn_marks_the_transfer_and_affinity_failed",
         "tests/tick/steps/test_master_placement_ops.py::test_a_reported_master_is_working_and_clears_its_start",
