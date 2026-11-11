@@ -4580,7 +4580,7 @@ installed code has delivered a tick; until then they keep ticking (see
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
 minutes (see [The tick holder](#the-tick-holder)). Tick output goes to the user journal under the
 `agentihooks-swarm` identifier when `systemd-cat` is on the path, whether the scheduler cron or the fallback service
-ran it, and to `swarm-tick.log` otherwise; a hand run prints to its terminal: `TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`.
+ran it; without `systemd-cat` a scheduler cron run writes to `swarm-tick.log` and the fallback to its unit journal; a hand run prints to its terminal: `TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`.
 Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
 whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
@@ -4712,7 +4712,7 @@ retries it.
 
 | What | Where |
 |---|---|
-| Tick pass output | `journalctl --user -t agentihooks-swarm`; in `swarm-tick.log` when `systemd-cat` is missing |
+| Tick pass output | `journalctl --user -t agentihooks-swarm`; when `systemd-cat` is missing, `swarm-tick.log` for a scheduler cron run and `journalctl --user -u agentihooks-swarm.service` for the fallback |
 | Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder for a holder the scheduler cron started; `journalctl --user -u agentihooks-swarm.service` for the fallback holder |
 | Scheduler supervisor output | `scheduler.log` in the scheduler runtime folder when the supervisor was not started by `agentihooks-scheduler.service`; that unit's journal otherwise |
 
@@ -5024,7 +5024,7 @@ systemctl --user status agentihooks-swarm-waits.service --no-pager
 
 # Ticks killed by a service stop in a window. journalctl reads --since and --until in local time, so set TZ
 # to give the window in UTC
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
+TZ=UTC journalctl --user -t agentihooks-swarm --since "<YYYY-MM-DD HH:MM:SS>" --until "<YYYY-MM-DD HH:MM:SS>" \
   --no-pager | grep -c "stopped by the service"
 
 # Recycles in the same window, so a zero above covers syncs that did happen
