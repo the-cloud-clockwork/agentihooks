@@ -3068,9 +3068,10 @@ common outbox columns (`event_id`, `ledger`, `ts_ms`, and empty `plan`,
 `phase`, `slice` and `task`).
 
 **`ledger_probes`** holds the ledger probe's latest pass, one row per probe
-pass. The tick's ledger probe step times one ledger read and one ledger write; the row
-keeps the probe's own time in `ts_ms`, so a pass already exported is written
-again under the same `event_id` and collapses in a `FINAL` read.
+pass. The tick's ledger probe step times one ledger read and one ledger
+write; the row keeps the probe's own time in `ts_ms`, so a pass already
+exported is written again under the same `event_id` and collapses in a `FINAL`
+read.
 
 | Column | Meaning |
 |---|---|
@@ -3120,14 +3121,14 @@ by the dashboard's `ledger` variable and the time range.
 
 | Panel | Source | Shows |
 |---|---|---|
-| Ledger read, p95 | `ledger_probes` | 95th percentile of `read_s` over passes whose read did not fail. |
-| Ledger write, p95 | `ledger_probes` | 95th percentile of `write_s` over passes whose write did not fail. |
-| Ledger timeouts | `ledger_probes` | Reads plus writes whose failure is `timed out`. |
-| Hive recoveries | `hive_samples` | Rows with `live` 1 whose previous row for the same hive had `live` 0. |
-| Ledger response time | `ledger_probes` | `read_s` and `write_s` per pass, failed passes included. |
-| Ledger read and write timeouts per hour | `ledger_probes` | Read timeouts, write timeouts and passes with any failure, per hour. |
-| Hive heartbeat age | `hive_samples` | `heartbeat_age_s` per hive name; hives that never beat (-1) are left out. |
-| Hive recovery per hive | `hive_samples` | Per hive: recoveries, samples with `live` 0, `live` at the latest sample and the last sample time. |
+| Ledger read, p95 | `swarm.ledger_probes` | 95th percentile of `read_s` over passes whose read did not fail. |
+| Ledger write, p95 | `swarm.ledger_probes` | 95th percentile of `write_s` over passes whose write did not fail. |
+| Ledger timeouts | `swarm.ledger_probes` | Reads plus writes whose failure is `timed out`. |
+| Hive recoveries | `swarm.hive_samples` | Rows with `live` 1 whose previous row for the same hive had `live` 0. |
+| Ledger response time | `swarm.ledger_probes` | `read_s` and `write_s` per pass, failed passes included. |
+| Ledger read and write timeouts per hour | `swarm.ledger_probes` | Read timeouts, write timeouts and passes with any failure, per hour. |
+| Hive heartbeat age | `swarm.hive_samples` | `heartbeat_age_s` per hive name; hives that never beat (-1) are left out. |
+| Hive recovery per hive | `swarm.hive_samples` | Per hive: recoveries, samples with `live` 0, `live` at the latest sample and the last sample time. |
 
 The panels draw a point only per metrics pass, so they update at most once per
 `AGENTIHOOKS_METRICS_EVERY_MINUTES` (default 10). A recovery counts only when
