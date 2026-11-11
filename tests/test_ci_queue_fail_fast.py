@@ -174,7 +174,9 @@ def test_every_merge_queue_job_but_the_watcher_is_graded() -> None:
         "ledger-load",
         "feature-suite",
         "hierarchy-cpu",
+        "tick-scale",
         "tick-pattern-tree",
+        "launch-hotfix",
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():
         expected.remove("count-record")

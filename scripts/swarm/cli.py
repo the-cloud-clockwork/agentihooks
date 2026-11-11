@@ -137,6 +137,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -594,8 +595,11 @@ class _PassSpool:
         from scripts.swarm import metrics_outbox
 
         spool: Any = metrics_outbox
+        sink = spool.settings(os.environ)
+        if sink is None:
+            return
         if self._box is None:
-            self._box = spool.Outbox(spool.spool_path(), spool.settings(os.environ))
+            self._box = spool.Outbox(spool.spool_path(), sink)
         self._box.append_many(batches, checkpoint)
 
 
@@ -619,6 +623,7 @@ def _fenced(held: object, deployment: str) -> Any:
 
 def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
+    from scripts.swarm import dispatcher
 
     swarm: Any = store
     settings: Any = classifier_settings.load()
@@ -634,7 +639,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),
-        metrics=SpoolMetrics(_PassSpool(), {}),
+        metrics=SpoolMetrics(_PassSpool(), {dispatcher.TABLE.name: dispatcher.TABLE}),
         host=local_host(store, slug, os.environ),
     )
 
@@ -2167,7 +2172,7 @@ def _require_target(store: object, args: argparse.Namespace, task_id: str) -> No
     done_gate.require_target(store, args.slug, task_id, args.url, rows + ledger.tasks_targeting(args.slug, args.url))
 
 
-def cmd_merge(store, args):
+def cmd_merge(store: Any, args: argparse.Namespace) -> None:
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
@@ -2176,6 +2181,9 @@ def cmd_merge(store, args):
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
+        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
+        hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:
             done_gate.require_local(store, args.slug, agent.task)
@@ -2187,7 +2195,7 @@ def cmd_merge(store, args):
                 admit=lambda head: (
                     (not hotfix and _queue_intent(store, args, agent, head)) or queue_exit.require_fresh(args.url, head)
                 ),
-                journal=queue_record.Journal(args.url),
+                journal=queue_record.Journal(args.url, context=stalled),
                 attempts=merge_queue.ATTEMPTS,
             )
         else:
