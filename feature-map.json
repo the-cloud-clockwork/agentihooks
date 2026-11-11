@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "claude-trust-lock-reclaim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",
+      "behaviour": "An agent launch that marks its folder trusted in a shared profile home's Claude config reclaims a lock directory left past the Claude lockfile stale bound by a killed launch and marks the folder, while a lock younger than the bound still blocks until the timeout.",
+      "seam": "claude_trust.ensure_trusted through _mark and _reclaim on the Claude config lock directory",
+      "tests": [
+        "tests/test_claude_trust.py::test_an_abandoned_lock_from_a_killed_launch_is_reclaimed_and_the_folder_marked",
+        "tests/test_claude_trust.py::test_a_lock_held_by_a_live_holder_still_blocks_the_mark",
+        "tests/test_claude_trust.py::test_a_lock_just_inside_the_stale_bound_is_left_to_its_holder",
+        "tests/test_claude_trust.py::test_a_lock_past_the_stale_bound_is_removed_and_a_vanished_one_reads_as_free"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
