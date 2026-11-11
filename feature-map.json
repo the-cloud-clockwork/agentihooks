@@ -23,6 +23,16 @@
       ]
     },
     {
+      "id": "failed-panes-report-hash-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-share",
+      "behaviour": "The failed launch panes report in the published tick status reads only the launches hash, where pane lines are written, and never reads the whole swarm history list, which cost the closing status publish step about a second each pass.",
+      "seam": "scripts.swarm.failed_panes.report against the store launches hash and history list",
+      "tests": [
+        "tests/swarm/test_failed_launch_panes.py::test_the_failed_panes_report_reads_the_launches_hash_and_never_the_history_list"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
@@ -2340,6 +2350,17 @@
         "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header",
         "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused",
         "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_tick_credential_plan_upload_is_never_taken_as_the_operator"
+      ]
+    },
+    {
+      "id": "plain-shell-plan-ingest",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-ingest-plain-shell",
+      "behaviour": "Plan ingest run from a plain operator shell with no Claude or Codex session in its environment records a shell session named from the host and the shell process, and the ledger accepts the plan; a Codex run records its thread.",
+      "seam": "plan ingest source and the ledger plan batch",
+      "tests": [
+        "tests/plans/test_ingest.py::test_source_names_the_codex_thread_or_else_the_plain_shell",
+        "tests/plans/test_ingest.py::test_a_plain_shell_ingest_with_no_agent_session_is_accepted_with_a_named_shell_session"
       ]
     },
     {
