@@ -1811,6 +1811,15 @@
       ]
     },
     {
+      "id": "tick-inbox-store-lookup",
+      "origin": "inventory",
+      "behaviour": "Preempt, the run window, the dispatcher seat and ledger events keep no inbox store class bound at import, so a first import under a patched store leaves later calls on the real store.",
+      "seam": "Module globals of the tick modules in scripts.swarm",
+      "tests": [
+        "tests/swarm/test_inbox_store_lookup.py::test_a_first_import_under_a_patched_inbox_store_keeps_no_fake"
+      ]
+    },
+    {
       "id": "inbox-wake",
       "origin": "inventory",
       "behaviour": "An idle Codex pane with a pending item gets exactly one typed wake; a busy pane, a Claude pane with its inbox channel and the master pane are never typed into.",
