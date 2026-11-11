@@ -452,6 +452,7 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
 | `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default the rest of the launch deadline); see [Canary deadline](profile-launch-home.md#canary-deadline) |
 | `--launch-until` | Epoch milliseconds by which the launch must return; bounds the launch deadline. A hive passes its launch order's expiry less an acknowledgement margin |
+| `--defer-canary` | With `--profile`: return once the launcher starts, printing `route_status=pending`, `profile_validation=pending` and `profile_report=<path>`; a detached child finishes the route and canary waits and writes any failure into that report. The swarm tick passes it for Claude masters; see [Deferred master canary](profile-launch-home.md#deferred-master-canary) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
 | `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
 | `--overlay <name>` | Overlay the profile wears; repeat for up to three |
