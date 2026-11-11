@@ -3,6 +3,8 @@
 Each package under ``agents/<agent>/package`` becomes ``profiles/<name>`` in the
 bundle: ``command.yml`` turns into ``profile.yml``, instructions, skills and rules
 are copied, and Claude settings become overrides with absolute paths removed.
+``state/`` and ``reports/`` go to a runtime data folder, Node and pip installs
+become bundle ``deps.json`` entries, and evaluation cases become judge cases.
 Secret files, symlinks, unsafe names and taken names refuse the whole import
 before any file is read for content or written; literal credential values and
 guard hooks the import would drop refuse it before any write. Profiles are
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -54,25 +57,60 @@ ENV_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_
 ENV_TEMPLATES = frozenset({"dist", "example", "sample", "template"})
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:[\\/]|file:/|\\\\)")
+DATA = ("state", "reports")
+CASES = "evaluation/cases"
+CASE_SUFFIXES = (".yaml", ".yml")
+DEPS = "deps.json"
+EMPTY_DEPS = '{\n  "deps": [\n  ]\n}\n'
+INSTALLS = (("npm", "package.json"), ("pip", "requirements.txt"))
+CHECKS = {
+    "npm": ("npm", "ls", "--global"),
+    "pip": ("python3", "-c", "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"),
+}
+INSTALL_COMMANDS = {"npm": ("npm", "install", "--global"), "pip": ("python3", "-m", "pip", "install")}
+REQUIREMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+LOCAL_VERSIONS = ("file:", "link:", ".")
+EMPTY: tuple[object, ...] = (None, "", [], {})
 _DROP = object()
 
 
-def import_hub(src: Path, out: Path, dry_run: bool) -> dict[str, object]:
-    """Convert every hub package under ``src`` into a profile under ``out``."""
+def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) -> dict[str, object]:
+    """Convert every hub package under ``src`` into a profile under ``out``, its runtime data under ``data``."""
+    data = data or Path(os.environ.get("AGENTIHOOKS_HOME", Path.home() / ".agentihooks")) / "hub-data"
     packages = _packages(src)
     for package in packages:
         _refuse_unsafe_files(package)
     plans: dict[str, dict[str, bytes]] = {}
+    stores: dict[str, dict[str, bytes]] = {}
+    deps: list[dict[str, object]] = []
     for package in packages:
         command = _command(package)
         name = _profile_name(command, package.parent.name)
         if name in plans or (out / "profiles" / name).exists():
             raise ValueError(f"profile name taken: {name}")
-        plans[name] = _plan(package, name, command)
+        if (data / "profiles" / name).exists():
+            raise ValueError(f"profile data taken: {name}")
+        plans[name] = _plan(package, name, command) | _cases(package.parent / CASES)
+        stores[name] = _collect(package, DATA)
+        deps.extend(_deps(package, name))
+    manifest = _manifest(out / DEPS, deps)
     if not dry_run:
         _write(out, plans)
+        if any(stores.values()):
+            _write(data, {name: files for name, files in stores.items() if files})
+        if deps:
+            _replace(out / DEPS, manifest)
     files = sorted(f"profiles/{name}/{relative}" for name, plan in plans.items() for relative in plan)
-    return {"profiles": sorted(plans), "files": files, "dry_run": dry_run}
+    return {
+        "profiles": sorted(plans),
+        "files": files,
+        "data": sorted(
+            str(data / "profiles" / name / relative) for name, store in stores.items() for relative in store
+        ),
+        "deps": [str(dep["id"]) for dep in deps],
+        "cases": [path for path in files if path.split("/", 2)[2].startswith("cases/")],
+        "dry_run": dry_run,
+    }
 
 
 def _packages(src: Path) -> list[Path]:
@@ -155,13 +193,7 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}
-    for relative in COPIED:
-        source = package / relative
-        paths = [source] if source.is_file() else sorted(source.rglob("*"))
-        for path in paths:
-            if path.is_file():
-                files[path.relative_to(package).as_posix()] = path.read_bytes()
+    files = {"profile.yml": yaml.safe_dump(_profile(command, name)).encode()} | _collect(package, COPIED)
     settings_path = package / SETTINGS
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
@@ -172,6 +204,148 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         if portable is not _DROP:
             files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
     return files
+
+
+def _collect(package: Path, relatives: tuple[str, ...]) -> dict[str, bytes]:
+    """Return each file under the given package paths by its path relative to the package."""
+    files: dict[str, bytes] = {}
+    for relative in relatives:
+        source = package / relative
+        paths = [source] if source.is_file() else sorted(source.rglob("*"))
+        for path in paths:
+            if path.is_file():
+                files[path.relative_to(package).as_posix()] = path.read_bytes()
+    return files
+
+
+def _cases(folder: Path) -> dict[str, bytes]:
+    """Return a judge case file for each hub evaluation case in ``folder``."""
+    files: dict[str, bytes] = {}
+    for path in sorted(folder.glob("*")):
+        if path.suffix in CASE_SUFFIXES:
+            if path.is_symlink():
+                raise ValueError(f"symlink refused: {path}")
+            files[f"cases/{path.stem}.json"] = (json.dumps(_judge_case(path), indent=2) + "\n").encode()
+    return files
+
+
+def _judge_case(path: Path) -> dict[str, object]:
+    """Map a hub evaluation case onto a judge case: its description as intent, each expectation a point."""
+    loaded: object = yaml.safe_load(path.read_text())
+    if not _is_mapping(loaded):
+        raise ValueError(f"eval case is not a mapping: {path}")
+    intent = loaded.get("description") or loaded.get("name")
+    expected = loaded.get("expected")
+    points = _points(expected) if _is_mapping(expected) else []
+    if not isinstance(intent, str) or not intent or not points:
+        raise ValueError(f"eval case needs an intent and points: {path}")
+    case: dict[str, object] = {"intent": intent, "points": points}
+    if any(secrets.scan(text, mode="strict") for text in secrets.iter_strings(case)):
+        raise ValueError(f"literal credential refused: {path}")
+    return case
+
+
+def _points(expected: dict[str, object]) -> list[str]:
+    """Return one point per non-empty expectation item."""
+    points: list[str] = []
+    for key, value in expected.items():
+        for item in value if _is_list(value) else [value]:
+            if item not in EMPTY:
+                points.append(f"{key}: {item if isinstance(item, str) else json.dumps(item, default=str)}")
+    return points
+
+
+def _deps(package: Path, name: str) -> list[dict[str, object]]:
+    """Return a bundle deps entry for each Node and pip manifest in the package that installs something."""
+    entries: list[dict[str, object]] = []
+    for kind, manifest in INSTALLS:
+        for path in sorted(package.rglob(manifest)):
+            if "node_modules" in path.relative_to(package).parts:
+                continue
+            names, specs = _npm(path) if kind == "npm" else _pip(path)
+            folder = path.parent.relative_to(package).as_posix()
+            if specs:
+                entries.append(
+                    {
+                        "id": f"{name}-{kind}-{'root' if folder == '.' else folder.replace('/', '-')}",
+                        "kind": kind,
+                        "check": [*CHECKS[kind], *names],
+                        "install": [*INSTALL_COMMANDS[kind], *specs],
+                    }
+                )
+    return entries
+
+
+def _npm(path: Path) -> tuple[list[str], list[str]]:
+    """Return the package names and install specs of a ``package.json``'s dependencies, refusing local paths."""
+    loaded: object = json.loads(path.read_text())
+    dependencies = loaded.get("dependencies") if _is_mapping(loaded) else None
+    pairs = sorted(dependencies.items()) if _is_mapping(dependencies) else []
+    for _, version in pairs:
+        if not isinstance(version, str) or ABSOLUTE.search(version) or version.startswith(LOCAL_VERSIONS):
+            raise ValueError(f"install from a local path refused: {path}")
+    return [package for package, _ in pairs], [f"{package}@{version}" for package, version in pairs]
+
+
+def _pip(path: Path) -> tuple[list[str], list[str]]:
+    """Return the distribution names and install specs of a ``requirements.txt``, refusing what a name cannot check."""
+    names: list[str] = []
+    specs: list[str] = []
+    for line in path.read_text().splitlines():
+        text = line.partition("#")[0].strip().removesuffix("\\").strip()
+        tokens = text.split()
+        if any(token.startswith("-") and not token.startswith("--hash") for token in tokens):
+            raise ValueError(f"requirements option refused: {text} in {path}")
+        spec = " ".join(token for token in tokens if not token.startswith("-"))
+        if not spec:
+            continue
+        match = REQUIREMENT.match(spec)
+        if not match or "@" in spec or "://" in spec:
+            raise ValueError(f"requirement without a checkable name refused: {spec} in {path}")
+        names.append(match.group())
+        specs.append(spec)
+    return names, specs
+
+
+def _manifest(path: Path, entries: list[dict[str, object]]) -> bytes:
+    """Return the bundle deps manifest with ``entries`` appended, keeping existing text, refusing a taken id."""
+    text = path.read_text() if path.is_file() else EMPTY_DEPS
+    loaded: object = json.loads(text)
+    current = loaded.get("deps") if _is_mapping(loaded) else None
+    if not _is_mapping(loaded) or not _is_list(current):
+        raise ValueError(f"deps.json has no deps list: {path}")
+    taken = {dep.get("id") for dep in current if _is_mapping(dep)}
+    for entry in entries:
+        if entry["id"] in taken:
+            raise ValueError(f"deps.json entry taken: {entry['id']}")
+        taken.add(entry["id"])
+    expected = loaded | {"deps": [*current, *entries]}
+    body = text.rstrip().removesuffix("}").rstrip()
+    rendered = ",\n".join(
+        "    {\n"
+        + ",\n".join(f"      {json.dumps(key)}: {json.dumps(value)}" for key, value in entry.items())
+        + "\n    }"
+        for entry in entries
+    )
+    appended = f"{body.removesuffix(']').rstrip()}{',' if current else ''}\n{rendered}\n  ]\n}}\n"
+    if not body.endswith("]") or not _parses_to(appended, expected):
+        appended = json.dumps(expected, indent=2) + "\n"
+    return appended.encode()
+
+
+def _parses_to(text: str, expected: object) -> bool:
+    """Tell whether ``text`` is JSON equal to ``expected``."""
+    try:
+        return json.loads(text) == expected
+    except json.JSONDecodeError:
+        return False
+
+
+def _replace(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` through a sibling file so a reader never sees it half written."""
+    staged = path.with_name(f".{path.name}.tmp")
+    staged.write_bytes(data)
+    staged.replace(path)
 
 
 def _refuse_lost_restrictions(settings: object, path: Path) -> None:
@@ -241,8 +415,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("src")
     parser.add_argument("out")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--data")
     args = parser.parse_args(argv)
-    print(json.dumps(import_hub(Path(args.src), Path(args.out), args.dry_run is True)))
+    data = Path(args.data) if args.data else None
+    print(json.dumps(import_hub(Path(args.src), Path(args.out), args.dry_run is True, data)))
     return 0
 
 

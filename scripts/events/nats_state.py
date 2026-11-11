@@ -20,6 +20,10 @@ LAST_SUBJECT_SEQUENCE = "Nats-Expected-Last-Subject-Sequence"
 HISTORY = 64
 
 
+class LegacyStateUnowned(RuntimeError):
+    """A swarm's scoped state stream cannot be created over a legacy bucket that still holds entries."""
+
+
 class ScopedStateStore:
     def __init__(self, root: "NatsBus", swarm: str, bucket: str, *, importing: bool = False):
         self._root, self._swarm, self._bucket = root, swarm, bucket
@@ -46,7 +50,9 @@ class ScopedStateStore:
             except NotFoundError:
                 legacy = None
             if legacy is not None and legacy.state.messages and not importing:
-                raise RuntimeError("legacy state requires explicit key ownership")
+                raise LegacyStateUnowned(
+                    f"legacy state requires explicit key ownership: swarm {self._swarm!r} bucket {self._bucket!r}"
+                )
             await self._root._js.add_stream(
                 name=self._stream,
                 subjects=[f"{subject(self._swarm, 'state', self._bucket)}.>"],

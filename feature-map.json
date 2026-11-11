@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "ci-select-markdown-glob-tests",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
+      "behaviour": "A pull request that changes markdown selects every test module that calls glob or rglob with a literal pattern ending in a markdown wildcard, so a markdown only change runs the docs tests that read it before the merge queue does, and a change with no markdown leaves them out.",
+      "seam": "scripts.ci_select.selected_tests through scripts.ci_select.decide",
+      "tests": [
+        "tests/test_ci_select.py::test_a_markdown_only_change_selects_the_tests_that_glob_markdown",
+        "tests/test_ci_select.py::test_a_markdown_change_skips_tests_that_glob_other_files",
+        "tests/test_ci_select.py::test_a_source_change_does_not_select_the_tests_that_glob_markdown"
+      ]
+    },
+    {
       "id": "hive-launch-pane-off-controller-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2481",
@@ -89,6 +101,17 @@
         "tests/events/test_nats_batch_units.py::test_read_entries_keeps_key_order_and_reads_deleted_or_missing_keys_as_none",
         "tests/events/test_nats_batch_units.py::test_the_key_value_store_reads_many_keys_through_its_bucket_stream",
         "tests/events/test_nats_batch_units.py::test_the_scoped_store_reads_many_keys_through_its_swarm_stream"
+      ]
+    },
+    {
+      "id": "hub-fan-in-unowned-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-readiness-key-ownership",
+      "behaviour": "The hub's scoped event fan in skips a swarm whose scoped state stream cannot be created over a legacy key value bucket that still holds entries, prints one line naming that swarm and bucket, and keeps fetching every other swarm's events, so one unmigrated swarm cannot stop the readiness offer poll or any other reactor for the rest.",
+      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
+      "tests": [
+        "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
       ]
     },
     {
@@ -1744,6 +1767,57 @@
       ]
     },
     {
+      "id": "hub-import-data",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package state and reports move to a runtime data folder outside the profile, staged like profiles, refusing an occupied data folder.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_state_and_reports_move_to_the_data_folder",
+        "tests/profiles/test_hub_import.py::test_a_package_without_state_writes_no_data_folder",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_defaults_under_the_agentihooks_home",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_falls_back_to_the_home_folder",
+        "tests/profiles/test_hub_import.py::test_an_occupied_data_folder_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_the_command_line_takes_the_data_folder"
+      ]
+    },
+    {
+      "id": "hub-import-deps",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package Node and pip manifests become bundle deps.json entries with check and install commands, refusing a taken id or an install from an absolute path.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_node_and_pip_installs_become_deps_entries",
+        "tests/profiles/test_hub_import.py::test_a_bundle_without_deps_gets_a_new_manifest",
+        "tests/profiles/test_hub_import.py::test_new_deps_entries_append_without_rewriting_existing_entries",
+        "tests/profiles/test_hub_import.py::test_a_manifest_the_append_cannot_keep_is_rewritten_whole",
+        "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
+        "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_install_folders_with_one_id_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_a_deps_manifest_without_a_deps_list_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_profiles_with_one_install_folder_get_separate_ids",
+        "tests/profiles/test_hub_import.py::test_an_npm_install_from_a_local_path_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_requirements_option_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_requirement_without_a_checkable_name_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_dry_run_reports_deps_without_writing_the_manifest"
+      ]
+    },
+    {
+      "id": "hub-import-evals",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub evaluation cases become judge cases holding intent and points, refusing a case without either, a symlinked case and a case holding a literal credential.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_eval_cases_become_judge_cases",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_without_intent_or_points_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_that_is_not_a_mapping_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_symlinked_eval_case_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_holding_a_credential_refuses_the_import"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
@@ -2253,6 +2327,19 @@
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_svg_is_stored_without_scripts_handlers_or_script_links",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_anything_else_is_refused",
         "tests/swarm_ledger/test_artifacts.py::TestStore::test_an_oversize_file_is_refused"
+      ]
+    },
+    {
+      "id": "operator-host-plan-upload",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2482",
+      "behaviour": "Plan ingest run by the operator on the host passes: its plan upload, carrying the operator credential with no Origin, passes the ledger server upload check with the operator agent header or none, and its source records the session Claude Code injects; a non plan upload by the operator, a plan upload by an agent that never joined and a plan upload carrying a tick credential are still refused.",
+      "seam": "ledger server receive upload check on the artifact upload route, and plan ingest source",
+      "tests": [
+        "tests/plans/test_ingest.py::test_source_records_the_session_claude_code_injects",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_host_plan_ingest_upload_by_the_operator_passes_with_or_without_the_agent_header",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_plan_upload_by_an_agent_that_never_joined_is_still_refused",
+        "tests/swarm_ledger/test_artifacts.py::TestOperatorHostPlanUpload::test_a_tick_credential_plan_upload_is_never_taken_as_the_operator"
       ]
     },
     {
@@ -3796,6 +3883,26 @@
       ]
     },
     {
+      "id": "tick-spawn-metrics-processes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-spawn-pass-ports",
+      "behaviour": "The spawn pass writes its claim cap and dispatcher gate log rows and its dispatch metrics rows only through the Tools metrics port, and reads a launched Codex agent's process only through a processes port rescan: the gate log write is a metrics write a step must declare, the spawn step declares it and hands the pass its metrics and processes ports under the recording deadline, a failed metrics emit reports like the outbox, and helpers run outside a step use this host's gate log and process table.",
+      "seam": "scripts.tick.ports.contracts.Metrics.log and Processes.rescan, bound for the spawn helpers by scripts.tick.adapters.calls.MetricsCalls",
+      "tests": [
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failing_claim_cap_writes_its_fail_open_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_an_observed_claim_cap_writes_its_row_through_the_metrics_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_writes_gate_and_dispatch_rows_through_the_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_dispatcher_log_outside_a_pass_writes_the_host_gate_log_and_outbox",
+        "tests/tick/test_spawn_metrics_ports.py::test_a_failed_metrics_emit_reports_like_the_outbox",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spool_metrics_appends_each_gate_row_to_the_gate_log",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_gate_log_write_needs_the_metrics_effect_and_a_rescan_needs_none",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_launch_reads_the_process_table_through_the_processes_port",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_codex_legacy_admission_reads_the_table_it_is_given",
+        "tests/tick/test_spawn_metrics_ports.py::test_spawn_helpers_outside_a_step_use_the_local_gate_log_and_process_table",
+        "tests/tick/test_spawn_metrics_ports.py::test_the_spawn_step_hands_the_pass_its_metrics_and_processes_ports"
+      ]
+    },
+    {
       "id": "swarm-tick-pass-errors",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-pass-error-store",
@@ -3872,6 +3979,46 @@
       ]
     },
     {
+      "id": "stall-master-queue",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
+      "behaviour": "While the spawn stall health finding is open, swarm merge queue accepts the master seat for a pull request whose task is urgent and admitted by the open focus (a focused task or a task the focus waits on), or any urgent task when no focus has open work, and records the stall route and task in the queue journal; without a stall, an urgent rank, an open task or the focus, the master is still refused, and the stall never opens a dequeue.",
+      "seam": "swarm merge queue through cli.cmd_merge and stall_queue.route",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_request",
+        "tests/swarm/test_merge_queue.py::test_with_no_focus_open_every_urgent_task_counts_as_focused_for_the_stall_route",
+        "tests/swarm/test_merge_queue.py::test_the_master_still_cannot_queue_without_a_stall_or_a_focused_urgent_task",
+        "tests/swarm/test_merge_queue.py::test_the_stall_route_never_opens_a_dequeue_for_the_master",
+        "tests/swarm/test_merge_queue.py::test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route"
+      ]
+    },
+    {
+      "id": "launch-hotfix-promotion",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
+        "tests/contracts/promotion/test_workflow.py::test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes",
+        "tests/swarm/test_promotion_watch.py::test_a_launch_hotfix_promoted_past_a_red_check_still_files_its_fixer_and_closes_nothing",
+        "tests/test_ci_launch_hotfix.py::test_a_labelled_merged_pull_with_a_green_head_and_unit_suite_promotes",
+        "tests/test_ci_launch_hotfix.py::test_a_labelled_pull_whose_own_grade_did_not_pass_never_promotes",
+        "tests/test_ci_launch_hotfix.py::test_a_pull_without_the_merged_launch_hotfix_label_never_promotes",
+        "tests/test_ci_launch_hotfix.py::test_a_red_unit_suite_never_promotes_a_labelled_pull",
+        "tests/test_ci_launch_hotfix.py::test_a_rerun_shard_never_turns_a_red_unit_suite_green",
+        "tests/test_ci_launch_hotfix.py::test_a_red_unit_suite_skips_the_label_read",
+        "tests/test_ci_launch_hotfix.py::test_an_unreadable_label_falls_back_to_the_full_grade",
+        "tests/test_ci_launch_hotfix.py::test_missing_needs_never_promote",
+        "tests/test_ci_launch_hotfix.py::test_a_label_absent_when_the_pull_entered_the_queue_never_promotes",
+        "tests/test_ci_launch_hotfix.py::test_the_label_on_the_last_queue_entry_counts_after_an_earlier_unlabelled_entry",
+        "tests/test_ci_launch_hotfix.py::test_the_grade_requires_both_the_repository_and_the_commit",
+        "tests/test_ci_launch_hotfix.py::test_the_grade_help_describes_the_route",
+        "tests/test_ci_launch_hotfix.py::test_only_the_launch_hotfix_label_decides_the_queue_entry",
+        "tests/test_ci_launch_hotfix.py::test_a_pull_without_labels_reads_as_unlabelled"
+      ]
+    },
+    {
       "id": "ledger-write-substep-timing",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2479",
@@ -3883,6 +4030,18 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
+    },
+    {
+      "id": "track-outages-claims-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2487",
+      "behaviour": "The track outages tick step judges each agent's recovery ownership and identity from the claims section alone, so a swarm whose fenced archive holds tens of thousands of executions never loads that archive per agent and the step ends inside its pass.",
+      "seam": "scripts.swarm.fencing.read_claims, used by scripts.swarm.resume.track_outages through its owner and identity checks",
+      "tests": [
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_answers_the_claims_section_without_the_archive",
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
+        "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
     }
   ],
