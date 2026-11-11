@@ -551,9 +551,7 @@ def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None
     sys.stderr.flush()
 
 
-def run_once(
-    store: RedisStore, ledger: LedgerClient | None = None, runtime=None, messenger=None, runtimes: dict | None = None
-) -> dict:
+def run_once(store: RedisStore, ledger: Any = None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
     from scripts.swarm.cli import run_tick
     from scripts.swarm.commands import hive_id
 
