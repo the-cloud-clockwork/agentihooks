@@ -1,0 +1,62 @@
+name: Tick scale gate
+description: Seed a production sized swarm store in a Redis on this runner, run three scheduled tick passes over it and fail when a spawn chain step or the tick view outruns its budgets floor.
+inputs:
+  plant:
+    description: true applies the planted whole hash execution update fault, which must turn the gate red
+    required: false
+    default: 'false'
+  profile:
+    description: Comma separated step names to profile with cProfile; profiled walls are evidence only
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - uses: astral-sh/setup-uv@v10.2.0
+      with:
+        version: '0.12.23'
+        enable-cache: false
+    - name: Start Redis on this runner
+      shell: bash
+      run: |
+            if command -v redis-server >/dev/null; then
+              echo "redis-server comes from the runner image; no package fetch"
+              redis-server --version
+            else
+              archive=/etc/apt/sources.list.d/ubuntu.sources
+              [[ -f "$archive" ]] || archive=/etc/apt/sources.list
+              only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
+              sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
+              sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
+            fi
+            redis-server --port 6379 --save '' --appendonly no --daemonize yes
+            for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
+            exit 1
+    - name: Install dependencies
+      shell: bash
+      run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
+    - name: Plant the whole hash execution update fault
+      if: inputs.plant == 'true'
+      shell: bash
+      run: git apply tests/tick_scale/whole_hash.patch
+    - name: Seed a production sized store and fail when a launch path step outruns its budgets floor
+      shell: bash
+      env:
+        AGENTIHOOKS_TICK_PROFILE_STEPS: ${{ inputs.profile }}
+      run: python -m tests.tick_scale.gate --redis redis://127.0.0.1:6379/1 --report tick-scale.json
+    - name: Stop Redis
+      if: always()
+      shell: bash
+      run: redis-cli -p 6379 shutdown nosave || true
+    - name: Preserve the gated step walls
+      if: always()
+      uses: ./.github/actions/retry-upload
+      with:
+        after-cancel: true
+        name: tick-scale${{ inputs.plant == 'true' && '-planted' || '' }}
+        path: tick-scale.json
+        if-no-files-found: warn
+        retention-days: 7

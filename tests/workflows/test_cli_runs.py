@@ -73,6 +73,25 @@ def test_run_routes_filtered_stages_through_the_judge(
     assert judge.launch.call_args.args[1:] == ({"case": "Build the sample", "build": ["built"]}, root / "judged")
 
 
+def test_run_resolves_workflows_from_the_current_folder(setup_run, monkeypatch, tmp_path, capsys):
+    root, case, launch = setup_run
+    definition = schema.parse(yaml.safe_dump(DOCUMENT))
+    cwds = []
+
+    def resolve(*args):
+        cwds.append(args)
+        return {"pair": loader.Found("project", case, definition)}, []
+
+    monkeypatch.setattr(loader, "resolve", resolve)
+    monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["run", "pair", "--case", str(case), "--run-id", "here"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+    assert cwds == [(tmp_path,)]
+
+
 def test_status_only_reads_saved_run(setup_run, monkeypatch, capsys):
     root, case, _ = setup_run
     definition = schema.parse(yaml.safe_dump(DOCUMENT))
@@ -198,7 +217,7 @@ def test_run_uses_the_exit_check_for_workflow_verdicts(setup_run, monkeypatch, c
     _, case, launch = setup_run
     document = {**DOCUMENT, "workflow": {**DOCUMENT["workflow"], "exit": "all stages accepted"}}
     definition = schema.parse(yaml.safe_dump(document))
-    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(loader, "resolve", lambda cwd: ({"pair": loader.Found("project", case, definition)}, []))
     judge = Mock(return_value=True)
     monkeypatch.setattr(cli.exit_checks, "check", judge)
     monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
@@ -219,7 +238,7 @@ def test_exhausted_run_returns_failure_with_saved_json(setup_run, monkeypatch, c
         },
     }
     definition = schema.parse(yaml.safe_dump(document))
-    monkeypatch.setattr(loader, "resolve", lambda: ({"pair": loader.Found("project", case, definition)}, []))
+    monkeypatch.setattr(loader, "resolve", lambda cwd: ({"pair": loader.Found("project", case, definition)}, []))
     monkeypatch.setattr(cli, "HeadlessProfile", Mock(return_value=Mock(launch=launch)))
     assert cli.main(["run", "pair", "--case", str(case)]) == 1
     state = json.loads(capsys.readouterr().out)

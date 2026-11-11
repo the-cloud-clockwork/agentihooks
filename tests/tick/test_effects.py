@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 
 import scripts.swarm.cli as cli
-from scripts.swarm import controller, metrics_outbox
+from scripts.swarm import controller, dispatcher, metrics_outbox
 from scripts.tick import engine, pool, registry
 from scripts.tick.adapters import fakes
 from scripts.tick.deadline import Deadline
@@ -111,9 +111,10 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
     declared = {step.name: step.effects for step in registry.steps() if step.effects}
     assert declared == {
         "reap": frozenset({"ledger", "runtime", "inbox"}),
-        "spawn": frozenset({"ledger", "runtime", "coordination", "inbox"}),
+        "spawn": frozenset({"ledger", "runtime", "coordination", "inbox", "metrics"}),
         "hive sweep": frozenset({"coordination"}),
         "workflow runner": frozenset({"host"}),
+        "knowledge warm": frozenset({"host"}),
         "doc items map": frozenset({"ledger", "coordination"}),
         "step starvation": frozenset({"inbox"}),
     }
@@ -191,7 +192,7 @@ def test_the_pass_tools_wire_every_real_adapter_for_the_swarm(monkeypatch: pytes
     assert tools.processes == ("PassProcesses", (), ())
     assert tools.inbox == ("StoreInbox", (("InboxStore", ("redis",), ()), "tick@sw"), ())
     assert tools.llm == ("ApiLlm", ("first", "url"), ())
-    assert tools.metrics == ("SpoolMetrics", ("spool", {}), ())
+    assert tools.metrics == ("SpoolMetrics", ("spool", {"dispatch_actions": dispatcher.TABLE}), ())
     assert tools.host == ("local_host", (store, "sw", os.environ), ())
     runtime: tuple[str, tuple[object, Callable[[str], object]], tuple[()]] = tools.runtime  # pyright: ignore[reportAssignmentType]
     assert runtime[1][0] == ("router", os.environ)

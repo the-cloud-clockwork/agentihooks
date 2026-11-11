@@ -2,6 +2,7 @@ import asyncio
 import base64
 import datetime
 import logging
+import sys
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass, replace
@@ -572,10 +573,14 @@ class NatsBus:
 
     def _logs(self, kind: str) -> list[EventLog]:
         from .nats_scope import discover_swarms
+        from .nats_state import LegacyStateUnowned
 
         if self._config.provision:
             for swarm in self._loop.run(discover_swarms(self._js)):
-                self.for_swarm(swarm)
+                try:
+                    self.for_swarm(swarm)
+                except LegacyStateUnowned as refusal:
+                    print(f"hub: swarm {swarm!r} skipped: {refusal}", file=sys.stderr)
         with self._lock:
             legacy = [getattr(self, f"_legacy_{kind}")] if self._config.provision else []
             return legacy + [getattr(view, kind) for view in self._views.values()]

@@ -56,7 +56,7 @@ TODAY = {
         "findings pass",
         "doc items map",
     ],
-    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job"],
+    "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job", "knowledge warm"],
     "closing": ["last tick", "heartbeat", "status publish", "step starvation"],
 }
 EDGES = (

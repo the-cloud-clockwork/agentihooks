@@ -253,6 +253,14 @@ def test_source_records_exact_provenance(
     }
 
 
+@pytest.mark.feature("operator-host-plan-upload")
+def test_source_records_the_session_claude_code_injects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    env = {"CLAUDE_CODE_SESSION_ID": "host-session", "CLAUDE_SESSION_ID": "legacy-session"}
+    assert ingest.source(env, "-", "plan")["session"] == "host-session"
+    assert ingest.source({"CLAUDE_SESSION_ID": "legacy-session"}, "-", "plan")["session"] == "legacy-session"
+
+
 def test_parser_contract(capsys: pytest.CaptureFixture[str]) -> None:
     parser = ingest.parser()
     assert parser.prog == "agentihooks plan ingest"

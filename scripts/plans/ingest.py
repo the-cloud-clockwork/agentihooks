@@ -140,7 +140,7 @@ def source(env: Mapping[str, str], path: str, markdown: str) -> dict[str, Any]:
     """The provenance an operator-authored plan row records."""
     return {
         "harness": env.get("AGENTIHOOKS_TARGET", "claude"),
-        "session": env.get("CLAUDE_SESSION_ID", ""),
+        "session": env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDE_SESSION_ID", ""),
         "path": "" if path == "-" else str(Path(path).resolve()),
         "sha256": hashlib.sha256(markdown.encode()).hexdigest(),
     }

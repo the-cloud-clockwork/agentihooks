@@ -543,10 +543,12 @@ grades the pattern shapes; the repository scan in the same step grades the path 
 
 Files that still build `gh` commands are listed twice and must match: in the rule's `paths.exclude` and in
 `.semgrep/source-control-allowlist.json`. The list only shrinks. The Semgrep workflow step
-`Source control exceptions only shrink` reads the list from the base commit and fails with
-`source control exceptions grew: [<paths>]` when the head list holds a path the base list lacks; otherwise it prints
-`source control exceptions: <head count> of <base count>`. A base without the file passes with
-`The base holds no source control exception list; the head list starts it`. A unit test in
+`Rule exceptions only shrink` reads every `.semgrep/*-allowlist.json` from the base commit and fails with
+`<list> exceptions grew: [<paths>]` when a head list holds a path its base list lacks; otherwise it prints
+`<list> exceptions: <head count> of <base count>`. A base without a list passes with
+`The base holds no <list>; the head list starts it`. The same step grades
+`.semgrep/tick-unbounded-read-allowlist.json`, the modules the `tick-unbounded-store-read` rule still excludes, each
+mapped to the task that removes its whole hash reads or unpaged key scans. A unit test in
 `tests/test_ci_semgrep.py` requires every entry to be one `.py` path with no wildcard, and names files that have left
 the list, such as `scripts/swarm/stack.py`, so they cannot return.
 
@@ -1032,6 +1034,75 @@ row ends. Spawn order records one `_running` and one `focus_budget.place` row pe
 inside the `_spawn_order` row, and inside it one `launchable` row per lane and one `begin_placement_pass`, `ranks`
 and `ordered` row per spawn order. The running filter keeps only the lane's agents that have not ended and still own their
 task, with a placeholder row for an agent whose task row is missing.
+
+### Focus ranks in spawn order
+
+`scripts.swarm.focus_budget.ranks(doc)` gives every task in the ledger document its focus rank, the position of the
+first focus record that covers it; `focus_budget.ordered` then sorts the spawn queue focused tasks first, by rank band,
+then by that rank. Only `focus` records count: freeze records in the same `freezes` collection take no position.
+
+| Focus record target | Covers a task when | Example |
+|---|---|---|
+| A node address: `plans/<id>`, `phases/<id>`, `slices/<id>`, `tasks/<id>` | The address is in the task's ancestry: the task itself, its slice, phase and plan, and the chain of a task it was merged into | `phases/p1` covers every task of phase `p1` |
+| A selector with a value: `lane:<lane>` or `kind:<kind>` | The task's lane or kind equals the value; everything after the first colon is the value | `kind:x:y` covers a task whose kind is `x:y` |
+| A selector with no value, such as `lane:` | Never: it is read as a node address, and no node has that address | |
+
+A task's rank is the lowest position among the records that cover it, so a task inside a focused phase that also
+matches an earlier `kind:` focus takes the earlier position. A target focused twice keeps its first position. A task
+no record covers takes the count of focus records, `focus_budget.outside(doc)`, which places it after every focused
+task.
+
+With these records, in order, on a ledger whose phase `p1` holds task `inside` and whose task `hot` has kind `hot`:
+
+```text
+freeze  phases/p1     no position
+focus   kind:hot      position 0   covers hot
+focus   phases/p1     position 1   covers inside
+focus   lane:ci       position 2   covers every ci lane task
+```
+
+`hot` ranks 0, `inside` ranks 1, a ci lane task ranks 2 and every other task ranks 3. A task in `p1` with kind `hot`
+ranks 0. Write the records with `agentihooks swarm <swarm slug> focus TARGET`; see
+[Freeze and focus](../pillars/swarm.md#freeze-and-focus).
+
+`ranks` reads the focus records once per call: node addresses go into one lookup from address to first position and
+selectors into one ordered list. Each task then costs one lookup per node of its ancestry, at most the hierarchy depth
+plus the merged chain, and one comparison per selector record, instead of a match of every focus record against every
+task. On 3 November 2026, with the 284 focus records `rig-grade-swarm` held, one call over 3000 tasks went from
+0.622 s to 0.006 s with the same ranks
+([pull request 9573](https://github.com/the-cloud-clockwork/agentihooks/pull/9573)). Spawn order calls `ranks` once
+per lane inside `focus_budget.place`, which orders the lane's ready tasks with it, and once more after the lanes to sort
+the whole queue. Only that last call has its own `scripts.swarm.focus_budget.ranks` row; the per lane calls count in
+each lane's `focus_budget.place` row.
+
+Measure the spawn step over a thirty minute UTC window from its `swarm_tick_step` finished records:
+
+```bash
+SLUG=rig-grade-swarm
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "2026-11-03 17:30:00" --until "2026-11-03 18:00:00" \
+  | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
+  | grep "\"slug\": \"$SLUG\"" | grep '"step": "spawn"' | sed 's/^[^{]*//' \
+  | python3 -c 'import sys, json
+w = sorted(json.loads(l)["wall_s"] for l in sys.stdin)
+print(len(w), "spawn passes; median", round(w[len(w) // 2], 2) if w else None, "s; max", round(w[-1], 2) if w else None, "s")'
+```
+
+Measured this way on the workstation tick of `rig-grade-swarm`, the spawn step read 8 passes with a median of 27.37 s
+and a max of 49.88 s from 17:30 to 18:00 UTC on 3 November 2026, and 9 passes with a median of 2.20 s and a max of
+32.89 s from 22:56 to 23:17 UTC after the merge, as recorded in the proof of the ledger task the pull request
+closed. The max stayed above the 5 s target, so the remaining slow passes are
+in other parts of spawn order or in the launch itself; split them with the rows above and with
+[Timed rows inside a fenced spawn](#timed-rows-inside-a-fenced-spawn).
+
+`tests/swarm/test_focus_budget.py` holds the contract: ranks by node address and selector, first position wins,
+duplicate targets, an empty selector value, colons inside task ids and selector values, and a test that ranks twenty
+node address focuses without calling `freeze.covers` once.
+
+| Symptom | Check |
+|---|---|
+| A task inside a focused phase launches after tasks of a later focus | An earlier `lane:` or `kind:` record covers the later tasks, or the task's `phase`, `slice` or `merged_into` link does not reach the focused node; read the task record and the ancestry its links give |
+| A focus record never ranks any task | Its target is a selector with no value, such as `lane:`, or names a node that no task's ancestry holds; clear it with `unfreeze TARGET` |
+| The `focus_budget.ranks` row, times one more than the lane count, is close to the `_spawn_order` row | Ranking is the slow part, since every lane's `focus_budget.place` row holds one more `ranks` call; the ledger document holds many tasks or selector records, and each selector record costs one comparison per task |
 
 ## One lease heartbeat per tick pass
 

@@ -7,6 +7,7 @@ import pytest
 from scripts.swarm import cli, controller
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm_ledger.ledger_link import Cleartext
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -57,6 +58,30 @@ def test_tickable_reads_binned_then_closed_and_ticks_a_gone_ledger() -> None:
         True,
         True,
     ]
+
+
+class _CleartextLedger:
+    """A ledger whose address refuses the credential over plain http."""
+
+    def binned(self, slug: str) -> bool:
+        raise Cleartext(f"a ledger credential off loopback travels only over https, not for {slug}")
+
+    def closed(self, slug: str) -> bool:
+        return False
+
+
+@pytest.mark.feature("controller-ticks-cleartext-ledger")
+def test_the_controller_ticks_a_swarm_whose_ledger_address_refuses_cleartext(
+    env: tuple[RedisStore, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, _, _ = env
+    store.create(SwarmConfig("proof", "/repo", 1, 0))
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+
+    assert controller.tickable(_CleartextLedger(), "proof") is True
+    assert controller.run_once(store, _CleartextLedger()) == {"proof": ["proof"]}
 
 
 @pytest.mark.feature("swarm-create-refuses-web-repo")
