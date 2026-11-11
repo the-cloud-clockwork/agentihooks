@@ -1583,7 +1583,7 @@
       "id": "hub-import-core",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
-      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
+      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, literal credential values, dropped guard hooks, unsafe names, symlinks and occupied names before writing, and committing every profile together from a staging folder.",
       "seam": "scripts.profiles.hub_import.import_hub",
       "tests": [
         "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
@@ -1600,7 +1600,11 @@
         "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
         "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
         "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused",
-        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused"
+        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused",
+        "tests/profiles/test_hub_import.py::test_literal_credential_values_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_credential_environment_references_are_kept",
+        "tests/profiles/test_hub_import.py::test_a_guard_hook_that_import_would_drop_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_write_error_leaves_no_profile_behind"
       ]
     },
     {

@@ -192,3 +192,58 @@ def test_command_line_prints_the_dry_run_report(hub: Path, tmp_path: Path, capsy
     assert main([str(hub), str(out), "--dry-run"]) == 0
     assert json.loads(capsys.readouterr().out) == import_hub(hub, out, True)
     assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize(
+    "env",
+    [{"GITHUB_TOKEN": "plain-value-123"}, {"DOCS": "ghp_" + "a" * 36}, {"DB_PASSWORD": "hunter2" + "-literal"}],
+)
+def test_literal_credential_values_refuse_the_import(hub: Path, tmp_path: Path, env: dict[str, str]) -> None:
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="literal credential"):
+        import_hub(hub, out, False)
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+def test_credential_environment_references_are_kept(hub: Path, tmp_path: Path) -> None:
+    env = {"GITHUB_TOKEN": "${GITHUB_TOKEN}", "API_KEY": "$DIAGRAM_KEY", "AUTH_MODE": ""}
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"env": env}))
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False)
+    assert json.loads((out / "profiles/diagram/.claude/settings.overrides.json").read_text()) == {"env": env}
+
+
+@pytest.mark.feature("hub-import-core")
+@pytest.mark.parametrize("event", ["PreToolUse", "PermissionRequest", "UserPromptSubmit"])
+def test_a_guard_hook_that_import_would_drop_refuses_the_import(hub: Path, tmp_path: Path, event: str) -> None:
+    guard = [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python /home/operator/guard.py"}]}]
+    (hub / "agents/diagram/package/.claude/settings.json").write_text(json.dumps({"hooks": {event: guard}}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"{event} hook .*settings\.json"):
+        import_hub(hub, out, False)
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_write_error_leaves_no_profile_behind(hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    second = hub / "agents/second/package"
+    second.mkdir(parents=True)
+    (second / "command.yml").write_text(yaml.safe_dump({"name": "second"}))
+    (second / "CLAUDE.md").write_text("Second.\n")
+    real = Path.write_bytes
+    calls: list[Path] = []
+
+    def failing(self: Path, data: bytes) -> int:
+        calls.append(self)
+        if len(calls) > 5:
+            raise OSError("disk full")
+        return real(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", failing)
+    out = tmp_path / "bundle"
+    with pytest.raises(OSError, match="disk full"):
+        import_hub(hub, out, False)
+    assert [path for path in out.rglob("*") if path.is_file()] == []
