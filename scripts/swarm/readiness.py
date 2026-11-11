@@ -189,10 +189,11 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
     """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
     withdraws the stale offers there before the fresh ones join them."""
-    withdraw_stale(bus, view, policy)
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
+    for queue in queues.values():
+        queue.withdraw(lambda event: stale(event, view))
     placed = []
     for event in events:
         if queues[event.data["lane"]].offer(event):
@@ -200,15 +201,9 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
     return placed
 
 
-def withdraw_stale(bus: Bus, view: Snapshot, policy: QueuePolicy = QueuePolicy()) -> int:
-    """Removes from every lane queue each waiting offer that ``withdrawal`` names against the snapshot, or whose task
-    turned workstation, which hives never take."""
-    return sum(
-        bus.queue(queue_name(view.slug, lane), policy).withdraw(lambda event: stale(event, view)) for lane in LANES
-    )
-
-
 def stale(event: Envelope, view: Snapshot) -> bool:
+    """An offer ``withdrawal`` names against the snapshot, or one whose task turned workstation, which hives never
+    take."""
     return bool(withdrawal(event, view) or view.rows[event.key].get("workstation"))
 
 

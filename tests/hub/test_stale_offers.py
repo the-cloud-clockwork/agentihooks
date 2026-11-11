@@ -72,7 +72,9 @@ def test_withdraw_removes_only_the_offers_named_stale_and_counts_them(kind: str,
 
 
 @pytest.mark.feature(FEATURE)
-def test_withdraw_stale_sweeps_every_lane_with_the_withdrawal_reasons(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fresh_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     admit_all(monkeypatch)
     row, store, ledger = source()
     ledger.state.return_value = doc([row, task("ci-done", lane="ci", state="done")])
@@ -83,10 +85,12 @@ def test_withdraw_stale_sweeps_every_lane_with_the_withdrawal_reasons(monkeypatc
         assert eng.offer(offered("task-a", 3))
         assert eng.offer(offered("task-a", 1))
         assert ci.offer(Envelope(**{**vars(offered("ci-done", 0)), "data": {"lane": "ci", "generation": 0}}))
-        assert readiness.withdraw_stale(bus, view) == 2
+        assert readiness.publish(bus, view, 73) == []
         kept = eng.take(1)
         assert kept is not None
         assert kept.event == offered("task-a", 3)
+        kept.ack()
+        assert eng.take(1) is None
         assert ci.take(1) is None
 
 
@@ -96,11 +100,14 @@ def test_an_offer_whose_task_turned_workstation_is_withdrawn(monkeypatch: pytest
     row, store, ledger = source()
     view = readiness.Source(store, ledger).snapshot("rig")
     assert not readiness.stale(offered("task-a", 3), view)
+    assert readiness.stale(offered("task-a", 2), view)
     row["workstation"] = True
     assert readiness.stale(offered("task-a", 3), view)
     with backend("memory", None) as bus:
-        assert bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy()).offer(offered("task-a", 3))
-        assert readiness.withdraw_stale(bus, view) == 1
+        eng = bus.queue(readiness.queue_name("rig", "eng"), QueuePolicy())
+        assert eng.offer(offered("task-a", 3))
+        assert readiness.publish(bus, view, 73) == []
+        assert eng.take(1) is None
 
 
 @pytest.mark.feature(FEATURE)
