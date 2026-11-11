@@ -38,7 +38,7 @@ jobs:
 
   promotion-ready:
     name: Promotion ready
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree]
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree, launch-hotfix]
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
@@ -260,8 +260,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
     outputs:
       promote: ${{ steps.grade.outputs.promote }}
     steps:
@@ -269,6 +267,18 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
 
       - uses: actions/setup-python@v5
         with:
@@ -278,7 +288,7 @@ jobs:
         id: grade
         env:
           NEEDS: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_launch_hotfix --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Confirm the launch hotfix route

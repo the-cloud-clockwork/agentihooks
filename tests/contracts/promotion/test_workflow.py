@@ -98,11 +98,18 @@ def test_the_launch_hotfix_grade_reads_only_the_unit_suite_on_dev_pushes() -> No
     for event in ("pull_request", "merge_group", "workflow_dispatch"):
         assert not enabled(grade["if"], event, {})
     assert "launch-hotfix" not in jobs["gate-required"]["needs"]
-    assert grade["permissions"] == {"contents": "read", "pull-requests": "read", "issues": "read"}
+    assert grade["permissions"] == {"contents": "read"}
+    token = next(step for step in grade["steps"] if step.get("id") == "app-token")["with"]
+    assert {key: token[key] for key in token if key.startswith("permission-")} == {
+        "permission-checks": "read",
+        "permission-contents": "read",
+        "permission-issues": "read",
+        "permission-pull-requests": "read",
+    }
     step, confirm = grade["steps"][-2:]
     assert step["id"] == "grade"
     assert step["run"].startswith("python -m scripts.ci_launch_hotfix ")
-    assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"
+    assert step["env"] == {"NEEDS": "${{ toJSON(needs) }}", "GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
     assert confirm["name"] == "Confirm the launch hotfix route"
     assert confirm["if"] == "steps.grade.outputs.promote == 'true'"
     script = (ROOT / ".github/scripts/promote.cjs").read_text()

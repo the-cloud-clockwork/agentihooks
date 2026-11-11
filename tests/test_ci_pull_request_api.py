@@ -182,6 +182,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_gate_summary.py",
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
+        "scripts/ci_launch_hotfix.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/arrival.py",
         "scripts/ci_mutation/identity.py",
