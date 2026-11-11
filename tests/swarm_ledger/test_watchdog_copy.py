@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from scripts.swarm_ledger import ledger as ledger_cli
 from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_ledger_authority import SLUG, ledger
@@ -14,6 +13,7 @@ live = _live
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.feature("tick-doc-items-map")
 def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest(live):
     import hashlib
     from dataclasses import replace
@@ -49,6 +49,7 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
     assert [event["id"] for event in events] == ["copy-0", "copy-1"]
 
 
+@pytest.mark.feature("tick-doc-items-map")
 @pytest.mark.parametrize(
     "operation",
     [
@@ -66,22 +67,23 @@ def test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy
     assert ledger_watchdog_copy.check({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100000}) is None
 
 
-def test_the_ledger_command_stores_the_watchdog_copy_from_a_file(tmp_path, monkeypatch, capsys):
+@pytest.mark.feature("tick-doc-items-map")
+def test_the_doc_items_command_stores_the_watchdog_copy_from_a_file(tmp_path, monkeypatch, capsys):
     import hashlib
-    from argparse import Namespace
+
+    from scripts.swarm import doc_items, ledger_client
 
     copy = tmp_path / "watchdog.md"
     copy.write_text("1. [open] First. [Ledger: t1]\n", encoding="utf-8")
     sent = []
-
-    def send(args, kind, **fields):
-        sent.append((kind, fields))
-        return {"applied": [1]}
-
-    monkeypatch.setattr(ledger_cli, "send", send)
-    ledger_cli.cmd_watchdog_copy(Namespace(slug=SLUG, name="watchdog-1", path=str(copy)))
-    assert sent == [("watchdog_copy", {"text": "1. [open] First. [Ledger: t1]\n"})]
+    monkeypatch.setattr(ledger_client.LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)))
+    assert doc_items.main(["--slug", SLUG, "--document", str(copy), "--store-as", "watchdog-1"]) == 0
+    [(slug, [operation])] = sent
+    assert slug == SLUG
+    assert {key: operation[key] for key in ("op", "by", "text")} == {
+        "op": "watchdog_copy",
+        "by": "watchdog-1",
+        "text": "1. [open] First. [Ledger: t1]\n",
+    }
     digest = hashlib.sha256(b"1. [open] First. [Ledger: t1]\n").hexdigest()
-    assert json.loads(capsys.readouterr().out) == {"stored": True, "digest": digest}
-    parsed = ledger_cli.build_parser().parse_args(["--slug", SLUG, "--as", "w", "watchdog-copy", str(copy)])
-    assert (parsed.command, parsed.path) == ("watchdog-copy", str(copy))
+    assert json.loads(capsys.readouterr().out) == {"slug": SLUG, "stored": digest}

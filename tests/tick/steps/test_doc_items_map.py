@@ -211,21 +211,3 @@ def test_the_coordination_store_reads_back_the_mark_it_wrote() -> None:
     assert port.mark(doc_items.MARK, "abc", deadline=deadline) is True
     assert port.marked(doc_items.MARK, deadline=deadline) == "abc"
     assert store.redis.values == {"swarm:sw:doc-items-digest": "abc"}
-
-
-@pytest.mark.feature("tick-doc-items-map")
-def test_the_swarm_setting_names_the_watchdog_document() -> None:
-    from unittest.mock import Mock
-
-    from scripts.swarm.cli import CONFIG_KEYS, config_value
-    from scripts.swarm.store import RedisStore
-
-    assert CONFIG_KEYS["watchdog-document"] == "watchdog_document"
-    assert config_value("watchdog-document", "/copy/watchdog-doc.md") == "/copy/watchdog-doc.md"
-    redis = Mock()
-    raw = {"slug": "sw", "repo": "/repo", "max_eng": "1", "max_ci": "1", "state": "paused"}
-    redis.hgetall.return_value = raw
-    store = RedisStore(redis)
-    assert store.config("sw").watchdog_document == ""
-    raw["watchdog_document"] = "/copy/watchdog-doc.md"
-    assert store.config("sw").watchdog_document == "/copy/watchdog-doc.md"

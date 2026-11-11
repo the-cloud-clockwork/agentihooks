@@ -217,6 +217,9 @@ class LedgerClient:
         copy: dict[str, Any] = self._resource(slug, "watchdog")
         return copy
 
+    def store_watchdog_copy(self, slug: str, text: str, by: str) -> None:
+        self._call(slug, [_op("watchdog_copy", by, text=text)])
+
     def item(self, slug, path):
         """One item by its list path, or None when the ledger holds no such item."""
         name, _, item_id = path.partition("/")

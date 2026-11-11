@@ -98,7 +98,6 @@ LEDGER_AUTOSTART=0 (never start a server on a failed request).
 import argparse
 import collections
 import functools
-import hashlib
 import itertools
 import json
 import os
@@ -110,7 +109,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from scripts.swarm_ledger import ledger_route
 
@@ -1032,12 +1031,6 @@ def cmd_url(args):
     print(ledger_link.page_line(args.slug))
 
 
-def cmd_watchdog_copy(args: argparse.Namespace) -> None:
-    text = Path(args.path).read_text(encoding="utf-8")
-    state = cast(dict[str, Any], send(args, "watchdog_copy", text=text))
-    print(json.dumps({"stored": bool(state.get("applied")), "digest": hashlib.sha256(text.encode()).hexdigest()}))
-
-
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--slug")
@@ -1065,7 +1058,6 @@ def build_parser():
     artifact.add_argument("--task", help="task id; default AGENTIHOOKS_SWARM_TASK, empty for none")
     artifact.add_argument("--request", help="id of the operator chat line or comment that asked for the file")
     sub.add_parser("artifact-purge")
-    sub.add_parser("watchdog-copy", help="store the newest watchdog document copy on the ledger").add_argument("path")
     sub.add_parser("plan-backfill", help="compute missing plan lines for linked unfinished tasks")
     hierarchy = sub.add_parser("hierarchy").add_subparsers(dest="action", required=True)
     hierarchy.add_parser("backfill").add_argument("--apply", action="store_true")
