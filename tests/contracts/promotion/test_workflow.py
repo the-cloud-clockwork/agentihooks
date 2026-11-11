@@ -48,7 +48,7 @@ def test_each_dev_push_runs_the_hierarchy_proof_before_promotion_and_never_on_pu
 def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     scale = jobs["tick-scale"]
-    assert scale["uses"] == "./.github/workflows/tick-scale.yml"
+    assert {"uses": "./.github/actions/tick-scale"} in scale["steps"]
     assert "tick-scale" not in jobs["gate-required"]["needs"]
     assert enabled(scale["if"], "push", {})
     for event in ("pull_request", "merge_group", "workflow_dispatch"):
@@ -59,13 +59,16 @@ def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pu
             needs = _graded_needs(jobs[consumer])
             needs["tick-scale"].result = result
             assert not enabled(jobs[consumer]["if"], "push", needs)
-    callee = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
-    assert "workflow_call" in callee[True]
-    steps = callee["jobs"]["tick-scale"]["steps"]
+    action = yaml.safe_load((ROOT / ".github/actions/tick-scale/action.yml").read_text())
+    steps = action["runs"]["steps"]
     assert any(str(step.get("run", "")).startswith("python -m tests.tick_scale.gate") for step in steps)
     plant = next(step for step in steps if step.get("run") == "git apply tests/tick_scale/whole_hash.patch")
-    assert plant["if"] == "inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant'"
-    assert callee[True]["push"]["branches"] == ["diffcheck/tick-scale-*"]
+    assert plant["if"] == "inputs.plant == 'true'"
+    proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
+    assert proofs[True] == {"push": {"branches": ["diffcheck/tick-scale-*"]}}
+    called = proofs["jobs"]["tick-scale"]["steps"][-1]
+    assert called["uses"] == "./.github/actions/tick-scale"
+    assert called["with"]["plant"] == "${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}"
 
 
 def _graded_needs(promote, analysis="A1"):

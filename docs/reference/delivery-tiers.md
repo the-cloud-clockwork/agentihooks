@@ -46,8 +46,9 @@ its last promoted tree while ordinary pull requests keep merging into `dev`.
 
 ## Tick scale gate at promotion
 
-The Tests workflow calls `Tick scale` as `tick-scale` on a push to `dev`, and
-`promotion-ready` and `promote` require it to succeed. It seeds a real Redis
+The Tests workflow runs the `tick-scale` job on a push to `dev`, and
+`promotion-ready` and `promote` require it to succeed. The job runs the
+`.github/actions/tick-scale` composite action. The action seeds a real Redis
 store at production size: 20 thousand archived executions, 2 thousand freeze
 records, a ledger view of 6 thousand tasks and 30 live Kubernetes executions
 holding claimed tasks. It then runs three scheduled passes of the tick
@@ -58,14 +59,16 @@ names, then `spawn`) and the `tick view` must end ok within its
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
 
-A push to a `diffcheck/tick-scale-*` branch runs the same gate on that branch.
+The `Tick scale` workflow runs the same action on a push to a
+`diffcheck/tick-scale-*` branch. No workflow calls it.
 On `diffcheck/tick-scale-plant` it first applies the planted fault in
 `tests/tick_scale/whole_hash.patch`. In that fault every fenced write loads the
 execution archive and rewrites every record it loaded. This planted fault must
 turn the gate red. In the reference proof run it drove `reap` to 25 seconds
 against its 22 second floor. On `diffcheck/tick-scale-profile` the gate profiles
 `track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
-walls are evidence only. A caller can also pass `plant` and `profile` inputs.
+walls are evidence only. The action takes the same choices as its `plant`
+and `profile` inputs.
 
 ### Scheduling and runner isolation
 

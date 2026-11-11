@@ -1,18 +1,6 @@
 name: Tick scale
 
 on:
-  workflow_call:
-    inputs:
-      plant:
-        description: Apply the planted whole hash execution update fault, which must turn the gate red
-        type: boolean
-        required: false
-        default: false
-      profile:
-        description: Comma separated step names to profile with cProfile while the gate runs; profiled walls are evidence only
-        type: string
-        required: false
-        default: ''
   push:
     branches: ['diffcheck/tick-scale-*']
 
@@ -29,46 +17,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/tick-scale
         with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: '0.12.23'
-          enable-cache: false
-      - name: Start Redis on this runner
-        run: |
-          if command -v redis-server >/dev/null; then
-            echo "redis-server comes from the runner image; no package fetch"
-            redis-server --version
-          else
-            archive=/etc/apt/sources.list.d/ubuntu.sources
-            [[ -f "$archive" ]] || archive=/etc/apt/sources.list
-            only_archive=(-o Acquire::Retries=5 -o "Dir::Etc::sourcelist=$archive" -o Dir::Etc::sourceparts=-)
-            sudo apt-get update -qq "${only_archive[@]}" || echo "::warning::apt archive index refresh incomplete; installing redis-server from the indexes that loaded"
-            sudo apt-get install -y -qq --no-install-recommends "${only_archive[@]}" redis-server
-          fi
-          redis-server --port 6379 --save '' --appendonly no --daemonize yes
-          for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
-          exit 1
-      - name: Install dependencies
-        run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
-      - name: Plant the whole hash execution update fault
-        if: inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant'
-        run: git apply tests/tick_scale/whole_hash.patch
-      - name: Seed a production sized store and fail when a launch path step outruns its budgets floor
-        env:
-          AGENTIHOOKS_TICK_PROFILE_STEPS: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-profile' && 'track outages,reap,spawn,tick view' || inputs.profile }}
-        run: python -m tests.tick_scale.gate --redis redis://127.0.0.1:6379/1 --report tick-scale.json
-      - name: Stop Redis
-        if: always()
-        run: redis-cli -p 6379 shutdown nosave || true
-      - name: Preserve the gated step walls
-        if: always()
-        uses: ./.github/actions/retry-upload
-        with:
-          after-cancel: true
-          name: tick-scale${{ (inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant') && '-planted' || '' }}
-          path: tick-scale.json
-          if-no-files-found: warn
-          retention-days: 7
+          plant: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}
+          profile: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-profile' && 'track outages,reap,spawn,tick view' || '' }}
