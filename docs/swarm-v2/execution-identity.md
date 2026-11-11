@@ -104,7 +104,7 @@ Read the parts for one swarm over the last thirty minutes of ticks run by the fa
 
 ```bash
 SLUG=rig-grade-swarm
-journalctl --user -u agentihooks-swarm.service --since "-30min" --until now \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-30min" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' | grep "\"slug\": \"$SLUG\"" \
   | grep -E '"step": "(scripts.swarm.execution.ExecutionRegistry._(put|update)|redis.client.Pipeline.execute)"' \
   | sed 's/^[^{]*//' \
