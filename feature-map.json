@@ -508,6 +508,8 @@
         "tests/tick/test_declared_reads.py::test_a_step_reading_a_box_value_no_step_stored_yet_is_refused_by_name",
         "tests/tick/test_declared_reads.py::test_declared_step_and_hook_values_and_pass_state_read_through",
         "tests/tick/test_declared_reads.py::test_the_box_view_refuses_undeclared_keys_and_writes_through",
+        "tests/tick/test_declared_reads.py::test_a_write_step_reads_what_its_reads_and_writes_declare",
+        "tests/tick/test_declared_reads.py::test_a_pass_box_in_the_pass_state_is_guarded_and_a_plain_state_dict_is_not",
         "tests/tick/test_declared_reads.py::test_every_site_hook_declares_its_keys",
         "tests/tick/test_declared_reads.py::test_every_hook_value_a_step_reads_is_written_by_a_hook_at_or_before_its_site",
         "tests/tick/test_declared_reads.py::test_the_box_keys_are_the_values_steps_and_hooks_declare_writing",

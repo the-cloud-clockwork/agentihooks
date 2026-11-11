@@ -10,7 +10,7 @@ from scripts.tick import registry, sites
 from scripts.tick import steps as tick_steps
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import CallStep, DeclaredBox, Left, PassBox, UndeclaredRead, hook_domains, pass_domains
+from scripts.tick.steps import CallStep, DeclaredBox, Left, PassBox, UndeclaredRead, hook_domains, pass_domains, tasks
 
 HOOK_SITES = (*cli.PASS_SITES, "closing")
 
@@ -78,6 +78,42 @@ def test_the_box_view_refuses_undeclared_keys_and_writes_through() -> None:
     assert dict(view) == {"raised": None, "doc": 3}
     assert len(view) == 2
     assert "scratch" not in view
+    box["scratch"] = 4
+    with pytest.raises(UndeclaredRead, match="pass value scratch"):
+        _ = "scratch" in view
+    with pytest.raises(Left):
+        _ = DeclaredBox({}, "viewer", frozenset({"doc"}))["doc"]
+
+
+@pytest.mark.feature("swarm-tick-declared-reads")
+def test_a_pass_box_in_the_pass_state_is_guarded_and_a_plain_state_dict_is_not() -> None:
+    scheduled = {"job": 1}
+    state = {"slug": "sw", "judging": PassBox({"doc": 1}), "scheduled": scheduled}
+
+    def judged(_tick: Any, get: Any) -> list[object]:
+        return [get("judging")["doc"], get("scheduled") is scheduled, isinstance(get("box"), DeclaredBox)]
+
+    ctx = Context(_View(state, cast(PassBox, {})), Deadline.after(60.0), None)
+    with pytest.raises(UndeclaredRead, match="step verify reads pass value doc"):
+        CallStep("verify", "observe", judged).run(ctx)
+    found = CallStep("verify", "observe", judged, reads=hook_domains("doc")).run(ctx)
+    assert found.writes[0].value == [1, True, True]
+
+
+@pytest.mark.feature("swarm-tick-declared-reads")
+def test_a_write_step_reads_what_its_reads_and_writes_declare() -> None:
+    box = PassBox({"doc": 1, "phase changed": True})
+
+    def call(_tick: Any, get: Any) -> list[str]:
+        return [f"{get('doc')} {get('phase changed')}"]
+
+    name = "planning and phase pass"
+    declared = tasks.WriteStep(name, "g", call, reads=hook_domains("doc"), writes=pass_domains("phase changed"))
+    assert declared.run(_ctx(box)).writes[0].value == ["1 True"]
+    with pytest.raises(UndeclaredRead, match=f"step {name} reads pass value doc it does not declare"):
+        tasks.WriteStep(name, "g", call, writes=pass_domains("phase changed")).run(_ctx(box))
+    with pytest.raises(UndeclaredRead, match=f"step {name} reads pass value phase changed it does not declare"):
+        tasks.WriteStep(name, "g", call, reads=hook_domains("doc")).run(_ctx(box))
 
 
 @pytest.mark.feature("swarm-tick-declared-reads")

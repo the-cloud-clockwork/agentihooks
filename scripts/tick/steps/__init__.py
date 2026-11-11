@@ -98,7 +98,7 @@ def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) ->
     if key == DEADLINE:
         return ctx.deadline
     found = ctx.view.read(PASS, key)
-    if key == BOX or isinstance(found, PassBox):
+    if isinstance(found, dict) and (key == BOX or isinstance(found, PassBox)):
         return DeclaredBox(cast(dict[str, Any], found), step, allowed)
     if key not in allowed and key in BOX_KEYS:
         refuse(step, key)
@@ -133,7 +133,7 @@ def hook_domains(*keys: str) -> frozenset[Domain]:
 def declared_keys(domains: Iterable[Domain]) -> frozenset[str]:
     """Return the pass box keys ``domains`` name, through step and site hook domains alike, with the held
     exception every step may read."""
-    keys = {domain.split(":", 1)[1] for domain in domains if domain.startswith((PASS_PREFIX, HOOK_PREFIX))}
+    keys = {domain.partition(":")[2] for domain in domains if domain.startswith((PASS_PREFIX, HOOK_PREFIX))}
     return frozenset(keys | {RAISED})
 
 
