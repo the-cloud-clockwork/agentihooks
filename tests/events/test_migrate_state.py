@@ -112,10 +112,13 @@ def test_no_keys_claim_clears_the_hub_skip_without_copying(buses, command, capsy
 def test_interrupted_move_reports_failure_and_stays_pending(buses, command, monkeypatch, capsys):
     from scripts.events import nats_migration
 
-    legacy, _ = buses
+    legacy, scoped = buses
     _seed(legacy)
+    legacy.state("spoke-work").create("later", b"unowned write")
+    copy = nats_migration._copy_state
 
-    def interrupted(*args, **kwargs):
+    def interrupted(root, target, records, plan):
+        copy(root, target, records[:1], plan)
         raise RuntimeError("interrupted during copy")
 
     with monkeypatch.context() as broken:
@@ -123,12 +126,16 @@ def test_interrupted_move_reports_failure_and_stays_pending(buses, command, monk
         code, report = _run(command, capsys, APPLY)
     assert code == 1
     assert report["failures"] == ["interrupted during copy"]
-    assert report["moved"] == 0
+    assert (report["would_move"], report["moved"]) == (2, 1)
     code, dry = _run(command, capsys, ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned"])
     assert code == 0
-    assert (dry["imported"], dry["would_move"]) == (False, 2)
+    assert (dry["imported"], dry["retained"], dry["would_move"]) == (False, 2, 1)
     code, resumed = _run(command, capsys, APPLY)
-    assert (code, resumed["moved"], resumed["failures"]) == (0, 2, [])
+    assert (code, resumed["would_move"], resumed["moved"], resumed["failures"]) == (0, 1, 1, [])
+    assert [entry.value for entry in scoped.for_swarm("rig").state("spoke-work").watch("owned")] == [
+        b"first",
+        b"second",
+    ]
 
 
 @pytest.mark.parametrize(("bucket", "seeded"), [("absent", False), ("empty", True)])

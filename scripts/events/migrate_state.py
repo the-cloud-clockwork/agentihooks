@@ -13,18 +13,21 @@ from .nats import DEFAULT_URL, NatsBus, NatsStateStore
 from .nats_migration import IMPORT_PLAN
 from .nats_state import IMPORT_PENDING
 from .resource_names import legacy_stream_name
-from .subjects import stream_name
+from .subjects import stream_name, subject
 
 
-def _target(bus: Any, swarm: str, bucket: str) -> tuple[int, bool]:
-    """Messages held by the swarm's scoped state stream and whether a completed import marks it."""
+def _target(bus: Any, swarm: str, bucket: str, keys: list[str]) -> tuple[int, bool]:
+    """Owned revisions the swarm's scoped state stream holds and whether a completed import marks it."""
+    prefix = subject(swarm, "state", bucket)
     for name in (legacy_stream_name(swarm, f"STATE_{bucket}"), stream_name(swarm, f"STATE_{bucket}")):
         try:
-            info = bus._loop.run(bus._js.stream_info(name))
+            info = bus._loop.run(bus._js.stream_info(name, subjects_filter=f"{prefix}.>"))
         except NotFoundError:
             continue
         metadata: dict[str, str] = info.config.metadata or {}
-        return info.state.messages, IMPORT_PLAN in metadata and IMPORT_PENDING not in metadata
+        held: dict[str, int] = info.state.subjects or {}
+        copied = sum(held.get(subject(swarm, "state", bucket, *key.split(".")), 0) for key in keys)
+        return copied, IMPORT_PLAN in metadata and IMPORT_PENDING not in metadata
     return 0, False
 
 
@@ -70,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     bus: Any = NatsBus(replace(config, scoped=True, provision=args.apply), config.url or DEFAULT_URL)
     try:
         present, retained = _legacy(bus, args.bucket, keys)
-        before, imported = _target(bus, args.swarm, args.bucket)
+        before, imported = _target(bus, args.swarm, args.bucket, keys)
         failures: list[str] = []
         moved = 0
         if args.apply:
@@ -78,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
                 bus.migrate_state(args.swarm, args.bucket, keys)
             except (RuntimeError, ValueError, PermissionError, APIError, NatsError) as error:
                 failures.append(str(error))
-            moved = _target(bus, args.swarm, args.bucket)[0] - before
+            moved = _target(bus, args.swarm, args.bucket, keys)[0] - before
         print(
             json.dumps(
                 {
@@ -89,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                     "unowned": [key for key in present if key not in keys],
                     "retained": retained,
                     "imported": imported,
-                    "would_move": 0 if imported else retained,
+                    "would_move": 0 if imported else retained - before,
                     "moved": moved,
                     "failures": failures,
                 }

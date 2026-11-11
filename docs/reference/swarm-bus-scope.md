@@ -279,9 +279,10 @@ python -m scripts.events.migrate_state --swarm rig --bucket spoke-work --key cla
 python -m scripts.events.migrate_state --swarm rig --bucket spoke-work --key claim-1 --key claim-2 --apply --quiescent
 ```
 
-The default dry run is read only. Each run prints one JSON report: `keys` claimed, `unowned` legacy keys left in
-the bucket, `retained` revisions of the claimed keys, `imported` when the scoped stream already holds a completed
-import, `would_move`, `moved` and `failures`. A rerun after a completed move reports `imported` true and moves
+The default dry run is read only; without a claim it only inventories the bucket's keys. Each run prints one JSON
+report: `keys` claimed, `unowned` legacy keys left in the bucket, `retained` revisions of the claimed keys,
+`imported` when the scoped stream already holds a completed import, `would_move` (claimed revisions not yet in the
+scoped stream), `moved` and `failures`. A rerun after a completed move reports `imported` true and moves
 nothing. `--apply` requires `--quiescent`, an ownership claim and a provisioning credential; a failed move exits 1
 and leaves the import pending, and the same command resumes it.
 
