@@ -44,7 +44,7 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None, published=None, reads=None):
+def ports_for(hives, readings, here="", local=None, published=None, reads=None, bridges=None):
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
         live=lambda hive, now: hive["live"] and now == NOW,
@@ -56,7 +56,9 @@ def ports_for(hives, readings, here="", local=None, published=None, reads=None):
 
     def read(redis, hive, now):
         (reads if reads is not None else []).append((redis, hive, now))
-        return published if isinstance(redis, Redis) and hive == "root" and now == NOW else None
+        if not isinstance(redis, Redis) or now != NOW:
+            return None
+        return bridges.get(hive) if bridges is not None else (published if hive == "root" else None)
 
     herdr_stats = SimpleNamespace(read=read, MASTER="master")
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
@@ -292,3 +294,55 @@ def test_a_herdr_label_matching_a_hive_no_longer_live_is_not_listed():
     data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
     assert data["agents"] == {"total": 6, "source": "herdr", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
+
+
+DESK = {"id": "desk", "name": "swarm-master", "ui": "yes", "live": True}
+HIVE_003 = {"id": "w3", "name": "swarm-hive-003", "ui": "no", "live": True}
+ROOT_BRIDGE = {
+    "machines": {"master": {"claude": 3}, "swarm-hive-001": {"claude": 1}, "swarm-hive-003": {"claude": 8, "codex": 1}},
+    "silent": [],
+    "measured_at": NOW,
+}
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_every_live_interface_hives_herdr_reading_is_counted_so_every_live_hive_shows(order):
+    interface = [DESK, {**ROOT, "name": "swarm-master"}]
+    hives = [*(interface if order == "desk first" else interface[::-1]), POD_HIVE, HIVE_003]
+    bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": ROOT_BRIDGE}
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert data["agents"] == {"total": 18, "source": "herdr", "reporting": 3, "of": 3, "claude": 17, "codex": 1}
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 8},
+        {"name": "swarm-hive-001", "agents": 1},
+        {"name": "swarm-hive-003", "agents": 9},
+    ]
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_a_hive_two_readings_count_is_counted_once_from_its_own_reading(order):
+    root_bridge = {**ROOT_BRIDGE, "machines": {**ROOT_BRIDGE["machines"], "desk": {"claude": 2}}}
+    bridges = {"desk": {"machines": {"master": {"claude": 5}}, "silent": [], "measured_at": NOW}, "root": root_bridge}
+    interface = [{**DESK, "name": "desk"}, ROOT]
+    hives = interface if order == "desk first" else interface[::-1]
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert sorted(data["hives"]["rows"], key=lambda row: row["name"]) == [
+        {"name": "swarm-hive-001", "agents": 1},
+        {"name": "swarm-hive-003", "agents": 9},
+        {"name": "swarm-master", "agents": 8},
+    ]
+    assert data["agents"]["total"] == 18
+
+
+@pytest.mark.feature("monitor-every-interface-hive")
+@pytest.mark.parametrize("order", ["desk first", "root first"])
+def test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives(order):
+    root_bridge = {**ROOT_BRIDGE, "machines": {"master": {"claude": 3}, "desk": {"claude": 2}}}
+    bridges = {"desk": {"machines": {}, "silent": ["master"], "measured_at": NOW}, "root": root_bridge}
+    interface = [{**DESK, "name": "desk"}, ROOT]
+    hives = interface if order == "desk first" else interface[::-1]
+    data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 5}]
+    assert data["agents"] == {"total": 5, "source": "herdr", "reporting": 1, "of": 1, "claude": 5, "codex": 0}
