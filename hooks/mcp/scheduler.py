@@ -7,6 +7,7 @@ seat (the seat address in name) or session (the session name in name). Ids come 
 import json
 import os
 from collections.abc import Callable
+from typing import Any
 
 from hooks.common import log
 from hooks.mcp._session import env_fallback_allowed
@@ -27,7 +28,7 @@ def owner(session_id: str, agent_name: str) -> str:
     return identity({**os.environ, "CLAUDE_CODE_SESSION_ID": session_id} if session_id else None)
 
 
-def answer(tool: str, action: Callable[[], dict]) -> str:
+def answer(tool: str, action: Callable[[], dict[str, Any]]) -> str:
     try:
         return json.dumps({"success": True, **action()})
     except Exception as e:
