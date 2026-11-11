@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.810 · 2026-11-11
+
+### 2026-11-11 · ded55f07ab36 · #10671 · @agenticore-app
+
+**Document how a stopped swarm tick releases its locks inside the service timeout**
+
+This change adds documentation to docs/pillars/swarm.md explaining how a swarm tick behaves when stopped inside its service timeout: the SIGTERM and 450-second deadline paths, the stop sequence (flag, hook check, grace period, lock release, exit), the in-process holder record, and how the deadline relates to measured tick timings from 17 October. It also adds read-only verification steps, a troubleshooting table, and links from docs/pillars/index.md, giving operators a clear, checked reference for diagnosing timeout kills and confirming locks are correctly released rather than leaked for the next tick to clean up.
+
+### 2026-11-11 · 503709678944 · #10731 · @nestorcolt
+
+**Pass refused accounts into hive master selection so a launch retry leaves them**
+
+This fixes a master-launch retry loop found while profiling master scale CPU cost: when a master launch is refused because the claude:unrouted account is full, `_placed` reselects but `_master_selection` only honored CLOSED capacity rows, so `placement.place_master` kept re-picking the same full native login tens of thousands of times until the tick lock went stale. The fix threads refused `harness:account` keys into `_master_selection`'s closed set so a retry moves to a subscription slot or waits instead of spinning, cutting the CPU burned while holding the placement lock that blocks spawn.
+
+### 2026-11-11 · 1428a13fd627 · #10675 · @agenticore-app
+
+**Document the scheduled swarm tick holder and its journal identifier**
+
+This change adds a new "The tick holder" section to the swarm pillar docs, describing how the minute tick now runs under the agentihooks-scheduler cron rather than a systemd timer: the shared `swarm-tick` machine lock, stop and kill-grace timings, process group sweep, fixed environment, cron re-registration, log locations, and the fallback unit's `--unit` flag with its own start timeout and troubleshooting notes. It also restores the swarm-specific journal query convention to keep tests passing, and adds an index link and changelog entry, giving operators accurate documentation matching the already-merged scheduler migration from #4546.
+
 ## v2.17.808 · 2026-11-11
 
 ### 2026-11-11 · 15c38d20d319 · #10658 · @agenticore-app
