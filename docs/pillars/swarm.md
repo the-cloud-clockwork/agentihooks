@@ -4515,11 +4515,11 @@ The same guard refuses a `gh run view` that names none of `--json`, `--log`, `--
 gh run view without --json, --log, --log-failed or --job reads the annotations of every job, one REST call per job, from the shared GitHub hourly quota. Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>.
 ```
 
-A plain `gh run view <id>` reads the run, its jobs, its artifacts and its workflow, then calls `check-runs/<id>/annotations` once per job. On the agentihooks Tests run that came to 56 REST requests for one command, while the gh call log recorded the command once. The narrow forms cost a few calls:
+In `GH_DEBUG=api` traces, a plain `gh run view <id>` read the run, its jobs, its artifacts and its workflow, then called `check-runs/<id>/annotations` once per job. On the agentihooks Tests run that came to 56 REST requests for one command, while the gh call log recorded the command once. The narrow forms cost a few calls:
 
 | Command | REST requests |
 |---|---|
-| `gh run view <id>` | 56 on the Tests run, 4 plus one per job in general |
+| `gh run view <id>` | 56 on the Tests run; 4 plus one per job in general |
 | `gh run view <id> --json status,conclusion` | 2 |
 | `gh run view <id> --json jobs` | 3 |
 | `gh run view <id> --job <job id>` | 4 |
@@ -4594,7 +4594,7 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 | A Claude agent gets the notice twice for one call | Not expected: post tool delivery runs only when `can_inject_context("PreToolUse")` is false. Check `AGENTIHOOKS_TARGET` in the session; the codex wrapper sets it to `codex`. |
 | A Codex agent keeps polling after `wait --on checks` | Read the command output for `next`. When it is missing, the wait was refused or was a bare wait; fix the target and declare it again. |
 | `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on mutation <run url>`. |
-| `gh run view` is refused with `one REST call per job` | The full run view refusal. Add `--json <fields>`, `--log-failed`, or `--job <job id>`; to wait for the run, declare `wait --on checks <run url>`. |
+| `gh run view` is refused with `one REST call per job` | The [full run view refusal](#full-gh-run-view-refusal). Add `--json <fields>`, `--log-failed`, or `--job <job id>`; to wait for the run, declare `wait --on checks <run url>`. |
 | A master's `gh run view` is refused while its `gh run watch` is not | Expected: the watch refusal covers eng and ci agents only, the full run view refusal covers every swarm agent. |
 
 ## The minute tick
