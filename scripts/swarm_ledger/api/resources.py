@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Callable
 from typing import cast
 
 from scripts.swarm_ledger import ledger_closed, models, ports
@@ -42,6 +43,16 @@ def metadata(doc: dict) -> dict:
         if key in doc["_meta"]
     }
     return result
+
+
+def watchdog_copy(doc: dict[str, object]) -> object:
+    return doc.get("watchdog_copy") or {}
+
+
+DOCUMENT_READS: dict[str, Callable[[dict[str, object]], object]] = {
+    "metadata": cast(Callable[[dict[str, object]], object], metadata),
+    "watchdog": watchdog_copy,
+}
 
 
 def resource_revision(doc: dict, path: str) -> str:
@@ -126,16 +137,14 @@ DONE_ONLY = "State and offset read the done rows of a collection"
 def value(doc: dict, path: str) -> object:
     parts = path.split("/")
     name = parts[0]
-    if path == "metadata":
-        return metadata(doc)
+    if path in DOCUMENT_READS:
+        return DOCUMENT_READS[path](doc)
     if path == "threads":
         return thread_rows(doc)
     if path == "counts":
         return {name: len(doc.get(name, [])) for name in COLLECTIONS}
     if path == "events":
         return doc["_meta"].get("events", [])
-    if path == "watchdog":
-        return cast(dict[str, object], doc).get("watchdog_copy") or {}
     if name == "members":
         members = doc["_meta"].get("members", {})
         if len(parts) == 1:
