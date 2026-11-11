@@ -166,14 +166,6 @@ def test_a_reading_keeps_its_cap_until_the_max_age_and_a_passed_week_reads_full(
     assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
 
 
-@pytest.mark.feature("codex-expired-cap-ages-out-with-usable")
-def test_an_expired_reading_ages_into_unknown_like_any_other_once_past_its_max_age(monkeypatch):
-    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
-    assert router.account_cap(replace(_aged(3600), expired=True), NOW) == 0
-    assert router.account_cap(replace(_aged(6 * 3600), expired=True), NOW) == 0
-    assert router.account_cap(replace(_aged(6 * 3600 + 1), expired=True), NOW) is None
-
-
 def test_a_usable_hour_old_reading_is_still_probed_once_per_freshness_window(monkeypatch):
     probed = []
     monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": _aged(3600)})

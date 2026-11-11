@@ -305,10 +305,10 @@ def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str]
     """Live sessions under the session bands: the week alone sets it; None without a usable reading."""
     if quota is None:
         return None
-    if not usable(quota, now, environ):
-        return None
     if quota.expired:
         return 0
+    if not usable(quota, now, environ):
+        return None
     if quota.reached and not codex_quota.passed(quota.seven_day, now):
         return 0
     return session_bands.week_cap(session_bands.left(quota.seven_day.used, quota.seven_day.resets_at, now))

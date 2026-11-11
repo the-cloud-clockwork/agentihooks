@@ -669,17 +669,6 @@ def test_codex_routing_left_is_the_week_whenever_the_week_is_known():
     assert (row.state, row.cap, row.routing_left) == ("STALE", None, 70.0)
 
 
-@pytest.mark.feature("codex-expired-cap-ages-out-with-usable")
-def test_an_aged_expired_reading_reports_stale_not_expired(monkeypatch):
-    dead = codex_quota.CodexQuota(1000, "?", seven_day=QuotaWindow(30.0, 10**10), expired=True)
-    [fresh_row] = agents_quota.codex_rows([CodexAccount("alpha", "AH_CX_TOKEN_alpha")], {"alpha": dead}, {}, now=1000)
-    assert fresh_row.state == "EXPIRED"
-    [aged_row] = agents_quota.codex_rows(
-        [CodexAccount("alpha", "AH_CX_TOKEN_alpha")], {"alpha": dead}, {}, now=1000 + 7 * 3600
-    )
-    assert aged_row.state == "STALE"
-
-
 def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(monkeypatch):
     from hooks.context import account_sessions
 
