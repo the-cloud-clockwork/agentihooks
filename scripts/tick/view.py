@@ -226,8 +226,10 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
     path = view_file(base, slug, scheduler.runtime_dir())
 
     def refresh() -> LedgerView:
-        """The held view patched with one delta read."""
-        return refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
+        """The held view patched with one delta read, dropping the task fields offline passes queued."""
+        answered = refreshed(path, lambda since, parts: client.changes(slug, since, parts, TICK_SCOPE))
+        queued_file(path).unlink(missing_ok=True)
+        return answered
 
     try:
         view = refresh()
@@ -236,7 +238,6 @@ def start(slug: str, service: bool, timeout: float | None = None) -> LedgerView 
             raise
         print(f"ledger view of {slug} skipped: the ledger server refused named parts", file=sys.stderr)
         view = None
-    queued_file(path).unlink(missing_ok=True)
     _hold(slug, view, _kept(refresh), path)
     return view
 
@@ -273,7 +274,11 @@ def _hold(slug: str, view: LedgerView | None, renew: Callable[[], LedgerView], p
 def stored(slug: str) -> LedgerView | None:
     """The last good view of this swarm's ledger stored on this host with the task fields an offline pass queued
     since applied, or nothing when the host stores none."""
-    path = _stored_file(slug)
+    return _stored_at(_stored_file(slug))
+
+
+def _stored_at(path: Path) -> LedgerView | None:
+    """The view stored at ``path`` with the task fields kept beside it applied, or nothing when none is stored."""
     found = read_export_file(path)
     if found is None:
         return None
@@ -316,9 +321,10 @@ def fresh(slug: str) -> bool:
 def hold_stored(slug: str) -> LedgerView | None:
     """Hold the last good view of this swarm's ledger stored on this host, read again as itself, or nothing when
     the host stores none."""
-    view = stored(slug)
+    path = _stored_file(slug)
+    view = _stored_at(path)
     if view is not None:
-        _hold(slug, view, lambda: HELD.get().view, _stored_file(slug))  # pyright: ignore[reportOptionalMemberAccess]
+        _hold(slug, view, lambda: HELD.get().view, path)  # pyright: ignore[reportOptionalMemberAccess]
     return view
 
 

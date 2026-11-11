@@ -299,6 +299,28 @@ def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
 
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_mid_pass_answered_read_drops_the_queued_fields_the_pass_kept(
+    stored: Queued, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def changes(
+        self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
+    ) -> dict[str, Any]:
+        return {"generation": since, "changes": {"lists": {}, "set": [], "drop": []}}
+
+    monkeypatch.setattr(api.ResourceClient, "changes", changes)
+    with view.holding():
+        view.start("sw", False)
+        view.queued([{"op": "task_update", "item": "tasks/t1", "fields": {"claimed_by": "e1"}}])
+        kept = view.stored("sw")
+        assert kept is not None and kept.read("tasks", "t1") == {"id": "t1", "state": "open", "claimed_by": "e1"}
+        view.wrote()
+        current = view.current()
+        assert current is not None and current.read("tasks", "t1") == {"id": "t1", "state": "open"}
+    reloaded = view.stored("sw")
+    assert reloaded is not None and reloaded.read("tasks", "t1") == {"id": "t1", "state": "open"}
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
 def test_a_first_read_stores_the_view_even_at_generation_zero(tmp_path: Path) -> None:
     path = tmp_path / "view.json"
     held = view.refreshed(path, lambda since, parts: {"generation": 0, "data": STATE})
