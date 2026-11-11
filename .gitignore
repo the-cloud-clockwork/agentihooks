@@ -59,3 +59,5 @@ profiles/*/.claude/settings.json
 docs/swarm-v2/.*.lock
 collected.json
 deploy/helm/agentihooks-swarm/Chart.lock
+/.agentihooks/enforcements.json
+/.agentihooks/enforcements.json.tmp

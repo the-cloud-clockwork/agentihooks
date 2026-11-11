@@ -193,7 +193,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import engine, pool
+from scripts.tick import engine, hook_reads, pool
 from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
@@ -210,7 +210,8 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets
+from scripts.tick.step import Domain
+from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -255,7 +256,18 @@ WRAPPER_PREFIX = (
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
 INTENT_JOINS = {"wrapper intent": "wrapper relay"}
+NONE: frozenset[Domain] = frozenset()
+WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    "wrapper probes": (NONE, NONE),
+    "wrapper commands": (NONE, NONE),
+    "wrapper phases": (NONE, hook_domains("doc")),
+    "wrapper intent": (NONE, hook_domains("doc", "config")),
+    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper metrics": (NONE, hook_domains("count")),
+}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -459,8 +471,9 @@ class _Wrapper:
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
-        later site's step may spawn before its hook runs."""
-        return {
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site."""
+        found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
@@ -469,6 +482,7 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
+        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
@@ -537,7 +551,7 @@ class _Wrapper:
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
-            self.box["view"] = view.result() if isinstance(view, Future) else view
+            self.box["view"] = host_steps.pass_view(self.slug, view)
         return True
 
     def _reread(self) -> bool:

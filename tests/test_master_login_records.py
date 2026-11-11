@@ -145,7 +145,7 @@ def _week(monkeypatch, **used):
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, used[account] + 0 * now, 0.0))
 
 
-@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 96.0])
+@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 99.0])
 def test_a_login_past_the_master_limit_yields_to_the_next_in_order(monkeypatch, rendered, tmp_path, spent):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
@@ -184,7 +184,7 @@ def test_a_held_first_login_passes_to_the_next_ordered_login_under_the_master_li
     _stored(2, TWO)
     _stored(3, {"emailAddress": "three@example.com"})
     _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=90.0, threeatexample_com=10.0)
-    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=97.0, threeatexample_com=30.0)
+    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=99.0, threeatexample_com=30.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com,threeatexample_com")
     environ = _environ(rendered)
     _held(1, environ["AGENTIHOOKS_AGENT_NAME"])

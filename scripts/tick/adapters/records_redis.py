@@ -6,7 +6,7 @@ from typing import Any
 
 from scripts.tick.ports.records import FencedBatch, LeaseFence, Record, RevisionConflict, StaleLease
 
-__all__ = ["CONFLICT", "LAYOUT", "LOG_CAP", "META", "RedisRecords", "STALE"]
+__all__ = ["CONFLICT", "LAYOUT", "LOG_CAP", "META", "RedisRecords", "STALE", "fence_key"]
 
 META = "meta"
 LAYOUT = "layout"
@@ -81,6 +81,11 @@ def _encode(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
+def fence_key(slug: str, part: str, prefix: str | None = None) -> str:
+    """The key of one fenced records part, built without registering the batch script."""
+    return f"{prefix or _prefix()}:{{{slug}}}:fence:{part}"
+
+
 class RedisRecords:
     """Every fenced record of a swarm lives under keys sharing the swarm's hash tag, so one script sees them all."""
 
@@ -92,7 +97,7 @@ class RedisRecords:
         self._script = redis.register_script(FENCED_BATCH)
 
     def key(self, slug: str, part: str) -> str:
-        return f"{self.prefix}:{{{slug}}}:fence:{part}"
+        return fence_key(slug, part, self.prefix)
 
     def revision_key(self, slug: str) -> str:
         return self.key(slug, "revision")

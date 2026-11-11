@@ -312,6 +312,53 @@ def test_tick_matches_golden(scenario: str, entry: str, monkeypatch: pytest.Monk
     compare(record, scenario, entry)
 
 
+@pytest.mark.feature("swarm-tick-declared-reads")
+@pytest.mark.parametrize("entry", ["tick", "run_tick"])
+@pytest.mark.parametrize("scenario", SCENARIOS)
+def test_recorded_passes_read_only_declared_values(
+    scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.tick import sites
+    from scripts.tick import steps as tick_steps
+
+    refused: list[tuple[str, str]] = []
+    wrote: list[tuple[str, str]] = []
+    original = tick_steps.refuse
+
+    def record(step: str, key: str) -> None:
+        refused.append((step, key))
+        original(step, key)
+
+    def guarded(owner_hooks: Callable[[Any], dict[str, Callable[[], bool]]], table: dict[str, Any]) -> Any:
+        def hooks(owner: Any) -> dict[str, Callable[[], bool]]:
+            return {site: guard(owner, site, hook, table[site]) for site, hook in owner_hooks(owner).items()}
+
+        return hooks
+
+    def guard(owner: Any, site: str, hook: Callable[[], bool], keys: Any) -> Callable[[], bool]:
+        reads, writes = keys
+        allowed = tick_steps.declared_keys(reads | writes)
+
+        def run() -> bool:
+            real = owner.box
+            before = dict(real)
+            owner.box = tick_steps.DeclaredBox(real, f"hook {site}", allowed)
+            try:
+                return hook()
+            finally:
+                owner.box = real
+                changed = {key for key in real if key not in before or real[key] is not before[key]}
+                wrote.extend((site, key) for key in sorted(changed - tick_steps.declared_keys(writes)))
+
+        return run
+
+    monkeypatch.setattr(tick_steps, "refuse", record)
+    monkeypatch.setattr(cli._Wrapper, "hooks", guarded(cli._Wrapper.hooks, cli.WRAPPER_HOOK_KEYS))
+    monkeypatch.setattr(sites.TickSites, "hooks", guarded(sites.TickSites.hooks, sites.TICK_HOOK_KEYS))
+    replay(scenario, entry, monkeypatch, tmp_path)
+    assert (refused, wrote) == ([], [])
+
+
 @pytest.mark.feature("swarm-tick-characterisation")
 @pytest.mark.parametrize("entry", ["tick", "run_tick"])
 def test_dropped_reap_action_breaks_golden(entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

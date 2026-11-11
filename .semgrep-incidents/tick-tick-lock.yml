@@ -1,0 +1,19 @@
+rules:
+  - id: tick-tick-lock
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A tick step takes or releases the controller tick lock on the swarm store itself, so the lock escapes the
+      Tools coordination port and its deadline. Use coordination.tick_lock(held, ttl_ms, caller, deadline=...) and
+      coordination.release_tick_lock(token, caller, deadline=...).
+    paths:
+      include:
+        - /scripts/tick/steps/
+        - tick-tick-lock.py
+    pattern-either:
+      - pattern: controller.take_tick_lock(...)
+      - pattern: controller.release_tick_lock(...)
+      - pattern: scripts.swarm.controller.take_tick_lock(...)
+      - pattern: scripts.swarm.controller.release_tick_lock(...)
+      - pattern: take_tick_lock(...)
+      - pattern: release_tick_lock(...)
