@@ -540,6 +540,28 @@ def test_a_refused_retire_is_recorded_with_its_refusal_and_retried(monkeypatch: 
     assert calls[-2:] == [("refusal", (agent,)), ("failed", (store, "sw", "eng@1-1", "pane busy", NOW))]
 
 
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_an_ended_agent_whose_drop_the_store_refuses_is_kept_without_settling_its_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = Calls()
+    monkeypatch.setattr(tick, "master_retire", SimpleNamespace(forget=calls.fn("forget")))
+    reports = SimpleNamespace(removed=calls.fn("removed", True))
+    monkeypatch.setattr(tick, "reports", SimpleNamespace(Reports=lambda redis: reports))
+    monkeypatch.setattr(tick, "_refund_parked", calls.fn("refund_parked"))
+    monkeypatch.setattr(tick, "exits", SimpleNamespace(settle=calls.fn("settle")))
+    redis = SimpleNamespace(hset=calls.fn("hset"), hexists=lambda key, field: False)
+    store = SimpleNamespace(
+        redis=redis,
+        key=lambda slug, *parts: "/".join((slug, *parts)),
+        release=calls.fn("release"),
+        drop_agent=calls.fn("drop_agent", False),
+    )
+    actions = agents._retire_ended("sw", store, "ledger", "runtime", {}, _agent(), NOW)
+    assert actions == ["kept eng@1-1, the store refused its drop, retrying next pass"]
+    assert [call[0] for call in calls][-2:] == ["release", "drop_agent"]
+
+
 def _reaping(monkeypatch: pytest.MonkeyPatch, calls: Calls, live: set[str], **answers: Any) -> Any:
     """Patch the seams one reap judgement reads and return the pass it judges against."""
     monkeypatch.setattr(tick, "_acknowledging", calls.fn("acknowledging", answers.get("acknowledging", False)))

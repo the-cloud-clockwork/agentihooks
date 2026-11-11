@@ -597,6 +597,7 @@
         "tests/tick/steps/test_reap_watch.py::test_an_agent_idle_past_the_kill_count_is_retired_and_its_task_dropped",
         "tests/tick/steps/test_reap_watch.py::test_an_owner_is_restored_only_for_a_live_current_agent_that_holds_its_claim",
         "tests/tick/steps/test_reap_watch.py::test_a_refused_retire_is_recorded_with_its_refusal_and_retried",
+        "tests/tick/steps/test_reap_watch.py::test_an_ended_agent_whose_drop_the_store_refuses_is_kept_without_settling_its_exit",
         "tests/tick/steps/test_reap_watch.py::test_an_agent_awaiting_a_decision_or_a_starting_master_is_not_judged",
         "tests/tick/steps/test_reap_watch.py::test_a_live_local_agent_has_its_owner_restored_then_is_watched",
         "tests/tick/steps/test_reap_watch.py::test_a_missing_agent_with_a_pending_recovery_keeps_its_lease",
