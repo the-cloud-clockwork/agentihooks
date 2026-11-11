@@ -21,7 +21,6 @@ from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import (
     AGENTS,
-    PASS,
     SWARM,
     TASKS,
     CallStep,
@@ -393,9 +392,8 @@ class WriteStep:
 
     def run(self, ctx: Context) -> Result:
         """Run the call against the pass state, returning its actions and its writes."""
-        found = cast(
-            list[object], self.call(steps.import_module("scripts.swarm.tick"), partial(ctx.view.read, PASS)) or []
-        )
+        reader = partial(steps.declared_read, ctx, self.name, steps.declared_keys(self.reads | self.writes))
+        found: list[object] = list(self.call(steps.import_module("scripts.swarm.tick"), reader) or [])
         writes = tuple(item for item in found if isinstance(item, Write))
         lines = [item for item in found if not isinstance(item, Write)]
         return Result((Write(actions_of(self.name), self.name, lines), *writes))
