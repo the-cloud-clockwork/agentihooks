@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from scripts.swarm import cli, ledger_client
-from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerUnreachable
+from scripts.swarm.ledger_client import OFFLINE, LedgerClient, LedgerOffline, LedgerUnreachable
 from scripts.swarm_ledger.api import client as api
 from scripts.tick import view
 from scripts.tick.adapters.ledger import resource_client
@@ -343,3 +343,105 @@ def test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on(wra
 
     assert wrapped(None, values.__getitem__) == []
     assert "raised" not in box
+
+
+def _not_answering(error: OSError) -> Any:
+    """A ledger call that fails the way the ledger module reports ``error`` from the server."""
+
+    def call(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        try:
+            raise error
+        except OSError as exc:
+            raise SystemExit(f"ledger server not answering on http://ledger: {exc}") from exc
+
+    return call
+
+
+def _unreached(error: OSError) -> Any:
+    """A ledger resource read that raises ``error`` as the resource client does."""
+
+    def resource(*_args: object, **_kwargs: object) -> Any:
+        raise error
+
+    return resource
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+@pytest.mark.parametrize(
+    ("first", "then", "error", "raised", "was_slow"),
+    [
+        ("state", "tasks", TimeoutError("timed out"), LedgerUnreachable, True),
+        ("tasks", "state", urllib.error.URLError(TimeoutError("timed out")), urllib.error.URLError, True),
+        ("state", "metadata", ConnectionRefusedError("refused"), LedgerUnreachable, False),
+    ],
+    ids=["call timeout", "read timeout", "call refused"],
+)
+def test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once(
+    first: str,
+    then: str,
+    error: OSError,
+    raised: type[Exception],
+    was_slow: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.scheduler import service
+
+    calls: list[str] = []
+
+    def counted(name: str, inner: Any) -> Any:
+        def wrapped(*args: object, **kwargs: object) -> Any:
+            calls.append(name)
+            return inner(*args, **kwargs)
+
+        return wrapped
+
+    ledger = SimpleNamespace(
+        base=lambda slug: "http://ledger",
+        credentials=lambda slug, service: {},
+        REQUEST_TIMEOUT=4,
+        call=counted("call", _not_answering(error)),
+        resource=counted("resource", _unreached(error)),
+        Missing=LookupError,
+    )
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", lambda *_args, **_kwargs: {"generation": 3, "data": STATE})
+    client = LedgerClient()
+    with view.holding():
+        view.start("sw", False)
+        assert ledger_client.offline() is False
+        with pytest.raises(raised):
+            getattr(client, first)("sw")
+        assert (ledger_client.offline(), ledger_client.slow()) == (True, was_slow)
+        with pytest.raises(LedgerOffline, match="last good view"):
+            getattr(client, then)("sw")
+    assert len(calls) == 1
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+@pytest.mark.parametrize(
+    "failure",
+    [refusal(503), ValueError("bad reply"), None],
+    ids=["refusal", "other failure", "no cause"],
+)
+def test_a_refusal_or_other_failure_leaves_the_held_view_online(
+    failure: BaseException | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.scheduler import service
+
+    ledger = SimpleNamespace(base=lambda slug: "http://ledger", credentials=lambda slug, service: {}, REQUEST_TIMEOUT=4)
+    monkeypatch.setattr(ledger_client, "_ledger", lambda: ledger)
+    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(api.ResourceClient, "changes", lambda *_args, **_kwargs: {"generation": 3, "data": STATE})
+    with view.holding():
+        view.start("sw", False)
+        view.stopped(failure)
+        assert (view.offline(), view.slow()) == (False, False)
+
+
+@pytest.mark.feature("swarm-tick-cached-ledger")
+def test_a_timeout_without_a_held_view_marks_nothing() -> None:
+    with view.holding():
+        view.stopped(TimeoutError("timed out"))
+        assert (view.offline(), view.slow(), view.current()) == (False, False, None)

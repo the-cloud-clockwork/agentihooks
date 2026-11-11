@@ -916,6 +916,7 @@ class HiveLaunch:
             launched_at=agent.launched_at,
             overlays=agent.overlays,
             launch_timings=agent.launch_timings,
+            remote_control=agent.remote_control,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 
@@ -946,6 +947,7 @@ class HiveLaunch:
             launched_at=ack.execution.get("launched_at", agent.launched_at),
             launch_timings=ack.execution.get("launch_timings", agent.launch_timings),
             overlays=ack.execution.get("overlays", agent.overlays),
+            remote_control=ack.execution.get("remote_control", agent.remote_control),
         )
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.store.execution_registry.update(self.slug, live)

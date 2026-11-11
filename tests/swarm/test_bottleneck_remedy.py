@@ -167,12 +167,10 @@ def test_seat_wait_moves_no_seat_and_proposes_to_the_master(store, home, shipped
     assert master_items(store) == [proposal("seat wait", CLAIM, bottleneck_remedy.UNMECHANICAL)]
 
 
-@pytest.mark.parametrize("shift", [3, 16, -16])
-def test_seat_wait_under_auto_scaling_leaves_the_stored_lane_shift(store, home, shipped, shift):
-    store.update(SLUG, scaling="auto", lane_shift=shift)
+def test_seat_wait_under_auto_scaling_leaves_the_caps(store, home, shipped):
+    store.update(SLUG, scaling="auto")
     fire(store, "seat_wait", value=7.5)
     assert run(store) == [proposed(CLAIM, bottleneck_remedy.UNMECHANICAL)]
-    assert store.config(SLUG).lane_shift == shift
     assert caps(store) == (2, 2)
 
 

@@ -344,7 +344,10 @@
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
-        "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+        "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on",
+        "tests/tick/test_offline_view.py::test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once",
+        "tests/tick/test_offline_view.py::test_a_refusal_or_other_failure_leaves_the_held_view_online",
+        "tests/tick/test_offline_view.py::test_a_timeout_without_a_held_view_marks_nothing"
       ]
     },
     {
@@ -1415,10 +1418,10 @@
     {
       "id": "swarm-manual-caps",
       "origin": "inventory",
-      "behaviour": "Manual lane caps hold against a stored lane shift.",
+      "behaviour": "Manual lane caps hold against lane demand.",
       "seam": "agentihooks swarm set max-eng-agents and max-ci-agents",
       "tests": [
-        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_ignore_a_stored_lane_shift"
+        "tests/swarm/test_lane_caps_owner.py::test_manual_caps_hold_against_lane_demand"
       ]
     },
     {
@@ -2174,6 +2177,17 @@
       "tests": [
         "tests/swarm_ledger/test_alerts_page.py::test_the_panel_lists_open_alerts_and_who_holds_a_claimed_one",
         "tests/swarm_ledger/test_alerts_page.py::test_claim_and_close_from_the_panel_send_their_ops"
+      ]
+    },
+    {
+      "id": "alert-writer-closes-its-sync-alert",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1769",
+      "behaviour": "A seat whose refused write raised a sync alert can claim and close that alert even after the ledger closed it on a later success or expiry, and every refused alert claim or close carries the server's reason without raising a new sync alert.",
+      "seam": "The alert_claim and alert_close ops through ledger_core.sync and the ledger CLI's refused report",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
+        "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
       ]
     },
     {
@@ -3364,6 +3378,17 @@
       ]
     },
     {
+      "id": "master-primary-login-reserve-2pct",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
+      "behaviour": "A master on the primary claude ai login hands off only once that login has 2% of its week left (PRIMARY_RESERVE_DEFAULT=2.0, ceiling 98% used) instead of the prior 20% reserve, and a master session itself leaves its own reserved account at 98% of the week used (MASTER_LEAVES=98.0) rather than at the session_bands week floor complement.",
+      "seam": "scripts.routing.reservation.primary_reserved, primary_login_ceiling and MASTER_LEAVES through hooks.context.quota_policy.evaluate",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_a_master_on_the_primary_login_at_90_percent_used_gets_no_handoff",
+        "tests/routing/test_reservation.py::test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left"
+      ]
+    },
+    {
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
@@ -3383,6 +3408,17 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "select-profile-records-the-agent-process",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1779",
+      "behaviour": "A swarm agent launched through select profile has its own agent process, the child select profile starts, recorded with its start time under the agent's name before select profile waits on it, with no binding report involved; retirement of an agent with no validated process id ends that recorded agent process, and a launch whose record cannot be written ends the agent it started.",
+      "seam": "scripts.select_profile.main with scripts.swarm.launches.record and HerdrRuntime.retire",
+      "tests": [
+        "tests/swarm/test_launches.py::test_select_profile_records_the_launched_agent_process_and_retire_ends_it",
+        "tests/swarm/test_launches.py::test_select_profile_ends_the_agent_when_its_launch_cannot_be_recorded"
       ]
     },
     {
@@ -3408,14 +3444,17 @@
       ]
     },
     {
-      "id": "alert-writer-closes-its-sync-alert",
+      "id": "tick-master-placement-coordination",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t1769",
-      "behaviour": "A seat whose refused write raised a sync alert can claim and close that alert even after the ledger closed it on a later success or expiry, and every refused alert claim or close carries the server's reason without raising a new sync alert.",
-      "seam": "The alert_claim and alert_close ops through ledger_core.sync and the ledger CLI's refused report",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-master-placement-ports",
+      "behaviour": "The master placement takes and releases the controller tick lock and drops gone lead masters only through the Tools coordination port: the port takes, refuses and releases the tick lock over the swarm store, both lock operations count as coordination writes a step must declare, the placement waits when the port refuses the lock, and the respawn drops a gone master through a coordination store write.",
+      "seam": "scripts.tick.ports.contracts.Coordination.tick_lock and release_tick_lock, implemented by scripts.tick.adapters.coordination.StoreCoordination",
       "tests": [
-        "tests/swarm_ledger/test_ledger_alerts.py::test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised",
-        "tests/swarm_ledger/test_ledger_alerts.py::test_a_refused_alert_claim_or_close_carries_the_server_reason"
+        "tests/tick/test_master_placement_coordination.py::test_the_store_coordination_takes_refuses_and_releases_the_tick_lock",
+        "tests/tick/test_master_placement_coordination.py::test_the_tick_lock_is_a_coordination_write_a_step_must_declare",
+        "tests/tick/test_master_placement_coordination.py::test_the_master_placement_takes_and_releases_the_tick_lock_through_the_port",
+        "tests/tick/test_master_placement_coordination.py::test_the_master_placement_waits_when_the_port_refuses_the_tick_lock",
+        "tests/tick/test_master_placement_coordination.py::test_respawn_master_drops_a_gone_master_through_the_coordination_port"
       ]
     }
   ],

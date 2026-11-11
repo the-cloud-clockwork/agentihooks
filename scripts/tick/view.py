@@ -248,11 +248,20 @@ def _kept(refresh: Callable[[], LedgerView]) -> Callable[[], LedgerView]:
         except urllib.error.HTTPError:
             raise
         except OSError as exc:
+            stopped(exc)
             held: Held = HELD.get()  # pyright: ignore[reportAssignmentType]
-            held.offline, held.slow = True, timed_out(exc)
             return held.view
 
     return renew
+
+
+def stopped(exc: BaseException | None) -> None:
+    """Leave the held view offline for the rest of the pass when ``exc`` shows the server stopped answering, slow
+    when it only timed out; a refusal or any other failure leaves it as it is."""
+    held = HELD.get()
+    if held is None or not isinstance(exc, OSError) or isinstance(exc, urllib.error.HTTPError):
+        return
+    held.offline, held.slow = True, timed_out(exc)
 
 
 def timed_out(exc: OSError) -> bool:
