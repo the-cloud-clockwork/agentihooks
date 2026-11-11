@@ -71,7 +71,7 @@ def connect_inbox() -> "InboxStore | None":
 
 
 def notify(owner: str, delivery_id: str, inbox: "InboxStore | None" = None) -> None:
-    """Send the owner one inbox item naming the run status and folder, queued while Redis is down; a resend is dropped."""
+    """Send the owner the run's status and folder, queued while Redis is down; a resend is dropped."""
     from scripts.inbox import outbox
 
     text = f"workflow run {delivery_id} {run_status(delivery_id)}, run folder {cli.run_folder(delivery_id)}"
