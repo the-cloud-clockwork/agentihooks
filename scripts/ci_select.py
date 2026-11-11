@@ -25,6 +25,7 @@ DOCS = "docs/"
 DOC = ".md"
 # A name the workflow passes to pytest through one space separated output line.
 SAFE = re.compile(r"[A-Za-z0-9_./-]+")
+MARKDOWN_GLOB = re.compile(r"glob\(\s*['\"][^'\"]*\*\.md['\"]")
 # Changing any of these changes how every test runs, so only the full suite grades them.
 HARNESS = frozenset(
     {
@@ -83,6 +84,15 @@ def naming_tests(root: Path, needles: set[str]) -> set[str]:
     return found
 
 
+def markdown_tests(root: Path) -> set[str]:
+    """Test files that glob markdown files, which no changed file name reaches."""
+    return {
+        test.relative_to(root).as_posix()
+        for test in sorted((root / TESTS).rglob("test_*.py"))
+        if MARKDOWN_GLOB.search(test.read_text())
+    }
+
+
 def reshaped(root: Path, base: str, head: str) -> bool:
     command = ["git", "diff", "--quiet", "--no-renames", "--diff-filter=AD", f"{base}...{head}"]
     result = subprocess.run(command, cwd=root)
@@ -135,6 +145,8 @@ def selected_tests(
     if any(path in locked_tests.LOCKED or path == locked_tests.MANIFEST.as_posix() for path in changed):
         tests.add(LOCKED_CHECK)
     tests |= naming_tests(root, needles)
+    if any(path.endswith(DOC) for path in changed):
+        tests |= markdown_tests(root)
     tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
     if (
         tests
