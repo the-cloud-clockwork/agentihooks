@@ -293,10 +293,10 @@ def _home_form(rest: str, agents: dict[str, str]) -> str | None:
     """Map a path below a home folder to its profile path when it names a hub agent, else to ``$HOME``."""
     parts = rest.split("/")
     for index, part in enumerate(parts[:-1]):
-        inside = parts[index + 2 :]
-        if part == "agents" and parts[index + 1] not in agents and inside[:1] == ["package"]:
-            return None
-        if part == "agents" and parts[index + 1] in agents:
+        if part == "agents" and parts[index - 1] != ".claude":
+            if parts[index + 1] not in agents:
+                return None
+            inside = parts[index + 2 :]
             if inside[:1] == ["package"]:
                 inside = inside[1:]
             elif inside[:1] not in ([], [""], [AGENT_HOOKS]):

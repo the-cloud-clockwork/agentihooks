@@ -819,6 +819,7 @@ def test_workstation_paths_in_instructions_become_bundle_or_environment_forms(
         "/mnt/c/Users/nesto/Desktop/thumb.png",
         "/home/iamroot/dev/agentihub/agents/diagram/bootstrap.sh",
         "/home/iamroot/dev/agentihub/agents/other/package/run.sh",
+        "/home/iamroot/dev/agentihub/agents/other/bootstrap.sh",
     ],
 )
 def test_a_workstation_path_with_no_portable_form_refuses_the_import(hub: Path, tmp_path: Path, path: str) -> None:
