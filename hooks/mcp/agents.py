@@ -52,14 +52,10 @@ def detach(run: str) -> None:
     )
 
 
-def start(profile: str, case: str, wait: bool) -> Any:
-    """Save a one-stage run of the profile, then run it to its end or hand it to a detached resume."""
-    if _module("hooks.context.worker_mode").active():
-        raise ValueError(NESTED)
+def launch(definition: Any, case: str, wait: bool) -> Any:
+    """Save a run of the definition on the case, then run it to its end or hand it to a detached resume."""
     cli = _module("scripts.workflows.cli")
     store = _module("scripts.workflows.store")
-    _module("scripts.agents.cli").show_card(profile)
-    definition = one_stage(profile)
     folder = cli.run_folder(uuid4().hex)
     state = store.create(folder, definition, case)
     state.update(definition=definition.to_document(), harness="auto")
@@ -68,6 +64,14 @@ def start(profile: str, case: str, wait: bool) -> Any:
         return cli.execute(folder, state)
     detach(folder.name)
     return state
+
+
+def start(profile: str, case: str, wait: bool) -> Any:
+    """Save a one-stage run of the profile, then run it to its end or hand it to a detached resume."""
+    if _module("hooks.context.worker_mode").active():
+        raise ValueError(NESTED)
+    _module("scripts.agents.cli").show_card(profile)
+    return launch(one_stage(profile), case, wait)
 
 
 def agent_list(capability: str = "") -> str:
