@@ -1481,7 +1481,7 @@ def test_the_tick_rereads_a_stall_from_github_before_acting():
 
     from scripts.tick.steps import report
 
-    assert "reread=ledger_events.view" in inspect.getsource(report)
+    assert "reread=_reread(get)" in inspect.getsource(report)
 
 
 def test_a_new_owner_inside_its_limit_costs_no_github_reread():

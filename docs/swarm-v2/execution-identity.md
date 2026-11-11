@@ -46,11 +46,11 @@ A launch that still runs out of attempts appears in the tick output as:
 
 The `, task <task id> reopened` part appears only when the tick still held the task and reopened it.
 
-When the scheduled tick runs under `systemd-cat -t agentihooks-swarm`, its output is in the user journal:
+The scheduled tick writes to the user journal of its unit, `agentihooks-swarm.service`:
 
 ```bash
 # Spawn failures from execution history contention in the last day
-journalctl --user -t agentihooks-swarm --since "1 day ago" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 day ago" --until now \
   | grep "spawn failed for" | grep "execution history kept changing"
 ```
 
@@ -149,14 +149,14 @@ routing reads over a window, and count passes with outcome `stopped`, which cove
 the service:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-20min" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-20min" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep '"step": "scripts.hive.scope.readings"' | sed 's/^[^{]*//' \
   | python3 -c 'import sys, json
 w = sorted(json.loads(l)["wall_s"] for l in sys.stdin)
 print(len(w), "calls; total", round(sum(w)), "s; median", round(w[len(w) // 2], 1) if w else None)'
 
-journalctl --user -t agentihooks-swarm --since "-1h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep '"step": "run_tick"' | sed 's/^[^{]*//' \
   | python3 -c 'import sys, json
@@ -329,7 +329,7 @@ and prints `pass` or `fail`:
 
 ```bash
 SLUG=rig-grade-swarm
-journalctl --user -t agentihooks-swarm --since "-3h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-3h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep '"step": "scripts.hive.scope.readings"' | grep "\"slug\": \"$SLUG\"" | sed 's/^[^{]*//' \
   | python3 -c 'import sys, json

@@ -37,6 +37,7 @@ pytestmark = pytest.mark.unit
 STORE = SimpleNamespace(redis="redis")
 DOC = {"tasks": ["t"], "_meta": {"events": ["e"]}}
 CONFIG = SimpleNamespace(repo="/repo", watchdog_address="wd")
+REREAD = ("reread", "view", "redis")
 AGENTS = [SimpleNamespace(name="b", runtime_backend="remote"), SimpleNamespace(name="c", runtime_backend="local")]
 
 
@@ -95,6 +96,7 @@ def _run(group: str, calls: list[tuple[Any, ...]], state: dict[str, Any], monkey
     monkeypatch.setattr(host, "import_module", lambda name: cli)
     monkeypatch.setattr(timing, "call", call)
     monkeypatch.setattr(ready, "Pass", lambda *args: ("pass", *args))
+    monkeypatch.setattr(ledger_events, "fresh_reader", lambda earlier, cache=None: ("reread", earlier, cache))
     monkeypatch.setattr(stall_watch, "Watch", lambda *args, **kwargs: ("stall watch", args, kwargs))
     monkeypatch.setattr(stall_watch, "ready_lanes", lambda *args: ("lanes", *args))
     monkeypatch.setattr(release_wait, "checker", lambda repo: ("checker", repo))
@@ -166,8 +168,8 @@ def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytes
         ("skip", ledger_events.event_pass, "inbox", STORE, "sw", DOC, "ledger", 7, "view"),
         ("skip", done_gate.recheck_pass, STORE, "sw", DOC, "ledger", 7, "view"),
         ("skip", progress.checks_pass, "redis", "sw", ["t"], "view", 7),
-        ("skip", waits.end_pass, STORE, "sw", "rows", "inbox", "view", 7, ledger_events.view),
-        ("skip", ready.merge_pass, ("pass", STORE, "sw", "ledger", "view", ledger_events.view, 7), "rows"),
+        ("skip", waits.end_pass, STORE, "sw", "rows", "inbox", "view", 7, REREAD),
+        ("skip", ready.merge_pass, ("pass", STORE, "sw", "ledger", "view", REREAD, 7), "rows"),
     ]
     assert calls[7:] == [
         ("skip", quiet.quiet_pass, STORE, "sw", "rows", 7),
@@ -198,7 +200,7 @@ def test_the_stall_and_overrun_watches_share_the_live_agents(monkeypatch: pytest
     assert name == "stall watch"
     assert args[:5] == (STORE, "sw", "ledger", "view", frozenset({"a", "b"}))
     assert args[6:] == (("lanes", "sw", STORE, "ledger", DOC, 7), 7)
-    assert kwargs == {"released": ("checker", CONFIG), "reread": ledger_events.view}
+    assert kwargs == {"released": ("checker", CONFIG), "reread": REREAD}
     assert (overrun_call[0], overrun_call[1], overrun_call[3]) == ("skip", overrun.overrun_pass, DOC)
     watch = overrun_call[2]
     assert watch[:5] == ("overrun watch", STORE, "sw", "ledger", frozenset({"a", "b"}))
