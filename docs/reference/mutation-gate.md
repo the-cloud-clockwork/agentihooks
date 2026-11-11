@@ -350,11 +350,17 @@ function.
 
 The planner compares the module's shape before and after each change between
 the manifest commit and the head. The shape is the list of top level
-statements, where a class is reduced to its name, bases, keywords, decorators,
-its methods and nested classes by name and decorators, and its attributes whose
-value is a dict literal. Plain class attributes and method bodies are not part
-of the shape. When the shape is unchanged, or the change only binds new names
-as described in the table above, no module wide fallback is added.
+statements, where a class is reduced to its name, bases, keywords and
+decorators, its methods by name and decorators, its nested classes reduced the
+same way as a top level class, and its attributes whose value is a dict
+literal. A top level function is reduced to its name and decorators, so its
+signature and body are not part of the shape. Every other top level statement,
+such as an assignment or an import, is compared in full. Plain class attributes
+and method bodies are not part of the shape.
+No module wide fallback is added when the shape is unchanged, or when the
+change only adds top level names: new imports, new undecorated functions, new
+assignments to unused names, or new entries appended to an existing literal
+table.
 
 | Change outside any function | Module shape | Selection for that file |
 |---|---|---|
@@ -372,7 +378,7 @@ lines include the changed class body line is selected. An inserted or deleted
 line inside a function still adds the tests reaching that function, and a
 replaced function header line still adds that function's tests. The table rows
 that mean "changed" are the cases where a top level rebinding, a new dispatch
-entry or a changed decorator can alter behaviour in code no changed line
+entry or a changed decorator can alter behavior in code no changed line
 belongs to.
 
 For example, a pull request adds one field to a configuration dataclass and
@@ -404,7 +410,7 @@ There is no switch or threshold. The rule runs inside the existing planner
 command whenever a usable line manifest is found, and does not apply when the
 manifest is missing or narrowing is disabled by the drift rows above.
 
-##### Inspection
+##### Inspect the class body selection
 
 Download the selection as in [Inspect the selection](#inspect-the-selection)
 and count the entries for the changed file. A count near the number of tests
