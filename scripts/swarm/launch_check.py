@@ -13,7 +13,7 @@ from pathlib import Path
 
 from hooks.context import profile_chain
 from scripts.hive import join_report
-from scripts.swarm import live_binding, naming
+from scripts.swarm import hash_pages, live_binding, naming
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
 
@@ -54,7 +54,9 @@ def begin(store: RedisStore, slug: str, agent: AgentRecord, at: int, relaunch: b
 
 
 def pending(store: RedisStore, slug: str) -> dict[str, dict]:
-    return {name: json.loads(raw) for name, raw in store.redis.hgetall(store.key(slug, "launch-checks")).items()}
+    return {
+        name: json.loads(raw) for name, raw in hash_pages.fields(store.redis, store.key(slug, "launch-checks")).items()
+    }
 
 
 def forget(store: RedisStore, slug: str, name: str) -> None:
@@ -236,11 +238,13 @@ def report(store: RedisStore, slug: str, task: str) -> dict:
 
 
 def reports(store: RedisStore, slug: str) -> list[dict]:
-    return [json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values()]
+    return [json.loads(raw) for raw in hash_pages.fields(store.redis, store.key(slug, "launch-check-reports")).values()]
 
 
 def judged(store: RedisStore, slug: str) -> set[str]:
-    reports = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values())
+    reports = (
+        json.loads(raw) for raw in hash_pages.fields(store.redis, store.key(slug, "launch-check-reports")).values()
+    )
     return set(pending(store, slug)) | {found["agent"] for found in reports if found.get("held")}
 
 
@@ -263,7 +267,7 @@ def told(found: dict, outcome: str) -> str:
 
 def findings(store: RedisStore, slug: str) -> list[Finding]:
     groups: dict[str, dict] = {}
-    for raw in store.redis.hgetall(store.key(slug, "launch-check-reports")).values():
+    for raw in hash_pages.fields(store.redis, store.key(slug, "launch-check-reports")).values():
         found = json.loads(raw)
         for field, values in found["misses"].items():
             if field in REPORT_ONLY:

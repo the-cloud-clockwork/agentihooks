@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from scripts.swarm import successor_retry
+from scripts.swarm import hash_pages, successor_retry
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
@@ -148,7 +148,7 @@ def collect(run) -> tuple[list[str], set[str]]:
 
     key, actions, waiting = run.store.key(run.slug, KEY), [], set()
     agents = {agent.name: agent for agent in run.store.agents(run.slug)}
-    for name, raw in run.store.redis.hgetall(key).items():
+    for name, raw in hash_pages.fields(run.store.redis, key).items():
         saved = json.loads(raw)
         agent = agents.get(name)
         if agent is None:

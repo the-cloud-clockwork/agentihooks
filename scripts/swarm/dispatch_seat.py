@@ -20,6 +20,7 @@ from scripts.swarm import (
     capacity,
     dev_red,
     elapsed,
+    hash_pages,
     launch_check,
     lifetime,
     priority_sweep,
@@ -122,8 +123,9 @@ def _forget_quota_lanes(store, slug: str, write: bool) -> None:
 
 
 def red_dev(store, slug: str, doc: dict) -> list[dict]:
-    held = store.redis.hgetall(dev_red.key(slug))
-    blocked = sorted(t["id"] for t in doc.get("tasks", []) if t["id"] in held and t.get("state") == "blocked")
+    candidates = [t["id"] for t in doc.get("tasks", []) if t.get("state") == "blocked"]
+    held = hash_pages.picked(store.redis, dev_red.key(slug), candidates)
+    blocked = sorted(task_id for task_id in candidates if task_id in held)
     if not blocked:
         return []
     run_id = max(int(held[task_id]) for task_id in blocked)

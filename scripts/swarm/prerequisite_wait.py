@@ -2,7 +2,7 @@ import json
 import subprocess
 from argparse import ArgumentParser
 
-from scripts.swarm import idle, ledger_events, merge_queue, waits
+from scripts.swarm import hash_pages, idle, ledger_events, merge_queue, waits
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, SwarmError
 
 
@@ -76,7 +76,7 @@ def hold(store: RedisStore, slug: str, agent: AgentRecord, note: str) -> None:
 
 def reopen_pass(slug: str, store: RedisStore, ledger, rows: dict) -> list[str]:
     actions = []
-    for task_id, raw in store.redis.hgetall(key(slug)).items():
+    for task_id, raw in hash_pages.fields(store.redis, key(slug)).items():
         record = json.loads(raw)
         if not record.get("blocked"):
             continue

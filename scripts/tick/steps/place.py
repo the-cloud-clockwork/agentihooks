@@ -14,7 +14,7 @@ from importlib import import_module
 from types import MappingProxyType
 from typing import Any
 
-from scripts.swarm import ack_pass, ledger_client, lost_runner, quota_notice, time_left
+from scripts.swarm import ack_pass, hash_pages, ledger_client, lost_runner, quota_notice, time_left
 from scripts.swarm.naming import seat_label
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -287,7 +287,7 @@ def _release_admission(slug: str, runtime: Any, task: dict[str, Any]) -> None:
 
 
 def _held_for_master(slug: str, store: Any, now_ms: int) -> list[str]:
-    waiting = store.redis.hgetall(tick.MASTER_WAITING)
+    waiting = hash_pages.fields(store.redis, tick.MASTER_WAITING)
     others = sorted(s for s, at in waiting.items() if s != slug and now_ms - int(at) < tick.MASTER_WAIT_MS)
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
