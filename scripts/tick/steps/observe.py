@@ -378,7 +378,7 @@ def _failed_launch(
 
 
 def _retire_launch(slug: str, store: Any, runtime: Any, agent: Any, now_ms: int) -> bool:
-    local = agent.runtime_backend == "local"
+    local = agent.runtime_backend == "local" and not reports.host(agent)
     exited = local and agent.lane != MASTER and agent.name not in runtime.live_names()
     kept = replace(agent, pane_id="") if exited else agent
     gone = retire_watch.reported_gone(store, agent, now_ms)
@@ -465,7 +465,13 @@ def _collect_acks(
 
 
 STEPS = (
-    CallStep("config load", "start", partial(_run, step_config_load), writes=CONFIG),
+    CallStep(
+        "config load",
+        "start",
+        partial(_run, step_config_load),
+        frozenset({"command runner", "reboot pass"}),
+        writes=CONFIG,
+    ),
     CallStep(
         "stopped branch",
         "start",

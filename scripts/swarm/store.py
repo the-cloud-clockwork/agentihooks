@@ -116,7 +116,6 @@ class SwarmConfig:
     repo_origin: str = ""
     tick_mode: str = SEQUENTIAL_TICK
     control_url: str = ""
-    watchdog_document: str = ""
 
     def __post_init__(self) -> None:
         if self.tick_mode not in TICK_MODES:
@@ -292,7 +291,6 @@ class RedisStore:
             raw.get("repo_origin", ""),
             raw.get("tick_mode") or SEQUENTIAL_TICK,
             raw.get("control_url", ""),
-            raw.get("watchdog_document", ""),
         )
 
     def update(self, slug, **changes):

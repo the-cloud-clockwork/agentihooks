@@ -810,7 +810,7 @@
   "scripts/swarm_ledger/repository/sqlite.py": 845,
   "scripts/swarm_ledger/repository/writer_copy.py": 80,
   "scripts/swarm_ledger/request_body.py": 39,
-  "scripts/swarm_ledger/request_metrics.py": 220,
+  "scripts/swarm_ledger/request_metrics.py": 206,
   "scripts/swarm_ledger/server_compose.py": 36,
   "scripts/swarm_ledger/server_handoff.py": 23,
   "scripts/swarm_ledger/server_lifetime.py": 29,

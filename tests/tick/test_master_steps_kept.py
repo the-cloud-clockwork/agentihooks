@@ -13,6 +13,8 @@ from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain, Lane, Result
 from scripts.tick.steps import CallStep, masters
 
+JUDGED = frozenset({Domain("pass:judged")})
+
 pytestmark = pytest.mark.unit
 
 MARK: ContextVar[str] = ContextVar("kept step mark", default="clean")
@@ -92,14 +94,14 @@ def test_an_overrunning_intent_check_still_lets_the_master_steps_run() -> None:
         return action
 
     steps = (
-        Step("intent check", "wrapper intent", _blocking(release), budget_s=60.0),
+        Step("intent check", "wrapper intent", _blocking(release), budget_s=60.0, writes=JUDGED),
         Step("reboot pass", "wrapper reboot", _sleeping(0.5)),
         Step("master down", masters.SEATS, seat("master down"), kept=True),
         Step("tick master", masters.SEATS, seat("tick master"), kept=True),
         Step("page relay", "wrapper relay"),
     )
     sites = ("wrapper intent", "wrapper reboot", masters.SEATS, "wrapper relay")
-    edged = registry.site_edges(steps, sites, {"wrapper intent": "wrapper relay"})
+    edged = registry.site_edges(steps, sites, {"wrapper relay": (JUDGED, frozenset())})
     try:
         with pool.running(critical_s=0.3, slow_s=1.0):
             records = {r.name: r for r in engine.run_graph(edged, Context(View(), Deadline.after(10.0)))}

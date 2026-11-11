@@ -92,6 +92,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 0.25,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
                 {
                     "ended": START + 1820.0,
@@ -100,6 +104,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 1.0,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
             ],
         },
@@ -115,6 +123,10 @@ def test_reader_groups_window_write_records_by_route(now):
                     "lock_wait_seconds": 0.5,
                     "client_wait_seconds": 0.0,
                     "postgres_wait_seconds": 0.0,
+                    "hierarchy_sync_seconds": 0.0,
+                    "outbox_write_seconds": 0.0,
+                    "refresh_record_seconds": 0.0,
+                    "event_append_seconds": 0.0,
                 },
             ],
         },
@@ -151,6 +163,10 @@ def test_clean_reload_keeps_every_record_readable(tmp_path, monkeypatch, now):
         "lock_wait_seconds": 0.75,
         "client_wait_seconds": 0.0,
         "postgres_wait_seconds": 0.0,
+        "hierarchy_sync_seconds": 0.0,
+        "outbox_write_seconds": 0.0,
+        "refresh_record_seconds": 0.0,
+        "event_append_seconds": 0.0,
     }
 
 
