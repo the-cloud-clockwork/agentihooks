@@ -714,7 +714,7 @@ def run_tick(
             records = run_sites(PASS_SITES, state, box, gate, ticks.apply, PASS_HOOK_KEYS, PASS_SHUT_KEYS)
         finally:
             wrapper.watching.close()
-        doc, view = box.get("doc", doc), box.get("view")
+        doc, view = box.get("doc", doc), host_steps.settled_view(box.get("view"))
         try:
             host_steps.raise_held(box)
         finally:
