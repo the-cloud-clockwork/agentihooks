@@ -45,6 +45,13 @@ def test_import_converts_metadata_and_copies_content(hub: Path, tmp_path: Path) 
     report = import_hub(hub, out, False)
     profile = out / "profiles/diagram"
     assert report["profiles"] == ["diagram"]
+    assert report["files"] == [
+        "profiles/diagram/.claude/rules/render.md",
+        "profiles/diagram/.claude/settings.overrides.json",
+        "profiles/diagram/.claude/skills/render/SKILL.md",
+        "profiles/diagram/CLAUDE.md",
+        "profiles/diagram/profile.yml",
+    ]
     assert yaml.safe_load((profile / "profile.yml").read_text()) == {
         "name": "diagram",
         "description": "Draw diagrams",
@@ -81,6 +88,13 @@ def test_dotenv_templates_are_copied(hub: Path, tmp_path: Path) -> None:
 def test_a_command_without_a_name_takes_the_agent_folder_name(hub: Path, tmp_path: Path) -> None:
     (hub / "agents/diagram/package/command.yml").write_text(yaml.safe_dump({"description": "Draw diagrams"}))
     assert import_hub(hub, tmp_path / "bundle", True)["profiles"] == ["diagram"]
+
+
+@pytest.mark.feature("hub-import-core")
+def test_a_command_that_is_not_a_mapping_is_refused(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/diagram/package/command.yml").write_text("- diagram\n")
+    with pytest.raises(ValueError, match="mapping"):
+        import_hub(hub, tmp_path / "bundle", True)
 
 
 @pytest.mark.feature("hub-import-core")
