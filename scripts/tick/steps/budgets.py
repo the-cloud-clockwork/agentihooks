@@ -150,6 +150,7 @@ FLOORS: dict[str, Timing] = {
     "workflow runner": Timing(LIGHT_S, CRITICAL_S),
     "doc items map": Timing(LIGHT_S, CRITICAL_S),
     "step starvation": Timing(LIGHT_S, CRITICAL_S),
+    "knowledge warm": Timing(LIGHT_S, CRITICAL_S),
 }
 
 
