@@ -575,11 +575,9 @@ def run_once(
 
 def tickable(ledger: Any, slug: str) -> bool:
     """Answer False for a swarm whose ledger is binned or closed; a gone or cleartext ledger ticks so its pass reports it once."""
-    from scripts.swarm_ledger.ledger_link import Cleartext
-
     try:
         return not (ledger.binned(slug) or ledger.closed(slug))
-    except (LedgerGone, Cleartext):
+    except (LedgerGone, ledger_link.Cleartext):
         return True
 
 
