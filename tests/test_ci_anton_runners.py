@@ -50,6 +50,8 @@ MOVED = {
     ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): BATCH,
     ("hierarchy-cpu.yml", "load"): BATCH,
+    ("tick-scale.yml", "tick-scale"): BATCH,
+    ("test.yml", "tick-scale"): BATCH,
     ("ledger-load.yml", "compare"): QUEUED,
     ("ledger-load.yml", "compare-grade"): LIGHT,
     ("ledger-load.yml", "load"): QUEUED,

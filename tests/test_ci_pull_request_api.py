@@ -270,6 +270,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "tests/shard_summary.py",
+        "tests/tick_scale/gate.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",
