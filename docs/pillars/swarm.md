@@ -5047,10 +5047,134 @@ stopped or stopping swarm, and each tick pass while the timer units are still on
   machine tick lock lets only one tick run at a time.
 - **Proven.** The timer is disabled, its service group is drained (stop, then SIGTERM for 30 seconds, then SIGKILL
   for 10), and both unit files are deleted. A timer that cannot be disabled, or a group that does not empty, keeps
-  its files and prints why; a later pass retries.
+  its files and prints why; a later pass retries. See [Draining the old tick service](#draining-the-old-tick-service).
 
 The cron and the supervisor are registered after this decision in both cases. A run from a git worktree or from a
 checkout other than the installed agentihooks leaves the shared units alone and says so.
+
+#### One tick per machine and leftover tick reaping
+
+The 18 to 19 October outage first looked like the old timer tick and the new scheduler tick running side by side.
+The scheduler log disproved it: 169 deliveries failed with `ModuleNotFoundError` from 22:04 UTC to 05:18 UTC, so no
+scheduled tick ran in that window (see [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). The journal
+did show the old `agentihooks-swarm.service` leaving tick children running after every tick from 12:00 to 00:04
+local, and `agentihooks swarm tick` took no machine lock, so the timer and the cron could still have run two ticks
+at once. Three changes close that path; each is in force wherever `agentihooks swarm tick` runs.
+
+**The machine tick lock.** Every machine wide tick runs under one file lock, `swarm-tick.lock` in the scheduler
+runtime folder. The folder is `~/.cache/agentihooks/scheduler/` for the local Redis at `redis://127.0.0.1:6379/0`
+and a hashed subfolder for any other Redis endpoint, hive namespace or event bus, so a scratch Redis gets a lock of
+its own. Two ticks for the same swarm Redis never run at once, whichever started them:
+
+| Who starts the tick | How it holds the lock |
+|---|---|
+| The scheduler cron | The holder (`python -m scripts.swarm.scheduled_tick`, logging to `swarm-tick.log` in the runtime folder) takes the lock, then starts `agentihooks swarm tick` through `systemd-cat -t agentihooks-swarm`, passing the locked descriptor in `AGENTIHOOKS_SWARM_TICK_LOCK_FD`. The tick runs under the holder's lock. |
+| The systemd timer, while it stays | The service runs the same holder with `--unit` (`python -m scripts.swarm.scheduled_tick --unit`), which hands its lock to the tick the same way and writes no delivery record. Units written before [pull request 9586](https://github.com/the-cloud-clockwork/agentihooks/pull/9586) run `agentihooks swarm tick` directly, which takes the lock itself. |
+| A hand run or any other caller | `agentihooks swarm tick` takes the lock itself. |
+
+A tick that finds the lock held prints `another swarm tick is running on this machine` on stderr and ends without
+reaping or ticking. A holder that finds the lock held starts no tick and writes no delivery record. The descriptor in
+`AGENTIHOOKS_SWARM_TICK_LOCK_FD` counts only while it is open on that same lock file; a stale, forged or unreadable
+value falls back to taking the lock, which a running holder refuses. `AGENTIHOOKS_SWARM_TICK_LOCK_FD` is set by the
+holder alone; never set it by hand.
+
+A per swarm tick (`agentihooks swarm <id> tick`) takes no machine lock; its swarm's Redis tick lock still applies
+(see [Tick lock holder record](#tick-lock-holder-record)).
+
+**The leftover tick reaper.** Under the lock, before any other work, the tick ends every earlier tick process it
+finds in `/proc`. A process is a leftover when all of these hold:
+
+- It runs as the same user.
+- Its command line ends in `swarm tick`, or it is a scheduler holder (`-m scripts.swarm.scheduled_tick`).
+- Its environment, over the env files a tick loads (`~/.agentihooks/.env` and `~/.agentihooks/*.env`), resolves to
+  the same scheduler runtime folder, which means the same swarm Redis.
+- It is neither the reaping tick nor one of its parents, so the holder that started this tick is spared.
+
+Age does not matter: since the reaper runs under the lock, any other tick of the same Redis is not the running tick.
+The reaper sends SIGTERM to each leftover, waits up to 10 seconds, then sends SIGKILL to each one still alive whose
+start time still matches, so a pid reused by another process is never killed. It signals the pid only, never its
+process group. Each process ended prints one line in the tick's output:
+
+```text
+reaped leftover swarm tick process 48213 after 62 seconds with SIGTERM: /home/me/.local/bin/agentihooks swarm tick
+```
+
+The signal is `SIGKILL` when the process outlived the grace. A host without `/proc` reaps nothing.
+
+#### Draining the old tick service
+
+The tick service runs with `KillMode=process`, so stopping it stops only its main process and leaves any tick child
+running. Retiring the timer therefore drains the service group before the unit files go:
+
+1. `systemctl --user disable --now agentihooks-swarm.timer`. On failure the pass prints
+   `the agentihooks-swarm timer could not be disabled; its unit files stay until a later pass` and stops here.
+2. Drain `agentihooks-swarm.service`, chosen by where the retiring process runs:
+   - **Outside the unit** (the scheduler tick, a swarm start, a wait pass): `systemctl --user stop` (up to
+     120 seconds), then `systemctl --user kill --kill-who=all` with SIGTERM, polling `TasksCurrent` each second for
+     30 seconds, then the same with SIGKILL for 10 seconds.
+   - **Inside the unit** (a tick the old timer started, found through `/proc/self/cgroup` on cgroup v1 or v2): the
+     tick cannot stop its own unit, so it signals every other live member of the unit's `cgroup.procs`, SIGTERM
+     for 30 seconds, then SIGKILL for 10. It never signals itself or its parents.
+3. When the group is empty, both unit files are deleted and systemd is reloaded. Otherwise the pass prints
+   `the agentihooks-swarm service group did not empty (<n> processes left); its unit files stay until a later pass`,
+   where `<n>` is `unknown` when the group could not be read, and the next pass retries.
+
+The scheduler cron is registered even when the drain fails. The timer is already disabled by then, and the cron is
+the only tick left; skipping it would stop every tick, as on 18 October. A survivor of the failed drain cannot run
+beside a new tick: new code takes the machine lock, and the next tick reaps an old one at any age.
+
+#### Check one tick per machine
+
+All of these only read.
+
+```bash
+# The machine tick lock file and the pid that last took it (local Redis; other endpoints use a hashed subfolder)
+ls ~/.cache/agentihooks/scheduler/swarm-tick.lock ~/.cache/agentihooks/scheduler/*/swarm-tick.lock 2>/dev/null
+cat ~/.cache/agentihooks/scheduler/swarm-tick.lock; echo
+
+# Every machine wide tick and scheduler holder now running, with parent and age in seconds; at most one tick
+# per runtime folder, and a holder only as the parent of that tick
+ps -eo pid,ppid,etimes,args | grep -E "swarm tick$|scripts.swarm.scheduled_tick" | grep -v grep
+
+# Refused starts and reaped leftovers in the last hour: timer ticks write to the unit, scheduled ticks to the user
+# journal through systemd-cat, and holders without systemd-cat to swarm-tick.log
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now --no-pager \
+  | grep -E "another swarm tick|reaped leftover"
+TZ=UTC journalctl --user --since "-1h" --until now --no-pager | grep -E "another swarm tick|reaped leftover"
+grep -E "another swarm tick|reaped leftover" ~/.cache/agentihooks/scheduler/swarm-tick.log
+
+# Drain results of recent retire attempts
+journalctl --user --since "-1h" --no-pager | grep -E "agentihooks-swarm (timer could not|service group did not)"
+```
+
+A `reaped leftover` line right after a timer retire or an upgrade is expected: it is a tick the old service left.
+The same line on every pass means something keeps starting ticks outside the lock.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `another swarm tick is running on this machine` once in a while | A tick pass ran past the next minute, or the timer and the cron fired together while the timer stays. | Expected. The next free minute ticks. |
+| `another swarm tick is running on this machine` on every pass | One tick holds the lock without finishing. | Find it with the `ps` line above. A scheduled tick is stopped by its holder after 9 minutes (SIGTERM, then SIGKILL 90 seconds later); a tick started by hand is not, so end it by its pid. |
+| `reaped leftover swarm tick process` on every pass | A process outside the lock keeps starting ticks, such as a loop or an old checkout. | Read the reaped command line and the parent with `ps -o ppid= -p <pid>` while it runs, and stop that caller. |
+| A tick of a scratch Redis was not reaped by the installed tick | It resolves to another scheduler runtime folder. | Expected: each Redis endpoint has its own lock and reaper. |
+| `service group did not empty` on several passes | A member of the old service ignores SIGKILL, for example stuck in uninterruptible I/O, or the group could not be read. | Run `systemctl --user status agentihooks-swarm.service` and end the process listed there. The timer stays disabled, and the next pass retires the unit files. |
+| `the agentihooks-swarm timer could not be disabled` | The user bus is down or `systemctl` is missing. | Restore the user systemd session; the next install pass retries. |
+
+**Tests and runs.** `tests/swarm/test_machine_tick_lock.py` pins that a second tick start exits while one holds the
+lock, that the holder hands its locked descriptor to the tick, that a descriptor not open on the lock file is refused
+while the holder runs, that the tick reaps and records leftovers before it ticks, and
+`test_two_concurrent_tick_starts_run_one_at_a_time`. `tests/swarm/test_tick_reaper.py` pins the match rules, including
+`test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group`,
+`test_a_leftover_that_ignores_terminate_is_killed`, `test_a_tick_of_another_swarm_redis_is_never_a_leftover` and
+`test_the_reaping_tick_spares_itself_and_its_ancestors`. The timer install tests pin both drains, including
+`test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself` and
+`test_an_unreadable_own_group_keeps_the_units`. Delivered by
+[pull request 4732](https://github.com/the-cloud-clockwork/agentihooks/pull/4732), closing
+[issue 4667](https://github.com/the-cloud-clockwork/agentihooks/issues/4667). Red: the tests only commit,
+[run 39209570508](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39209570508), where the lock and
+reaper tests failed to import and three retire tests failed. A scratch proof on a scratch Redis namespace ran two
+concurrent tick starts one at a time and reaped a planted leftover tick aged 62 seconds with SIGTERM while sparing a
+tick of another Redis. On scratch transient user units, a leftover that ignored SIGTERM was killed at 31 seconds, and
+a drain run from inside its own unit killed its sibling and left the unit ending `Result=success`.
 
 #### The wait pass guard
 
