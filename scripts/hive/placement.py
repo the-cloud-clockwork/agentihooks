@@ -8,6 +8,7 @@ from typing import Any
 from scripts.hive.registry import LIVE_MS, MASTER_NAME, UI_ROLES, live
 from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 from scripts.routing.slots import account_key
+from scripts.swarm.probe import ROOT
 
 MASTER = "master"
 INTERACTIVE = "interactive"
@@ -88,9 +89,9 @@ def equipped(task: dict, hive: dict | None) -> bool:
 
 
 def workstation_hives(hives: list[dict[str, Any]], local: str) -> list[dict[str, Any]]:
-    """The hives a workstation task runs on: the headed hive, else the controller's own hive."""
-    headed = [hive for hive in hives if hive.get("ui") == YES]
-    return headed or [hive for hive in hives if hive["id"] == local]
+    """The hives a workstation task runs on: the root hive, else the controller's own hive."""
+    rooted = [hive for hive in hives if hive["id"] == ROOT]
+    return rooted or [hive for hive in hives if hive["id"] == local]
 
 
 def needs_refusal(task: dict, hives: list[dict]) -> str:
