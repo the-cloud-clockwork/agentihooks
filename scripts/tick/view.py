@@ -340,7 +340,7 @@ def queued(ops: list[dict[str, Any]]) -> dict[str, Any]:
     document = dict(held.view.document)
     document["tasks"] = [{**task, **fields.get(task.get("id"), {})} for task in held.view.tasks]
     held.view = LedgerView(held.view.generation, document)
-    if held.path is not None and fields:
+    if held.path is not None:
         _keep_queued(queued_file(held.path), held.view.generation, fields)
     return document
 
