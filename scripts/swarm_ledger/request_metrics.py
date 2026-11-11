@@ -11,7 +11,7 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -25,11 +25,13 @@ DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
-JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9}
-LEGACY_SAMPLE_WIDTH = 7
+STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
+JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9 + len(STEPS)}
+LEGACY_SAMPLE_WIDTHS = frozenset((7, 9))
 CURRENT = ContextVar("ledger_request_timing", default=None)
-SAMPLES = deque(maxlen=MAX_SAMPLES)
-PENDING = []
+Row = tuple[float, str, str, float, float, float, float, float, float, float, float, float]
+SAMPLES: deque[Row] = deque(maxlen=MAX_SAMPLES)
+PENDING: list[Row] = []
 GUARD = threading.Lock()
 JOURNAL_GUARD = threading.Lock()
 STARTED_AT = time.time()
@@ -48,6 +50,7 @@ class Timing:
     postgres_wait: float = 0.0
     started: float = 0.0
     locking: int = 0
+    steps: dict[str, float] = field(default_factory=dict)
 
 
 RESOURCES = frozenset(
@@ -79,6 +82,7 @@ RESOURCES = frozenset(
         "agent-token",
         "hierarchy",
         "freezes",
+        "watchdog",
     )
 )
 FIXED_ROUTES = frozenset(
@@ -138,7 +142,7 @@ def route_name(path: str) -> str:
     return "/:slug"
 
 
-def hold(row: tuple) -> None:
+def hold(row: Row) -> None:
     global EVICTED_THROUGH
 
     if len(SAMPLES) == SAMPLES.maxlen:
@@ -152,14 +156,28 @@ def record(
     wall: float,
     cpu: float,
     lock_wait: float,
-    client_wait: float = 0.0,
-    postgres_wait: float = 0.0,
+    waits: Timing | None = None,
 ) -> None:
     global EVICTED_THROUGH
 
+    waits = Timing() if waits is None else waits
+    hierarchy, outbox, refresh, events = (waits.steps.get(name, 0.0) for name in STEPS)
     with GUARD:
         ended = time.time()
-        row = (ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait)
+        row: Row = (
+            ended,
+            method,
+            route,
+            wall,
+            cpu,
+            lock_wait,
+            waits.client_wait,
+            waits.postgres_wait,
+            hierarchy,
+            outbox,
+            refresh,
+            events,
+        )
         hold(row)
         if JOURNAL is not None:
             PENDING.append(row)
@@ -185,7 +203,7 @@ def journal_rows(path: Path) -> Iterator[list]:
 def journal_row(row: object) -> bool:
     if not isinstance(row, list) or not row or not isinstance(row[0], str):
         return False
-    if len(row) != JOURNAL_WIDTHS.get(row[0]) and not (row[0] == "s" and len(row) == LEGACY_SAMPLE_WIDTH):
+    if len(row) != JOURNAL_WIDTHS.get(row[0]) and not (row[0] == "s" and len(row) in LEGACY_SAMPLE_WIDTHS):
         return False
     texts = (2, 3) if row[0] == "s" else ()
     return all(
@@ -330,8 +348,7 @@ def measured(method: Callable) -> Callable:
                     elapsed,
                     used,
                     timing.lock_wait,
-                    timing.client_wait,
-                    timing.postgres_wait,
+                    timing,
                 )
 
     return request
@@ -380,6 +397,18 @@ def postgres() -> Iterator[None]:
 
 
 @contextmanager
+def step(name: str) -> Iterator[None]:
+    """Add the wall time of one ledger write substep to the current request's timing."""
+    timing = CURRENT.get()
+    wall = time.perf_counter()
+    try:
+        yield
+    finally:
+        if timing is not None:
+            timing.steps[name] = timing.steps.get(name, 0.0) + time.perf_counter() - wall
+
+
+@contextmanager
 def locked(lock: LockType) -> Iterator[None]:
     with waiting():
         lock.acquire()
@@ -423,7 +452,7 @@ def records(hours: float, end: float | None, limit: int) -> dict:
     writes = [row for row in rows if row[1] in WRITES]
     kept = writes[-limit:]
     routes = {}
-    for ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait in kept:
+    for ended, method, route, wall, cpu, lock_wait, client_wait, postgres_wait, *steps in kept:
         entry = routes.setdefault((method, route), {"method": method, "route": route, "count": 0, "records": []})
         entry["count"] += 1
         entry["records"].append(
@@ -434,6 +463,7 @@ def records(hours: float, end: float | None, limit: int) -> dict:
                 "lock_wait_seconds": lock_wait,
                 "client_wait_seconds": client_wait,
                 "postgres_wait_seconds": postgres_wait,
+                **{f"{name}_seconds": steps[index] for index, name in enumerate(STEPS)},
             }
         )
     return {
@@ -471,7 +501,8 @@ def report(hours: float, end: float | None = None) -> dict:
             "lock_wait_seconds": sum(row[5] for row in writes),
             "client_wait_seconds": sum(row[6] for row in writes),
             "postgres_wait_seconds": sum(row[7] for row in writes),
-            "other_wall_seconds": sum(max(0.0, row[3] - sum(row[4:])) for row in writes),
+            **{f"{name}_seconds": sum(row[8 + index] for row in writes) for index, name in enumerate(STEPS)},
+            "other_wall_seconds": sum(max(0.0, row[3] - sum(row[4:8])) for row in writes),
         },
         "slow_days": [{"day": day, "count": count} for day, count in sorted(days.items())],
         "routes": sorted(routes.values(), key=lambda entry: (-entry["cpu_seconds"], entry["method"], entry["route"])),

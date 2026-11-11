@@ -74,6 +74,7 @@ PROMOTION = (
     "hierarchy-cpu",
     "tick-scale",
     "tick-pattern-tree",
+    "launch-hotfix",
     "kind-due",
     "helm-kind",
     "stage-budget",
@@ -86,6 +87,7 @@ def enabled(condition, event, needs, base_ref="dev"):
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
     expression = expression.replace("&&", " and ").replace("||", " or ").replace("!cancelled()", "not cancelled()")
     expression = expression.replace("!contains", "not contains").replace("needs.*.result", "results")
+    expression = expression.replace("!(", "not (")
     expression = re.sub(r"needs\.([a-z]+(?:-[a-z]+)*)", r'needs["\1"]', expression)
     return bool(
         eval(

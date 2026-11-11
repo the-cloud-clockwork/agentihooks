@@ -650,6 +650,14 @@ def _swarm_refresh_job_never_spawns(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _knowledge_warm_job_never_starts(request, monkeypatch):
+    from scripts.ledger_knowledge import warm_job
+
+    if not getattr(request.module, "KNOWLEDGE_WARM_JOB", False):
+        monkeypatch.setattr(warm_job, "start", lambda slug, environ: False)
+
+
+@pytest.fixture(autouse=True)
 def _ci_speed_offline(request, monkeypatch):
     from scripts.swarm import ci_speed
 

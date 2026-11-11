@@ -74,6 +74,7 @@ class StepRecord:
     applied: tuple[str, ...] = ()
     rested: bool = False
     cut: bool = False
+    started_at: float | None = field(default=None, compare=False)
 
     @property
     def outcome(self) -> str:
@@ -102,7 +103,7 @@ def group_steps(name: str, steps: Iterable[Step] | None = None) -> tuple[Step, .
     return registry.ordered(step for step in pool if step.group == name)
 
 
-def run_step(step: Step, ctx: Context) -> StepRecord:
+def _run_once(step: Step, ctx: Context) -> StepRecord:
     """Run one step under a copied context and its own deadline, waiting at most its budget for it to end.
 
     A step still running at its budget is recorded late and left running in its daemon thread; its result is dropped.
@@ -136,6 +137,14 @@ def run_step(step: Step, ctx: Context) -> StepRecord:
     return _finished(step, outcome, clock() - started)
 
 
+def run_step(step: Step, ctx: Context) -> StepRecord:
+    """Run one step as ``_run_once`` runs it and stamp its record with the wall time its run began, unless it was
+    held and never started."""
+    began = time.time()
+    record = _run_once(step, ctx)
+    return record if record.held else replace(record, started_at=began)
+
+
 @dataclass
 class _Run:
     """One step run's end, decided once under a lock: it ended inside its budget, or was given up at it."""
@@ -159,12 +168,14 @@ class _Run:
 
 @dataclass
 class _Start:
-    """When one scheduled step's run began, decided once under a lock against the end of its lane."""
+    """When one scheduled step's run began, by its lane clock and by wall time, decided once under a lock against
+    the end of its lane."""
 
     clock: Callable[[], float]
     lock: Lock = field(default_factory=Lock)
     at: float | None = None
     closed: bool = False
+    wall: float | None = None
 
     def begin(self) -> bool:
         """Record that the run starts now and return True, or return False when its lane end already closed it."""
@@ -172,6 +183,7 @@ class _Start:
             if self.closed:
                 return False
             self.at = self.clock()
+            self.wall = time.time()
             return True
 
     def close(self) -> float | None:
@@ -317,7 +329,8 @@ def _shut(gate: Gate | None, step: Step, records: Mapping[str, StepRecord]) -> f
 class SiteGate:
     """Open or shut each step of a pass graph as it becomes ready.
 
-    A site's hook runs once, when the site's first step is ready, and shuts the whole site when it answers false;
+    A site's hook runs once, when the first step of its site or of a later site in ``sites`` is ready, so a step
+    never runs before the hooks of the sites before its own, and shuts its own site when it answers false;
     ``shut`` shuts single steps and is asked before and after the hook. ``seen`` holds the records of the steps that
     ended, on either thread, before the latest step became ready. The handed lane and the rest of the graph ask it
     from their own threads; a site's hook runs once, outside the guard.
@@ -329,25 +342,37 @@ class SiteGate:
     opened: dict[str, bool] = field(default_factory=dict[str, bool])
     guard: Lock = field(default_factory=Lock, compare=False)
     opening: dict[str, Event] = field(default_factory=dict[str, Event], compare=False)
+    sites: tuple[str, ...] = ()
 
     def __call__(self, step: Step, records: Mapping[str, StepRecord]) -> bool:
-        """Return whether ``step`` runs, running its site's hook first when it is the site's first ready step; a
-        step of a site whose hook runs on another thread of the pass waits for it at most its own budget, never past
-        its lane, and stays shut when the hook did not answer by then; steps of other sites never wait, and outside a
-        pass the hook has always answered before the next step asks."""
+        """Return whether ``step`` runs, first running the hooks of the earlier ``sites`` not yet run, then its own
+        site's hook when it is the site's first ready step; a step whose hooks run on another thread of the pass
+        waits for them at most its own budget, never past its lane, and stays shut when one did not answer by then;
+        outside a pass a hook has always answered before the next step asks."""
         with self.guard:
             self.seen.update(records)
-            if self.shut(step):
-                return False
-            first = step.group not in self.opening
-            opening = self.opening.setdefault(step.group, Event())
-        if first:
-            self._open(step.group, opening)
-        found = pool.active()
-        if found is not None and not opening.wait(min(step.budget_s, found.lane(step.lane).remaining)):
+        if not all(self._answered(group, step) for group in self._hooked(step.group)):
             return False
         with self.guard:
             return bool(self.opened.get(step.group)) and not self.shut(step)
+
+    def _hooked(self, group: str) -> tuple[str, ...]:
+        """Return the hooked sites before site ``group`` in ``sites``, then ``group`` itself."""
+        earlier = self.sites[: self.sites.index(group)] if group in self.sites else ()
+        return (*(site for site in earlier if site in self.hooks), group)
+
+    def _answered(self, group: str, step: Step) -> bool:
+        """Return whether the hook of site ``group`` answered for ``step``, running it when ``step`` asks first; a
+        shut ``step`` runs no hook."""
+        with self.guard:
+            if self.shut(step):
+                return False
+            first = group not in self.opening
+            opening = self.opening.setdefault(group, Event())
+        if first:
+            self._open(group, opening)
+        found = pool.active()
+        return found is None or opening.wait(min(step.budget_s, found.lane(step.lane).remaining))
 
     def _open(self, group: str, opening: Event) -> None:
         """Run the hook of site ``group`` and keep its answer, then release the steps waiting on it."""
@@ -438,7 +463,9 @@ def _critical(step: Step) -> bool:
 def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
     """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
 
-    A step on the critical chain moves the pass record's ``critical_end_s`` to its end offset when that is later. An
+    The row's ``ready_s`` is the pass offset at which the step became ready and its ``start_s`` the offset at which
+    its run began, the ready offset when it never ran. A step on the critical chain moves the pass record's
+    ``critical_end_s`` to its start offset plus its wall time when that is later. An
     abandoned step that started counts every write domain it declares as dropped, since its result never applies.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
@@ -448,6 +475,7 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         dropped = len(record.dropped)
     else:
         dropped = len(step.writes) if record.lost and not record.skipped else 0
+    start = offset if record.started_at is None else record.started_at - current["start_ms"] / 1000
     row = {
         "pass_id": current["pass_id"],
         "step": record.name,
@@ -455,7 +483,8 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
         "outcome": SKIPPED if record.skipped else record.outcome,
         "wall_s": record.wall_s,
         "budget_s": record.budget_s,
-        "start_s": offset,
+        "ready_s": offset,
+        "start_s": start,
         "abandoned": record.abandoned and not record.skipped,
         "cut": record.cut,
         "held": record.held,
@@ -466,8 +495,8 @@ def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord
     }
     if record.outcome in (OK, FAILED) and (step.interval_s > CRON_S or step.lane == SLOW):
         timing.step_ended(store, slug, step.name, time.time())
-    if offset is not None and _critical(step):
-        current["critical_end_s"] = max(current.get("critical_end_s", 0.0), offset + record.wall_s)
+    if start is not None and _critical(step):
+        current["critical_end_s"] = max(current.get("critical_end_s", 0.0), start + record.wall_s)
     timing.append_record(store, slug, "tick:records", row)
     return record
 
@@ -615,7 +644,7 @@ def _expire(
                 left = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
             else:
                 _lost_writes(step, CUT_EVENT)
-                left = StepRecord(step.name, clock() - began, step.budget_s, cut=True)
+                left = StepRecord(step.name, clock() - began, step.budget_s, cut=True, started_at=start.wall)
             records[step.name] = _ended(found, left)
 
 

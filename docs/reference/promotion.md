@@ -24,6 +24,10 @@ The `promote` job in `.github/workflows/test.yml` is the last job of a `dev` pus
 
 Pull request and merge queue runs never promote. A dispatched Tests run never promotes.
 
+### Launch hotfix route
+
+A pull request labelled `launch hotfix` takes a second route. On its `dev` push run the `launch-hotfix` job (`Launch hotfix grade`) runs `python -m scripts.ci_launch_hotfix`, which prints `promote=true` only when the commit's merged pull request carried the label when it last entered the merge queue (read from its timeline), its own `Gate — Required` check run passed on its head commit, and the unit suite passed on the push run: `select`, `split`, `unit`, `shard-check` and `test-count` succeeded with no shard rerun. Its `Confirm the launch hotfix route` step then runs, `promote` runs even when other promotion checks are red, and `promote.cjs` reads that step's success from the run's jobs and grades the snapshot on `Launch hotfix grade` instead of `Gate — Required` and waits only for every other job to finish. The `main` ruleset requires only the `Gate — Required` status that `promote.cjs` itself posts on the snapshot, so no red promotion check blocks the snapshot merge. The red checks keep their result, so the run concludes red and the promotion watch still files one fixer task per failed check. A label read that fails prints `promote=false` and leaves only the normal route.
+
 Every `dev` push run joins one of three concurrency groups, `promotion-dev-a`, `-b` or `-c`, picked by the last digit of its run id, with `cancel-in-progress` off and a single pending slot. A running run always finishes; a newer push replaces only the pending run of its lane, so at most three dev push runs compete for runners and a red run holds only its own lane. A green run promotes the revision it graded even after `dev` has moved on. The promotion job's `release-version` group serializes the writes, and a graded revision that is not ahead of the last promoted one is refused, so an older run never overwrites a newer `main`.
 
 ## What a promotion does

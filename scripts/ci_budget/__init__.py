@@ -47,6 +47,7 @@ BUDGETS = {
     "hierarchy-cpu": 15 * 60,
     "tick-scale": 30 * 60,
     "tick-pattern-tree": 120,
+    "launch-hotfix": 60,
     "brain-smoke": 90,
     "writer-lock": 180,
     "install-smoke": 180,

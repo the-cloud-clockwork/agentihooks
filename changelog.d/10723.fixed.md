@@ -1,0 +1,1 @@
+The first tick pass after a controller start no longer waits for its whole pull request view build: it waits only while both lanes keep their reserve, skips the steps that need the view that pass, and keeps the late build for the next pass.
