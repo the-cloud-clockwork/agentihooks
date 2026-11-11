@@ -4833,6 +4833,114 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
+### Idle swarm pane sweep
+
+At the end of every host tick, after the passes of every swarm, the tick closes each herdr pane its swarms opened
+that has had no agent running for five minutes. Handoff tabs, finished engineers and failed launches no longer stay
+open as idle shells. The sweep reads only panes agentihooks recorded at launch, so a pane the operator opened, or any
+pane with no record, is never read or closed.
+
+#### Which panes are recorded
+
+`init-agent` (every swarm spawn, handoff, resume and proof launch) and `run-in-terminal` with a command write one
+record per pane they open in `~/.agentihooks/herdr/panes/` (`AGENTIHOOKS_HERDR_PANES_DIR` overrides the folder).
+A plain `run-in-terminal` shell with no command is not recorded. The record holds:
+
+| Field | Meaning |
+|---|---|
+| `pane_id`, `terminal_id`, `tab_id`, `workspace_id` | Where herdr placed the pane. The terminal id tells a reused pane id apart. |
+| `kind` | `init-agent` or `run-in-terminal`. |
+| `owner_session` | The agent name passed to `init-agent`, or `AGENTIHOOKS_AGENT_NAME` for `run-in-terminal`. |
+| `owner_swarm` | `AGENTIHOOKS_SWARM` of the launching environment; empty outside a swarm. |
+| `swarm_store` | The swarm Redis URL the pane was launched against. A URL with a password is never written: it is stored as `withheld:<digest>`, a digest of the URL without its password. |
+| `launched_at`, `route_status` | Launch time, and whether the launcher reported a started route (`routed`, `bare`, `direct`). |
+| `seen`, `active_at` | A digest of the pane screen at the last sweep and the time it last changed. |
+
+The tick sweep judges only records with an `owner_swarm`. A withheld store opens only when this environment's own
+`AGENTIHOOKS_SWARM_REDIS_URL` has the same digest. A record written before the digest existed carries a bare
+`withheld` mark and resolves to this environment's URL only when that URL has a password. A store that does not
+resolve keeps the pane.
+
+#### How a pane is judged
+
+Each recorded pane goes through these checks in order. The first one that applies decides it.
+
+| Check | Outcome |
+|---|---|
+| herdr no longer lists the pane | The record is dropped. |
+| The pane id now holds another terminal | The record is dropped; the pane is left alone. |
+| Launched inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) | Kept: inside the launch grace. |
+| The swarm store cannot be read, or a legacy `withheld` record's store does not hold the swarm | Kept. |
+| Its owner is an unfinished agent of a running swarm | Kept: its agent is live. A live master pane stays this way. |
+| An `init-agent` pane at a bare shell (every foreground process is a shell with no arguments but flags) whose record never reported a started route | Gone: a failed launch, whatever the swarm says of its agent. |
+| Its owner is not an unfinished agent of the swarm, the swarm is stopped, or the swarm is gone from the store | Gone: its agent was retired, its swarm stopped, or its swarm was removed. |
+| The pane is at a bare shell | Gone: its agent or command exited and left a bare shell. |
+| Otherwise | Kept: its agent is live. |
+| A gone pane whose input line holds text | Kept. |
+| A gone pane idle under five minutes | Kept: used inside the quiet window. |
+
+Idle time runs from the later of two moments: the last time the sweep saw the pane screen change, and the last
+prompt the swarm sent that agent. The threshold is five minutes, or `AGENTIHOOKS_INBOX_QUIET_S` (default 180
+seconds) when that is longer. The sweep stores a screen digest on each pass, so a pane closes no sooner than five
+minutes after the first sweep that saw its current screen.
+
+A pane that passes every check is closed by its own pane id and its record is removed. A tab or workspace the
+sweep leaves with no panes is closed too. A herdr read error on one pane keeps that pane and the sweep goes on to
+the next.
+
+#### Log lines
+
+Each close prints one line to the tick output with the `herdr:` prefix, naming pane, agent, task and idle minutes:
+
+```text
+herdr: closed pane w1:p2 of engineer@a1b2c3-0002, task t-panesweep, idle 5 minutes: its agent was retired
+herdr: closed tab w1:t4, left empty
+```
+
+The reasons are `its agent was retired`, `its swarm stopped`, `its swarm was removed`,
+`its agent exited and left a bare shell`, `its command exited and left a bare shell` and
+`a failed launch left it at a bare shell`. The task is `none` when the swarm store lists no task for the agent.
+A herdr failure for the whole sweep prints `herdr: herdr sweep failed: <error>`. The sweep is skipped when herdr is
+not installed or its server is not running, and when the tick stops at its 450 second deadline or on a service stop.
+
+The same pass removes launch files older than 24 hours from `$XDG_RUNTIME_DIR/agentihooks-claude-terminal` and
+prints `herdr: removed <file>` for each.
+
+#### Run the sweep by hand
+
+`agentihooks gc` lists what the sweep would do, as `would close pane …` lines, and `agentihooks gc --enforce`
+closes it. Unlike the tick, `gc` judges every recorded pane, including `run-in-terminal` panes launched outside a
+swarm:
+
+```bash
+agentihooks gc
+agentihooks gc --enforce
+agentihooks gc --json | jq .herdr
+```
+
+Read the tick's closes from the tick journal:
+
+```bash
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now | grep 'herdr: closed'
+```
+
+#### Configuration
+
+| Setting | Default | Effect |
+|---|---|---|
+| `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` | 5 | No pane closes inside this many minutes of its launch. |
+| `AGENTIHOOKS_INBOX_QUIET_S` | 180 | Raises the idle threshold above five minutes when set longer. |
+| `AGENTIHOOKS_HERDR_PANES_DIR` | `~/.agentihooks/herdr/panes` | Folder of pane records. Launchers and the sweep must see the same value. |
+| `AGENTIHOOKS_SWARM_REDIS_URL` | | The store a withheld record resolves to. |
+
+#### Troubleshooting
+
+| Symptom | Cause and action |
+|---|---|
+| An idle swarm tab stays open | Run `agentihooks gc --json` and read the pane's finding. `its swarm store cannot be read` means the record's store does not resolve here: the tick environment's `AGENTIHOOKS_SWARM_REDIS_URL` differs from the launcher's. `its input line holds text` means text sits at the prompt; clear it. A pane with no record was not opened by agentihooks and is never closed. |
+| A pane never closes although its agent ended | The screen keeps changing, or the agent was prompted recently; the idle clock restarts on each. |
+| No `herdr:` lines in the journal | herdr is not installed or its server is down, or the tick stopped at its deadline before the sweep. |
+
 ### Scheduled tick delivery guard
 
 The minute tick moved from the `agentihooks-swarm` systemd timer to the scheduler cron. On 18 October an install
