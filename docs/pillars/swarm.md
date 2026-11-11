@@ -4507,6 +4507,50 @@ Independent GitHub watches spend the shared GitHub hourly quota. Use agentihooks
 
 The guard reads the command's own words, so `gh -R owner/repo run watch 1` is refused as well.
 
+##### Full `gh run view` refusal
+
+The same guard refuses a `gh run view` that names none of `--json`, `--log`, `--log-failed`, `--job` (`-j`) or `--web` (`-w`). This rule covers every swarm agent, masters included, from a `Bash` or `Monitor` call, task or not:
+
+```text
+gh run view without --json, --log, --log-failed or --job reads the annotations of every job, one REST call per job, from the shared GitHub hourly quota. Ask for what you need: gh run view <id> --json status,conclusion,jobs, --log-failed, or --job <job id>.
+```
+
+In `GH_DEBUG=api` traces, a plain `gh run view <id>` read the run, its jobs, its artifacts and its workflow, then called `check-runs/<id>/annotations` once per job. On the agentihooks Tests run that came to 56 REST requests for one command, while the gh call log recorded the command once. The narrow forms cost a few calls:
+
+| Command | REST requests |
+|---|---|
+| `gh run view <id>` | 56 on the Tests run; 4 plus one per job in general |
+| `gh run view <id> --json status,conclusion` | 2 |
+| `gh run view <id> --json jobs` | 3 |
+| `gh run view <id> --job <job id>` | 4 |
+
+Pick the form by what you need to know:
+
+```bash
+gh run view <run id> --json status,conclusion,jobs
+gh run view <run id> --log-failed
+gh run view <run id> --job <job id> --log
+gh run view <run id> --web
+```
+
+To wait for a run to finish, declare `agentihooks swarm <swarm> wait --on checks <run url>` instead of reading it repeatedly.
+
+What the guard counts as a narrow view:
+
+| Refused | Allowed |
+|---|---|
+| `gh run view 123` | `gh run view 123 --json status,conclusion`, `--json=jobs` |
+| `gh run view 123 -R owner/repo --exit-status` | `gh run view 123 --log`, `--log-failed` |
+| `gh -R owner/repo run view 123 --verbose`, `gh --repo=owner/repo run view 123` | `gh run view 123 --job 456`, `--job=456`, `-j 456`, `-j456` |
+| `cd repo && /usr/bin/gh run view 123 \| tail -n 5` | `gh run view 123 --web`, `-w` |
+| `bash -lc 'gh run view 123'`, `env X=1 gh run view 123`, `time gh run view 123` | `gh run list -L 5`, `echo gh run view 123` |
+
+The guard splits the shell command into its commands, skips leading `gh` options such as `-R`, `--repo` and `--hostname`, and reads the first two words after them. Flags such as `--exit-status`, `--verbose` or `--attempt` do not narrow the read. A session missing `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_AGENT_NAME` is outside the swarm and runs a full view unchanged. There is no setting to turn this rule off within a swarm; it fires through the same pre tool shell guards as the watch refusal.
+
+Delivered in [pull request 8620](https://github.com/the-cloud-clockwork/agentihooks/pull/8620) for ledger task t1781. The hourly sampler of the workstation login, over one hour from 05:00 UTC with the tick running, read 3619 REST calls outside the Doctor, 2470 of them not attributed to any caller; agents ran `gh run view` 87 times in that hour. `GH_DEBUG=api` traces gave the request counts in the table. A conditional read answered `304` did not raise `x-ratelimit-used` in four paired reads, so conditional reads were ruled out as the unattributed share.
+
+`tests/context/test_swarm_wait_nudge.py` pins the rule: `test_a_full_run_view_is_refused_to_every_swarm_agent` for the refused forms across engineer, ci and master names and the exact refusal text, `test_a_narrow_run_view_is_allowed` for the allowed forms, `test_a_full_run_view_outside_the_swarm_is_allowed` for sessions outside a swarm, and `test_a_monitor_cannot_start_a_full_run_view` for `Monitor`.
+
 #### A checked wait ends the turn
 
 A checked wait (`--on checks|merge|reply|task|mutation|intent`) that the command accepts prints one JSON line with a `next` field:
@@ -4550,6 +4594,8 @@ Delivered in [pull request 5237](https://github.com/the-cloud-clockwork/agentiho
 | A Claude agent gets the notice twice for one call | Not expected: post tool delivery runs only when `can_inject_context("PreToolUse")` is false. Check `AGENTIHOOKS_TARGET` in the session; the codex wrapper sets it to `codex`. |
 | A Codex agent keeps polling after `wait --on checks` | Read the command output for `next`. When it is missing, the wait was refused or was a bare wait; fix the target and declare it again. |
 | `gh run watch` is refused | The GitHub watch guard. Use `wait --on checks <pr url>` or `wait --on mutation <run url>`. |
+| `gh run view` is refused with `one REST call per job` | The [full run view refusal](#full-gh-run-view-refusal). Add `--json <fields>`, `--log-failed`, or `--job <job id>`; to wait for the run, declare `wait --on checks <run url>`. |
+| A master's `gh run view` is refused while its `gh run watch` is not | Expected: the watch refusal covers eng and ci agents only, the full run view refusal covers every swarm agent. |
 
 ## The minute tick
 
