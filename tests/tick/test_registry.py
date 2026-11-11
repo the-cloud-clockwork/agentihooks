@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -302,3 +303,30 @@ def test_waves_load_a_required_module_before_ordering(provider: str) -> None:
     first, second = module.waves()
     assert [step.name for step in first] == ["strays"]
     assert second == (needer,)
+
+
+SWAPPED_IMPORT = """
+from importlib import import_module
+from scripts.tick import registry
+real = registry.registry
+first = {step.name for step in registry.steps()}
+registry.registry = registry.Registry()
+for name in import_module("scripts.tick.catalogue").step_modules():
+    import_module(name)
+registry.registry = real
+assert first, "no steps loaded"
+assert {step.name for step in registry.steps()} == first
+"""
+
+
+def test_a_first_read_keeps_every_step_when_the_step_modules_load_under_a_swapped_registry() -> None:
+    """A process whose first registry read precedes any step module import, then imports every step module under a
+    swapped registry as the catalogue check does, still holds every step in the module registry."""
+    done = subprocess.run(
+        [sys.executable, "-c", SWAPPED_IMPORT],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=Path(__file__).resolve().parents[2],
+    )
+    assert done.returncode == 0, done.stderr

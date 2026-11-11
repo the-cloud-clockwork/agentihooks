@@ -66,6 +66,9 @@ def latest(rows: Iterable[dict], by: str) -> dict:
     return found
 
 
+TERMINAL_STATES = ("ended", "finished")
+
+
 def _archivable(row: dict) -> bool:
     return (
         isinstance(row.get("name"), str)
@@ -124,7 +127,8 @@ class ExecutionRegistry:
             old = [
                 key
                 for key, row in rows.items()
-                if row["generation"] < heads[row["seat"]]["generation"] and row["name"] not in listed
+                if row["name"] not in listed
+                and (row["generation"] < heads[row["seat"]]["generation"] or row.get("state") in TERMINAL_STATES)
             ]
             if not old and "archive_ref" in doc:
                 return 0

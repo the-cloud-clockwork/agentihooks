@@ -287,6 +287,7 @@ TICK_LOCK_MS = 10 * 60 * 1000
 # Every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
 TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+WEB_REPO = re.compile(r"[a-z][a-z0-9+.-]*://|[\w.-]+@[\w.-]+:|([\w-]+\.)+(com|org|net|io|dev)/", re.IGNORECASE)
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
@@ -485,9 +486,11 @@ class _Wrapper:
         return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
-        commands once the ledger was binned or gone, and as the tick's sites say."""
-        stopped = step.group != "wrapper probes" and "stop" in self.box
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, past the commands once the ledger was binned or gone, and as the tick's sites
+        say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
         return stopped or self.ended is not None or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:
@@ -966,6 +969,8 @@ def cmd_tick_watch(store, args):
 def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
+    if WEB_REPO.match(args.repo):
+        raise SwarmError(f"--repo takes a folder on this host, not the web address {args.repo}")
     repo = os.path.abspath(os.path.expanduser(args.repo))
     template = templates.load(args.template, os.environ) if args.template else templates.parse({"name": "none"})
     ledger = LedgerClient()
@@ -1205,12 +1210,13 @@ def cmd_agent_up(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def cmd_exit(store, args):
+def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
+    released = agent is not None and agent.lane != MASTER and agent.state == "finished"
+    if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
-    else:
+    elif not released:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)
