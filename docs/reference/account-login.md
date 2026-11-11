@@ -181,10 +181,10 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
   second copy behind. Whether native Claude serializes two refreshes that start
   at the same moment from different config homes is not yet proven live.
   The rendered profile's `projects` and `sessions` folders are linked into
-  that home, so conversations stay with the profile and `--resume` finds them
-  on the next launch.
+  that home, so conversations are written into the profile's folders.
 - **Refusal.** With no usable login the launch prints each login's reason and
-  exits 3. It never falls back to a quota token or bare Claude.
+  exits 3. Outside [front door masters](#front-door-masters) it never falls
+  back to a quota token or bare Claude.
 
 The session gets `--settings {"forceLoginMethod":"claudeai"}` and the same
 credential scrubbing and settings refusals as the master route.
@@ -227,12 +227,30 @@ with `claude auth status --text`, which prints
 
 A launch whose profile is `master` and whose `--name` is
 `master 1 · <slug>` is a swarm's front door. `init-agent` rewrites any route
-it was given to `--route claude-ai` for it, and the route then takes the
-master path instead: an exclusive slot claim through the master login chain,
-the `claude auth status --text` check and a live probe. When that login is
+it was given to `--route claude-ai` for it, whatever
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` says, and the route then takes the master
+path instead. It claims a stored slot through master login placement (see
+[Master claude ai login](#master-claude-ai-login)): the primary reserve
+applies, the 10% drain floor does not. It then runs the
+`claude auth status --text` check and a live probe. When that login is
 expired, the launch prints `[agenti] claude ai login refused: <reason>` and
 falls back to the master token route, the only case where this route reaches
-a quota token. Every other launch follows the rules above.
+a quota token. Its other refusals print the bare reason with no account
+prefix, or one of these, and exit 3:
+
+- `no master claude ai login: run agentihooks claude login --master`
+- `every stored master claude ai login is held by a live master (...)`, listing
+  each slot as `<account> by <holder>` or `<account> reserved at <n>% of the
+  week left`
+
+Every other launch follows the rules above.
+
+### Hives
+
+On a hive (`AGENTIHOOKS_HIVE` set) the launch also takes one of that hive's
+account slots for the chosen login, as every routed launch does. A hive with no
+free slot or a failed admission stops the launch with `No account slot
+available` or `Account slot admission failed`.
 
 ### Refusal messages
 

@@ -393,7 +393,7 @@ agenti                          # fewest live sessions among accounts below thei
 agenti --route work             # force AH_CC_TOKEN_work, ignore the cap
 agenti --model fable            # Fable models also weigh the separate Fable quota
 agenti --route api              # force the api side; fails when no api endpoint is configured
-agenti --route claude-ai        # a stored claude ai login, never a quota token
+agenti --route claude-ai        # a stored claude ai login; only a front door master falls back to a token
 ```
 
 `--route claude-ai` picks a stored claude ai login by
