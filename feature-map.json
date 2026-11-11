@@ -3725,6 +3725,16 @@
       ]
     },
     {
+      "id": "controller-ticks-cleartext-ledger",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43001784835-0",
+      "behaviour": "The controller tick pass keeps running and ticks a swarm whose ledger address refuses the credential over plain http, so the pass reports the refusal instead of the controller exiting before it takes the lease.",
+      "seam": "scripts.swarm.controller.run_once and scripts.swarm.controller.tickable",
+      "tests": [
+        "tests/swarm/test_stale_swarm_tick.py::test_the_controller_ticks_a_swarm_whose_ledger_address_refuses_cleartext"
+      ]
+    },
+    {
       "id": "swarm-create-refuses-web-repo",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2306",
