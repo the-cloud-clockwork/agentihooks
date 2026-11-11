@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 import hooks.mcp.agents as agents
+import hooks.mcp.scheduler as scheduler_tools
 import hooks.mcp.workflows as workflows
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
@@ -57,7 +58,7 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     (folder / ".agentihooks" / "workflows").mkdir(parents=True)
     (folder / ".agentihooks" / "workflows" / "sample.yml").write_text(WORKFLOW)
     monkeypatch.chdir(folder)
-    monkeypatch.setattr(loader, "repo_root", lambda cwd: folder)
+    monkeypatch.setattr(loader, "repo_root", lambda cwd: folder if cwd and Path(cwd) == folder else None)
     monkeypatch.delenv("AGENTIHOOKS_WORKER_RUN", raising=False)
     monkeypatch.setattr(store, "default_root", lambda: tmp_path / "runs")
     return folder
@@ -175,10 +176,12 @@ def test_workflow_schedule_arms_a_timer_after_a_delay(
     case.write_text("Build the sample")
 
     entry = tools["workflow_schedule"]("sample", str(case), when="5m", agent_name="eng-1@sw")["entry"]
-    timed = tools["workflow_schedule"]("sample", str(case), when="2026-10-18T09:30:00+00:00")["entry"]
+    timed = tools["workflow_schedule"]("sample", str(case), when="2026-10-18T09:30:00+00:00", session_id="sid-given")[
+        "entry"
+    ]
 
     assert (entry["kind"], entry["owner"], entry["due"]) == ("timer", "eng-1@sw", NOW + 300)
-    assert (timed["kind"], timed["owner"], timed["due"]) == ("timer", SID, 1792315800.0)
+    assert (timed["kind"], timed["owner"], timed["due"]) == ("timer", "sid-given", 1792315800.0)
     assert tools["workflow_schedule"]("sample", str(case), when="later") == {
         "success": False,
         "error": "later is not an ISO time with an offset such as 2026-10-18T09:30:00+00:00",
@@ -201,8 +204,14 @@ def test_workflow_schedule_needs_exactly_one_moment_and_a_case_file(
 
 
 def test_workflow_schedule_refuses_an_unknown_workflow(
-    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path, project: Path
+    tools: dict[str, Callable[..., Any]],
+    scheduler: Any,
+    tmp_path: Path,
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    logged: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(scheduler_tools, "log", lambda message, data: logged.append((message, data)))
     case = tmp_path / "case.md"
     case.write_text("x")
     assert tools["workflow_schedule"]("ghost", str(case), when="5m") == {
@@ -210,6 +219,11 @@ def test_workflow_schedule_refuses_an_unknown_workflow(
         "error": "no workflow named ghost",
     }
     assert scheduler.records() == []
+    assert tools["workflow_unschedule"]("nope") == {"success": False, "error": "no workflow schedule nope"}
+    assert logged == [
+        ("MCP workflow_schedule failed", {"error": "no workflow named ghost"}),
+        ("MCP workflow_unschedule failed", {"error": "no workflow schedule nope"}),
+    ]
 
 
 def test_workflow_unschedule_refuses_a_schedule_that_is_not_a_workflow(
