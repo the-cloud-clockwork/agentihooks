@@ -670,12 +670,13 @@ def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_pa
     _assets(hub)
     out = tmp_path / "bundle"
     report = import_hub(hub, out, False, tmp_path / "data")
-    profile, package = out / "profiles/diagram", _package(hub)
+    profile, package, files = out / "profiles/diagram", _package(hub), report["files"]
+    assert isinstance(files, list)
     for relative in ASSETS:
         assert (profile / relative).read_bytes() == (package / relative).read_bytes()
-        assert f"profiles/diagram/{relative}" in report["files"]
+        assert f"profiles/diagram/{relative}" in files
     assert (profile / "hooks/render_diagram.py").read_text() == "print('render')\n"
-    assert "profiles/diagram/hooks/render_diagram.py" in report["files"]
+    assert "profiles/diagram/hooks/render_diagram.py" in files
     for relative in SKIPPED:
         assert not (profile / relative).exists()
 
