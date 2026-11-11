@@ -53,6 +53,17 @@ def refusal(drill: Drill) -> str:
     return ""
 
 
+def _observed(drill: Drill) -> int | None:
+    """When the night watch's own passes first saw the seat empty, kept only while those passes are fresh; a stale
+    seat episode is dropped, as the night watch drops it after a gap in its passes."""
+    state: dict[str, Any] = night_watch.read(drill.store, drill.slug)
+    if drill.now_ms - state.get("at", drill.now_ms) <= night_watch.GAP_MS:
+        return state.get(night_watch.SEAT, {}).get("since")
+    if state.pop(night_watch.SEAT, None) is not None:
+        drill.store.redis.set(drill.store.key(drill.slug, night_watch.KEY), json.dumps(state))
+    return None
+
+
 def run(drill: Drill) -> dict[str, Any]:
     """Set the night watch gate to enforce and store the record of the passes. A seat stall the night watch already
     observed is kept and passed once now; with none observed, the passes age a new one across the threshold."""
@@ -60,7 +71,7 @@ def run(drill: Drill) -> dict[str, Any]:
         raise SwarmError(why)
     gates: dict[str, str] = drill.store.config(drill.slug).gates
     drill.store.update(drill.slug, gates={**gates, NIGHT_WATCH.name: ENFORCE})
-    observed: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("since")
+    observed = _observed(drill)
     actions: list[str] = []
     start = drill.now_ms if observed is not None else drill.now_ms - night_watch.SEAT_MS
     for at in range(start, drill.now_ms + 1, night_watch.GAP_MS):
