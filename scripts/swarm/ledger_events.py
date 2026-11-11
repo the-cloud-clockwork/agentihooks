@@ -498,8 +498,8 @@ def views(
 def fresh_reader(
     earlier: Callable[[str], PullRequest | None], source: SourceControl | None = None, cache: object | None = None
 ) -> Callable[[str], PullRequest | None]:
-    """A reread for one tick pass: its first call reads every open pull request of ``earlier`` fresh in batches,
-    and a pull request that read did not return, or any when ``earlier`` holds no open one, is read on its own."""
+    """A reread whose first call reads every open pull request of ``earlier`` fresh in batches and keeps them for
+    its later calls; a pull request that read did not return, or any when ``earlier`` holds none open, reads alone."""
     read: dict[str, PullRequest | None] = {}
 
     def reread(url: str) -> PullRequest | None:
