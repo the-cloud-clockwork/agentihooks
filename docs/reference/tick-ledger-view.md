@@ -277,8 +277,9 @@ Two consumers read it:
 | The export route's `since` body schema (`routes.SINCE_SCHEMA`) | `parts.items.enum`, built as `list(schemas.LEDGER_PARTS)` |
 | The tick ledger view (`scripts.tick.view`) | `view.PARTS`, the same tuple object, sent as `parts` on every delta read |
 
-The parts a pass asks for and the parts the server accepts therefore cannot
-drift apart.
+The parts a pass asks for and the parts a server on the same code accepts
+therefore cannot drift apart. A server running older code can still refuse a
+new part (see the end of [Adding a ledger part](#adding-a-ledger-part)).
 
 #### Adding a ledger part
 
@@ -287,8 +288,9 @@ drift apart.
 2. Update the exact tuple in
    `test_the_view_and_the_export_schema_read_one_ledger_part_list` in
    `tests/tick/test_view.py`. The test also asserts that `view.PARTS` is
-   `schemas.LEDGER_PARTS` and that the schema enum equals the list, so a
-   reintroduced copy fails it.
+   the `schemas.LEDGER_PARTS` object, so a copy in the view fails it, and
+   that the schema enum equals the list, so a route copy fails it once its
+   contents differ.
 3. Read the new part in steps through `pass_state`. A view stored before the
    change lacks the part. The next delta read returns it only if the part
    changed after the stored generation. A change to a top level value, such
