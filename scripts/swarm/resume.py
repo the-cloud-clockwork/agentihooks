@@ -3,7 +3,7 @@
 import json
 import os
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts import agent_choice
 from scripts.handoff import transfers
@@ -94,7 +94,7 @@ def reopen(
     store: RedisStore,
     slug: str,
     worktrees: dict[str, str],
-    runtime: "Runtime",
+    runtime: Any,
     now_ms: int,
     ledger: object,
     has_quota: object = account_quota,
