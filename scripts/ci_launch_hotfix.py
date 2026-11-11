@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 LABEL = "launch hotfix"
@@ -22,9 +22,19 @@ UNIT_PASS = ("success", "skipped", "skipped")
 GRADE = "Gate — Required"
 
 
+def _row(value: Any) -> dict[str, Any]:
+    """A JSON object read from GitHub, or an empty one when the field is absent."""
+    return cast(dict[str, Any], value or {})
+
+
+def _rows(value: Any) -> list[Any]:
+    """A JSON array read from GitHub, or an empty one when the field is absent."""
+    return cast(list[Any], value or [])
+
+
 def suite_passed(needs: Mapping[str, Any]) -> bool:
     """Whether the unit suite and its selection, split, shard and count checks passed on this run."""
-    results = {name: (needs.get(name) or {}).get("result") for name in (*SUITE, *UNIT)}
+    results = {name: _row(needs.get(name)).get("result") for name in (*SUITE, *UNIT)}
     return all(results[name] == "success" for name in SUITE) and tuple(results[name] for name in UNIT) == UNIT_PASS
 
 
@@ -33,7 +43,7 @@ def hotfix_pulls(pulls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         pull
         for pull in pulls
-        if pull.get("merged_at") and any(label.get("name") == LABEL for label in pull.get("labels") or [])
+        if pull.get("merged_at") and any(_row(label).get("name") == LABEL for label in _rows(pull.get("labels")))
     ]
 
 
@@ -41,7 +51,7 @@ def labelled_at_queue(events: list[dict[str, Any]]) -> bool:
     """Whether the launch hotfix label was on the pull request when it last entered the merge queue."""
     labelled = queued = False
     for event in events:
-        kind, name = event.get("event"), (event.get("label") or {}).get("name")
+        kind, name = event.get("event"), _row(event.get("label")).get("name")
         if kind in ("labeled", "unlabeled") and name == LABEL:
             labelled = kind == "labeled"
         elif kind == "added_to_merge_queue":

@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1161,14 +1162,14 @@ OTHER_TASK = {"id": "t2", "rank": "normal", "state": "open"}
 def stall_ledger(rows: list[dict], focus: tuple[str, ...] = ()) -> object:
     from types import SimpleNamespace
 
-    scoped = scoped_ledger(rows)
+    scoped: Any = scoped_ledger(rows)
     doc = {"tasks": rows, "freezes": [{"verb": "focus", "target": f"tasks/{task}"} for task in focus]}
     return SimpleNamespace(
         task=scoped.task, tasks_targeting=scoped.tasks_targeting, tasks=scoped.tasks, state=lambda slug: doc
     )
 
 
-def plant_stall(store: object, minutes: int) -> None:
+def plant_stall(store: Any, minutes: int) -> None:
     from scripts.swarm.health import spawn_stall
 
     state = {"since": 0, "launch": 0, "at": minutes * 60_000}

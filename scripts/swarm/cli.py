@@ -137,6 +137,7 @@ from scripts.swarm import (
     snapshot,
     stack,
     stages,
+    stall_queue,
     take_master,
     templates,
     tick_heartbeat,
@@ -2148,15 +2149,6 @@ def _hotfix_master(store, args) -> bool:
     return _me(store, args).lane == MASTER and master_coding.is_open(os.environ.get("CLAUDE_CODE_SESSION_ID", ""))
 
 
-def _stall_master(store: Any, args: argparse.Namespace) -> dict[str, str] | None:
-    """The stall route context when the master queues a focused, urgent pull request under an open spawn stall."""
-    if _me(store, args).lane != MASTER:
-        return None
-    from scripts.swarm import stall_queue
-
-    return stall_queue.route(store, args.slug, args.url, LedgerClient())
-
-
 def _require_target(store: object, args: argparse.Namespace, task_id: str) -> None:
     """Refuse a final integration this task does not target, reading only its own task and the tasks naming the pull
     request, never the whole tasks collection."""
@@ -2175,7 +2167,8 @@ def cmd_merge(store: Any, args: argparse.Namespace) -> None:
         result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         hotfix = args.action == "queue" and _hotfix_master(store, args)
-        stalled = _stall_master(store, args) if args.action == "queue" and not hotfix else None
+        master = args.action == "queue" and not hotfix and _me(store, args).lane == MASTER
+        stalled = stall_queue.route(store, args.slug, args.url, LedgerClient()) if master else None
         hotfix = hotfix or stalled is not None
         agent = _worker(store, args) if args.action != "state" and not hotfix else None
         if agent is not None:

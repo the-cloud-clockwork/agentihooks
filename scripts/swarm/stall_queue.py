@@ -3,8 +3,6 @@ the merge queue when no lane engineer can launch to queue it."""
 
 from typing import Any
 
-from scripts.swarm.health import spawn_stall
-
 ROUTE = "spawn stall"
 
 
@@ -19,7 +17,9 @@ def focused(doc: dict[str, Any], task_id: str) -> bool:
 
 def route(store: Any, slug: str, url: str, ledger: Any) -> dict[str, str] | None:
     """The queue journal context naming the stall route and its task when the master may queue ``url``, else None."""
-    if not spawn_stall.findings(store, slug):
+    from scripts.swarm.health import spawn_stall
+
+    if not spawn_stall.findings(store, slug):  # pyright: ignore[reportUnknownMemberType]
         return None
     rows: list[dict[str, Any]] = ledger.tasks_targeting(slug, url)
     urgent = [row for row in rows if row.get("rank") == "urgent" and row.get("state") != "done"]
