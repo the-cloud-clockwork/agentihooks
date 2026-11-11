@@ -19,7 +19,7 @@ def admit_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
 
 
-def offered(key: str, generation: int) -> Envelope:
+def offered(key: str, generation: int, lane: str = "eng") -> Envelope:
     return Envelope(
         id=f"ready:rig:{key}:{generation}",
         type="task.ready",
@@ -29,7 +29,7 @@ def offered(key: str, generation: int) -> Envelope:
         version=generation,
         time=1,
         author=readiness.AUTHOR,
-        data={"lane": "eng", "generation": generation},
+        data={"lane": lane, "generation": generation},
     )
 
 
@@ -84,7 +84,7 @@ def test_publish_withdraws_the_stale_offers_of_every_lane_and_keeps_a_waiting_fr
         ci = bus.queue(readiness.queue_name("rig", "ci"), QueuePolicy())
         assert eng.offer(offered("task-a", 3))
         assert eng.offer(offered("task-a", 1))
-        assert ci.offer(Envelope(**{**vars(offered("ci-done", 0)), "data": {"lane": "ci", "generation": 0}}))
+        assert ci.offer(offered("ci-done", 0, "ci"))
         assert readiness.publish(bus, view, 73) == []
         kept = eng.take(1)
         assert kept is not None

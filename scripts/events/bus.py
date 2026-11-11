@@ -52,7 +52,8 @@ class WorkQueue(Protocol):
     def take(self, timeout_ms: int) -> Delivery | None: ...
 
     def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
-        """Removes every waiting offer ``stale`` names and returns how many it removed."""
+        """Removes every offer still on the queue, taken but unsettled or not, that ``stale`` names and returns how
+        many it removed."""
         ...
 
 
