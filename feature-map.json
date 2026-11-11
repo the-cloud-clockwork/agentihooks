@@ -1791,7 +1791,7 @@
       "id": "hub-import-assets",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2486",
-      "behaviour": "A hub import carries every file of the agent package and the agent level hooks folder into the profile, leaving out only the command file, converted and machine local settings, moved state, node modules and git metadata, and refusing a package MCP file holding a literal credential or an unsafe file in the agent hooks.",
+      "behaviour": "A hub import carries every file of the agent package and the agent level hooks folder into the profile, leaving out only the command file, converted and machine local settings, moved state, install manifests turned into deps entries, node modules and git metadata, and refusing a package MCP file holding a literal credential or an unsafe file in the agent hooks.",
       "seam": "scripts.profiles.hub_import.import_hub",
       "tests": [
         "tests/profiles/test_hub_import.py::test_an_import_carries_every_package_asset_and_agent_hooks",

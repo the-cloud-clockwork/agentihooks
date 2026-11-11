@@ -67,6 +67,7 @@ CASE_SUFFIXES = (".yaml", ".yml")
 DEPS = "deps.json"
 EMPTY_DEPS = '{\n  "deps": [\n  ]\n}\n'
 INSTALLS = (("npm", "package.json"), ("pip", "requirements.txt"))
+INSTALL_MANIFESTS = frozenset(manifest for _, manifest in INSTALLS)
 CHECKS = {
     "npm": ("npm", "ls", "--global"),
     "pip": ("python3", "-c", "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"),
@@ -223,7 +224,7 @@ def _assets(package: Path) -> dict[str, bytes]:
         dirs[:] = sorted(d for d in dirs if d not in SKIPPED_DIRS and not (top and d in DATA))
         for entry in sorted(names):
             relative = (root / entry).relative_to(package).as_posix()
-            if relative not in CONVERTED:
+            if relative not in CONVERTED and entry not in INSTALL_MANIFESTS:
                 files[relative] = (root / entry).read_bytes()
     return files | _collect(package.parent, (AGENT_HOOKS,))
 

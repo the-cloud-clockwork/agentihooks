@@ -642,7 +642,6 @@ ASSETS = (
     "docs/guide.md",
     "knowledge/facts.md",
     "src/pipeline/render.ts",
-    "package.json",
     ".gitignore",
 )
 SKIPPED = (
@@ -651,6 +650,7 @@ SKIPPED = (
     ".claude/settings.local.json",
     "node_modules/left/index.js",
     ".git/HEAD",
+    "package.json",
 )
 
 
