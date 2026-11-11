@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scripts.workflows import cli, store
+from scripts.workflows import cli, machine, store
 
 if TYPE_CHECKING:
     from scripts.inbox.store import InboxStore
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 DELIVERIES = "deliveries"
 LOG = "run.log"
 SENDER = "scheduler"
+FAILED = "failed"
 
 
 def delivery_folder(delivery_id: str) -> Path:
@@ -50,20 +51,31 @@ def start(name: str, case: str, delivery_id: str, owner: str, popen: Callable[..
     return True
 
 
-def notify(owner: str, delivery_id: str, inbox: "InboxStore | None" = None) -> None:
-    """Send the owner one inbox item naming the run status and folder; a resent notice is dropped."""
+def run_status(delivery_id: str) -> str:
+    """The run's saved status; a run that saved no readable status or stopped mid run reads failed."""
+    try:
+        found = store.load(cli.run_folder(delivery_id))["status"]
+    except (OSError, ValueError, KeyError):
+        return FAILED
+    return FAILED if found == machine.RUNNING else found
+
+
+def connect_inbox() -> "InboxStore | None":
+    """The swarm inbox, or None while Redis is unreachable so the notice waits in the outbox."""
     from scripts.inbox import store as inbox_store
 
-    folder = cli.run_folder(delivery_id)
     try:
-        status = store.load(folder)["status"]
-    except (OSError, ValueError, KeyError):
-        status = "failed"
-    text = f"workflow run {delivery_id} {status}, run folder {folder}"
-    try:
-        (inbox or inbox_store.connect()).send(SENDER, owner, text, item_id=f"{delivery_id}:done")
-    except inbox_store.DuplicateItem:
-        pass
+        return inbox_store.connect()
+    except inbox_store.Unreachable:
+        return None
+
+
+def notify(owner: str, delivery_id: str, inbox: "InboxStore | None" = None) -> None:
+    """Send the owner one inbox item naming the run status and folder, queued while Redis is down; a resend is dropped."""
+    from scripts.inbox import outbox
+
+    text = f"workflow run {delivery_id} {run_status(delivery_id)}, run folder {cli.run_folder(delivery_id)}"
+    outbox.post(inbox or connect_inbox(), outbox.Post(SENDER, owner, text, item=f"{delivery_id}:done"))
 
 
 def main(argv: list[str]) -> int:

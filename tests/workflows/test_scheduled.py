@@ -1,4 +1,5 @@
 import inspect
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 from hooks import config
+from scripts.inbox import outbox
 from scripts.inbox import store as inbox_store
 from scripts.inbox.store import DuplicateItem
 from scripts.scheduler import slots
@@ -118,24 +120,28 @@ def test_the_workflow_slot_delivers_through_start(monkeypatch: pytest.MonkeyPatc
 
 class Inbox:
     def __init__(self, duplicate: bool = False) -> None:
-        self.sent: list[tuple[tuple[str, ...], dict[str, str]]] = []
+        self.sent: list[tuple[tuple[str, ...], dict[str, object]]] = []
         self.duplicate = duplicate
 
-    def send(self, *args: str, **options: str) -> None:
+    def send(self, *args: str, **options: object) -> str:
         self.sent.append((args, options))
         if self.duplicate:
             raise DuplicateItem("message was already sent")
+        return "item"
+
+    def get(self, item_id: str) -> str:
+        return f"existing {item_id}"
 
 
-def finished_run(home: Path, run_id: str, status: str) -> Path:
+def finished_run(home: Path, run_id: str, state: dict[str, str]) -> Path:
     folder = home / "workflows" / "runs" / run_id
     folder.mkdir(parents=True)
-    store.save(folder, {"status": status})
+    store.save(folder, state)
     return folder
 
 
 def test_a_finished_run_sends_its_status_and_folder_to_the_owner(home: Path) -> None:
-    folder = finished_run(home, "entry-1:slot-1", "passed")
+    folder = finished_run(home, "entry-1:slot-1", {"status": "passed"})
     inbox = Inbox()
 
     scheduled.notify("me", "entry-1:slot-1", inbox=cast(Any, inbox))
@@ -143,7 +149,7 @@ def test_a_finished_run_sends_its_status_and_folder_to_the_owner(home: Path) -> 
     assert inbox.sent == [
         (
             ("scheduler", "me", f"workflow run entry-1:slot-1 passed, run folder {folder}"),
-            {"item_id": "entry-1:slot-1:done"},
+            {"ref": "", "fyi": False, "task": "", "item_id": "entry-1:slot-1:done"},
         )
     ]
 
@@ -157,8 +163,28 @@ def test_a_run_that_saved_no_state_reports_failed(home: Path) -> None:
     assert inbox.sent[0][0][2] == f"workflow run entry-1:slot-1 failed, run folder {folder}"
 
 
+@pytest.mark.parametrize("state", [{"status": "running"}, {"stage": "answer"}], ids=["stopped-mid-run", "no-status"])
+def test_a_run_that_did_not_finish_reads_failed(home: Path, state: dict[str, str]) -> None:
+    finished_run(home, "entry-1:slot-1", state)
+
+    assert scheduled.run_status("entry-1:slot-1") == "failed"
+
+
+def test_an_unreadable_run_state_reads_failed(home: Path) -> None:
+    folder = finished_run(home, "entry-1:slot-1", {"status": "passed"})
+    (folder / store.STATE_FILE).write_text("{not json")
+
+    assert scheduled.run_status("entry-1:slot-1") == "failed"
+
+
+def test_a_finished_status_reads_as_saved(home: Path) -> None:
+    finished_run(home, "entry-1:slot-1", {"status": "blocked"})
+
+    assert scheduled.run_status("entry-1:slot-1") == "blocked"
+
+
 def test_a_second_notice_for_the_same_run_is_dropped(home: Path) -> None:
-    finished_run(home, "entry-1:slot-1", "failed")
+    finished_run(home, "entry-1:slot-1", {"status": "failed"})
     inbox = Inbox(duplicate=True)
 
     assert scheduled.notify("me", "entry-1:slot-1", inbox=cast(Any, inbox)) is None
@@ -172,7 +198,23 @@ def test_notify_connects_to_the_inbox_by_default(home: Path, monkeypatch: pytest
 
     scheduled.notify("me", "entry-1:slot-1")
 
-    assert inbox.sent[0][1] == {"item_id": "entry-1:slot-1:done"}
+    assert inbox.sent[0][1]["item_id"] == "entry-1:slot-1:done"
+
+
+def test_a_notice_waits_in_the_outbox_while_redis_is_unreachable(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreachable() -> None:
+        raise inbox_store.Unreachable("redis down")
+
+    monkeypatch.setattr(inbox_store, "connect", unreachable)
+
+    assert scheduled.connect_inbox() is None
+    scheduled.notify("me", "entry-1:slot-1")
+
+    [line] = outbox.path().read_text().splitlines()
+    queued = json.loads(line)
+    assert (queued["op"], queued["by"], queued["item"]) == ("post", "scheduler", "entry-1:slot-1:done")
+    assert queued["args"]["address"] == "me"
+    assert queued["args"]["text"].startswith("workflow run entry-1:slot-1 failed, run folder ")
 
 
 def test_main_runs_the_workflow_then_notifies_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:
