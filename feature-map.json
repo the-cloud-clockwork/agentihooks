@@ -1536,6 +1536,30 @@
       ]
     },
     {
+      "id": "hub-import-core",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
+      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
+        "tests/profiles/test_hub_import.py::test_settings_remove_absolute_paths_but_keep_environment_references",
+        "tests/profiles/test_hub_import.py::test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls",
+        "tests/profiles/test_hub_import.py::test_restrictions_on_absolute_paths_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_dry_run_reports_the_same_files_without_writing",
+        "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
+        "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
+        "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
+        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them",
+        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report",
+        "tests/profiles/test_hub_import.py::test_hooks_with_portable_commands_and_safe_restrictions_are_kept",
+        "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
+        "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
+        "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused",
+        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
