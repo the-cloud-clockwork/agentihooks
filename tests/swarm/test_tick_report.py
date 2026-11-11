@@ -113,7 +113,9 @@ def test_report_prints_each_step_ready_to_start_gap(capsys: pytest.CaptureFixtur
     with mock.patch.object(tick_report, "read", return_value=report):
         tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
     out = capsys.readouterr().out
-    assert "Step  Ready to start median  Ready to start max\nmerge pass  0.000s  0.000s\nwaits  3.500s  11.700s\n" in out
+    assert (
+        "Step  Ready to start median  Ready to start max\nmerge pass  0.000s  0.000s\nwaits  3.500s  11.700s\n" in out
+    )
 
 
 def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
