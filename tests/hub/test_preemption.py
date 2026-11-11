@@ -99,6 +99,18 @@ def test_polls_inside_one_tick_interval_run_preemption_once(rig):
     assert len(asks(rig.store, "e2")) == 1
 
 
+@pytest.mark.feature("swarm-preempt-claim-view-once-per-pass")
+def test_the_hub_preempts_with_the_tick_claim_view_builder(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import tick
+
+    seen: list[preempt.Seats] = []
+    monkeypatch.setattr(preempt, "run", lambda *args: seen.append(args[-1]) or [])
+    poll_at(rig, 1_000)
+    assert [seats.view for seats in seen] == [tick.claim_view]
+
+
 @pytest.mark.parametrize("fields", [{"state": "paused"}, {"engine": "legacy"}])
 def test_a_swarm_not_running_on_the_events_engine_asks_nobody(rig, fields):
     rig.store.update(SLUG, **fields)

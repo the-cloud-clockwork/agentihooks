@@ -124,6 +124,7 @@ def _tick(log: list[Any], places: bool = True) -> SimpleNamespace:
         _ended="ended",
         _current_owner="owner",
         ready_in_order="ready in order",
+        claim_view="claim view",
         readiness=SimpleNamespace(
             tick_places=lambda engine_name, rows: log.append(("places", engine_name, rows)) or places
         ),
@@ -271,6 +272,7 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
     assert seats.args[:4] == (ROWS, "ended", "owner", "ready in order")
     assert seats.args[4].func is _probe
     assert seats.args[4].args == ("runtime",)
+    assert seats.args[5] == "claim view"
     assert calm == [
         (tasks.rank_writes, tick, "sw", config, store, "ledger", "doc", 7),
         ("bottleneck remedy", "sw", store, "ledger", "doc", 7),

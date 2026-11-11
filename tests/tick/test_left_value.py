@@ -10,7 +10,7 @@ import scripts.swarm.cli  # noqa: F401
 from scripts.tick import engine
 from scripts.tick.deadline import Deadline
 from scripts.tick.step import Context, Domain
-from scripts.tick.steps import PASS, CallStep, Left, PassBox, host, observe
+from scripts.tick.steps import PASS, CallStep, Left, PassBox, host, observe, pass_domains
 
 pytestmark = pytest.mark.unit
 
@@ -41,7 +41,7 @@ def _steps(release: Event, read: list[object]) -> tuple[CallStep, CallStep]:
 
     writer = CallStep("health findings", GROUP, host.held(write))
     writer.floor_s = 0.1
-    reader = CallStep("findings pass", GROUP, host.held(use), frozenset({"health findings"}))
+    reader = CallStep("findings pass", GROUP, host.held(use), frozenset({"health findings"}), pass_domains("found"))
     return writer, reader
 
 

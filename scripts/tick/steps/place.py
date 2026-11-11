@@ -114,7 +114,9 @@ def _preempt(tick: Any, get: Get) -> Any:
     config, store = get("config"), get("store")
     if config.state == "running" and config.engine != tick.EVENTS_ENGINE and tick.panic.state(store) is None:
         placement = partial(tick.preempt.probe, get("runtime"))
-        seats = tick.preempt.Seats(get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement)
+        seats = tick.preempt.Seats(
+            get("rows"), tick._ended, tick._current_owner, tick.ready_in_order, placement, tick.claim_view
+        )
         return tick.skip_refused(tick.preempt.run, get("slug"), config, store, get("doc"), get("now_ms"), seats)
     return []
 

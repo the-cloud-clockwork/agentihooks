@@ -223,16 +223,17 @@ def test_no_session_slot_holds_the_seat_and_says_why(store):
     ]
 
 
-def test_a_full_host_holds_the_seat_with_the_hold_it_names(store):
+@pytest.mark.feature("swarm-master-skips-host-hold")
+def test_a_full_host_never_holds_the_seat(store):
     from unittest.mock import patch
 
     from scripts.swarm import seat_spawn
 
     MasterSeats(store.redis).set_count("sw", 2)
+    runtime = FakeRuntime()
     with patch.object(seat_spawn, "host_hold", return_value="holding the master spawn") as held:
-        actions = master_fill.run("sw", store.config("sw"), store, FakeRuntime(), {}, 7)
-    assert actions == ["holding the master spawn"]
-    assert held.call_args.args == ("sw", store, 7, MASTER)
+        master_fill.run("sw", store.config("sw"), store, runtime, {}, 7)
+    assert held.call_count == 0 and len(runtime.masters) == 1
 
 
 class SeatTwoDown(FakeRuntime):

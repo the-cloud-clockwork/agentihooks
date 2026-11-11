@@ -103,6 +103,23 @@ def _set(value):
     return "" if value in (None, "", AUTO) else value
 
 
+def _required(want: str, task: dict[str, Any]) -> str:
+    required: str = task.get("requires_harness", "")
+    if required and want and want != required:
+        raise SpawnError(f"lane harness {want} cannot run a task that requires {required}", "unsupported")
+    return want or required
+
+
+def _off_requirement(saved: dict[str, Any], task: dict[str, Any], admitted: bool) -> bool:
+    required: str | None = task.get("requires_harness")
+    off = bool(required and saved and saved.get("harness") != required)
+    if off and admitted:
+        raise SpawnError(
+            f"admitted {saved['harness']} launch cannot run a task that requires {required}", "unsupported"
+        )
+    return off
+
+
 def _prefer(profile, avoid):
     order = profile_choice.preferred(profile)
     if not avoid:
@@ -458,7 +475,9 @@ class HerdrRuntime:
                     or profile_choice.DEFAULT_PROFILES[lane]
                 )
                 requested = _set(chosen.get("agent"))
-                if requested:
+                if task.get("requires_harness"):
+                    options.append((task["requires_harness"],))
+                elif requested:
                     options.append((requested,))
                 elif plugins.claude_only(profile):
                     options.append(("claude",))
@@ -719,7 +738,7 @@ class HerdrRuntime:
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
@@ -727,6 +746,7 @@ class HerdrRuntime:
         profile = decision.profile
         requested = "claude" if plugins.claude_only(profile) else _set(chosen.get("agent"))
         want = affinity.desired(config) if lane == MASTER else _set(chosen.get("agent"))
+        want = _required(want, task)
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
@@ -751,7 +771,7 @@ class HerdrRuntime:
             and not quota_transfer
             and not admitted
             and (saved["harness"] != want if want else saved["harness"] == avoid)
-        ):
+        ) or _off_requirement(saved, task, admitted):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"

@@ -104,7 +104,7 @@ A swarm spawn that fails this way reopens its task and writes the same reason
 to the swarm timer journal. Count canary timeouts for one UTC day with:
 
 ```bash
-TZ=UTC journalctl --user -u 'agentihooks-swarm*' \
+TZ=UTC journalctl --user -u agentihooks-swarm.service \
   --since "2026-10-23 00:00" --until "2026-10-23 23:59:59" --no-pager -o cat \
   | grep -c "canary did not validate before timeout"
 ```

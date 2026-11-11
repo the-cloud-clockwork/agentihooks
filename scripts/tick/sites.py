@@ -47,6 +47,11 @@ SLEEPING = "sleeping"
 FINISHED = "finished"
 CONFIG = "config"
 TICK_HOOK_READS = {"agents": TICK_KEYS, "tasks": frozenset({CONFIG})}
+TICK_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    START: (frozenset(), frozenset()),
+    "agents": (steps.pass_domains(*TICK_KEYS), frozenset()),
+    "tasks": (steps.pass_domains(CONFIG), frozenset()),
+}
 
 
 class _GraphView:
@@ -82,9 +87,10 @@ class TickSites:
     scan: Token[PassProcesses | None] | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the start, agents and tasks sites, each guarded on the box keys it reads."""
+        """Return the checks run before the start, agents and tasks sites, each reading and writing the keys
+        ``TICK_HOOK_KEYS`` declares for its site and guarded on the box keys it reads."""
         found = {START: self._start, "agents": self._listed, "tasks": self._configured}
-        return hook_reads.guarded(found, TICK_HOOK_READS)
+        return hook_reads.guarded({site: found[site] for site in TICK_HOOK_KEYS}, TICK_HOOK_READS)
 
     def shut(self, step: Step) -> bool:
         """Return whether ``step`` stays shut: every step once a step held an exception; a tick site past the start

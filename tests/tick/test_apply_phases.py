@@ -13,7 +13,7 @@ from scripts.tick import engine, view
 from scripts.tick.deadline import Deadline
 from scripts.tick.ports.records import RevisionConflict
 from scripts.tick.step import Context, Domain, Write
-from scripts.tick.steps import PASS, actions, tasks
+from scripts.tick.steps import PASS, actions, hook_domains, tasks
 
 pytestmark = pytest.mark.unit
 
@@ -183,6 +183,7 @@ def _phase_pass(ledger: Ledger, doc: dict[str, Any], box: dict[str, Any]) -> lis
         "planning and phase pass",
         "phase writes",
         lambda tick, get: tasks.phase_writes(phases.phase_changes(get("doc"))),
+        reads=hook_domains("doc"),
         writes=frozenset({tasks.PHASES}),
     )
     ctx = Context(_State({"slug": "sw", "doc": doc, "ledger": ledger}), Deadline.after(60.0))
