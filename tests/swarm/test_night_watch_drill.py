@@ -84,6 +84,11 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
     return {"store": store, "ledger": ledger, "runtime": runtime, "started": started, "docs": docs, "routes": routes}
 
 
+def no_pass(*args: Any) -> list[str]:
+    """A night watch pass that takes no action."""
+    return []
+
+
 def drill(store: RedisStore, slug: str) -> None:
     args = cli.build_parser().parse_args([slug, "night-watch-drill"])
     args.handler(store, args)
@@ -129,7 +134,7 @@ def test_the_drill_records_when_the_night_watch_first_saw_the_empty_seat(
 @pytest.mark.feature("swarm-night-watch-drill")
 def test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched(rig: dict[str, Any]) -> None:
     store = rig["store"]
-    with pytest.raises(SwarmError, match="not a scratch proof swarm"):
+    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_SCRATCH.format(slug='live-swarm')}$"):
         drill(store, "live-swarm")
     assert store.config("live-swarm").gates == {}
     assert night_watch.read(store, "live-swarm") == {}
@@ -140,7 +145,7 @@ def test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched(rig: dict[str, A
 def test_the_drill_refuses_a_scratch_swarm_that_is_not_running(rig: dict[str, Any]) -> None:
     store = rig["store"]
     store.update(SCRATCH, state="paused")
-    with pytest.raises(SwarmError, match="is paused"):
+    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_RUNNING.format(slug=SCRATCH, state='paused')}$"):
         drill(store, SCRATCH)
     assert store.config(SCRATCH).gates == {} and rig["started"] == []
 
@@ -215,7 +220,7 @@ def test_the_drill_reads_the_ledger_document_to_see_a_starting_master_hold_the_s
     store.put_agent(SCRATCH, AgentRecord("master@proof", MASTER, MASTER, started_at=NOW - 1, state="starting"))
     rig["runtime"].live.add("master@proof")
     doc = {"tasks": [], "_meta": {"events": [{"by": "master@proof", "at": NOW}]}}
-    found = night_watch_drill.Drill(store, SCRATCH, rig["ledger"], rig["runtime"], doc, NOW, list)
+    found = night_watch_drill.Drill(store, SCRATCH, rig["ledger"], rig["runtime"], doc, NOW, no_pass)
     assert night_watch_drill.refusal(found) == night_watch_drill.SEAT_HELD.format(slug=SCRATCH)
     assert night_watch_drill.refusal(replace(found, doc={"tasks": []})) == ""
 
