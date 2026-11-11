@@ -402,8 +402,9 @@ done
 - On 20 October the guard logged `FLAGGED name=agentihooks count=30`. An hour
   at that count would have ended the tick watcher, prober and waker.
 - The survival test also starts path-prefixed `agentihooks swarm tick-watch`,
-  `agentihooks swarm prober` and `agentihooks swarm waker` probes. They must survive and be logged
-  `SKIPPED reason=excluded_command`, while `ledger watch` and
+  `agentihooks swarm prober` and `agentihooks swarm waker` probes. They must
+  survive and be logged `SKIPPED reason=excluded_command`, while `ledger watch`
+  and
   `swarm waker-report` probes are `KILLED`. Before the pattern the test failed
   on the daemon probes ([Proofs run
   39369840962](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39369840962));
