@@ -97,3 +97,80 @@ def test_reap_skips_one_agents_identity_conflict_and_finishes_the_rest(
     assert actions == ["skipped stale-eng, its execution identity changed mid pass", "watched fine-eng"]
     err = capsys.readouterr().err
     assert "reap skipped stale-eng, its execution identity changed mid pass: stale or changed execution identity" in err
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_reap_keeps_an_agent_whose_drop_the_store_refuses_for_the_next_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm import tick
+    from scripts.tick.steps import common
+
+    lost = AgentRecord("lost-eng", "eng", "task-a")
+    fine = AgentRecord("fine-eng", "eng", "task-b")
+    rows = {"task-a": {"id": "task-a", "state": "claimed", "claimed_by": "lost-eng", "claim_generation": 1}}
+    released: list[str] = []
+    store = SimpleNamespace(
+        claims=lambda slug, task: 0,
+        claim_generation=lambda slug, task: 1,
+        release=lambda slug, task, name: released.append(name),
+        drop_agent=lambda slug, name: False,
+    )
+    updates: list[str] = []
+    ledger = SimpleNamespace(update_task=lambda slug, task, *args, **kwargs: updates.append(task) or {"state": "open"})
+    settled: list[str] = []
+    monkeypatch.setattr(common, "_settle_exit", lambda store, name, seat: settled.append(name))
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: [lost, fine])
+
+    def fake_reap_agent(judging: Any, agent: AgentRecord) -> list[str]:
+        if agent.name == "lost-eng":
+            return [f"lost {agent.name}" + tick._drop(judging.slug, judging.store, judging.ledger, judging.rows, agent)]
+        return [f"watched {agent.name}"]
+
+    monkeypatch.setattr(tick, "_reap_agent", fake_reap_agent)
+    runtime = SimpleNamespace(live_names=lambda: set())
+    actions = agents._reap("sw", store, ledger, runtime, rows, 7)
+    assert actions == ["kept lost-eng, the store refused its drop, retrying next pass", "watched fine-eng"]
+    assert updates == []
+    assert settled == []
+    assert rows["task-a"]["claimed_by"] == "lost-eng"
+
+
+@pytest.mark.feature("swarm-tick-agents-reap")
+def test_a_refused_drop_skips_the_reopen_for_any_caller_and_the_next_pass_retries_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.swarm import tick
+    from scripts.tick.steps import common
+
+    lost = AgentRecord("lost-eng", "eng", "task-a")
+    rows = {"task-a": {"id": "task-a", "state": "claimed", "claimed_by": "lost-eng", "claim_generation": 1}}
+    answers = iter([False, True])
+    store = SimpleNamespace(
+        claims=lambda slug, task: 0,
+        claim_generation=lambda slug, task: 1,
+        release=lambda slug, task, name: None,
+        drop_agent=lambda slug, name: next(answers),
+    )
+    updates: list[str] = []
+
+    def update_task(slug: str, task: str, *args: Any, **kwargs: Any) -> dict[str, str]:
+        updates.append(task)
+        return {"state": "open", "claimed_by": ""}
+
+    ledger = SimpleNamespace(update_task=update_task)
+    settled: list[str] = []
+    monkeypatch.setattr(common, "_settle_exit", lambda store, name, seat: settled.append(name))
+    assert tick._drop("sw", store, ledger, rows, lost) == common.DROP_REFUSED
+    assert (updates, settled) == ([], [])
+    monkeypatch.setattr(reconciler, "legacy_agents", lambda store, slug: [lost])
+    monkeypatch.setattr(
+        tick,
+        "_reap_agent",
+        lambda judging, agent: [f"lost {agent.name}" + tick._drop("sw", store, ledger, judging.rows, agent)],
+    )
+    runtime = SimpleNamespace(live_names=lambda: set())
+    assert agents._reap("sw", store, ledger, runtime, rows, 7) == ["lost lost-eng, task task-a reopened"]
+    assert (updates, settled) == (["task-a"], ["lost-eng"])

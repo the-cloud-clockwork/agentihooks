@@ -11,6 +11,8 @@ from typing import Any
 
 from scripts.swarm import claim_lost
 
+DROP_REFUSED = ", the store refused its drop, retrying next pass"
+
 
 def skip_refused(function: Callable[..., Any], *args: Any) -> Any:
     from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -60,7 +62,8 @@ def _drop(slug: str, store: Any, ledger: Any, rows: dict[str, Any], agent: Any, 
     if refund and tick._still_held(ledger.task(slug, agent.task), expected):
         store.refund_held_claim(slug, agent.task, agent.name, generation)
     store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
+    if store.drop_agent(slug, agent.name) is False:
+        return DROP_REFUSED
     reopen = held and tick._reopen(slug, ledger, rows, agent.task, expected)
     _settle_exit(store, agent.name, agent.seat if reopen else "")
     return f", task {agent.task} reopened" if reopen else ""
