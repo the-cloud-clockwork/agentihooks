@@ -13,6 +13,8 @@ shows pass p95, the gap since the last pass and the slowest steps. The Redis
 records behind the tick report (`tick:passes`, `tick:steps`) are written as
 before; the metrics are an extra copy of the same timings.
 
+Delivered by [pull request 9549](https://github.com/the-cloud-clockwork/agentihooks/pull/9549).
+
 ## Metrics
 
 `scripts.tick.metrics` defines the names. Durations are histograms in seconds,
