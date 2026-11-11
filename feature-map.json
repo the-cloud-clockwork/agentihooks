@@ -4032,6 +4032,18 @@
         "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
         "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
+    },
+    {
+      "id": "phase-pass-sliced-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-tick-sliced-tasks",
+      "behaviour": "The phase pass counts every task of a phase, the tasks a planner sliced included, when its pass document carries no slices, so a phase whose sliced tasks are open is never ticked done; a task whose slice the document holds still counts under that slice's phase.",
+      "seam": "scripts.swarm.phase_projection.projected_phase_tasks through scripts.swarm.phases.phase_changes",
+      "tests": [
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_pass_document_lacks_counts_under_the_phase_it_names",
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_document_holds_counts_under_the_slice_phase_not_its_own",
+        "tests/swarm/test_phase_projection.py::test_the_phase_pass_keeps_a_phase_open_while_its_sliced_tasks_are_open"
+      ]
     }
   ],
   "unmapped_rules": [
