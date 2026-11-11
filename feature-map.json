@@ -3632,6 +3632,7 @@
       "tests": [
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_ledger_write_metrics_row_carries_each_substep_time",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_substeps_outside_a_measured_request_are_not_counted",
+        "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
       ]

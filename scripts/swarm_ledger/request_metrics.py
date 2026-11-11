@@ -29,8 +29,9 @@ STEPS = ("hierarchy_sync", "outbox_write", "refresh_record", "event_append")
 JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 9 + len(STEPS)}
 LEGACY_SAMPLE_WIDTHS = frozenset((7, 9))
 CURRENT = ContextVar("ledger_request_timing", default=None)
-SAMPLES = deque(maxlen=MAX_SAMPLES)
-PENDING = []
+Row = tuple[float, str, str, *tuple[float, ...]]
+SAMPLES: deque[Row] = deque(maxlen=MAX_SAMPLES)
+PENDING: list[Row] = []
 GUARD = threading.Lock()
 JOURNAL_GUARD = threading.Lock()
 STARTED_AT = time.time()
@@ -140,7 +141,7 @@ def route_name(path: str) -> str:
     return "/:slug"
 
 
-def hold(row: tuple) -> None:
+def hold(row: Row) -> None:
     global EVICTED_THROUGH
 
     if len(SAMPLES) == SAMPLES.maxlen:
@@ -154,12 +155,11 @@ def record(
     wall: float,
     cpu: float,
     lock_wait: float,
-    client_wait: float = 0.0,
-    postgres_wait: float = 0.0,
-    **steps: float,
+    waits: Timing | None = None,
 ) -> None:
     global EVICTED_THROUGH
 
+    waits = Timing() if waits is None else waits
     with GUARD:
         ended = time.time()
         row = (
@@ -169,9 +169,9 @@ def record(
             wall,
             cpu,
             lock_wait,
-            client_wait,
-            postgres_wait,
-            *(steps.get(name, 0.0) for name in STEPS),
+            waits.client_wait,
+            waits.postgres_wait,
+            *(waits.steps.get(name, 0.0) for name in STEPS),
         )
         hold(row)
         if JOURNAL is not None:
@@ -343,9 +343,7 @@ def measured(method: Callable) -> Callable:
                     elapsed,
                     used,
                     timing.lock_wait,
-                    timing.client_wait,
-                    timing.postgres_wait,
-                    **timing.steps,
+                    timing,
                 )
 
     return request
