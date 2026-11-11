@@ -270,6 +270,7 @@ PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) fo
 HEALTH_SITES = ("wrapper health", "wrapper commands")
 WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
+LEDGER_HOOKS = frozenset({"wrapper commands", "wrapper phases", "wrapper intent", "wrapper view"})
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
@@ -474,7 +475,8 @@ class _Wrapper:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
         later site's step may spawn before its hook runs. Each check reads and writes the keys
-        ``WRAPPER_HOOK_KEYS`` declares for its site."""
+        ``WRAPPER_HOOK_KEYS`` declares for its site; the checks that reach the ledger answer false without running
+        once the ledger health probe stopped the pass, because the sites they open are shut then."""
         found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
@@ -484,7 +486,12 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
-        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        guarded = hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
+        return {site: self._unstopped(hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
+
+    def _unstopped(self, hook: Callable[[], bool]) -> Callable[[], bool]:
+        """Return ``hook`` answering false without running once the ledger health probe stopped the pass."""
+        return lambda: "stop" not in self.box and hook()
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
