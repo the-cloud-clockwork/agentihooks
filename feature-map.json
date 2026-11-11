@@ -3782,7 +3782,8 @@
         "tests/test_docs_sanity.py::test_a_placeholder_reference_or_version_is_not_a_secret",
         "tests/test_docs_sanity.py::test_a_baseline_holds_existing_lab_names_and_fails_only_on_growth",
         "tests/test_docs_sanity.py::test_a_baseline_never_holds_addresses_or_secrets",
-        "tests/test_docs_sanity.py::test_the_public_docs_pass_and_the_baseline_matches_them_exactly"
+        "tests/test_docs_sanity.py::test_the_public_docs_pass_and_the_baseline_matches_them_exactly",
+        "tests/test_docs_sanity.py::test_a_written_baseline_sorts_rules_and_indents_two_spaces"
       ]
     },
     {

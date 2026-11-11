@@ -197,6 +197,8 @@ def test_each_edge_of_the_built_in_rules(line: str, rules: list[str]) -> None:
         ("build i-12345 and sha 0a1b2c3d4e5f60718aa", []),
         ("legacy instance i-0a1b2c3d", ["cloud-host"]),
         ("peer fd00:1234::5", ["private-ipv6"]),
+        ("peer fd00::5", ["private-ipv6"]),
+        ("at 12:30 and ratio 1:2:3 the peer fd00::5", ["private-ipv6"]),
         ("docs 2001:db8::1, loopback ::1 and time 12:30:45", []),
     ],
 )
@@ -215,6 +217,7 @@ def test_each_edge_of_the_lab_host_and_ipv6_rules(line: str, rules: list[str]) -
         "clone https://bot:" + TAIL[:12] + "@git.example.com/r.git",
         "pass" + "word_valid: " + TAIL[:11],
         "api_token_hid=" + TAIL[:10],
+        "tok" + "en: " + TAIL[:8],
     ],
 )
 def test_a_password_or_token_like_value_is_flagged(line: str) -> None:
@@ -234,6 +237,9 @@ def test_a_password_or_token_like_value_is_flagged(line: str) -> None:
         "https://user:secret-placeholder@github.com/org/repo.git",
         "token_file=/run/secrets/x1y2z3w4",
         "secretName: ingress-tls2 and tokenRef: vault-ref1",
+        "tok" + "en: " + TAIL[:7],
+        "tok" + "en: ~/keys/a1b2c3d4e5",
+        "tok" + "en: TheExample123",
     ],
 )
 def test_a_placeholder_reference_or_version_is_not_a_secret(line: str) -> None:
@@ -249,8 +255,10 @@ def test_a_baseline_holds_existing_lab_names_and_fails_only_on_growth(
     baseline = tmp_path / "baseline.json"
 
     assert docs_sanity.main(["--write-baseline", str(baseline), str(page)]) == 1
-    assert json.loads(baseline.read_text()) == {page.as_posix(): {"lab-name": 2}}
+    assert baseline.read_text() == json.dumps({page.as_posix(): {"lab-name": 2}}, indent=2) + "\n"
     capsys.readouterr()
+    assert docs_sanity.main(["--baseline", str(baseline), str(page)]) == 1
+    assert "docs sanity: 1 hit(s), 2 held by the baseline" in capsys.readouterr().err
 
     page.write_text("the anton lab\nanton again\n", encoding="utf-8")
     assert docs_sanity.main(["--baseline", str(baseline), str(page)]) == 0
@@ -287,3 +295,21 @@ def test_the_public_docs_pass_and_the_baseline_matches_them_exactly(monkeypatch:
     assert "docs" in present
     assert docs_sanity.beyond_baseline(found, docs_sanity.load_baseline(str(BASELINE))) == []
     assert docs_sanity.count_hits(found) == held
+
+
+@pytest.mark.feature("docs-sanity-scan")
+def test_a_written_baseline_sorts_rules_and_indents_two_spaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    page = tmp_path / "page.md"
+    page.write_text("the anton quokkahost\n", encoding="utf-8")
+    baseline = tmp_path / "baseline.json"
+    monkeypatch.setenv("DOCS_SANITY_KEYWORDS", "quokkahost")
+
+    assert (
+        docs_sanity.main(["--keywords-env", "DOCS_SANITY_KEYWORDS", "--write-baseline", str(baseline), str(page)]) == 1
+    )
+    assert baseline.read_text() == (
+        "{\n" + f'  "{page.as_posix()}": {{\n' + '    "keyword": 1,\n    "lab-name": 1\n  }\n}\n'
+    )
+    capsys.readouterr()

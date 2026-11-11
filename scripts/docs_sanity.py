@@ -129,8 +129,6 @@ def lab_name(text: str) -> bool:
 def private_ipv6(text: str) -> bool:
     """Return whether the text holds an IPv6 address in the unique local or link local range."""
     for token in NOT_V6.split(text):
-        if token.count(":") < 2:
-            continue
         try:
             address = ipaddress.IPv6Address(token)
         except ValueError:
