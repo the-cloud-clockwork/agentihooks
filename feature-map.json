@@ -979,6 +979,27 @@
       ]
     },
     {
+      "id": "swarm-tick-view-lane-fit",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-view-critical-lane-fit",
+      "behaviour": "The tick wrapper waits for the pass view only while the critical and slow lanes keep a reserve for the reread and the steps that need the view; a build that misses that bound yields the last view the swarm completed in the long running tick process, and a late build replaces it once it ends unless a newer build is kept, so waits end, merge pass, done recheck and health findings run every pass. The first pass of a process has no earlier view and waits for its build as before.",
+      "seam": "pass_view in scripts.tick.steps.host, called by the relay hook of the wrapper pass in scripts.swarm.cli",
+      "tests": [
+        "tests/tick/steps/test_pass_view.py::test_a_built_view_is_returned_and_kept_for_the_next_pass",
+        "tests/tick/steps/test_pass_view.py::test_a_view_that_is_no_future_is_returned_as_is",
+        "tests/tick/steps/test_pass_view.py::test_a_late_build_yields_the_last_view_and_becomes_the_next_fallback",
+        "tests/tick/steps/test_pass_view.py::test_the_wait_is_bounded_by_the_slow_lane_when_it_ends_first",
+        "tests/tick/steps/test_pass_view.py::test_a_failed_late_build_keeps_the_last_view",
+        "tests/tick/steps/test_pass_view.py::test_a_swarm_with_no_earlier_view_waits_for_its_build",
+        "tests/tick/steps/test_pass_view.py::test_views_are_kept_per_swarm",
+        "tests/tick/steps/test_pass_view.py::test_a_build_that_raises_its_own_timeout_in_time_raises_it",
+        "tests/tick/steps/test_pass_view.py::test_the_wait_has_no_bound_outside_a_pass",
+        "tests/tick/steps/test_pass_view.py::test_the_relay_hook_takes_the_view_through_pass_view",
+        "tests/tick/steps/test_pass_view.py::test_an_older_build_ending_last_never_replaces_a_newer_view",
+        "tests/tick/steps/test_pass_view.py::test_a_cancelled_late_build_keeps_the_last_view"
+      ]
+    },
+    {
       "id": "swarm-tick-cost-report",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a1",
