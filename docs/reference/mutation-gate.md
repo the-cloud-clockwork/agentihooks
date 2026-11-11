@@ -357,10 +357,13 @@ literal. A top level function is reduced to its name and decorators, so its
 signature and body are not part of the shape. Every other top level statement,
 such as an assignment or an import, is compared in full. Plain class attributes
 and method bodies are not part of the shape.
-No module wide fallback is added when the shape is unchanged, or when the
-change only adds top level names: new imports, new undecorated functions, new
-assignments to unused names, or new entries appended to an existing literal
-table.
+No module wide fallback is added when the shape is unchanged, or when every
+top level change is additive: new imports, new undecorated functions, new
+assignments to unused names, or new entries appended to an existing top level
+list, tuple, set or dict literal, where a dict gains new constant keys and no
+new entry contains a call. That last exemption covers
+only a top level assignment; the same append to a dict literal inside a class
+body changes the shape.
 
 | Change outside any function | Module shape | Selection for that file |
 |---|---|---|
@@ -368,6 +371,7 @@ table.
 | A class attribute is added or removed, such as a new dataclass field | Unchanged | Tests that executed the changed lines |
 | A class attribute whose value is a dict literal changes, such as a dispatch table | Changed | Every test reaching a recorded unit of the module |
 | A top level assignment changes, `SETTING = 1` to `SETTING = 2` | Changed | Every test reaching a recorded unit of the module |
+| A new entry is appended to a top level literal, `HANDLERS = {"a": f}` to `HANDLERS = {"a": f, "b": g}` | Changed, exempt as additive | Tests that executed the changed lines, plus tests that executed a line reading that table. A dict subscript lookup outside a `try` block is not counted, because only a test passing the new key reaches the new entry |
 | A class base, keyword or decorator changes | Changed | Every test reaching a recorded unit of the module |
 | A decorator on a function or method is added, removed or changed | Changed | Every test reaching a recorded unit of the module |
 | A method or nested class is added, removed or renamed | Changed | Every test reaching a recorded unit of the module |
