@@ -9,3 +9,12 @@
      ]
      removed = sorted(before.keys() - after.keys())
      return writes + [RecordWrite("delete", section, key, _expected(loaded, section, key)) for key in removed]
+@@ -359,7 +359,7 @@
+     from scripts.swarm.store import SwarmError
+ 
+     for attempt in range(ATTEMPTS):
+-        loaded = port.sections(slug, LOADED)
++        loaded = port.sections(slug, (*LOADED, ARCHIVE))
+         assembled = _assemble(slug, loaded)
+         before = copy.deepcopy(assembled)
+         doc = _track(assembled)
