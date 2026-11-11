@@ -291,6 +291,26 @@ def test_a_pass_error_is_read_back_from_the_store_after_a_controller_restart() -
 
 
 @pytest.mark.feature("swarm-tick-pass-errors")
+def test_a_pass_ended_by_a_held_step_failure_keeps_its_pass_error_off_the_pass_row() -> None:
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+    from scripts.tick.steps import host
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    held = ValueError("ledger answered 503")
+    with timing.tick("sw", store), timing.pass_record(store, "sw"):
+        assert host.end_held({"raised": held}) == ["pass failed: a step raised ValueError: ledger answered 503"]
+    passes = store.redis.xrange(store.key("sw", "tick:passes"))
+    record = json.loads(passes[0][1]["record"])
+    assert record["outcome"] == "error"
+    assert "ledger answered 503" not in passes[0][1]["record"]
+    assert timing.pass_errors(store, "sw") == [
+        {"pass_id": record["pass_id"], "end_ms": record["end_ms"], "error": "ValueError: ledger answered 503"}
+    ]
+
+
+@pytest.mark.feature("swarm-tick-pass-errors")
 def test_pass_errors_keep_only_the_newest_within_their_bound() -> None:
     import fakeredis
 

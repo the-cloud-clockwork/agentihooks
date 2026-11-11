@@ -126,6 +126,11 @@ def step_ended(store: Any, slug: str, name: str, ended: float) -> None:
         emit(sys.stderr, json.dumps({"event": "swarm_tick_record_failed", "slug": slug, "stream": STEP_RAN}))
 
 
+def failed(record: dict[str, Any], exc: BaseException) -> None:
+    """Mark the pass ``record`` as ended by ``exc``; its error text is kept as a pass error, never on the pass row."""
+    record.update(outcome="error", error=f"{type(exc).__qualname__}: {exc}")
+
+
 @contextmanager
 def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
     if store is None:
@@ -139,18 +144,17 @@ def pass_record(store: Any, slug: str) -> Generator[None, None, None]:
         "outcome": "success",
     }
     token = PASS.set(record)
-    error = ""
     try:
         yield
     except tick_stop.Stopped:
         record["outcome"] = "stopped"
         raise
     except BaseException as exc:
-        record["outcome"] = "error"
-        error = f"{type(exc).__qualname__}: {exc}"
+        failed(record, exc)
         raise
     finally:
         try:
+            error = record.pop("error", "")
             record.update(end_ms=time.time_ns() // 1000000, wall_s=time.perf_counter() - started)
             tick_metrics.pass_finished(slug, record)
             finish_pass(store, slug, record)
