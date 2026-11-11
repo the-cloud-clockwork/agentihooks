@@ -551,13 +551,20 @@ def _journal_lock(slug: str, caller: str, outcome: str, raw: str | None) -> None
     sys.stderr.flush()
 
 
-def run_once(store: RedisStore, ledger: Any = None, runtime=None, messenger=None, runtimes: dict | None = None) -> dict:
+def run_once(
+    store: RedisStore,
+    ledger: Any = None,
+    runtime: Any = None,
+    messenger: Any = None,
+    runtimes: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
     from scripts.swarm.cli import run_tick
     from scripts.swarm.commands import hive_id
 
     runtimes = runtimes or {}
-    host, actions = hive_id(), {}
-    reader = ledger or LedgerClient()
+    host = hive_id()
+    actions: dict[str, list[str]] = {}
+    reader: Any = ledger or LedgerClient()
     for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, "")):
         if not tickable(reader, slug):
             continue
