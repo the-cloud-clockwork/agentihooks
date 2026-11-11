@@ -96,9 +96,9 @@ def test_substeps_outside_a_measured_request_are_not_counted(clock: Clock) -> No
 @pytest.mark.feature("ledger-write-substep-timing")
 def test_the_summary_totals_each_write_substep_and_keeps_other_wall(clock: Clock) -> None:
     steps = {"hierarchy_sync": 1.0, "outbox_write": 2.0, "refresh_record": 3.0, "event_append": 0.5}
-    metrics.record("POST", OPERATIONS, 10.0, 1.0, 2.0, steps=steps)
-    metrics.record("POST", OPERATIONS, 4.0, 1.0, 0.0, steps={"outbox_write": 1.5})
-    metrics.record("GET", OPERATIONS, 50.0, 1.0, 0.0, steps=steps)
+    metrics.record("POST", OPERATIONS, 10.0, 1.0, 2.0, **steps)
+    metrics.record("POST", OPERATIONS, 4.0, 1.0, 0.0, outbox_write=1.5)
+    metrics.record("GET", OPERATIONS, 50.0, 1.0, 0.0, **steps)
     writes = metrics.report(1.0)["writes"]
     assert [writes[key] for key in STEP_KEYS] == [1.0, 3.5, 3.0, 0.5]
     assert writes["other_wall_seconds"] == 10.0
@@ -112,7 +112,7 @@ def test_a_journal_sample_carries_its_substeps_across_a_restore(
     path.parent.mkdir()
     metrics.restore(path)
     steps = {"hierarchy_sync": 1.0, "outbox_write": 2.0, "refresh_record": 3.0, "event_append": 4.0}
-    metrics.record("POST", OPERATIONS, 12.0, 1.0, 0.0, steps=steps)
+    metrics.record("POST", OPERATIONS, 12.0, 1.0, 0.0, **steps)
     metrics.persist(stopped=True)
     [sample] = [row for row in map(json.loads, path.read_text().splitlines()) if row[0] == "s"]
     assert sample[-4:] == [1.0, 2.0, 3.0, 4.0]

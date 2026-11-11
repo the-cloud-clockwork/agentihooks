@@ -156,11 +156,10 @@ def record(
     lock_wait: float,
     client_wait: float = 0.0,
     postgres_wait: float = 0.0,
-    steps: dict[str, float] | None = None,
+    **steps: float,
 ) -> None:
     global EVICTED_THROUGH
 
-    timed = steps or {}
     with GUARD:
         ended = time.time()
         row = (
@@ -172,7 +171,7 @@ def record(
             lock_wait,
             client_wait,
             postgres_wait,
-            *(timed.get(name, 0.0) for name in STEPS),
+            *(steps.get(name, 0.0) for name in STEPS),
         )
         hold(row)
         if JOURNAL is not None:
@@ -346,7 +345,7 @@ def measured(method: Callable) -> Callable:
                     timing.lock_wait,
                     timing.client_wait,
                     timing.postgres_wait,
-                    timing.steps,
+                    **timing.steps,
                 )
 
     return request
