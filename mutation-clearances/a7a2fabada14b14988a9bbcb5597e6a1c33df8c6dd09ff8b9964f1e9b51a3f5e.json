@@ -1,0 +1,6 @@
+{
+  "scripts/tick/steps/host.py:scripts.tick.steps.host.x_pass_view:85a4b43139fa484325102e948be96e4827d07c279f6e1659d7e65ce5e694ad6f": {
+    "reader": "standards_reader",
+    "reason": "typing.cast(typ, val) returns val unchanged at runtime and never reads the type, and cast is the only cast name in scripts/tick/steps/host.py, imported from typing and not shadowed, so no mutation of its first argument can change the value pass_view returns or the view it stores."
+  }
+}

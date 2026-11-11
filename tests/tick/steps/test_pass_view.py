@@ -1,5 +1,6 @@
 """The pass view wait fits inside the critical lane: a late build yields the swarm's last view and becomes the next."""
 
+import logging
 from collections.abc import Iterator
 from concurrent.futures import Future
 from threading import Timer
@@ -80,15 +81,30 @@ def test_the_wait_is_bounded_by_the_slow_lane_when_it_ends_first() -> None:
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
-def test_a_failed_late_build_keeps_the_last_view() -> None:
+def test_a_failed_late_build_keeps_the_last_view(caplog: pytest.LogCaptureFixture) -> None:
     earlier = object()
     host.pass_view("sw", _built(earlier))
     building = _pending()
     with pool.running(critical_s=0.0, slow_s=0.0):
         assert host._view_wait_s() == 0.0
         assert host.pass_view("sw", building) is earlier
-    building.set_exception(RuntimeError("github down"))
+    with caplog.at_level(logging.ERROR, logger="concurrent.futures"):
+        building.set_exception(RuntimeError("github down"))
     assert host._LAST_VIEWS == {"sw": earlier}
+    assert caplog.records == []
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_a_cancelled_late_build_keeps_the_last_view(caplog: pytest.LogCaptureFixture) -> None:
+    earlier = object()
+    host.pass_view("sw", _built(earlier))
+    building = _pending()
+    with pool.running(critical_s=0.0, slow_s=0.0):
+        assert host.pass_view("sw", building) is earlier
+    with caplog.at_level(logging.ERROR, logger="concurrent.futures"):
+        assert building.cancel()
+    assert host._LAST_VIEWS == {"sw": earlier}
+    assert caplog.records == []
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")

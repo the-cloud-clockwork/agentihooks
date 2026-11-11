@@ -240,7 +240,7 @@ def _keep_view(slug: str, built: Future[Any], order: int) -> None:
     if built.cancelled() or built.exception() is not None:
         return
     with _KEEPING:
-        if order >= _VIEW_ORDER.get(slug, -1):
+        if _VIEW_ORDER.get(slug, order) <= order:
             _LAST_VIEWS[slug], _VIEW_ORDER[slug] = built.result(), order
 
 
