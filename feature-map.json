@@ -3364,6 +3364,17 @@
       ]
     },
     {
+      "id": "master-primary-login-reserve-2pct",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
+      "behaviour": "A master on the primary claude ai login hands off only once that login has 2% of its week left (PRIMARY_RESERVE_DEFAULT=2.0, ceiling 98% used) instead of the prior 20% reserve, and a master session itself leaves its own reserved account at 98% of the week used (MASTER_LEAVES=98.0) rather than at the session_bands week floor complement.",
+      "seam": "scripts.routing.reservation.primary_reserved, primary_login_ceiling and MASTER_LEAVES through hooks.context.quota_policy.evaluate",
+      "tests": [
+        "tests/context/test_quota_policy.py::test_a_master_on_the_primary_login_at_90_percent_used_gets_no_handoff",
+        "tests/routing/test_reservation.py::test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left"
+      ]
+    },
+    {
       "id": "docs-sanity-scan",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-public-docs-lan-scrub",
