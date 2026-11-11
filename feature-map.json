@@ -1756,6 +1756,57 @@
       ]
     },
     {
+      "id": "hub-import-data",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package state and reports move to a runtime data folder outside the profile, staged like profiles, refusing an occupied data folder.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_state_and_reports_move_to_the_data_folder",
+        "tests/profiles/test_hub_import.py::test_a_package_without_state_writes_no_data_folder",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_defaults_under_the_agentihooks_home",
+        "tests/profiles/test_hub_import.py::test_the_data_folder_falls_back_to_the_home_folder",
+        "tests/profiles/test_hub_import.py::test_an_occupied_data_folder_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_the_command_line_takes_the_data_folder"
+      ]
+    },
+    {
+      "id": "hub-import-deps",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub package Node and pip manifests become bundle deps.json entries with check and install commands, refusing a taken id or an install from an absolute path.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_node_and_pip_installs_become_deps_entries",
+        "tests/profiles/test_hub_import.py::test_a_bundle_without_deps_gets_a_new_manifest",
+        "tests/profiles/test_hub_import.py::test_new_deps_entries_append_without_rewriting_existing_entries",
+        "tests/profiles/test_hub_import.py::test_a_manifest_the_append_cannot_keep_is_rewritten_whole",
+        "tests/profiles/test_hub_import.py::test_manifests_without_installs_add_no_entry",
+        "tests/profiles/test_hub_import.py::test_a_taken_deps_id_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_install_folders_with_one_id_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_a_deps_manifest_without_a_deps_list_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_two_profiles_with_one_install_folder_get_separate_ids",
+        "tests/profiles/test_hub_import.py::test_an_npm_install_from_a_local_path_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_requirements_option_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_requirement_without_a_checkable_name_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_dry_run_reports_deps_without_writing_the_manifest"
+      ]
+    },
+    {
+      "id": "hub-import-evals",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm2",
+      "behaviour": "Hub evaluation cases become judge cases holding intent and points, refusing a case without either, a symlinked case and a case holding a literal credential.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_eval_cases_become_judge_cases",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_without_intent_or_points_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_that_is_not_a_mapping_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_symlinked_eval_case_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_eval_case_holding_a_credential_refuses_the_import"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
@@ -3955,6 +4006,18 @@
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_substep_run_twice_in_one_request_adds_both_times",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_the_summary_totals_each_write_substep_and_keeps_other_wall",
         "tests/swarm_ledger/test_request_metrics_steps.py::test_a_journal_sample_carries_its_substeps_across_a_restore"
+      ]
+    },
+    {
+      "id": "track-outages-claims-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2487",
+      "behaviour": "The track outages tick step judges each agent's recovery ownership and identity from the claims section alone, so a swarm whose fenced archive holds tens of thousands of executions never loads that archive per agent and the step ends inside its pass.",
+      "seam": "scripts.swarm.fencing.read_claims, used by scripts.swarm.resume.track_outages through its owner and identity checks",
+      "tests": [
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_answers_the_claims_section_without_the_archive",
+        "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
+        "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
     },
     {
