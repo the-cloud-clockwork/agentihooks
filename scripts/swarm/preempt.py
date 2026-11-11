@@ -6,8 +6,9 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox import store as inbox_store
 from scripts.swarm import dispatcher, freeze
+from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -88,7 +89,9 @@ def preferred(task: dict, doc: dict, graph: dict) -> bool:
     return any(r["verb"] == "focus" and freeze.covers(r["target"], task, chain) for r in doc.get("freezes") or [])
 
 
-def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe: Callable = _places) -> list[str]:
+def step(
+    slug: str, store: RedisStore, rows: dict, doc: dict, full: dict, now_ms: int, probe: Callable = _places
+) -> list[str]:
     """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders;
     probe(lane, task) returns why placement refuses the task now, empty when it would place."""
     from scripts.hive import placement_waits
@@ -111,7 +114,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int, probe
                 asked[victim.name] = json.dumps([task["id"], now_ms])
                 redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 redis.hset(store.key(slug, VICTIMS), victim.name, task["id"])
-                actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
+                actions += _ask(inbox_store.InboxStore(redis), slug, lane, victim, task["id"])
     redis.delete(store.key(slug, WAITING))
     if waiting:
         redis.sadd(store.key(slug, WAITING), *waiting)
