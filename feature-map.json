@@ -1815,7 +1815,10 @@
       "tests": [
         "tests/profiles/test_hub_import.py::test_an_import_carries_every_package_asset_and_agent_hooks",
         "tests/profiles/test_hub_import.py::test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import",
-        "tests/profiles/test_hub_import.py::test_an_unsafe_file_in_agent_hooks_refuses_the_import"
+        "tests/profiles/test_hub_import.py::test_an_unsafe_file_in_agent_hooks_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_dangling_agent_hooks_symlink_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_asset_holding_a_literal_credential_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_profile_file_taken_twice_refuses_the_import"
       ]
     },
     {

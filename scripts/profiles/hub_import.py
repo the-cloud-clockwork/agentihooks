@@ -85,8 +85,9 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
     packages = _packages(src)
     for package in packages:
         _refuse_unsafe_files(package)
-        if (package.parent / AGENT_HOOKS).exists():
-            _refuse_unsafe_files(package.parent / AGENT_HOOKS)
+        hooks = package.parent / AGENT_HOOKS
+        if hooks.exists() or hooks.is_symlink():
+            _refuse_unsafe_files(hooks)
     plans: dict[str, dict[str, bytes]] = {}
     stores: dict[str, dict[str, bytes]] = {}
     deps: list[dict[str, object]] = []
@@ -217,7 +218,10 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
 
 
 def _assets(package: Path) -> dict[str, bytes]:
-    """Return every package file the profile carries and the agent level hooks, leaving out what import converts or moves."""
+    """Return every package file the profile carries and the agent level hooks.
+
+    Leaves out what import converts or moves and refuses a file holding a literal credential.
+    """
     files: dict[str, bytes] = {}
     for root, dirs, names in package.walk():
         top = root == package
@@ -226,7 +230,15 @@ def _assets(package: Path) -> dict[str, bytes]:
             relative = (root / entry).relative_to(package).as_posix()
             if relative not in CONVERTED and entry not in INSTALL_MANIFESTS:
                 files[relative] = (root / entry).read_bytes()
-    return files | _collect(package.parent, (AGENT_HOOKS,))
+    hooks = _collect(package.parent, (AGENT_HOOKS,))
+    taken = sorted(files.keys() & {*hooks, "profile.yml"})
+    if taken:
+        raise ValueError(f"profile file taken twice: {taken[0]} in {package}")
+    files |= hooks
+    for relative, content in files.items():
+        if secrets.scan(content.decode(errors="ignore"), mode="strict"):
+            raise ValueError(f"literal credential refused: {relative} in {package.parent}")
+    return files
 
 
 def _collect(package: Path, relatives: tuple[str, ...]) -> dict[str, bytes]:

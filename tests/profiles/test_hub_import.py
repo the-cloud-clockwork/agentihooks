@@ -741,3 +741,33 @@ def test_an_unsafe_file_in_agent_hooks_refuses_the_import(hub: Path, tmp_path: P
     out = tmp_path / "bundle"
     with pytest.raises(ValueError, match=rf"refused: .*hooks/{name}"):
         import_hub(hub, out, True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_a_dangling_agent_hooks_symlink_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/diagram/hooks").symlink_to(tmp_path / "missing")
+    with pytest.raises(ValueError, match=r"symlink refused: .*hooks"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize("relative", ["scripts/run.py", "hooks/render.py"])
+def test_an_asset_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path, relative: str) -> None:
+    root = hub / "agents/diagram" if relative.startswith("hooks/") else _package(hub)
+    (root / relative).parent.mkdir(parents=True, exist_ok=True)
+    (root / relative).write_text(f"TOKEN = 'xoxb-{'1' * 12}'\n")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"literal credential refused: {relative}"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize("relative", ["profile.yml", "hooks/render.py"])
+def test_a_profile_file_taken_twice_refuses_the_import(hub: Path, tmp_path: Path, relative: str) -> None:
+    (hub / "agents/diagram/hooks").mkdir()
+    (hub / "agents/diagram/hooks/render.py").write_text("")
+    (_package(hub) / relative).parent.mkdir(parents=True, exist_ok=True)
+    (_package(hub) / relative).write_text("")
+    with pytest.raises(ValueError, match=rf"profile file taken twice: {relative}"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
