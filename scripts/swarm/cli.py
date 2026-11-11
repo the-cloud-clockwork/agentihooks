@@ -258,11 +258,11 @@ PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wr
 NONE: frozenset[Domain] = frozenset()
 WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
     "wrapper probes": (NONE, NONE),
-    "wrapper commands": (NONE, NONE),
-    "wrapper phases": (NONE, hook_domains("doc")),
-    "wrapper intent": (NONE, hook_domains("doc", "config")),
+    "wrapper commands": (pass_domains("stop"), NONE),
+    "wrapper phases": (pass_domains("stop"), hook_domains("doc")),
+    "wrapper intent": (pass_domains("stop"), hook_domains("doc", "config")),
     "wrapper relay": (pass_domains("judged"), hook_domains("view")),
-    "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper view": (pass_domains("agents", "stop"), hook_domains("agents", "doc", "config", "rows")),
     "wrapper metrics": (NONE, hook_domains("count")),
 }
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
@@ -432,6 +432,11 @@ def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, conf
     return view, skip_refused(check.run, doc)
 
 
+def _unstopped(owner: Any, hook: Callable[[], bool]) -> Callable[[], bool]:
+    """Return ``hook`` answering false without running once the ledger health probe stopped the pass of ``owner``."""
+    return lambda: "stop" not in owner.box and hook()
+
+
 @dataclass
 class _Wrapper:
     """The wrapper's sites of a pass graph: the checks the hand written wrapper ran between its groups, and the
@@ -487,11 +492,7 @@ class _Wrapper:
             "wrapper metrics": self._count,
         }
         guarded = hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
-        return {site: self._unstopped(hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
-
-    def _unstopped(self, hook: Callable[[], bool]) -> Callable[[], bool]:
-        """Return ``hook`` answering false without running once the ledger health probe stopped the pass."""
-        return lambda: "stop" not in self.box and hook()
+        return {site: _unstopped(self, hook) if site in LEDGER_HOOKS else hook for site, hook in guarded.items()}
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
