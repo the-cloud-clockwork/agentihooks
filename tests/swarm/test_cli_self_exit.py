@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from scripts.swarm import cli
@@ -8,7 +10,11 @@ SELF_EXIT = cli.cmd_exit.__name__.removeprefix("cmd_")
 
 
 @pytest.mark.feature("swarm-exit-after-release")
-def test_a_released_worker_exits_and_the_next_tick_retires_it(env, monkeypatch, capsys):  # noqa: F811
+def test_a_released_worker_exits_and_the_next_tick_retires_it(
+    env: tuple[Any, Any, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from scripts.swarm.tick import tick
 
     store, ledger, runtime = env
