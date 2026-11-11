@@ -79,14 +79,17 @@ def test_take_master_reads_the_harness_from_the_binding_when_the_process_names_n
     assert (master.harness, master.account) == ("codex", "cx")
 
 
-def test_take_master_reads_no_model_when_neither_process_nor_binding_names_a_harness(taker, monkeypatch):
+def test_take_master_refuses_when_neither_process_nor_binding_names_a_harness(taker, monkeypatch, capsys):
     store, _, _, _ = taker
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "")
     monkeypatch.setattr(take_master, "launch_of", lambda pid: ("", {}))
-    monkeypatch.setattr(take_master.launch_model, "configured", lambda harness: {"model": "opus", "effort": "max"})
-    assert run("sw", "take-master") == 0
-    [master] = [a for a in store.agents("sw") if a.lane == "master"]
-    assert (master.harness, master.model, master.effort) == ("", "", "")
+    assert run("sw", "take-master") == 1
+    assert capsys.readouterr().err.strip() == (
+        "swarm: take-master could not name this session's harness: "
+        "neither its process nor its profile binding names claude or codex"
+    )
+    assert [a for a in store.agents("sw") if a.lane == "master"] == []
+    assert store.next_name("sw", "master", 1) == "master@a1b2c3-0001"
 
 
 def test_take_master_records_the_mounted_profile(taker, monkeypatch):

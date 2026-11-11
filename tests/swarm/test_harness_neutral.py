@@ -236,3 +236,110 @@ def test_a_one_harness_template_pins_every_lane_and_round_trips(tmp_path, name, 
     path = templates.save(found, environ)
     assert templates.load(name, environ) == found
     assert json.loads(path.read_text())["lanes"] == {key: asdict(value) for key, value in found.lanes.items()}
+
+
+def _operator(tmp_path, profile="planner", agent=""):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        out = "status=started\nroute_status=routed\npane_id=w1:p7\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run)
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    placed = runtime.operator(config, "planner@a1b2c3-0001", profile, "hello", agent)
+    return placed, seen["argv"]
+
+
+@pytest.mark.parametrize(("agent", "expected"), [("", "codex"), ("codex", "codex"), ("claude", "claude")])
+def test_the_operator_launch_takes_the_open_seat_harness_and_a_named_harness_wins(codex_only, agent, expected):
+    placed, argv = _operator(codex_only, agent=agent)
+    assert argv[argv.index("--agent") + 1] == expected
+    assert placed.harness == expected
+
+
+def test_the_operator_launch_on_a_claude_only_machine_opens_claude(claude_only):
+    placed, argv = _operator(claude_only)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
+def test_the_operator_launch_of_a_claude_only_profile_on_a_codex_only_machine_is_refused(codex_only, monkeypatch):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    with pytest.raises(SpawnError) as error:
+        _operator(codex_only, profile="frontend")
+    assert str(error.value) == "the claude only profile frontend needs a Claude account and this machine has none"
+    assert error.value.status == "unavailable"
+
+
+def test_a_named_codex_operator_launch_of_a_claude_only_profile_is_refused(claude_only, monkeypatch):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    with pytest.raises(SpawnError) as error:
+        _operator(claude_only, profile="frontend", agent="codex")
+    assert str(error.value) == "codex cannot mount the claude only profile frontend"
+    assert error.value.status == "unsupported"
+
+
+@pytest.mark.parametrize("agent", ["", "claude"])
+def test_the_operator_launch_of_a_claude_only_profile_opens_claude_on_a_claude_machine(claude_only, monkeypatch, agent):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    placed, argv = _operator(claude_only, profile="frontend", agent=agent)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
+def test_the_operator_launch_with_no_account_anywhere_opens_claude(claude_only, monkeypatch):
+    monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
+    placed, argv = _operator(claude_only)
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"
+
+
+@pytest.mark.parametrize(("profile", "requested"), [("planner", ""), ("frontend", "claude")])
+def test_the_operator_launch_asks_the_open_seat_choice_with_the_environment(tmp_path, monkeypatch, profile, requested):
+    monkeypatch.setattr(plugins, "claude_only", lambda name: name == "frontend")
+    monkeypatch.setenv("AGENTIHOOKS_PROBE", "1")
+    asked, read = [], []
+
+    def choose(agent, environ):
+        asked.append((agent, environ.get("AGENTIHOOKS_PROBE")))
+        return "claude", "rotation"
+
+    def accounts(environ, now, refresh):
+        read.append((environ.get("AGENTIHOOKS_PROBE"), isinstance(now, float), refresh))
+        return [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
+
+    def run(argv, **kwargs):
+        out = "status=started\nroute_status=routed\npane_id=w1:p7\n"
+        return SimpleNamespace(returncode=0, stdout=validated(argv, out), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    runtime.quota_accounts = accounts
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    runtime.operator(config, "planner@a1b2c3-0001", profile, "hello")
+    assert asked == [(requested, "1")]
+    assert read == ([("1", True, False)] if requested else [])
+
+
+def test_a_claude_only_profile_on_an_unpinned_lane_with_no_claude_account_is_refused_in_plain_words(
+    codex_only, monkeypatch
+):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    with pytest.raises(SpawnError) as error:
+        _spawned(codex_only, {"eng": {"profile": "frontend"}}, "eng")
+    assert str(error.value) == "the claude only profile frontend needs a Claude account and this machine has none"
+    assert error.value.status == "unavailable"
+
+
+def test_a_claude_only_profile_on_an_unpinned_lane_spawns_on_claude_when_a_claude_account_exists(
+    claude_only, monkeypatch
+):
+    monkeypatch.setattr(plugins, "claude_only", lambda profile: profile == "frontend")
+    placed, argv = _spawned(claude_only, {"eng": {"profile": "frontend"}}, "eng")
+    assert argv[argv.index("--agent") + 1] == "claude"
+    assert placed.harness == "claude"

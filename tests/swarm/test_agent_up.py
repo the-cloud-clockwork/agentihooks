@@ -68,12 +68,13 @@ def test_the_role_of_an_installed_profile_comes_from_its_chain(monkeypatch):
 
 class OperatorRuntime:
     def __init__(self, fail=""):
-        self.launched, self.reaped, self.fail = [], [], fail
+        self.launched, self.reaped, self.agents, self.fail = [], [], [], fail
 
-    def operator(self, config, name, profile, text):
+    def operator(self, config, name, profile, text, agent=""):
         if self.fail:
             raise RuntimeError(self.fail)
         self.launched.append((config.slug, name, profile, text))
+        self.agents.append(agent)
         return Placed(pane_id="w1:p7", harness="claude")
 
     def reap_name(self, name):
@@ -125,6 +126,32 @@ def test_cli_profile_up_launches_and_prints_the_launch(swarm, monkeypatch, capsy
         '{"name": "planner@a1b2c3-0001", "pane": "w1:p7", "profile": "planner", "role": "planner"}'
     )
     assert rt.launched[0][1] == "planner@a1b2c3-0001"
+
+
+@pytest.mark.parametrize(("argv", "agent"), [((), ""), (("--agent", "codex"), "codex")])
+def test_cli_profile_up_passes_a_named_harness_to_the_launch(swarm, monkeypatch, argv, agent):
+    from scripts.swarm import cli
+
+    rt = OperatorRuntime()
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
+    assert run("sw", "planner", "up", *argv) == 0
+    assert rt.agents == [agent]
+
+
+def test_up_with_no_harness_named_leaves_the_choice_to_the_launch(swarm):
+    rt = OperatorRuntime()
+    agent_up.up(swarm, "sw", rt, "planner", 1000)
+    assert rt.agents == [""]
+
+
+def test_cli_profile_up_refuses_a_harness_outside_the_choices(swarm, monkeypatch):
+    from scripts.swarm import cli
+
+    rt = OperatorRuntime()
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: rt)
+    with pytest.raises(SystemExit):
+        run("sw", "planner", "up", "--agent", "copilot")
+    assert rt.launched == []
 
 
 def test_cli_master_up_still_brings_the_master(swarm, monkeypatch):

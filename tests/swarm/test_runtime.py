@@ -591,6 +591,7 @@ def test_a_claude_only_profile_asks_the_plain_choice_for_claude_with_the_environ
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
+    runtime.quota_accounts = lambda environ, now, refresh: [SimpleNamespace(harness="claude")]
     config = SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),

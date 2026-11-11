@@ -102,7 +102,12 @@ def retired(store, slug, runtime, others):
 def master_record(slug, name, pid, now_ms):
     account, validated = launch_of(pid)
     harness = harness_of(pid) or validated.get("harness", "")
-    model, effort = launch_model.read(harness, argv_of(pid)) if harness else ("", "")
+    if not harness:
+        raise SwarmError(
+            "take-master could not name this session's harness: "
+            "neither its process nor its profile binding names claude or codex"
+        )
+    model, effort = launch_model.read(harness, argv_of(pid))
     return AgentRecord(
         name,
         MASTER,
@@ -130,13 +135,15 @@ def take(store, slug, name, runtime, now_ms, replace_live=False, admit=lambda na
     if running and not replace_live:
         raise SwarmError(f"{running[0]} is the live master of {slug}; run take-master --replace to retire it first")
     pid = agent_pid()
+    record = master_record(slug, name, pid, now_ms)
     if not seated:
         name = store.next_name(slug, MASTER, now_ms)
+        record = replace(record, name=name)
     if not name_session(pid, name):
         raise SwarmError("this session is not registered with agentihooks, so the tick could not see it as master")
     before, after = (others, []) if hive else ([], others)
     retired(store, slug, runtime, before)
-    record = admitted(store, slug, master_record(slug, name, pid, now_ms), admit, pid, hive)
+    record = admitted(store, slug, record, admit, pid, hive)
     if not seated and carried and not store.names.entry(carried):
         store.names.alias(carried, name)
     retired(store, slug, runtime, after)
