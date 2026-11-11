@@ -220,6 +220,10 @@ def test_the_coordination_store_reads_back_the_mark_it_wrote() -> None:
 HOOK_S = 0.4
 
 
+def _no_result(ctx: Context) -> Result:
+    return Result()
+
+
 @dataclass
 class _Timed:
     name: str
@@ -227,7 +231,7 @@ class _Timed:
     needs: frozenset[str] = frozenset()
     lane: Lane = Lane("critical")
     budget_s: float = 6 * HOOK_S
-    action: Callable[[Context], Result] = field(default=lambda ctx: Result())
+    action: Callable[[Context], Result] = field(default=_no_result)
     interval_s: float = 0.0
     reads: frozenset[Domain] = frozenset()
     writes: frozenset[Domain] = frozenset()
