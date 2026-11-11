@@ -18,7 +18,7 @@ from scripts.tick import engine, registry, sites
 from scripts.tick.adapters.inbox import StoreInbox
 from scripts.tick.ports import Tools
 from scripts.tick.step import Context, Domain, Lane, Result, Step, Write
-from scripts.tick.steps import PASS, actions_of, observe, report
+from scripts.tick.steps import PASS, actions_of, host, observe, report
 from scripts.tick.steps import tasks as task_steps
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -203,9 +203,28 @@ def test_a_stopped_swarm_runs_only_the_start_site(store: RedisStore, monkeypatch
     assert _ran(graph) == ["start"]
 
 
+@pytest.mark.feature("swarm-tick-value-edges")
+def test_the_tick_orders_its_sites_by_the_tick_hook_and_shut_keys(
+    store: RedisStore,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[Any, Any]] = []
+    original = registry.site_edges
+
+    def spy(steps: Any, order: Any, hooks: Any = None, shuts: Any = None) -> Any:
+        seen.append((hooks, shuts))
+        return original(steps, order, hooks, shuts)
+
+    monkeypatch.setattr(registry, "site_edges", spy)
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
+    assert (sites.TICK_HOOK_KEYS, sites.TICK_SHUT_KEYS) in seen
+
+
 def test_a_registered_step_runs_in_its_tick_site(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     ran: list[str] = []
-    _with(monkeypatch, *observe.STEPS, _Marker("marker", "agents", _recorder(ran, lambda get: "agents")), real=False)
+    needed = (step for step in host.STEPS if step.name in {"command runner", "reboot pass"})
+    marker = _Marker("marker", "agents", _recorder(ran, lambda get: "agents"))
+    _with(monkeypatch, *observe.STEPS, *needed, marker, real=False)
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), now_ms=1_000)
     assert ran == ["agents"]
 
@@ -255,7 +274,7 @@ def test_the_intent_site_joins_the_wrapper_at_the_relay(
             assert {other.name for other in intent if _crossed(other, step)} <= step.needs
         elif step.group in ("wrapper reboot", "start"):
             assert not {other.name for other in intent} & step.needs
-    assert cli.INTENT_JOINS == {"wrapper intent": "wrapper relay"}
+    assert cli.PASS_HOOK_KEYS["wrapper relay"] == cli.WRAPPER_HOOK_KEYS["wrapper relay"]
 
 
 @pytest.mark.feature("swarm-tick-declared-effects")

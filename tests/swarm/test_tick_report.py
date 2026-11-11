@@ -38,6 +38,7 @@ def test_report_aggregates_step_costs_and_pass_gaps() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "ready_gaps": [],
         "rows_read_max": None,
     }
 
@@ -94,6 +95,33 @@ def test_report_names_the_most_task_rows_a_pass_read(capsys: pytest.CaptureFixtu
     assert "Task rows read per pass, most: 997\n" in capsys.readouterr().out
 
 
+@pytest.mark.feature("swarm-tick-ready-gap")
+def test_report_prints_each_step_ready_to_start_gap(capsys: pytest.CaptureFixture[str]) -> None:
+    passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 20000, "wall_s": 19.0}]
+    counts = {"outcome": "ok", "abandoned": False, "held": False, "skipped": False, "dropped": 0}
+    records = [
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 2.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 1.0, "start_s": 4.5},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 2.0, "start_s": 13.7},
+        {**counts, "pass_id": "a", "step": "merge pass", "ready_s": 3.0, "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "legacy", "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 5.0, "start_s": 5.0, "skipped": True},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 6.0, "start_s": 6.0, "held": True},
+        {**counts, "pass_id": "other", "step": "waits", "ready_s": 0.0, "start_s": 90.0},
+    ]
+    report = tick_report.summarize(passes, [], records)
+    assert report["ready_gaps"] == [
+        {"step": "merge pass", "count": 1, "median_s": 0.0, "max_s": 0.0},
+        {"step": "waits", "count": 3, "median_s": 3.5, "max_s": pytest.approx(11.7)},
+    ]
+    with mock.patch.object(tick_report, "read", return_value=report):
+        tick_report.command(object(), argparse.Namespace(slug="sw", passes=1))
+    out = capsys.readouterr().out
+    assert (
+        "Step  Ready to start median  Ready to start max\nmerge pass  0.000s  0.000s\nwaits  3.500s  11.700s\n" in out
+    )
+
+
 def test_lane_share_is_zero_when_no_step_cpu_was_spent() -> None:
     rows = [{**step("a", "spawn", 1.0, 0.0, 0.0), "lane": "critical"}]
     assert tick_report.lane_shares(rows, 0.0) == [{"lane": "critical", "count": 1, "cpu_share": 0.0}]
@@ -131,6 +159,7 @@ def test_empty_report_and_missing_step_history_are_explicit() -> None:
         "lanes": [],
         "critical_end_p95_s": None,
         "records": [],
+        "ready_gaps": [],
         "rows_read_max": None,
     }
     passes = [{"pass_id": "a", "start_ms": 1000, "end_ms": 2000, "wall_s": 1.0}]
@@ -214,6 +243,7 @@ def test_report_command_prints_all_requested_metrics(capsys: pytest.CaptureFixtu
         "Task rows read per pass, most: n/a\n"
         "Step  Records  Late share  Abandoned  Held  Skipped  Dropped\n"
         "launch  1  100.00%  1  0  0  2\n"
+        "Step  Ready to start median  Ready to start max\n"
         "CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.\n"
     )
 

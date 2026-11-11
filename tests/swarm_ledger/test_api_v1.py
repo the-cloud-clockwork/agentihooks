@@ -973,6 +973,7 @@ def test_domain_operation_families_use_their_named_guards(live):
         ("metadata", {"op": "size_set", "by": "swarm", "size": "swarm"}),
         ("metadata", {"op": "set", "by": "swarm", "path": "time_left_minutes", "value": 20}),
         ("sources", {"op": "source_add", "by": "swarm", "source": "https://example.com/proof"}),
+        ("watchdog", {"op": "watchdog_copy", "by": "swarm", "text": "1. [open] Item. [Ledger: t1]"}),
         ("tasks/t1", {"op": "task_update", "by": "swarm", "item": "tasks/t1", "fields": {"description": "Updated"}}),
         ("phases/p1", {"op": "phase_update", "by": "swarm", "item": "phases/p1", "fields": {"description": "Updated"}}),
         ("phases", {"op": "phase_add", "by": "swarm", "phase": "p2", "title": "Later"}),

@@ -2,7 +2,6 @@
 
 import os
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from scripts.gates import progress, quiet
@@ -350,11 +349,8 @@ for _step in STEPS:
 
 
 def _doc_items_map(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Map the watchdog document copy onto its tasks once each time the copy changes."""
-    document = get("config").watchdog_document
-    if not document:
-        return []
-    return doc_items.map_changed(Path(document), get("doc")["tasks"], get("tools"), get("deadline"))
+    """Map the newest watchdog document copy on the ledger onto its tasks once each time the copy changes."""
+    return doc_items.map_changed(get("doc"), get("tools"), get("deadline"))
 
 
 registry.register(
@@ -363,7 +359,7 @@ registry.register(
         "wrapper events",
         _doc_items_map,
         needs=frozenset({"ledger state", "drained resume"}),
-        reads=pass_domains("config", "doc"),
+        reads=pass_domains("doc"),
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"coordination", "ledger"}),

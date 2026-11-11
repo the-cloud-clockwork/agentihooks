@@ -10,6 +10,7 @@ All routes retain the host check. Ledger resources authenticate the stored opera
 | Comments and question answers | GET `/{collection}/{item}/{thread}`, GET `/threads` | Paginated thread or flat entries for composite consumers |
 | Chat, priorities, notifications, artifacts and artifact trash | GET `/{collection}`, GET `/{collection}/{item}` | Paginated collection or bounded item |
 | Members, events and sources | GET `/{collection}` | Paginated resource; members also have item reads |
+| Watchdog document copy | GET `/watchdog` | The newest stored copy with its text, digest, time and author; empty when none is stored |
 | Swarm controls and agents, history, findings, transfers, handoffs, gates | GET `/swarm`, GET `/swarm/{collection}` | Bounded control metadata and paginated collections |
 | Layout | GET/PUT `/api/v1/layout` | Schema checked row sizes; bounded saved resource |
 | Bin delete and restore | POST `/api/v1/bin/actions` | Schema checked action and slug; acknowledgment |
@@ -36,7 +37,7 @@ All domain mutations use POST or PUT `/operations`. The envelope has a transport
 | Tasks | task_add, task_update, task_rank, task_group, task_ungroup | Named task or tasks collection; task_add needs no guard because the locked apply refuses an id already in use, so adds of different ids never conflict |
 | Phases | phase_add, phase_update, phase_review, phase_append | Phases collection or named phase |
 | Decisions | priority, priority_clear, notification_clear, relay, answer, verdict | Priority or notification collection, or named item |
-| Ledger lifecycle | title_set, overview_set, summary_set, close, reopen, size_set, source_add | Metadata or sources |
+| Ledger lifecycle | title_set, overview_set, summary_set, close, reopen, size_set, source_add, watchdog_copy | Metadata, sources or the watchdog copy |
 | Artifacts | artifact_add, artifact_delete, artifact_restore, artifact_purge | Artifacts |
 
 Operation schema names are checked against every domain dispatch name. Existing semantic validators are reused after the central strict field and type schemas. Receipts retain the latest one thousand transport identifiers and operation outcomes in repository metadata, including across server restarts. A replay within that retained window ignores its old expected revision and does not apply again. Outside the window the revision guard still applies.
