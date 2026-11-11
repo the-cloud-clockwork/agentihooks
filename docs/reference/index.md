@@ -19,6 +19,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 | Page | What it covers |
 |------|---------------|
 | [Ledger watchdog signal records](ledger-watchdog.md) | Attribute server exits using retained signal reasons, target and caller process ids, log location, inspection examples, reload records and failed restart diagnostics |
+| [Operator presence](operator-presence.md) | Operator off as the start state of every swarm agent on a hive or the workstation, which sessions are gated, `operator on` and `operator off`, the master quiet window, the twenty word reply limit refused at the Stop hook with its counting rules and three refusal cap, the away reminder, question tool and permission prompt refusals, `AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS`, the state file, limits and troubleshooting |
 | [Swarm elapsed thresholds](swarm-thresholds.md) | Idle and input timing, retirement, dispatch and autoscale windows, cadence examples, legacy settings, holds and ledger probe limits |
 | [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Feature map](feature-map.md) | Feature map origins and keys, the test marker, live check targets and the pull request validation |
