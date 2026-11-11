@@ -345,6 +345,7 @@ def test_resource_ledger_success_invalidates_the_held_view() -> None:
         ("export", ()),
         ("mutate", ([{"op": "notice"}],)),
         ("task", ("task",)),
+        ("watchdog_copy", ()),
         ("update_task", ("task", {"state": "open"})),
         ("notify", ("notice",)),
         ("question", ("question", "eng", "id")),

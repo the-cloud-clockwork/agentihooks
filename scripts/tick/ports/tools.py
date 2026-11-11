@@ -18,7 +18,7 @@ from scripts.tick.ports.contracts import (
 
 _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "ledger": (
-        frozenset([Ledger.export.__name__, Ledger.task.__name__]),
+        frozenset([Ledger.export.__name__, Ledger.task.__name__, Ledger.watchdog_copy.__name__]),
         frozenset(
             [
                 Ledger.mutate.__name__,
