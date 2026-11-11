@@ -172,3 +172,45 @@ def test_an_unreadable_label_falls_back_to_the_full_grade(capsys: pytest.Capture
 def test_missing_needs_never_promote(capsys: pytest.CaptureFixture[str]) -> None:
     assert ci_launch_hotfix.main(["--repo", "o/r", "--sha", "abc"], gh(HOTFIX), {}) == 0
     assert capsys.readouterr().out == "promote=false\n"
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize("argv", [[], ["--repo", "o/r"], ["--sha", "abc"]], ids=["none", "no sha", "no repo"])
+def test_the_grade_requires_both_the_repository_and_the_commit(
+    capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    with pytest.raises(SystemExit) as exited:
+        ci_launch_hotfix.main(argv, gh(HOTFIX), {"NEEDS": json.dumps(GREEN)})
+    assert exited.value.code == 2
+    assert "the following arguments are required" in capsys.readouterr().err
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_the_grade_help_describes_the_route(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        ci_launch_hotfix.main(["--help"], gh(HOTFIX), {})
+    assert "Grade a dev push for the launch hotfix route" in capsys.readouterr().out
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+@pytest.mark.parametrize(
+    "events, expected",
+    [
+        ((), False),
+        ((LABELLED,), False),
+        ((LABELLED, {"event": "unlabeled", "label": {"name": "bug"}}, QUEUED), True),
+        (({"event": "labeled", "label": {"name": "bug"}}, QUEUED), False),
+        (({"event": "labeled"}, QUEUED), False),
+    ],
+    ids=["no events", "never queued", "other label removed", "other label added", "label missing"],
+)
+def test_only_the_launch_hotfix_label_decides_the_queue_entry(
+    events: tuple[dict[str, Any], ...], expected: bool
+) -> None:
+    assert ci_launch_hotfix.labelled_at_queue(list(events)) is expected
+
+
+@pytest.mark.feature("launch-hotfix-promotion")
+def test_a_pull_without_labels_reads_as_unlabelled(capsys: pytest.CaptureFixture[str]) -> None:
+    pulls = [{key: value for key, value in HOTFIX[0].items() if key != "labels"}]
+    assert promote(GREEN, gh(pulls), capsys) == "promote=false\n"

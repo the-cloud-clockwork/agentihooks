@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any, cast
+from typing import Any
 from urllib.parse import quote
 
 LABEL = "launch hotfix"
@@ -24,12 +24,12 @@ GRADE = "Gate — Required"
 
 def _row(value: Any) -> dict[str, Any]:
     """A JSON object read from GitHub, or an empty one when the field is absent."""
-    return cast(dict[str, Any], value or {})
+    return dict(value or {})
 
 
 def _rows(value: Any) -> list[Any]:
     """A JSON array read from GitHub, or an empty one when the field is absent."""
-    return cast(list[Any], value or [])
+    return list(value or [])
 
 
 def suite_passed(needs: Mapping[str, Any]) -> bool:
@@ -98,7 +98,7 @@ def main(
     except subprocess.CalledProcessError as exc:
         print(f"launch hotfix label unreadable, promoting on the full grade only: {exc.stderr}", file=sys.stderr)
         promote = False
-    print(f"promote={'true' if promote else 'false'}")
+    print(f"promote={str(promote).lower()}")
     return 0
 
 

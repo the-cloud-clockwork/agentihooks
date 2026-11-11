@@ -1163,10 +1163,27 @@ def stall_ledger(rows: list[dict], focus: tuple[str, ...] = ()) -> object:
     from types import SimpleNamespace
 
     scoped: Any = scoped_ledger(rows)
-    doc = {"tasks": rows, "freezes": [{"verb": "focus", "target": f"tasks/{task}"} for task in focus]}
-    return SimpleNamespace(
-        task=scoped.task, tasks_targeting=scoped.tasks_targeting, tasks=scoped.tasks, state=lambda slug: doc
-    )
+    targets = [target if "/" in target else f"tasks/{target}" for target in focus]
+    phases = sorted({row["phase"] for row in rows if row.get("phase")})
+    doc = {
+        "tasks": rows,
+        "phases": [{"id": phase} for phase in phases],
+        "freezes": [{"verb": "focus", "target": target} for target in targets],
+    }
+
+    def own(slug: str) -> None:
+        if slug != "sw":
+            pytest.fail(f"the stall route read swarm {slug}")
+
+    def targeting(slug: str, url: str) -> list[dict]:
+        own(slug)
+        return scoped.tasks_targeting(slug, url)
+
+    def state(slug: str) -> dict:
+        own(slug)
+        return doc
+
+    return SimpleNamespace(task=scoped.task, tasks_targeting=targeting, tasks=scoped.tasks, state=state)
 
 
 def plant_stall(store: Any, minutes: int) -> None:
@@ -1204,6 +1221,19 @@ def test_a_planted_spawn_stall_lets_the_master_queue_a_focused_urgent_pull_reque
     journal.write("queue", URL, "abc", [], [])
     record = json.loads((tmp_path / "merge-queue-events.jsonl").read_text().splitlines()[-1])
     assert (record["route"], record["task"], record["pull"]) == ("spawn stall", "t1", URL)
+
+
+@pytest.mark.feature("stall-master-queue")
+@pytest.mark.parametrize("phase, queued", [("p1", True), ("p2", False)])
+def test_a_phase_focus_admits_only_the_urgent_tasks_of_its_phase_to_the_stall_route(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str, queued: bool
+) -> None:
+    rows = [{**STALL_TASK, "phase": "p1"}, {**OTHER_TASK, "phase": "p2"}]
+    seen = stalled_master(monkeypatch, tmp_path, rows, focus=(f"phases/{phase}",))
+    assert cli.main(["sw", "merge", "queue", URL]) == (0 if queued else 1)
+    assert [kwargs["journal"].context for kwargs in seen] == (
+        [{"route": "spawn stall", "task": "t1"}] if queued else []
+    )
 
 
 @pytest.mark.feature("stall-master-queue")
