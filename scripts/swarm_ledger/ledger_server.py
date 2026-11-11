@@ -1263,11 +1263,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, "no such ledger", "text/plain")
         origin = self.headers.get("Origin")
         agent = self.headers.get("X-Ledger-Agent")
-        if origin not in ALLOWED_ORIGINS and (origin is not None or not agent):
+        operator = operator_plan and agent in (None, "operator")
+        if origin not in ALLOWED_ORIGINS and (origin is not None or not (agent or operator)):
             return self.send(403, "origin not allowed", "text/plain")
         if self.refused(slug):
             return None
-        if agent or (agents_only and not (operator_plan and self.principal == "")):
+        if (agent or agents_only) and not (operator and self.principal == ""):
             meta = repository.read(slug, "_meta.members")["_meta"]
             if agent not in meta.get("members", {}):
                 return self.send(403, "agent must join this ledger before uploading", "text/plain")
