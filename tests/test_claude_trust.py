@@ -125,5 +125,18 @@ def test_a_lock_past_the_stale_bound_is_removed_and_a_vanished_one_reads_as_free
     assert claude_trust._reclaim(lock) is True
 
 
-def test_the_stale_bound_matches_the_claude_lockfile_stale_time() -> None:
-    assert claude_trust.STALE_LOCK_SECONDS == 10.0
+@pytest.mark.feature("claude-trust-lock-reclaim")
+def test_a_stale_lock_another_launch_removed_first_reads_as_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    old = time.time() - claude_trust.STALE_LOCK_SECONDS - 5
+    os.utime(lock, (old, old))
+
+    def gone(self: Path) -> None:
+        raise FileNotFoundError(self)
+
+    monkeypatch.setattr(Path, "rmdir", gone)
+
+    assert claude_trust._reclaim(lock) is True
