@@ -244,7 +244,7 @@ step is abandoned:
 - `run_step` waited the full `budget_s` and the worker has not returned. This
   holds in a sequential pass and in a parallel pass alike.
 - In a parallel pass the step's lane deadline ran out while the step was
-  still running: 110 seconds for the critical lane, 400 for the slow lane.
+  still running: 60 seconds for the critical lane, 59 for the slow lane.
 
 A step dropped before it starts, because a step it needs was dropped or its
 lane had already expired, writes no line: it never ran, so it had no writes to
@@ -276,9 +276,9 @@ The tick report counts these runs per step in its Late share, Abandoned, Held an
 
 ### Lanes
 
-A parallel pass gives each lane its own deadline: 110 seconds for the critical
+A parallel pass gives each lane its own deadline: 60 seconds for the critical
 lane, which holds every step whose lane is neither `slow` nor `closing`, and
-400 seconds for the slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`),
+59 seconds for the slow lane (`scripts.tick.pool.CRITICAL_S` and `SLOW_S`),
 both counted from the start of the pass. The closing lane's 30 seconds count
 from the start of the pass `finally`; see [The closing lane](#the-closing-lane).
 These steps declare the slow lane:
@@ -322,8 +322,9 @@ under `found`. The `status publish` step, in the `closing` group, passes
 publishes those findings instead of calling `findings` again with the same
 inputs. When the box holds no `found`, for example because the handed off
 health step has not finished when the status publish runs, `status_report`
-finds them itself as before. The status publish declares no need on the health
-step, so it never waits for it. Over ten passes on 4 November 2026 after this
+finds them itself as before. The status publish needs the health step and is
+kept, so it waits for it at most its own budget and runs even when the health
+step was dropped (see [Needs across groups](#needs-across-groups)). Over ten passes on 4 November 2026 after this
 reached the workstation's dev checkout, the status publish median fell from
 10.932 seconds to 9.244 seconds (p95 12.937 seconds).
 
@@ -341,10 +342,8 @@ with its repr. When the
 pass ends, `scripts.tick.pool.running` joins each handed off thread for at
 most the slow lane time left plus `LATER_GRACE_S` (one second), one thread
 after another, so each extra hung thread adds about one second. A step that
-needs a step an earlier group handed off, and that is still running, is handed
-off too and starts once that step ends; it is dropped when that step was
-dropped or ran past its budget or lane. A need on a step of an earlier group
-that ran critical and already ended is met at once. In sequential mode every step runs
+needs a step an earlier group handed off waits for it as
+[Needs across groups](#needs-across-groups) describes. In sequential mode every step runs
 in group order, each in its own daemon thread the caller waits on up to its
 budget, slow lane included.
 
@@ -401,6 +400,112 @@ different lanes, and one lane when they share it, as in
 
 `agentihooks swarm <slug> tick-report` prints each lane's share of step CPU
 (see [Lane lines](tick-report.md#lane-lines)).
+
+#### Needs across groups
+
+A step's `needs` may name a step of an earlier group. The tick runs its groups
+in order, so in sequential mode the needed step has already ended when the
+dependent starts. In a parallel pass the earlier group returns before its slow
+lane steps end: they run on as handed off steps. A step that needs one of them
+waits for it, then runs or is dropped by how it ended.
+
+The tick's own example: `metrics record`, in group `wrapper metrics`, needs
+`health findings`, a slow lane step of group `wrapper events`. It starts only
+after `health findings` ended or was held:
+
+```python
+CallStep(
+    "metrics record",
+    "wrapper metrics",
+    held(viewed("metrics record", _metrics)),
+    frozenset({"health findings"}),
+    pass_domains("found", "view") | hook_domains("doc", "count"),
+    lane=SLOW,
+)
+```
+
+Turn parallel mode on, or back off, per swarm:
+
+```bash
+agentihooks swarm <slug> set tick-mode=parallel
+agentihooks swarm <slug> set tick-mode=sequential
+```
+
+How the needed step ended decides the dependent:
+
+| Needed step, from an earlier group | Dependent |
+| --- | --- |
+| Still running when the dependent's group starts | Handed off with it, even when the dependent is critical; it keeps its own lane deadline and starts once the needed step ends |
+| Ended `ok` or `failed` | Runs |
+| Recorded `held`: its earlier run was still alive | Runs |
+| Recorded `skipped`: its interval had not elapsed | Runs |
+| Left running at its budget (`late`), cut at its lane deadline, or dropped before it started | Dropped and recorded `late`, without running |
+| Not ended before the dependent's lane deadline | Dropped and recorded `late` |
+| Ran critical in its own group | Already ended; the need is met at once |
+
+A dropped dependent drops every step of its group that needs it and, when it
+was handed off, every step of a later group that needs it. When a group returns, its handed off steps that need a step of the group
+that was dropped are marked ended and dropped at once, so a later group does
+not wait on them.
+
+A kept step (`kept=True`), such as `status publish`, waits at most its own
+budget for the steps it needs and runs even when one of them was dropped,
+unless the pass ended before it started.
+
+While it waits, the dependent holds no pass worker; see the last paragraphs of
+[Pass executors](#pass-executors). Each handed off step is tracked on the
+active `scripts.tick.pool.Pass`:
+
+| Method | Returns or does |
+| --- | --- |
+| `hand(names)` | Marks each step handed off and pending |
+| `pending()` | The handed off steps not yet ended. The next group hands off every step that needs one of them |
+| `handed_of(names)` | The steps in `names` that a group of this pass handed off |
+| `settled(names)` | Whether every step in `names` has ended, dropped or not |
+| `end(name, dropped)` | Marks a handed off step ended, dropped when its record was lost; ignores a step never handed off |
+| `ended(names, timeout)` | Whether every step in `names` ended within `timeout` seconds and none was dropped |
+
+A test that holds the dependent back until the step it needs ends, after
+`tests/tick/test_cross_group_needs.py`:
+
+```python
+from threading import Event
+
+from scripts.tick import engine, pool
+from scripts.tick.step import Context, Result
+
+release, started = Event(), Event()
+
+
+def find(ctx: Context) -> Result:
+    release.wait(5.0)
+    return Result()
+
+
+def record_metrics(ctx: Context) -> Result:
+    started.set()
+    return Result()
+
+
+findings = Step("findings", find, "events")
+record = Step("record", record_metrics, "metrics", frozenset({"findings"}))
+with pool.running(workers=4, slow_s=3.0):
+    engine.run_group("events", ctx, (findings,))
+    engine.run_group("metrics", ctx, (record,))
+    assert not started.wait(0.2)
+    release.set()
+assert started.is_set()
+```
+
+`Step` there is the test's step double, slow lane by default, and `ctx` a
+`Context` with a ten second deadline. A sequential pass runs
+the same two groups in order with no handoff.
+
+| Symptom | Cause | Check |
+| --- | --- | --- |
+| A step records `late` with no wall time in a parallel pass | A step it needs, in its group or an earlier one, was dropped, ran past its budget or lane, or did not end before the dependent's lane deadline | Read the needed step's record in the same pass; `agentihooks swarm <slug> tick-report` lists both |
+| A critical step's actions print with the slow lane steps | It needs a step an earlier group handed off that was still running, so it was handed off with it | Expected; its critical deadline still applies |
+| A dependent ran although the step it needs failed | A failed step counts as ended | Guard the dependent's body on what the failed step should have written |
 
 ### Pass executors
 
