@@ -11,6 +11,7 @@ from hooks import config
 from scripts import agents_quota, codex_router, codex_usage
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
+from scripts.hive import quota_refresh
 from tests.codex_fakes import NOW, access_token
 
 WEEK = {"used_percent": 12.0, "limit_window_seconds": 604800, "reset_after_seconds": 9, "reset_at": NOW + 100_000}
@@ -270,3 +271,50 @@ def test_an_expired_account_has_no_seats_and_shows_expired_with_the_login_never_
         ("EXPIRED", None, "token expired: run agentihooks codex login alpha"),
         ("EXPIRED", None, "token expired: run codex login"),
     ]
+
+
+def _replay(monkeypatch, days_left, replies):
+    def opener(request, timeout=None):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return io.BytesIO(json.dumps(reply).encode())
+
+    account = codex_router.CodexAccount("nestorcolt_gmail_personal", "AH_CX_TOKEN_nestorcolt_gmail_personal")
+    monkeypatch.setattr(codex_usage.urllib.request, "urlopen", opener)
+    monkeypatch.setattr(codex_router, "accounts", lambda environ: [account])
+    monkeypatch.setattr(codex_router, "_registry", lambda: {})
+    monkeypatch.setattr(codex_router.codex_quota, "latest_codex_quota", lambda *args, **kwargs: None)
+    monkeypatch.setattr(quota_refresh.balancer, "discover_credentials", lambda environ: [])
+    return account, {account.env_name: access_token(days_left)}
+
+
+def _seats(account, environ, now):
+    reading = codex_router.quotas([account], environ)[account.name]
+    return reading.state_at(now), codex_router.account_cap(reading, now)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_one_transient_401_token_expired_then_a_healthy_read_reopens_the_account_on_the_next_refresh(monkeypatch):
+    expired = _http(401, b'{"error": {"code": "token_expired", "message": "expired"}}')
+    account, environ = _replay(monkeypatch, 7, [expired, PRO])
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    assert quota_refresh.refresh(environ, NOW) is True
+    assert _seats(account, environ, NOW) == ("EXPIRED", 0)
+    later = NOW + quota_refresh.RETRY_SECONDS
+    monkeypatch.setattr(codex_router.time, "time", lambda: later)
+    assert quota_refresh.due(environ, later) is True
+    assert quota_refresh.refresh(environ, later) is True
+    assert _seats(account, environ, later) == ("NORMAL", 6)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+def test_an_expired_reading_for_a_token_past_its_exp_stays_expired_and_is_not_probed_again(monkeypatch):
+    expired = _http(401, b'{"code": "token_expired"}')
+    account, environ = _replay(monkeypatch, -1, [expired])
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    assert quota_refresh.refresh(environ, NOW) is True
+    later = NOW + quota_refresh.RETRY_SECONDS
+    assert quota_refresh.due(environ, later) is False
+    assert quota_refresh.refresh(environ, later) is False
+    assert _seats(account, environ, later) == ("EXPIRED", 0)
