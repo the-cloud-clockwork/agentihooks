@@ -54,19 +54,23 @@ def refusal(drill: Drill) -> str:
 
 
 def run(drill: Drill) -> dict[str, Any]:
-    """Set the night watch gate to enforce, pass the watch across the empty seat threshold and store the record."""
+    """Set the night watch gate to enforce and store the record of the passes. A seat stall the night watch already
+    observed is kept and passed once now; with none observed, the passes age a new one across the threshold."""
     if why := refusal(drill):
         raise SwarmError(why)
     gates: dict[str, str] = drill.store.config(drill.slug).gates
     drill.store.update(drill.slug, gates={**gates, NIGHT_WATCH.name: ENFORCE})
+    observed: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("since")
     actions: list[str] = []
-    for at in range(drill.now_ms - night_watch.SEAT_MS, drill.now_ms + 1, night_watch.GAP_MS):
+    start = drill.now_ms if observed is not None else drill.now_ms - night_watch.SEAT_MS
+    for at in range(start, drill.now_ms + 1, night_watch.GAP_MS):
         actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, False)
     respawned: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("respawned")
     record: dict[str, Any] = {
         "swarm": drill.slug,
         "at": drill.now_ms,
         "mode": ENFORCE,
+        "observed_since": observed,
         "actions": actions,
         "respawned": respawned,
         "recovered": respawned == drill.now_ms and not any(line.startswith(REFUSED) for line in actions),

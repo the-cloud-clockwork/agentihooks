@@ -91,6 +91,21 @@ def test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_rec
     assert store.config(SCRATCH).gates["nightwatch"] == "enforce"
     assert [source for _, source, _ in rig["ledger"].alerts] == ["seat"]
     assert night_watch.read(store, SCRATCH)["respawns"] == [NOW]
+    assert stored["observed_since"] is None
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_drill_records_when_the_night_watch_first_saw_the_empty_seat(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = rig["store"]
+    seen = NOW - 30 * 60_000
+    store.redis.set(store.key(SCRATCH, night_watch.KEY), json.dumps({"at": NOW - 60_000, "seat": {"since": seen}}))
+    drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert stored["observed_since"] == seen and stored["recovered"] is True
+    assert night_watch.read(store, SCRATCH)["seat"]["since"] == seen
+    assert rig["started"] == [(SCRATCH, NOW)]
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
