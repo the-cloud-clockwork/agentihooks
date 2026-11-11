@@ -126,6 +126,17 @@ def test_a_lock_past_the_stale_bound_is_removed_and_a_vanished_one_reads_as_free
 
 
 @pytest.mark.feature("claude-trust-lock-reclaim")
+def test_a_lock_exactly_at_the_stale_bound_is_reclaimed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    os.utime(lock, (1000.0, 1000.0))
+    monkeypatch.setattr(claude_trust.time, "time", lambda: 1000.0 + claude_trust.STALE_LOCK_SECONDS)
+
+    assert claude_trust._reclaim(lock) is True
+    assert not lock.exists()
+
+
+@pytest.mark.feature("claude-trust-lock-reclaim")
 def test_a_stale_lock_another_launch_removed_first_reads_as_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
