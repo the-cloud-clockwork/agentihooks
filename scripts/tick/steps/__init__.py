@@ -275,6 +275,7 @@ MODULES = (
     "scripts.tick.steps.tasks",
     "scripts.tick.steps.territory",
     "scripts.tick.steps.workflows",
+    "scripts.tick.steps.knowledge",
 )
 
 for _module in MODULES:

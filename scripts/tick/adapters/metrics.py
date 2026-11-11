@@ -1,8 +1,9 @@
 """Metrics port adapter: measurements appended to the local metrics spool in one transaction, admitted only while its deadline holds."""
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from scripts.tick.deadline import Deadline
 
@@ -36,3 +37,11 @@ class SpoolMetrics:
             batches.append((self.tables[name], list(cast(Iterable[dict[str, object]], rows))))
         self.box.append_many(batches, _no_checkpoint)
         return sum(len(rows) for _, rows in batches)
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
+        """Append each gate log row of swarm ``slug`` to its gate log and return how many landed."""
+        deadline.live()
+        gate_log: Any = import_module("scripts.gates.log")
+        for row in rows:
+            gate_log.append(slug, row)
+        return len(rows)

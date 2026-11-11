@@ -367,7 +367,9 @@ def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) ->
     (package / "scripts/lib").mkdir(parents=True)
     node = {"dependencies": {"playwright-core": "^1.52.0", "js-yaml": "^4.1.0"}, "devDependencies": {"x": "1"}}
     (package / "scripts/package.json").write_text(json.dumps(node))
-    requirements = "# tools\nrequests>=2.31  # http\n\nPyYAML==6.0 \\\n    --hash=sha256:ab\n"
+    (package / "lib/node_modules/x").mkdir(parents=True)
+    (package / "lib/node_modules/x/package.json").write_text(json.dumps({"dependencies": {"y": "1"}}))
+    requirements = "# tools\nrequests >= 2.31  # http # web\n\nPyYAML==6.0 \\\n    --hash=sha256:ab\n"
     (package / "requirements.txt").write_text(requirements + "rich[jupyter]>=13 --hash=sha256:cd\n")
     out = tmp_path / "bundle"
     out.mkdir()
@@ -388,7 +390,7 @@ def test_node_and_pip_installs_become_deps_entries(hub: Path, tmp_path: Path) ->
                 "id": "diagram-pip-root",
                 "kind": "pip",
                 "check": ["python3", "-c", check, "requests", "PyYAML", "rich"],
-                "install": ["python3", "-m", "pip", "install", "requests>=2.31", "PyYAML==6.0", "rich[jupyter]>=13"],
+                "install": ["python3", "-m", "pip", "install", "requests >= 2.31", "PyYAML==6.0", "rich[jupyter]>=13"],
             },
         ]
     }
@@ -420,9 +422,37 @@ def test_new_deps_entries_append_without_rewriting_existing_entries(hub: Path, t
         '{\n  "deps": [\n    {"id": "uv", "kind": "system", "check": ["uv", "--version"]},\n' + entry + "\n  ]\n}\n"
     )
     assert (out / "deps.json").read_text() == expected
+    (_package(hub) / "requirements.txt").write_text("rich\n")
     fresh = tmp_path / "fresh"
     import_hub(hub, fresh, False, tmp_path / "fresh-data")
-    assert (fresh / "deps.json").read_text() == '{\n  "deps": [\n' + entry + "\n  ]\n}\n"
+    check = "import importlib.metadata as m, sys; [m.distribution(n) for n in sys.argv[1:]]"
+    pip = (
+        f'    {{\n      "id": "diagram-pip-root",\n      "kind": "pip",\n      "check": ["python3", "-c", "{check}", "rich"],\n'
+        '      "install": ["python3", "-m", "pip", "install", "rich"]\n    }'
+    )
+    assert (fresh / "deps.json").read_text() == '{\n  "deps": [\n' + entry + ",\n" + pip + "\n  ]\n}\n"
+
+
+@pytest.mark.feature("hub-import-deps")
+def test_two_install_folders_with_one_id_refuse_the_import(hub: Path, tmp_path: Path) -> None:
+    for folder in ("a-b", "a/b"):
+        (_package(hub) / folder).mkdir(parents=True)
+        (_package(hub) / folder / "package.json").write_text(json.dumps({"dependencies": {"zod": "3"}}))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="deps.json entry taken: diagram-npm-a-b"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-data")
+def test_the_data_folder_falls_back_to_the_home_folder(
+    hub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (_package(hub) / "state").mkdir()
+    (_package(hub) / "state/run.json").write_text("{}")
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    report = import_hub(hub, tmp_path / "bundle", True)
+    assert report["data"] == [str(Path.home() / ".agentihooks/hub-data/profiles/diagram/state/run.json")]
 
 
 @pytest.mark.feature("hub-import-deps")
@@ -534,7 +564,14 @@ def test_a_requirements_option_refuses_the_import(hub: Path, tmp_path: Path, lin
 @pytest.mark.feature("hub-import-deps")
 @pytest.mark.parametrize(
     "line",
-    ["https://example.com/a.tar.gz", "pkg @ https://example.com/a.whl", "git+ssh://host/repo", "./local", "/opt/a.whl"],
+    [
+        "https://example.com/a.tar.gz",
+        "pkg @ https://example.com/a.whl",
+        "git+ssh://host/repo",
+        "./local",
+        "/opt/a.whl",
+        "pkg @ wheels/a.whl",
+    ],
 )
 def test_a_requirement_without_a_checkable_name_refuses_the_import(hub: Path, tmp_path: Path, line: str) -> None:
     (_package(hub) / "requirements.txt").write_text(f"{line}\n")

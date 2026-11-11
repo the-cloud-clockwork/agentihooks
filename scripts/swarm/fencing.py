@@ -498,6 +498,12 @@ def read_executions(store: Any, slug: str) -> dict[str, Any]:
     return {key: row.value for key, row in rows.items()}
 
 
+def read_claims(store: Any, slug: str) -> dict[str, Any]:
+    """Return the swarm's task claims, read from the claims section alone through the records port."""
+    rows = records(store, slug).sections(slug, ("claims",))["claims"]
+    return {key: row.value for key, row in rows.items()}
+
+
 LEASE_CACHE = "lease-cache"
 
 

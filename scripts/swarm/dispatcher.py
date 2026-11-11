@@ -18,6 +18,7 @@ task.
 import json
 from collections import Counter
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -58,6 +59,7 @@ SKIPPED = "skipped "
 WINDOW = (None, "high", "urgent")
 UNCOMMENTED = "; the ledger did not take its comment"
 TABLE = metrics_outbox.Table("dispatch_actions", (("rule", "String"), ("mode", "String"), ("action", "String")))
+PORT: ContextVar[Any] = ContextVar("dispatch_log_port", default=None)
 ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {why}."
 LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
 LEADS = "it leads a chain of {chain} and unblocks {work}"
@@ -172,13 +174,17 @@ def _merged(task, known):
     return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
 
 
-def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
+def chain_claimed(
+    slug: str, config: Any, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
+) -> list[str]:
     if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
         return []
     return _chain_report(slug, ledger, doc, task, lane, now_ms)
 
 
-def _chain_report(slug, ledger, doc, task, lane, now_ms):
+def _chain_report(
+    slug: str, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int
+) -> list[str]:
     known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
     times = [
         (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
@@ -356,15 +362,23 @@ def priorities(store, slug, doc, ledger, view, now_ms):
     return found + log(slug, [Action(PRIORITIES, "apply", text, {}) for text in found], now_ms)
 
 
-def log(slug, actions, now_ms):
+def log(slug: str, actions: list[Any], now_ms: int) -> list[str]:
+    """Write each action's gate log row and dispatch row, through the tick pass's ``PORT`` when one is set."""
     from scripts.swarm import metrics
 
     if not actions:
         return []
-    for action in actions:
-        row = gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
-        gate_log.append(slug, row)
+    port = PORT.get()
+    gated = [
+        gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
+        for action in actions
+    ]
     rows = [dispatch_row(slug, index, action, now_ms) for index, action in enumerate(actions)]
+    if port is not None:
+        port.log(slug, gated)
+        return port.record(TABLE, rows)
+    for row in gated:
+        gate_log.append(slug, row)
     return metrics.record(TABLE, rows, now_ms)
 
 
