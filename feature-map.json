@@ -1095,6 +1095,18 @@
       ]
     },
     {
+      "id": "swarm-tick-ready-gap",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2480",
+      "behaviour": "Each tick step record carries the pass offset at which the step became ready beside the offset at which its run actually began, and the tick report prints each step's median and largest ready to start gap.",
+      "seam": "tick:records rows journaled by the tick engine and swarm tick-report",
+      "tests": [
+        "tests/tick/test_engine_records.py::test_step_row_carries_its_ready_time_beside_the_later_start_of_its_run",
+        "tests/tick/test_engine_records.py::test_step_that_never_ran_starts_at_its_ready_time",
+        "tests/swarm/test_tick_report.py::test_report_prints_each_step_ready_to_start_gap"
+      ]
+    },
+    {
       "id": "semgrep-feature-tests",
       "origin": "operator",
       "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",

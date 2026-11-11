@@ -221,5 +221,33 @@ def test_handed_off_critical_step_leaves_the_critical_lane_end_on_the_critical_c
     assert current["critical_end_s"] == rows["size pass"]["start_s"] + rows["size pass"]["wall_s"]
 
 
+@pytest.mark.feature("swarm-tick-ready-gap")
+def test_step_row_carries_its_ready_time_beside_the_later_start_of_its_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = Store()
+    after = engine._after
+
+    def queued(*args: Any) -> engine.StepRecord:
+        time.sleep(0.3)
+        return after(*args)
+
+    monkeypatch.setattr(engine, "_after", queued)
+    with recording(store) as current, pool.running(critical_s=5.0):
+        current["start_ms"] = time.time() * 1000
+        engine.run_group("planted", Context(View(), Deadline.after(60.0)), [ok_step()])
+    (found,) = store.records()
+    assert 0 <= found["ready_s"] < 0.3
+    assert found["start_s"] - found["ready_s"] >= 0.3
+    assert current["critical_end_s"] == found["start_s"] + found["wall_s"]
+
+
+@pytest.mark.feature("swarm-tick-ready-gap")
+def test_step_that_never_ran_starts_at_its_ready_time() -> None:
+    store = Store()
+    with recording(store):
+        engine.run_graph([ok_step()], Context(View(), Deadline.after(60.0)), gate=lambda step, seen: False)
+    (found,) = store.records()
+    assert found["skipped"] and found["start_s"] == found["ready_s"]
+
+
 def ok_step() -> WriteStep:
     return WriteStep("size pass", "planted", lambda tick, get: [])
