@@ -2533,6 +2533,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         workstation=False,
         needs="",
         profile="",
+        requires_harness="",
         rank="",
         difficulty=None,
         plan="",
