@@ -6,13 +6,14 @@ seat (the seat address in name) or session (the session name in name). Ids come 
 
 import json
 import os
+from collections.abc import Callable
 
 from hooks.common import log
 from hooks.mcp._session import env_fallback_allowed
 from scripts.scheduler import commands
 
 
-def _owner(session_id: str, agent_name: str) -> str:
+def owner(session_id: str, agent_name: str) -> str:
     if agent_name:
         return agent_name
     if not env_fallback_allowed():
@@ -26,7 +27,7 @@ def _owner(session_id: str, agent_name: str) -> str:
     return identity({**os.environ, "CLAUDE_CODE_SESSION_ID": session_id} if session_id else None)
 
 
-def _answer(tool: str, action) -> str:
+def answer(tool: str, action: Callable[[], dict]) -> str:
     try:
         return json.dumps({"success": True, **action()})
     except Exception as e:
@@ -68,19 +69,19 @@ def timer_add(
             raise commands.CommandError("give delay or at")
         when = {"at": commands.moment(at)} if at else {"delay": commands.seconds(delay)}
         slot = commands.target_slot(target, name)
-        return {"entry": commands.add_timer(commands.connect(), _owner(session_id, agent_name), slot, message, **when)}
+        return {"entry": commands.add_timer(commands.connect(), owner(session_id, agent_name), slot, message, **when)}
 
-    return _answer("timer_add", action)
+    return answer("timer_add", action)
 
 
 def timer_list() -> str:
     """List timers still waiting to fire on this machine, soonest first."""
-    return _answer("timer_list", lambda: _listed("timer"))
+    return answer("timer_list", lambda: _listed("timer"))
 
 
 def timer_cancel(timer_id: str) -> str:
     """Cancel a timer that has not fired."""
-    return _answer("timer_cancel", lambda: {"entry": commands.cancel(commands.connect(), "timer", timer_id)})
+    return answer("timer_cancel", lambda: {"entry": commands.cancel(commands.connect(), "timer", timer_id)})
 
 
 def stopwatch_start(
@@ -103,21 +104,21 @@ def stopwatch_start(
     def action():
         slot = commands.target_slot(target, name)
         entry = commands.start_stopwatch(
-            commands.connect(), _owner(session_id, agent_name), slot, message, limit=commands.seconds(limit)
+            commands.connect(), owner(session_id, agent_name), slot, message, limit=commands.seconds(limit)
         )
         return {"entry": entry}
 
-    return _answer("stopwatch_start", action)
+    return answer("stopwatch_start", action)
 
 
 def stopwatch_stop(stopwatch_id: str) -> str:
     """Stop a running stopwatch and report its elapsed seconds."""
-    return _answer("stopwatch_stop", lambda: {"entry": commands.stop_stopwatch(commands.connect(), stopwatch_id)})
+    return answer("stopwatch_stop", lambda: {"entry": commands.stop_stopwatch(commands.connect(), stopwatch_id)})
 
 
 def stopwatch_show(stopwatch_id: str) -> str:
     """Show a stopwatch with its state and elapsed seconds."""
-    return _answer("stopwatch_show", lambda: {"entry": commands.show_stopwatch(commands.connect(), stopwatch_id)})
+    return answer("stopwatch_show", lambda: {"entry": commands.show_stopwatch(commands.connect(), stopwatch_id)})
 
 
 def cron_add(
@@ -147,21 +148,21 @@ def cron_add(
     def action():
         slot = commands.target_slot(target, name)
         entry = commands.add_cron(
-            commands.connect(), _owner(session_id, agent_name), slot, message, expression=expression, timezone=timezone
+            commands.connect(), owner(session_id, agent_name), slot, message, expression=expression, timezone=timezone
         )
         return {"entry": entry}
 
-    return _answer("cron_add", action)
+    return answer("cron_add", action)
 
 
 def cron_list() -> str:
     """List cron schedules on this machine, next firing first."""
-    return _answer("cron_list", lambda: _listed("cron"))
+    return answer("cron_list", lambda: _listed("cron"))
 
 
 def cron_remove(cron_id: str) -> str:
     """Remove a cron schedule."""
-    return _answer("cron_remove", lambda: {"entry": commands.cancel(commands.connect(), "cron", cron_id)})
+    return answer("cron_remove", lambda: {"entry": commands.cancel(commands.connect(), "cron", cron_id)})
 
 
 TOOLS = (

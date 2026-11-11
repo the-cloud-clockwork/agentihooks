@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
+import hooks.mcp.agents as agents
 import hooks.mcp.workflows as workflows
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
@@ -130,7 +131,7 @@ def test_workflow_run_without_wait_hands_the_saved_run_to_a_detached_resume(
     tools: dict[str, Callable[..., Any]], project: Path, launch: Mock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     detached: list[str] = []
-    monkeypatch.setattr(workflows, "detach", detached.append)
+    monkeypatch.setattr(agents, "detach", detached.append)
 
     state = tools["workflow_run"]("sample", "Build the sample", wait=False)
 
@@ -152,7 +153,7 @@ def test_workflow_status_refuses_a_run_identifier_that_is_a_path(tools: dict[str
 
 
 def test_workflow_schedule_arms_a_cron_and_unschedule_cancels_it(
-    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path
+    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path, project: Path
 ) -> None:
     case = tmp_path / "case.md"
     case.write_text("Build the sample")
@@ -168,7 +169,7 @@ def test_workflow_schedule_arms_a_cron_and_unschedule_cancels_it(
 
 
 def test_workflow_schedule_arms_a_timer_after_a_delay(
-    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path
+    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path, project: Path
 ) -> None:
     case = tmp_path / "case.md"
     case.write_text("Build the sample")
@@ -185,7 +186,7 @@ def test_workflow_schedule_arms_a_timer_after_a_delay(
 
 
 def test_workflow_schedule_needs_exactly_one_moment_and_a_case_file(
-    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path
+    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path, project: Path
 ) -> None:
     case = tmp_path / "case.md"
     case.write_text("x")
@@ -197,6 +198,18 @@ def test_workflow_schedule_needs_exactly_one_moment_and_a_case_file(
         "success": False,
         "error": f"{missing} is not a case file",
     }
+
+
+def test_workflow_schedule_refuses_an_unknown_workflow(
+    tools: dict[str, Callable[..., Any]], scheduler: Any, tmp_path: Path, project: Path
+) -> None:
+    case = tmp_path / "case.md"
+    case.write_text("x")
+    assert tools["workflow_schedule"]("ghost", str(case), when="5m") == {
+        "success": False,
+        "error": "no workflow named ghost",
+    }
+    assert scheduler.records() == []
 
 
 def test_workflow_unschedule_refuses_a_schedule_that_is_not_a_workflow(
