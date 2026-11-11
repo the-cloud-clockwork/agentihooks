@@ -3781,6 +3781,22 @@
       ]
     },
     {
+      "id": "swarm-tick-pass-errors",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-pass-error-store",
+      "behaviour": "A tick pass that ends with an error, raised out of the pass or held by a step and ended as a failed pass, never a stop, keeps its pass id, end time and error text cut to a bound in the swarm store, newest first within a bounded count, off the pass row; the tick report reads them back from a fresh connection after a controller restart. A pass that Redis refuses writes none, since the store is down.",
+      "seam": "scripts.swarm.timing.pass_record and timing.failed, set by scripts.tick.steps.host.failed_pass, writing scripts.swarm.timing.pass_error, read back through scripts.swarm.tick_report.read and swarm tick-report",
+      "tests": [
+        "tests/swarm/test_tick_records.py::test_a_pass_error_is_read_back_from_the_store_after_a_controller_restart",
+        "tests/swarm/test_tick_records.py::test_a_pass_ended_by_a_held_step_failure_keeps_its_pass_error_off_the_pass_row",
+        "tests/swarm/test_tick_records.py::test_pass_errors_keep_only_the_newest_within_their_bound",
+        "tests/swarm/test_tick_records.py::test_a_pass_that_ends_without_an_error_keeps_no_pass_error",
+        "tests/swarm/test_tick_records.py::test_a_long_pass_error_is_cut_to_its_bound",
+        "tests/swarm/test_tick_records.py::test_a_refused_pass_error_write_is_journalled",
+        "tests/swarm/test_tick_report.py::test_tick_report_prints_each_kept_pass_error"
+      ]
+    },
+    {
       "id": "hive-headed-member-check",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2473",

@@ -1,12 +1,13 @@
 import argparse
 import json
 import math
+import time
 from collections import defaultdict
 from collections.abc import Iterable
 from statistics import median
 from typing import Any
 
-from scripts.swarm.timing import HISTORY_LIMIT
+from scripts.swarm.timing import HISTORY_LIMIT, pass_errors
 
 PAGE_SIZE = 256
 
@@ -123,7 +124,8 @@ def read(store: Any, slug: str, passes: int) -> dict[str, Any]:
     selected = history(store, slug, "tick:passes", passes)
     identities = {row["pass_id"] for row in selected}
     steps = [row for row in history(store, slug, "tick:steps", HISTORY_LIMIT) if row.get("pass_id") in identities]
-    return summarize(selected, steps, history(store, slug, "tick:records", HISTORY_LIMIT))
+    report = summarize(selected, steps, history(store, slug, "tick:records", HISTORY_LIMIT))
+    return {**report, "pass_errors": pass_errors(store, slug)}
 
 
 def pass_count(value: str) -> int:
@@ -162,3 +164,8 @@ def command(store: Any, args: argparse.Namespace) -> None:
     for row in report.get("ready_gaps", []):
         print(f"{row['step']}  {seconds(row['median_s'])}  {seconds(row['max_s'])}")
     print("CPU share uses summed own and reaped child CPU of retained steps, excluding the whole pass.")
+    errors = report.get("pass_errors", [])
+    print(f"Pass errors, newest first: {len(errors)}")
+    for row in errors:
+        ended = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(row["end_ms"] / 1000))
+        print(f"{row['pass_id']}  {ended}  {row['error']}")

@@ -96,7 +96,7 @@ def failed_pass(exc: BaseException) -> list[str]:
     traceback.print_exception(exc, file=sys.stderr)
     record = timing.PASS.get()
     if record is not None:
-        record["outcome"] = "error"
+        timing.failed(record, exc)
     return [f"pass failed: a step raised {type(exc).__name__}: {exc}"]
 
 
