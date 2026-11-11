@@ -738,7 +738,7 @@ class HerdrRuntime:
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
-    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict[str, Any]) -> Placed:
+    def spawn(self, config: Any, lane: str, name: str, task: Any) -> Placed:
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
         relaunch = live_binding.complete(task.get("launch_assignment"))
         saved = relaunch or profile_choice.transfer(task)
