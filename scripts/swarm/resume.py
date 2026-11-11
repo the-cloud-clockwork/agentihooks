@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 AWAITING = "awaiting-decision"
-RESUMED, FRESH = "resumed", "fresh"
+RESUMED, FRESH, REFUSED = "resumed", "fresh", "refused"
 KUBERNETES = "kubernetes"
 RECOVERY_REQUESTS = "recovery-requests"
 RESUME, NATIVE, CONTEXT = "resume", "native", "context"
@@ -76,11 +76,26 @@ def restored_text(slug, agent, ledger):
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
 
 
+def occupants_first(store, agents):
+    """The seat's current occupant is judged before an older record of the same seat, so it is the one that waits."""
+    return sorted(agents, key=lambda a: bool(a.seat) and store.seats.occupant(a.seat).occupant != a.name)
+
+
+def waiting_peer(store, slug, agent) -> str:
+    """Another agent of the same seat already awaiting a restore decision; one seat waits on one decision."""
+    if not agent.seat:
+        return ""
+    return next(
+        (a.name for a in store.agents(slug) if a.name != agent.name and a.seat == agent.seat and a.state == AWAITING),
+        "",
+    )
+
+
 def reopen(store, slug, worktrees, runtime, now_ms, ledger, has_quota=account_quota):
     context = RestoreContext(runtime, now_ms, ledger, has_quota)
     store.redis.set(store.key(slug, "restore-worktrees"), json.dumps(worktrees))
     outcomes = []
-    for agent in store.agents(slug):
+    for agent in occupants_first(store, store.agents(slug)):
         if agent.state == "finished":
             continue
         worktree = store.config(slug).repo if agent.lane == MASTER else worktrees.get(agent.name, "")
@@ -100,7 +115,8 @@ class RestoreContext:
 
 
 def _attempt(store, slug, agent, worktree, context, transfer):
-    if agent.seat:
+    peer = waiting_peer(store, slug, agent)
+    if agent.seat and not peer:
         if store.seats.occupant(agent.seat).occupant != agent.name:
             store.seats.occupy(agent.seat, agent.name, context.at)
         transfers.attach(store, slug, agent)
@@ -127,21 +143,14 @@ def _attempt(store, slug, agent, worktree, context, transfer):
                 idle_ticks=0,
                 state="working",
             )
+    outcome, reason = RESUMED, REOPENED
     if why:
-        agent = replace(agent, state=AWAITING)
+        outcome, reason = (REFUSED, f"seat {agent.seat} already waits on {peer}") if peer else (AWAITING, why)
+        agent = replace(agent, state="finished" if peer else AWAITING)
     store.put_agent(slug, agent)
     live = context.runtime.live_names() if context.runtime else set()
     transfers.observe(store, slug, live)
-    return Outcome(
-        agent.name,
-        agent.lane,
-        agent.task,
-        AWAITING if why else RESUMED,
-        why or REOPENED,
-        agent.conversation_id,
-        context.at,
-        transfer["id"],
-    )
+    return Outcome(agent.name, agent.lane, agent.task, outcome, reason, agent.conversation_id, context.at, transfer["id"])
 
 
 def decide(store, slug: str, name: str, choice: str, runtime, now_ms: int, ledger) -> Outcome:

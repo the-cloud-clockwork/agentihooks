@@ -154,7 +154,7 @@ def boot_pass(
     if actions:
         return actions
     store.redis.set(key, current)
-    for agent in lost:
+    for agent in resume.occupants_first(store, lost):
         if agent.lane != MASTER and store.handoff(slug, agent.task) and dead_resume._owns(store, slug, agent, ledger):
             actions.append(_succeed(slug, store, ledger, agent))
             continue
@@ -186,6 +186,11 @@ def _succeed(slug: str, store: RedisStore, ledger: Any, agent: AgentRecord) -> s
 def _await_decision(slug, store, ledger, agent, now_ms):
     """A failed reboot resume waits for the master or operator to choose resume or fresh, never a silent fresh start;
     the agent keeps its recorded account for that choice."""
+    if peer := resume.waiting_peer(store, slug, agent):
+        store.put_agent(slug, replace(agent, state="finished"))
+        action = f"{agent.name} was not left waiting because seat {agent.seat} already waits on {peer}"
+        ledger.notify(slug, f"{action}; one restore decision covers the seat.")
+        return action
     shutdown = _shutdown_handoff(slug) if agent.lane == MASTER else ""
     text = store.handoff(slug, agent.task) or shutdown or transfers.last_handoff(store, slug, agent.task)
     transfer = transfers.record(store, slug, agent, "restore", text, now_ms)
