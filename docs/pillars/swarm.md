@@ -4580,8 +4580,8 @@ installed code has delivered a tick; until then they keep ticking (see
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
 minutes. Tick output goes to the user journal:
 `TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`.
-Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those whose declared interval has passed
-([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
+Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
+whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
 pass in its own thread; a swarm whose tick runs long never makes another swarm tick again within the same pass.
 
