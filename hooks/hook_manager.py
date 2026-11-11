@@ -2746,6 +2746,10 @@ def main() -> None:
 
         record_lifecycle_context(payload)
 
+        from hooks.observability import presence
+
+        presence.mark(payload)
+
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
 

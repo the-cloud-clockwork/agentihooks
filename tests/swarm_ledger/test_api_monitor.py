@@ -44,7 +44,7 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None, published=None, reads=None):
+def ports_for(hives, readings, here="", local=None, published=None, reads=None, present=None):
     registry = SimpleNamespace(
         hives=lambda redis: hives if isinstance(redis, Redis) else [],
         live=lambda hive, now: hive["live"] and now == NOW,
@@ -59,13 +59,18 @@ def ports_for(hives, readings, here="", local=None, published=None, reads=None):
         return published if isinstance(redis, Redis) and hive == "root" and now == NOW else None
 
     herdr_stats = SimpleNamespace(read=read, MASTER="master")
+    presence = SimpleNamespace(
+        read=lambda environ, now_s: present if environ is monitor.os.environ and now_s == NOW / 1000 else None
+    )
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
     swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
     return (
         mock.patch.object(
             monitor.ports,
             "hive",
-            return_value=SimpleNamespace(registry=registry, headroom=headroom, herdr_stats=herdr_stats),
+            return_value=SimpleNamespace(
+                registry=registry, headroom=headroom, herdr_stats=herdr_stats, presence=presence
+            ),
         ),
         mock.patch.object(monitor.ports, "hooks", return_value=hooks),
         mock.patch.object(monitor.ports, "swarm", return_value=swarm),
@@ -292,3 +297,31 @@ def test_a_herdr_label_matching_a_hive_no_longer_live_is_not_listed():
     data = viewed(Store({}), *ports_for([ROOT, dead], {}, published=published))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
     assert data["agents"] == {"total": 6, "source": "herdr", "reporting": 1, "of": 1, "claude": 6, "codex": 0}
+
+
+PRESENT = [
+    {"id": "anton-1", "name": "swarm-hive-001", "headed": False, "release": "9", "agents": {"claude": 3}},
+    {"id": "auto", "name": "automation", "headed": True, "release": "9", "agents": {"claude": 4, "codex": 1}},
+    {"id": "dark", "name": "dark-hive", "headed": False, "release": "9", "agents": {}},
+]
+
+
+def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry():
+    published = {"machines": {"master": {"claude": 99}}, "silent": [], "measured_at": NOW}
+    readings = {"pod": {**POD, "agents": {"claude": 50}}}
+    data = viewed(Store({}), *ports_for([ROOT, POD_HIVE], readings, published=published, present=PRESENT))
+    assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 3, "claude": 7, "codex": 1}
+    assert data["hives"]["rows"] == [
+        {"name": "automation", "agents": 5},
+        {"name": "dark-hive", "agents": 0},
+        {"name": "swarm-hive-001", "agents": 3},
+    ]
+    assert data["hives"]["live"] == 3
+    assert data["hives"]["measured"] == 1
+
+
+def test_no_presence_falls_back_to_the_herdr_count():
+    published = {"machines": {"master": {"claude": 6}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published, present=[]))
+    assert data["agents"]["source"] == "herdr"
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]

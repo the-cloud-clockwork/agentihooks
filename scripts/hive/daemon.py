@@ -238,11 +238,28 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
         try:
             now_ms = int(time.time() * 1000)
             headroom.publish(redis, local_id, now_ms)
+            emit_presence(redis, local_id, now_ms)
             registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
+    from hooks.observability import presence
+
+    shown = registry.show(redis, local_id) or {}
+    agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
+    presence.hive(
+        local_id,
+        str(shown.get("name") or local_id),
+        shown.get("ui") == "yes",
+        updater.installed_version(),
+        agents,
+        now_ms / 1000,
+    )
 
 
 def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:

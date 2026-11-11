@@ -44,6 +44,7 @@ class Hive(Protocol):
     reports: Any
     headroom: Any
     herdr_stats: Any
+    presence: Any
 
 
 @runtime_checkable

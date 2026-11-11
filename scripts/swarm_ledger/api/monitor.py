@@ -2,6 +2,7 @@
 from each live hive's headroom reading, and running swarms."""
 
 import json
+import os
 import time
 
 from redis import RedisError
@@ -112,7 +113,10 @@ def view(store: object, now_ms: int) -> dict:
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
     machines = herdr_machines(store.redis, hives, live, now_ms)
-    if machines is None or all(counts is None for _, counts in machines):
+    present = ports.hive().presence.read(os.environ, now_ms / 1000)
+    if present:
+        agents, rows = tally("otel", [(hive["name"], hive["agents"]) for hive in present])
+    elif machines is None or all(counts is None for _, counts in machines):
         agents, rows = tally("hives", hive_machines(store, live, readings))
     else:
         agents, rows = tally("herdr", machines)
