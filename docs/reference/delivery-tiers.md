@@ -49,8 +49,10 @@ its last promoted tree while ordinary pull requests keep merging into `dev`.
 The Tests workflow calls `Tick scale` as `tick-scale` on a push to `dev`, and
 `promotion-ready` and `promote` require it to succeed. It seeds a real Redis
 store at production size: 20 thousand archived executions, 2 thousand freeze
-records and a ledger view of 6 thousand tasks. It then runs three whole tick
-passes against it. Every step on the spawn chain (the steps `SPAWN_NEEDS`
+records, a ledger view of 6 thousand tasks and 30 live Kubernetes executions
+holding claimed tasks. It then runs three scheduled passes of the tick
+command against it. The ledger view is served from memory, so the gate
+measures the tick's cost of using the view, not the ledger server's read. Every step on the spawn chain (the steps `SPAWN_NEEDS`
 names, then `spawn`) and the `tick view` must end ok within its
 `budgets.FLOORS` floor on every pass it runs. A step that is cut off,
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
@@ -59,7 +61,8 @@ few rows, so they cannot catch a step whose cost grows with stored data.
 A push to a `diffcheck/tick-scale-*` branch runs the same gate on that branch.
 On `diffcheck/tick-scale-plant` it first applies the planted fault in
 `tests/tick_scale/whole_hash.patch`. In that fault every fenced write loads the
-execution archive and rewrites every record it loaded. This planted fault must
+execution archive and rewrites every record it loaded. In the reference proof
+run, the planted fault drove `reap` to 25 seconds against its 22 second floor. This planted fault must
 turn the gate red. On `diffcheck/tick-scale-profile` the gate profiles
 `track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
 walls are evidence only. A caller can also pass `plant` and `profile` inputs.
