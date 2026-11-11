@@ -90,7 +90,7 @@ def git_identity_ready() -> bool:
     return all(_output(["git", "config", "--global", f"user.{field}"]) for field in ("name", "email"))
 
 
-def headed(redis: Any, hive: str) -> bool:
+def headed(redis: "Redis", hive: str) -> bool:
     """The hive hosts an operator interface, so it takes workstation tasks and runs the workstation's tools."""
     from scripts.hive import registry
 

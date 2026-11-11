@@ -136,6 +136,6 @@ def test_a_hive_is_headed_when_its_registry_record_carries_the_interface(
         return record
 
     monkeypatch.setattr(registry, "show", show)
-    redis = object()
+    redis = cast(Any, object())
     assert join_checks.headed(redis, "hive-1") is headed
     assert seen == [(redis, "hive-1")]
