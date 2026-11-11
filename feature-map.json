@@ -4032,6 +4032,24 @@
         "tests/swarm/test_track_outages_claims.py::test_read_claims_on_a_document_swarm_answers_its_claims",
         "tests/swarm/test_track_outages_claims.py::test_track_outages_judges_owners_without_reading_the_whole_fencing_document"
       ]
+    },
+    {
+      "id": "hive-run-result",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr3",
+      "behaviour": "A workflow run a hive starts from a run order records its final status and run folder files once on its run receipt, and the sending host restores that folder so workflow status reads the same result and posts the owner one notice per run id naming the hive, because a hive member's Redis user cannot write the owner's inbox.",
+      "seam": "scripts.workflows.scheduled.report and scripts.workflows.scheduled.collect with scripts.workflows.store.files and restore",
+      "tests": [
+        "tests/workflows/test_scheduled_hive.py::test_a_hive_start_passes_the_hive_to_the_detached_run",
+        "tests/workflows/test_scheduled_hive.py::test_main_on_a_hive_reports_to_the_receipt_and_posts_no_notice",
+        "tests/workflows/test_scheduled_hive.py::test_report_writes_the_final_status_and_run_folder_files_into_the_receipt",
+        "tests/workflows/test_scheduled_hive.py::test_report_keeps_the_first_result_for_a_run_id",
+        "tests/workflows/test_scheduled_hive.py::test_collect_restores_the_run_so_workflow_status_reads_the_same_result",
+        "tests/workflows/test_scheduled_hive.py::test_collect_posts_one_notice_per_run_id",
+        "tests/workflows/test_scheduled_hive.py::test_collect_waits_while_the_hive_has_reported_nothing",
+        "tests/workflows/test_scheduled_hive.py::test_restore_refuses_a_file_outside_the_run_folder",
+        "tests/workflows/test_scheduled_hive.py::test_a_hive_member_may_write_its_run_receipt_but_not_the_owners_inbox"
+      ]
     }
   ],
   "unmapped_rules": [
