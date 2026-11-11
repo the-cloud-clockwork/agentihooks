@@ -65,7 +65,7 @@ def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pu
     plant = next(step for step in steps if step.get("run") == "git apply tests/tick_scale/whole_hash.patch")
     assert plant["if"] == "inputs.plant == 'true'"
     proofs = yaml.safe_load((ROOT / ".github/workflows/tick-scale.yml").read_text())
-    assert proofs[True] == {"push": {"branches": ["diffcheck/tick-scale-*"]}}
+    assert proofs[True] == {"push": {"branches": ["diffcheck/tick-scale-*"]}, "workflow_dispatch": None}
     called = proofs["jobs"]["tick-scale"]["steps"][-1]
     assert called["uses"] == "./.github/actions/tick-scale"
     assert called["with"]["plant"] == "${{ github.ref == 'refs/heads/diffcheck/tick-scale-plant' }}"

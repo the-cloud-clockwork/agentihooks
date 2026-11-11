@@ -60,7 +60,7 @@ abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
 
 The `Tick scale` workflow runs the same action on a push to a
-`diffcheck/tick-scale-*` branch. No workflow calls it.
+`diffcheck/tick-scale-*` branch or a manual dispatch. No workflow calls it.
 On `diffcheck/tick-scale-plant` it first applies the planted fault in
 `tests/tick_scale/whole_hash.patch`. In that fault every fenced write loads the
 execution archive and rewrites every record it loaded. This planted fault must

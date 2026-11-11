@@ -3,6 +3,7 @@ name: Tick scale
 on:
   push:
     branches: ['diffcheck/tick-scale-*']
+  workflow_dispatch:
 
 permissions:
   contents: read
