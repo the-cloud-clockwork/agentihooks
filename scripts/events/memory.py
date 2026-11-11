@@ -100,6 +100,14 @@ class _Pending:
     def add(self, event: Envelope) -> None:
         self._messages.append(_Message(event))
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        with self._runtime.cond:
+            removed = [message for message in self._messages if not message.settled and stale(message.event)]
+            for message in removed:
+                message.settled = True
+            self._messages = [message for message in self._messages if not message.settled]
+            return len(removed)
+
     def take(self, batch: int, timeout_ms: int) -> list[MemoryDelivery]:
         with self._runtime.cond:
             if not self._runtime.closed and self._ready() is None:
@@ -218,6 +226,9 @@ class MemoryWorkQueue:
     def take(self, timeout_ms: int) -> MemoryDelivery | None:
         deliveries = self._pending.take(1, timeout_ms)
         return deliveries[0] if deliveries else None
+
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        return self._pending.withdraw(stale)
 
 
 class MemoryStateStore:
