@@ -11,7 +11,6 @@ from typing import Any
 
 from scripts.swarm import claim_lost
 
-
 DROP_REFUSED = ", the store refused its drop, retrying next pass"
 
 
