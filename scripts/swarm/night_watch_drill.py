@@ -10,9 +10,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from scripts.gates.enforcement import NIGHT_WATCH
+from scripts.swarm import lifetime as lifetime_module
 from scripts.swarm import naming
 from scripts.swarm.health import night_watch as night_watch_module
-from scripts.swarm.store import SwarmError
+from scripts.swarm.master_start import seated
+from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm_v2 import front_door
 
 KEY = "night-watch-drill"
 ENFORCE = "enforce"
@@ -22,6 +25,7 @@ NOT_RUNNING = "scratch swarm {slug} is {state}; start it before the night watch 
 SEAT_HELD = "a live master holds the front door seat of {slug}; the night watch drill needs an empty seat"
 
 night_watch: Any = night_watch_module
+lifetime: Any = lifetime_module
 WatchPass = Callable[[str, Any, Any, Any, dict[str, Any], int, bool], list[str]]
 
 
@@ -45,11 +49,10 @@ def refusal(drill: Drill) -> str:
         return NOT_SCRATCH.format(slug=drill.slug)
     if config.state != "running":
         return NOT_RUNNING.format(slug=drill.slug, state=config.state)
-    watch = night_watch.Watch(
-        drill.store, drill.slug, drill.ledger, drill.runtime, drill.doc, drill.now_ms, False, list
-    )
-    if night_watch._seat_held(watch):
-        return SEAT_HELD.format(slug=drill.slug)
+    live: set[str] = drill.runtime.live_names()
+    for agent in drill.store.agents(drill.slug):
+        if agent.lane == MASTER and seated(agent, live, drill.doc) and front_door.holds(drill.slug, agent.seat):
+            return SEAT_HELD.format(slug=drill.slug)
     return ""
 
 
@@ -74,8 +77,10 @@ def run(drill: Drill) -> dict[str, Any]:
     observed = _observed(drill)
     actions: list[str] = []
     start = drill.now_ms if observed is not None else drill.now_ms - night_watch.SEAT_MS
-    for at in range(start, drill.now_ms + 1, night_watch.GAP_MS):
-        actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, False)
+    rows = {task["id"]: task for task in drill.doc["tasks"]}
+    for at in [*range(start, drill.now_ms, night_watch.GAP_MS), drill.now_ms]:
+        asleep = lifetime.sleeping(drill.slug, drill.store, rows)
+        actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, asleep)
     respawned: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("respawned")
     record: dict[str, Any] = {
         "swarm": drill.slug,

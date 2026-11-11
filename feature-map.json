@@ -912,6 +912,11 @@
         "tests/swarm/test_night_watch_drill.py::test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_records_it",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_records_when_the_night_watch_first_saw_the_empty_seat",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_drops_a_seat_stall_from_stale_night_watch_passes_and_recovers_once",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_ages_a_new_stall_when_stale_passes_saw_no_empty_seat",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_keeps_a_stall_seen_by_passes_exactly_at_the_gap",
+        "tests/swarm/test_night_watch_drill.py::test_a_fresh_stall_younger_than_the_threshold_records_no_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_reads_the_ledger_document_to_see_a_starting_master_hold_the_seat",
+        "tests/swarm/test_night_watch_drill.py::test_a_master_retired_with_no_new_tasks_leaves_the_drill_without_a_recovery",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
