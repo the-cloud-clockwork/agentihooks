@@ -127,7 +127,7 @@ class WorkflowSlot:
     def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
         from scripts.workflows import scheduled
 
-        scheduled.start(self.name, self.case, delivery_id)
+        scheduled.start(self.name, self.case, delivery_id, str(event["owner"]))
 
 
 KINDS = {

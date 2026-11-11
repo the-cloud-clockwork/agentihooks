@@ -1,0 +1,20 @@
+rules:
+  - id: tick-spawn-metrics-processes
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The spawn pass writes the gate log or the metrics spool, or scans the process table, on this host itself, so
+      the call escapes the Tools metrics and processes ports, the step's declared effects and the pass deadline. Use
+      the spawn pass ports from place._ports(): log(slug, rows), record(table, rows) and table().
+    paths:
+      include:
+        - /scripts/tick/steps/place.py
+        - tick-spawn-metrics-processes.py
+    pattern-either:
+      - pattern: gate_log.append(...)
+      - pattern: scripts.gates.log.append(...)
+      - pattern: metrics.record(...)
+      - pattern: scripts.swarm.metrics.record(...)
+      - pattern: processes()
+      - pattern: hooks.proc.processes()
+      - pattern: codex.admit_legacy($STORE, $SLUG, $AGENT, $RUNTIME)

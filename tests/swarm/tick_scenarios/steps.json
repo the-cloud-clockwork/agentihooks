@@ -6,6 +6,9 @@
   "hive sweep": [
    "running"
   ],
+  "knowledge warm": [
+   "running"
+  ],
   "reap": [
    "hive-roll"
   ],

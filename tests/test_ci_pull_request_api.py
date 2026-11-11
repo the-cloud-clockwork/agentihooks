@@ -19,6 +19,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "budget"},
+    ROOT / "scripts/ci_launch_hotfix.py": {"pulls_of", "timeline_of", "head_green"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
@@ -182,6 +183,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/ci_gate_summary.py",
         "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
+        "scripts/ci_launch_hotfix.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/arrival.py",
         "scripts/ci_mutation/identity.py",
@@ -268,6 +270,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "tests/shard_budget.py",
         "tests/shard_check.py",
         "tests/shard_summary.py",
+        "tests/tick_scale/gate.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",

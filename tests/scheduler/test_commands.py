@@ -2,7 +2,7 @@ import pytest
 
 from scripts.events.redis_state import RedisStateStore
 from scripts.scheduler import commands
-from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, restore
+from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, WorkflowSlot, restore
 
 pytestmark = pytest.mark.unit
 
@@ -53,7 +53,7 @@ def test_fleet_is_the_target_without_a_name():
 @pytest.mark.parametrize(
     ("target", "name", "message"),
     [
-        ("pane", "x", "target must be one of fleet, swarm, seat, session, not pane"),
+        ("pane", "x", "target must be one of fleet, swarm, seat, session, workflow, not pane"),
         ("fleet", "sw", "the fleet target takes no name"),
         ("swarm", "", "the swarm target needs a name"),
         ("seat", "", "the seat target needs a name"),
@@ -65,6 +65,50 @@ def test_fleet_is_the_target_without_a_name():
 def test_a_target_that_does_not_fit_is_refused(target, name, message):
     with refused(message):
         commands.target_slot(target, name)
+
+
+@pytest.fixture
+def case(tmp_path):
+    path = tmp_path / "case.json"
+    path.write_text("{}")
+    return path
+
+
+def test_the_workflow_target_names_its_slot_with_the_case(case):
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot("nightly", str(case))
+
+
+def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
+    monkeypatch.chdir(case.parent)
+    slot = commands.target_slot("workflow", "nightly", "case.json")
+    assert slot == WorkflowSlot("nightly", str(case.resolve()))
+    assert slot.record() == {"kind": "workflow", "name": "nightly", "case": str(case.resolve())}
+
+
+@pytest.mark.parametrize(
+    ("target", "name", "message"),
+    [
+        ("workflow", "", "the workflow target needs a name"),
+        ("fleet", "", "only the workflow target takes a case"),
+        ("swarm", "sw", "only the workflow target takes a case"),
+        ("seat", "master@sw", "only the workflow target takes a case"),
+        ("session", OWNER, "only the workflow target takes a case"),
+    ],
+)
+def test_a_case_fits_only_a_named_workflow_target(case, target, name, message):
+    with refused(message):
+        commands.target_slot(target, name, str(case))
+
+
+def test_the_workflow_target_needs_a_case():
+    with refused("the workflow target needs a case"):
+        commands.target_slot("workflow", "nightly")
+
+
+def test_a_case_that_is_not_a_file_is_refused(tmp_path):
+    for case in (tmp_path / "missing.json", tmp_path):
+        with refused(f"{case} is not a case file"):
+            commands.target_slot("workflow", "nightly", str(case))
 
 
 @pytest.mark.parametrize(

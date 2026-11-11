@@ -38,16 +38,16 @@ jobs:
 
   promotion-ready:
     name: Promotion ready
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
       - run: echo 'All promotion dependencies graded this development revision.'
 
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, feature-suite, tick-pattern-tree, promotion-ready]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu, tick-scale, feature-suite, tick-pattern-tree, promotion-ready, launch-hotfix]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && !(!(needs.gate-required.result == 'success' && needs.hierarchy-cpu.result == 'success' && needs.tick-scale.result == 'success' && needs.feature-suite.result == 'success' && needs.tick-pattern-tree.result == 'success' && needs.promotion-ready.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '') && needs.launch-hotfix.outputs.promote != 'true') }}
     uses: ./.github/workflows/promote.yml
     secrets:
       TCC_CI_CLIENT_ID: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -251,6 +251,61 @@ jobs:
   hierarchy-cpu:
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
     uses: ./.github/workflows/hierarchy-cpu.yml
+
+  tick-scale:
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/tick-scale
+
+  launch-hotfix:
+    name: Launch hotfix grade
+    needs: [select, split, unit, unit-lost, unit-rerun, shard-check, test-count]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      promote: ${{ steps.grade.outputs.promote }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Mint the tcc main ci App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-checks: read
+          permission-contents: read
+          permission-issues: read
+          permission-pull-requests: read
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Grade a launch hotfix on its unit suite
+        id: grade
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: python -m scripts.ci_launch_hotfix --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm the launch hotfix route
+        if: steps.grade.outputs.promote == 'true'
+        run: echo 'The labelled pull request and the unit suite open the launch hotfix route.'
 
   tick-pattern-tree:
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
