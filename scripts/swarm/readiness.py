@@ -187,7 +187,9 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
-    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned."""
+    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
+    withdraws the stale offers there before the fresh ones join them."""
+    withdraw_stale(bus, view, policy)
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
@@ -196,6 +198,14 @@ def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePo
         if queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
+
+
+def withdraw_stale(bus: Bus, view: Snapshot, policy: QueuePolicy = QueuePolicy()) -> int:
+    """Removes from every lane queue each waiting offer that ``withdrawal`` names against the snapshot."""
+    return sum(
+        bus.queue(queue_name(view.slug, lane), policy).withdraw(lambda event: bool(withdrawal(event, view)))
+        for lane in LANES
+    )
 
 
 def withdrawal(event: Envelope, view: Snapshot) -> str:

@@ -88,3 +88,11 @@ def test_withdraw_stale_sweeps_every_lane_with_the_withdrawal_reasons(monkeypatc
         assert kept is not None
         assert kept.event == offered("task-a", 3)
         assert ci.take(1) is None
+
+
+@pytest.mark.feature(FEATURE)
+def test_the_controller_grant_lets_the_hub_delete_a_stale_offer_from_any_lane_stream() -> None:
+    from scripts.hive import nats_grant
+
+    assert "$JS.API.STREAM.MSG.DELETE.*" in nats_grant.CONTROLLER_PUBLISH
+    assert not any(subject.startswith("$JS.API.STREAM.MSG.DELETE") for subject in nats_grant.MEMBER_PUBLISH)

@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -50,6 +50,10 @@ class WorkQueue(Protocol):
     def offer(self, event: Envelope) -> bool: ...
 
     def take(self, timeout_ms: int) -> Delivery | None: ...
+
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        """Removes every waiting offer ``stale`` names and returns how many it removed."""
+        ...
 
 
 @runtime_checkable

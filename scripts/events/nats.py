@@ -402,6 +402,21 @@ class NatsWorkQueue:
         deliveries = self._consumer.fetch(1, timeout_ms)
         return deliveries[0] if deliveries else None
 
+    def withdraw(self, stale: Callable[[Envelope], bool]) -> int:
+        removed, sequence = 0, 1
+        while (msg := self._loop.run(self._next(sequence))) is not None:
+            sequence = msg.seq + 1
+            if stale(Envelope.decode(msg.data or b"")):
+                self._loop.run(self._js.delete_msg(self._stream, msg.seq))
+                removed += 1
+        return removed
+
+    async def _next(self, sequence: int) -> api.RawStreamMsg | None:
+        try:
+            return await self._js.get_msg(self._stream, seq=sequence, subject=self._filter, next=True)
+        except NotFoundError:
+            return None
+
 
 class NatsStateStore:
     def __init__(self, loop: _Loop, js: JetStreamContext, bucket: str, provision: bool):
