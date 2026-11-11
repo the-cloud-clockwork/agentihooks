@@ -1,6 +1,7 @@
 from typing import Any
 
 from scripts.swarm import controller
+from scripts.swarm import controller as lock_owner
 from scripts.swarm.controller import release_tick_lock
 
 
@@ -22,6 +23,11 @@ def renamed(swarm: Any, slug: str, held: Any) -> Any:
 def imported(swarm: Any, slug: str, token: str) -> None:
     # ruleid: tick-tick-lock
     release_tick_lock(swarm, slug, token, "respawn master")
+
+
+def aliased(swarm: Any, slug: str, held: Any) -> Any:
+    # ruleid: tick-tick-lock
+    return lock_owner.take_tick_lock(swarm, slug, held, 30, "respawn master")
 
 
 def through_the_port(coordination: Any, held: Any, token: str) -> Any:
