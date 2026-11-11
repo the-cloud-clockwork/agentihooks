@@ -282,7 +282,7 @@ def test_a_second_offline_pass_refuses_a_second_claim_of_a_task_the_first_queued
 
 @pytest.mark.feature("swarm-tick-cached-ledger")
 def test_an_answered_read_drops_the_queued_fields_an_offline_pass_kept(
-    stored: Queued, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    stored: Queued, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def changes(
         self: api.ResourceClient, slug: str, since: int, parts: tuple[str, ...], scope: object = None
