@@ -187,5 +187,5 @@ def ledger_checks(report: dict) -> dict:
     return {**passed, "errors": errors} if errors else passed
 
 
-def startup(redis: "Redis", report: dict) -> dict:
+def startup(redis: "Redis", report: dict[str, Any]) -> dict[str, Any]:
     return {**cheap(redis, report), **ledger_checks(report), "github": github_ready(), **headed_checks(report)}

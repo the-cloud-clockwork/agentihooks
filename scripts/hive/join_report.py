@@ -35,12 +35,12 @@ def key(hive: str) -> str:
     return f"{registry.key(hive)}:join-reports"
 
 
-def graded(report: dict) -> dict:
-    checks = report["checks"]
-    errors = checks.get("errors", {})
+def graded(report: dict[str, Any]) -> dict[str, Any]:
+    checks: dict[str, Any] = report["checks"]
+    errors: dict[str, str] = checks.get("errors", {})
     context: dict[str, Any] = report.get("context") or {}
     required = (*REQUIRED, *(HEADED if context.get("headed") else ()))
-    misses = {
+    misses: dict[str, dict[str, Any]] = {
         name: {"required": name in required, **({"reason": errors[name]} if name in errors else {})}
         for name in (*required, *OPTIONAL)
         if checks.get(name) is not True

@@ -1,9 +1,9 @@
 import subprocess
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
-FEATURE = "hive-headed-member-check"
 HEADED = {"kubectl": True, "git_identity": True}
 
 
@@ -13,7 +13,7 @@ def passing() -> dict[str, bool]:
     return dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 @pytest.mark.parametrize("missing", ["kubectl", "git_identity"])
 def test_a_headed_hive_without_kubectl_or_git_identity_grades_failed(missing: str) -> None:
     from scripts.hive import join_report
@@ -24,7 +24,7 @@ def test_a_headed_hive_without_kubectl_or_git_identity_grades_failed(missing: st
     assert report["misses"] == {missing: {"required": True}}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 def test_a_headed_hive_with_kubectl_and_git_identity_grades_complete() -> None:
     from scripts.hive import join_report
 
@@ -33,7 +33,7 @@ def test_a_headed_hive_with_kubectl_and_git_identity_grades_complete() -> None:
     assert report["misses"] == {}
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 def test_a_headless_hive_is_not_graded_on_kubectl_or_git_identity() -> None:
     from scripts.hive import join_report
 
@@ -62,7 +62,7 @@ NAME = ("git", "config", "--global", "user.name")
 EMAIL = ("git", "config", "--global", "user.email")
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 @pytest.mark.parametrize(
     ("answer", "ready"),
     [((0, "node/master\n"), True), ((0, ""), False), ((1, ""), False)],
@@ -77,7 +77,7 @@ def test_kubectl_is_ready_only_when_it_lists_the_cluster_nodes(
     assert calls == [list(KUBECTL)]
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 def test_kubectl_missing_from_the_hive_fails_the_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import join_checks
 
@@ -88,7 +88,7 @@ def test_kubectl_missing_from_the_hive_fails_the_check(monkeypatch: pytest.Monke
     assert join_checks.checked(join_checks.kubectl_ready) is False
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 @pytest.mark.parametrize(
     ("name", "email", "ready"),
     [
@@ -107,7 +107,7 @@ def test_git_identity_needs_both_a_global_name_and_email(
     assert join_checks.git_identity_ready() is ready
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 @pytest.mark.parametrize("headed", [True, False])
 def test_startup_runs_the_headed_checks_only_on_a_headed_hive(monkeypatch: pytest.MonkeyPatch, headed: bool) -> None:
     from scripts.hive import join_checks
@@ -117,12 +117,12 @@ def test_startup_runs_the_headed_checks_only_on_a_headed_hive(monkeypatch: pytes
     monkeypatch.setattr(join_checks, "github_ready", lambda: True)
     monkeypatch.setattr(join_checks, "kubectl_ready", lambda: True)
     monkeypatch.setattr(join_checks, "git_identity_ready", lambda: False)
-    checks = join_checks.startup(object(), {"context": {"headed": headed}})
+    checks = join_checks.startup(cast(Any, object()), {"context": {"headed": headed}})
     expected = {"pane": True, "ledger_join": True, "github": True}
     assert checks == ({**expected, "kubectl": True, "git_identity": False} if headed else expected)
 
 
-@pytest.mark.feature(FEATURE)
+@pytest.mark.feature("hive-headed-member-check")
 @pytest.mark.parametrize(("record", "headed"), [({"ui": "yes"}, True), ({"ui": "no"}, False), (None, False)])
 def test_a_hive_is_headed_when_its_registry_record_carries_the_interface(
     monkeypatch: pytest.MonkeyPatch, record: dict[str, str] | None, headed: bool
