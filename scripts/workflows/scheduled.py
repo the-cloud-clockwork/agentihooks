@@ -54,7 +54,9 @@ def start(name: str, case: str, delivery_id: str, owner: str, popen: Callable[..
 def run_status(delivery_id: str) -> str:
     """The run's saved status; a run that saved no readable status or stopped mid run reads failed."""
     try:
-        found = store.load(cli.run_folder(delivery_id))["status"]
+        folder = cli.run_folder(delivery_id)
+        state = store.load(folder)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        found = str(state["status"])  # pyright: ignore[reportUnknownArgumentType]
     except (OSError, ValueError, KeyError):
         return FAILED
     return FAILED if found == machine.RUNNING else found
@@ -75,7 +77,8 @@ def notify(owner: str, delivery_id: str, inbox: "InboxStore | None" = None) -> N
     from scripts.inbox import outbox
 
     text = f"workflow run {delivery_id} {run_status(delivery_id)}, run folder {cli.run_folder(delivery_id)}"
-    outbox.post(inbox or connect_inbox(), outbox.Post(SENDER, owner, text, item=f"{delivery_id}:done"))
+    notice = outbox.Post(SENDER, owner, text, item=f"{delivery_id}:done")
+    outbox.post(inbox or connect_inbox(), notice)  # pyright: ignore[reportUnknownMemberType]
 
 
 def main(argv: list[str]) -> int:
