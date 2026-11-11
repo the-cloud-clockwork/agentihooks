@@ -49,7 +49,12 @@ def _runs(monkeypatch: pytest.MonkeyPatch, answers: dict[tuple[str, ...], tuple[
 
     def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         calls.append(argv)
-        assert kwargs["timeout"] == join_checks.COMMAND_TIMEOUT_S
+        assert kwargs == {
+            "capture_output": True,
+            "text": True,
+            "timeout": join_checks.COMMAND_TIMEOUT_S,
+            "check": False,
+        }
         code, out = answers[tuple(argv)]
         return SimpleNamespace(returncode=code, stdout=out)
 
