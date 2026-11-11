@@ -380,7 +380,7 @@ def test_a_failed_pass_logs_the_error_and_records_the_pass_as_an_error(capsys: p
         assert host.failed_pass(RuntimeError("boom")) == ["pass failed: a step raised RuntimeError: boom"]
     finally:
         timing.PASS.reset(token)
-    assert record == {"outcome": "error"}
+    assert record == {"outcome": "error", "error": "RuntimeError: boom"}
     assert capsys.readouterr().err.endswith("RuntimeError: boom\n")
 
 
