@@ -46,23 +46,26 @@ def test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_
         "mapped watchdog doc items of the ledger copy: 0 items on 0 tasks, updated none"
     ]
     events = [event for event in client.collection(SLUG, "events") if event.get("kind") == "watchdog copy stored"]
-    assert [event["id"] for event in events] == ["copy-0", "copy-1"]
+    assert [(event["id"], event["target"]) for event in events] == [
+        ("copy-0", "watchdog_copy"),
+        ("copy-1", "watchdog_copy"),
+    ]
 
 
 @pytest.mark.feature("tick-doc-items-map")
 @pytest.mark.parametrize(
-    "operation",
+    ("operation", "refusal"),
     [
-        {"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "   "},
-        {"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100001},
-        {"op": "watchdog_copy", "id": "c", "by": "1bad", "text": "copy"},
-        {"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "copy", "extra": 1},
+        ({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "   "}, "must be text of at most 100000"),
+        ({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100001}, "must be text of at most 100000"),
+        ({"op": "watchdog_copy", "id": "c", "by": "1bad", "text": "copy"}, "takes id, by"),
+        ({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "copy", "extra": 1}, "takes id, by"),
     ],
 )
-def test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy(operation):
+def test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy(operation, refusal):
     from scripts.swarm_ledger import ledger_watchdog_copy
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=refusal):
         ledger_watchdog_copy.check(operation)
     assert ledger_watchdog_copy.check({"op": "watchdog_copy", "id": "c", "by": "swarm", "text": "x" * 100000}) is None
 

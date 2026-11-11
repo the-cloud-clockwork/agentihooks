@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Map watchdog document items to their ledger tasks")
     parser.add_argument("--slug", required=True)
     parser.add_argument("--document", type=Path, required=True)
-    parser.add_argument("--store-as", default="", help="store the document on the ledger as this author instead")
+    parser.add_argument("--store-as", default="")
     args = parser.parse_args(argv)
     text = args.document.read_text()
     if args.store_as:
