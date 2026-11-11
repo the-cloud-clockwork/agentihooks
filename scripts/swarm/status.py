@@ -49,6 +49,7 @@ from scripts.swarm.health import (
     ordering_dependencies,
     prompt_backlog,
     quiet_hives,
+    restore_wait,
     spawn_stall,
     standing,
     step_starvation,
@@ -157,6 +158,7 @@ def findings(
         + standing.findings(store.redis, slug, now_ms())
         + early_ends.findings(store, slug)  # pyright: ignore[reportUnknownArgumentType]
         + quiet_hives.findings(store.redis, now_ms())
+        + restore_wait.findings(store, slug, now_ms())
     )
     found = outage.hold_findings(store, slug, found, agents)
     if ledger_probe.holding(store, slug):

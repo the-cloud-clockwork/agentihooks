@@ -1125,6 +1125,88 @@ document with no ledger read (see
 `inbox` and a `box` as well, `phases`. `swarm.tick.run_group`, the masters
 group run and the `wrapper` group runs of the swarm command all pass this map.
 
+### The server guard on size and group writes
+
+The held view compare in step 2 sees the ledger as of the pass's latest read,
+so a write another process lands between that read and the call would still
+pass it. The size and group appliers close that window by sending the guard
+with the call, and the ledger server compares it inside the same locked apply
+that makes the change.
+
+| Applier | Ledger call | Operation sent | Server compare | On a mismatch |
+| --- | --- | --- | --- | --- |
+| `task_writer` (`sizes`) | `LedgerClient.update_task(slug, key, fields, if_match=expected or None)` | `task_update` with `fields` and `if_match` | each `if_match` field against the task, a missing field read as its default (`""` for `difficulty`) | the update is skipped, not refused; the call returns the task as it stands |
+| `group_writer` (`groups`) | `LedgerClient.ungroup_tasks(slug, key, if_match={"group_members": [...]})` | `task_ungroup` with `if_match` | `group_members` of the lead against the expected list, order included | the operation is refused with `tasks/<lead> changed its group members` |
+
+A write with no `expected` fields sends no `if_match` to `update_task`, and
+the server then applies it unguarded. The group applier always sends one; a
+write with no `expected` sends an empty member list. When the held view shows
+the lead with members, the applier's own compare raises `RevisionConflict`
+before any ledger call; the server refusal of a lead holding members covers a
+stale view.
+
+The server accepts these `task_update` guard fields, each compared against its
+default when the task lacks it: `claimed_by`, `pr_url`, `awaiting` and
+`difficulty` (`""`), `claim_generation` (`0`) and `group_members` (`[]`). Any
+other field is rejected with `if_match must contain task ownership fields`.
+
+Because a guarded `task_update` that misses is skipped without a refusal, the
+size applier checks the task the call returns: a field that is both guarded
+and written, and does not hold the written value, raises `RevisionConflict`
+with `task <id> changed <fields> on the ledger before the write`. A refused
+`task_ungroup` reaches the group applier as `LedgerRefused`, which it raises as
+`RevisionConflict` with `the ledger refused the release of the group under task
+<lead>`. Both writes are dropped and recomputed like any other.
+
+#### `task_ungroup` with a guard
+
+The operation takes `op`, `id`, `by`, `item` (`tasks/<lead id>`) and an
+optional `if_match`. `if_match` holds exactly one key, `group_members`, a list
+of task ids; an empty list is valid. Without `if_match` the operation releases
+whatever group the lead holds, as before.
+
+```json
+{
+  "op": "task_ungroup",
+  "id": "task_ungroup-1",
+  "by": "swarm",
+  "item": "tasks/t1",
+  "if_match": {"group_members": ["t2", "t3"]}
+}
+```
+
+From Python, through the swarm's ledger client:
+
+```python
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+
+try:
+    LedgerClient().ungroup_tasks("example-swarm", "t1", if_match={"group_members": ["t2", "t3"]})
+except LedgerRefused as exc:
+    print(exc)
+```
+
+The server answers each case this way:
+
+| Request | Result |
+| --- | --- |
+| The lead holds `["t2", "t3"]` and the guard expects `["t2", "t3"]` | Released: the lead loses `group_members`, each member whose `merged_into` names the lead loses it, and an `ungrouped` event lists the released members |
+| The lead holds `["t2", "t3"]` and the guard expects `["t2"]`, or `["t3", "t2"]` | Refused: `tasks/t1 changed its group members`; the group is unchanged |
+| The lead holds no group | Refused: `tasks/t1 leads no group`, checked before the guard |
+| `by` is an agent of the `eng`, `ci` or `plan` lane | Refused: `<name> works in the <lane> lane and cannot release a task group` |
+| `by` is missing, not an agent name, or `operator` | Rejected before apply: ``task_ungroup needs `by`, an agent name other than operator``, checked first |
+| `if_match` is not an object, holds a key other than `group_members`, or `group_members` is not a list of task ids | Rejected before apply: `task_ungroup if_match holds only group_members, a list of task ids` |
+| Any key other than `op`, `id`, `by`, `item` and `if_match` | Rejected before apply: `task_ungroup takes only an id, by, an item tasks/<lead id> and an if_match` |
+
+The API schema lists `if_match` among the `task_ungroup` fields, so the HTTP
+ledger API accepts the same body. `task_group` takes no guard.
+
+The guard is covered by `tests/swarm_ledger/test_task_group.py` (release on a
+match, refusal after a concurrent regroup, malformed guards),
+`tests/swarm/test_ledger_client_group.py` (the client sends the guard) and
+`tests/tick/test_apply.py` (a size and a release a concurrent write beat on
+the server are dropped).
+
 ### Dropped writes and the recompute
 
 A dropped write is not retried in the same pass. `steps.actions(records)`
@@ -1135,6 +1217,8 @@ returned, then one line per write that step dropped:
 dropped write sizes t7 of step size pass: task t7 changed difficulty since the step read it; the next pass recomputes it
 dropped write groups t3 of step grouping release: task t3 changed group_members since the step read it; the next pass recomputes it
 dropped write sizes t7 of step size pass: the ledger refused the write of task t7; the next pass recomputes it
+dropped write sizes t7 of step size pass: task t7 changed difficulty on the ledger before the write; the next pass recomputes it
+dropped write groups t3 of step grouping release: the ledger refused the release of the group under task t3; the next pass recomputes it
 dropped write rank s1 of step rank pass: the claim queue heads of swarm s1 changed since the rank pass read them; the next pass recomputes it
 dropped write phases p2 of step planning and phase pass: phase p2 changed its checkbox since the phase pass read it; the next pass recomputes it
 dropped write master stall master@s1-2 of step master stall: master master@s1-2 is no longer the live master of swarm s1; the next pass recomputes it
