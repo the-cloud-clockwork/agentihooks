@@ -24,7 +24,7 @@ UNFIT_NAK_MS = 5_000
 @dataclass(frozen=True)
 class Snapshot:
     slug: str
-    rows: dict
+    rows: dict[str, Any]
     doc: dict
     graph: dict
     fix: str
@@ -187,15 +187,24 @@ def offers(view: Snapshot, now_ms: int) -> list[Envelope]:
 
 
 def publish(bus: Bus, view: Snapshot, now_ms: int, policy: QueuePolicy = QueuePolicy()) -> list[str]:
-    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned."""
+    """Opens every lane queue first, so a hive polling a lane with no offer yet finds its stream provisioned, and
+    withdraws the stale offers there before the fresh ones join them."""
     events = offers(view, now_ms)
     lanes = dict.fromkeys([*LANES, *(event.data["lane"] for event in events)])
     queues = {lane: bus.queue(queue_name(view.slug, lane), policy) for lane in lanes}
+    for queue in queues.values():
+        queue.withdraw(lambda event: stale(event, view))
     placed = []
     for event in events:
         if queues[event.data["lane"]].offer(event):
             placed.append(event.id)
     return placed
+
+
+def stale(event: Envelope, view: Snapshot) -> bool:
+    """An offer ``withdrawal`` names against the snapshot, or one whose task turned workstation, which hives never
+    take."""
+    return bool(withdrawal(event, view) or view.rows[event.key].get("workstation"))
 
 
 def withdrawal(event: Envelope, view: Snapshot) -> str:
