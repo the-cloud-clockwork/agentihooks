@@ -756,9 +756,10 @@ def test_a_multi_page_pull_request_is_shared_across_calls_without_a_second_pagin
     doc = {"tasks": [{"state": "pr", "pr_url": url}]}
 
     first = ledger_events.tick_view(inbox, store, "sw", doc)
+    first_pull = first(url)
     assert len(calls) == 2
-    assert first(url).failed == ("job 100",)
+    assert first_pull is not None and first_pull.failed == ("job 100",)
 
     later = ledger_events.tick_view(inbox, store, "sw", doc)
     assert len(calls) == 2
-    assert later(url) == first(url)
+    assert later(url) == first_pull

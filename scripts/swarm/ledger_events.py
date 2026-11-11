@@ -22,7 +22,7 @@ from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage, stack
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
-from scripts.swarm.store import MASTER, PREFIX, SwarmError
+from scripts.swarm.store import MASTER, PREFIX, RedisStore, SwarmError
 from scripts.swarm_v2 import masters
 from scripts.tick import pool
 from scripts.tick.deadline import Deadline
@@ -579,7 +579,7 @@ def _workflow_gates(data: dict[str, Any], source: SourceControl, cache: Any) -> 
 SHARED_VIEW_KEY = "pr-view-cache"
 
 
-def _shared_views(store: object, slug: str, now_s: float) -> dict[str, PullRequest]:
+def _shared_views(store: RedisStore, slug: str, now_s: float) -> dict[str, PullRequest]:
     """Return the pull requests cached for ``slug`` within ``github_reads.RUN_TTL_S`` of ``now_s``, read from the
     store any caller of ``tick_view`` last fetched them into."""
     found: dict[str, PullRequest] = {}
@@ -596,7 +596,7 @@ def _shared_views(store: object, slug: str, now_s: float) -> dict[str, PullReque
     return found
 
 
-def _save_shared_views(store: object, slug: str, now_s: float, snapshots: dict[str, "PullRequest | None"]) -> None:
+def _save_shared_views(store: RedisStore, slug: str, now_s: float, snapshots: dict[str, Any]) -> None:
     """Add every resolved pull request of ``snapshots`` to the store any caller of ``tick_view`` reads back within
     ``github_reads.RUN_TTL_S``, each keeping its own fetch time so an unfetched entry is never kept past its own."""
     fresh = {url: pr for url, pr in snapshots.items() if isinstance(pr, PullRequest)}
@@ -608,7 +608,7 @@ def _save_shared_views(store: object, slug: str, now_s: float, snapshots: dict[s
 
 
 def tick_view(
-    inbox: object, store: object, slug: str, doc: dict, earlier: Callable | None = None
+    inbox: object, store: RedisStore, slug: str, doc: dict, earlier: Callable | None = None
 ) -> Callable[[str], PullRequest | None]:
     from scripts.swarm import metrics_outbox, metrics_swarm
 
