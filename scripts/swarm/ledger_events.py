@@ -496,7 +496,7 @@ def views(
 
 
 def fresh_reader(
-    earlier: Callable[[str], PullRequest | None], source: SourceControl | None = None, cache: object | None = None
+    earlier: Callable[[str], PullRequest | None], cache: object | None = None
 ) -> Callable[[str], PullRequest | None]:
     """A reread whose first call reads every open pull request of ``earlier`` fresh in batches and keeps them for
     its later calls; a pull request that read did not return, or any when ``earlier`` holds none open, reads alone."""
@@ -506,9 +506,9 @@ def fresh_reader(
         known = getattr(earlier, "snapshots", {})
         shared = [target for target, pull in known.items() if pull is not None and pull.state == "OPEN"]
         if not read and shared and not mutation_wait.backing_off():
-            read.update(views(shared, source, cache, ttl=0))
+            read.update(views(shared, cache=cache, ttl=0))
         pull = read.get(url)
-        return pull if pull is not None else view(url, source)
+        return pull if pull is not None else view(url)
 
     return reread
 

@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from scripts.swarm import github_reads, ledger_events, mutation_wait
+from scripts.swarm import github_reads, ledger_events, mutation_wait, stack
 from scripts.swarm.ledger_events import PullRequest
 from scripts.tick.ports.contracts import SourceControl
 from tests.swarm.graph_port import RunPort
@@ -61,11 +61,13 @@ def port(monkeypatch: pytest.MonkeyPatch) -> Any:
             data = {"resource": resource("single")}
         return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
 
-    return SimpleNamespace(source=cast(SourceControl, RunPort(run)), calls=calls, missing=missing)
+    source = cast(SourceControl, RunPort(run))
+    monkeypatch.setattr(stack, "login_source_control", lambda: source)
+    return SimpleNamespace(calls=calls, missing=missing)
 
 
 def test_a_pass_rereads_every_open_pull_request_in_one_batched_request(port: Any) -> None:
-    reread = ledger_events.fresh_reader(held(*URLS), port.source)
+    reread = ledger_events.fresh_reader(held(*URLS))
     assert head(reread(URLS[1])) == "fresh1"
     assert (head(reread(URLS[0])), head(reread(URLS[2])), head(reread(URLS[1]))) == ("fresh0", "fresh2", "fresh1")
     assert len(port.calls) == 1
@@ -76,7 +78,7 @@ def test_a_pass_rereads_every_open_pull_request_in_one_batched_request(port: Any
 
 def test_a_pull_request_the_batch_did_not_return_is_read_on_its_own(port: Any) -> None:
     port.missing.add(1)
-    reread = ledger_events.fresh_reader(held(*URLS), port.source)
+    reread = ledger_events.fresh_reader(held(*URLS))
     assert head(reread(URLS[0])) == "fresh0"
     assert head(reread(URLS[1])) == "single"
     assert head(reread(MERGED)) == "single"
@@ -86,7 +88,7 @@ def test_a_pull_request_the_batch_did_not_return_is_read_on_its_own(port: Any) -
 
 def test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own(port: Any) -> None:
     for lookup in (held(), {}.get):
-        reread = ledger_events.fresh_reader(lookup, port.source)
+        reread = ledger_events.fresh_reader(lookup)
         assert head(reread(URLS[0])) == "single"
     assert len(port.calls) == 2
     assert all("p0:resource" not in query for query in port.calls)
@@ -94,7 +96,7 @@ def test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own(port: 
 
 def test_a_reread_during_a_rate_limit_backoff_makes_no_request(port: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutation_wait, "backing_off", lambda: True)
-    reread = ledger_events.fresh_reader(held(*URLS), port.source)
+    reread = ledger_events.fresh_reader(held(*URLS))
     assert reread(URLS[0]) is None
     assert port.calls == []
 
@@ -105,20 +107,20 @@ def test_each_pass_reads_fresh_past_the_shared_snapshot(
     monkeypatch.setattr(github_reads, "home", lambda: tmp_path / "reads")
     cache = SimpleNamespace()
     for _ in range(2):
-        assert head(ledger_events.fresh_reader(held(*URLS), port.source, cache)(URLS[0])) == "fresh0"
+        assert head(ledger_events.fresh_reader(held(*URLS), cache)(URLS[0])) == "fresh0"
     assert len(port.calls) == 2
 
 
-def test_the_batch_forwards_its_source_cache_and_a_zero_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_batch_forwards_its_cache_and_a_zero_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mutation_wait, "backing_off", lambda: False)
     seen: list[tuple[Any, ...]] = []
     pull = PullRequest("OPEN", None, None, False, head="batched")
 
-    def views(urls: list[str], source: Any = None, cache: Any = None, ttl: float = 0.5) -> dict[str, Any]:
-        seen.append((urls, source, cache, ttl))
+    def views(urls: list[str], cache: Any = None, ttl: float = 0.5) -> dict[str, Any]:
+        seen.append((urls, cache, ttl))
         return dict.fromkeys(urls, pull)
 
     monkeypatch.setattr(ledger_events, "views", views)
-    reread = ledger_events.fresh_reader(held(URLS[0], URLS[1]), "source", "cache")  # pyright: ignore[reportArgumentType]
+    reread = ledger_events.fresh_reader(held(URLS[0], URLS[1]), "cache")
     assert reread(URLS[1]) is pull
-    assert seen == [([URLS[0], URLS[1]], "source", "cache", 0)]
+    assert seen == [([URLS[0], URLS[1]], "cache", 0)]
