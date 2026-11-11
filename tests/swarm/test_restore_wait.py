@@ -4,7 +4,7 @@ from dataclasses import asdict, replace
 import pytest
 
 from scripts.handoff import transfers
-from scripts.swarm import reboot, resume, snapshot
+from scripts.swarm import lease, reboot, resume, snapshot
 from scripts.swarm.health import restore_wait
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
@@ -57,6 +57,13 @@ def test_a_seat_waiting_within_one_tick_window_raises_no_finding(store):
     swarm(store)
     waiting(store, at=10 * MINUTE)
     assert restore_wait.findings(store, "sw", 10 * MINUTE + 30_000) == []
+
+
+def test_a_wait_of_exactly_one_tick_window_raises_no_finding(store):
+    swarm(store)
+    waiting(store, at=10 * MINUTE)
+    assert restore_wait.findings(store, "sw", 10 * MINUTE + lease.tick_ms()) == []
+    assert [f.subject for f in restore_wait.findings(store, "sw", 10 * MINUTE + lease.tick_ms() + 1)] == ["sw-eng-1"]
 
 
 def test_a_wait_within_the_window_never_hides_a_later_seat_past_it(store):
