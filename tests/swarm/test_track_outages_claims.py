@@ -71,6 +71,7 @@ def test_read_claims_answers_the_claims_section_without_the_archive(
 
     assert fencing.read_claims(store, "sw") == {"t1": claim}
     assert asked == [("claims",)]
+    assert fencing.read_claims(store, "sw") == fencing.read(store, "sw")["claims"]
 
 
 @pytest.mark.feature("track-outages-claims-only")
@@ -81,6 +82,7 @@ def test_read_claims_on_a_document_swarm_answers_its_claims(store: Any) -> None:
     fencing.write(store, "sw", lambda doc: doc["claims"].update({"t9": claim}))
 
     assert fencing.read_claims(store, "sw") == {"t9": claim}
+    assert fencing.read_claims(store, "sw") == fencing.read(store, "sw")["claims"]
 
 
 @pytest.mark.feature("track-outages-claims-only")
@@ -91,8 +93,10 @@ def test_track_outages_judges_owners_without_reading_the_whole_fencing_document(
 
     ledger, runtime, agent = _owner(store)
     fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: _authority(agent)}))
+    fencing.migrate_records(store, "sw", writers_upgraded=True)
     outage.observe("sw", "provider", ["provider unavailable"], MINUTE)
     rows = {task["id"]: task for task in ledger.state("sw")["tasks"]}
+    asked = _sections_read(monkeypatch)
 
     def whole(found_store: Any, slug: str) -> dict[str, Any]:
         raise AssertionError(f"track outages read the whole fencing document of {slug}")
@@ -101,6 +105,8 @@ def test_track_outages_judges_owners_without_reading_the_whole_fencing_document(
     resume.track_outages("sw", store, runtime, rows, 8 * MINUTE)
 
     assert resume.recovery_pending(store, "sw", agent)
+    assert ("claims",) in asked
+    assert all("archive" not in names for names in asked)
     assert resume._recovery_identity(store, "sw", agent) == [
         agent.task,
         agent.seat,
