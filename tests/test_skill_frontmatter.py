@@ -102,6 +102,13 @@ def test_tick_pattern_rule_carries_package_rule_frontmatter() -> None:
     assert not re.search(r"manifesto|§|~/\.claude/skills", RULE.read_text(), re.IGNORECASE)
 
 
+def test_role_list_covers_every_package_role_folder() -> None:
+    folders = {path.parent.name for path in (PACKAGE / "roles").glob("*/profile.yml")}
+
+    assert {"dispatcher", "judge", "documentation"} <= folders
+    assert sorted(ROLES) == sorted(folders)
+
+
 @pytest.mark.parametrize("role", ROLES)
 def test_tick_pattern_rule_folds_into_every_role_persona(world: dict, role: str) -> None:
     from scripts.profiles import render
