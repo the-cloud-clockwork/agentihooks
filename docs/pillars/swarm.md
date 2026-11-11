@@ -4579,8 +4579,8 @@ installed code has delivered a tick; until then they keep ticking (see
 [Scheduled tick delivery guard](#scheduled-tick-delivery-guard)). A minute fires a holder that takes a machine
 lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
 minutes (see [The tick holder](#the-tick-holder)). Tick output goes to the user journal under the
-`agentihooks-swarm` identifier, whether the scheduler cron or the fallback service ran it; a hand run prints to its
-terminal: `TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`.
+`agentihooks-swarm` identifier when `systemd-cat` is on the path, whether the scheduler cron or the fallback service
+ran it, and to `swarm-tick.log` otherwise; a hand run prints to its terminal: `TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --until now`.
 Each pass considers every step the [tick step catalogue](../reference/tick-step-catalogue.md) lists and runs those
 whose declared interval has passed ([Interval enforcement](../reference/tick-engine-steps.md#interval-enforcement)); a step added through
 [Adding a step](../reference/tick-engine-steps.md#adding-a-step) joins the next pass with no change to the cadence. Every swarm ticks once per
@@ -4705,7 +4705,7 @@ steps and one minute, so systemd never stops the holder before the holder stops 
 
 The cron entry is registered under the scheduler lease `swarm-tick-lock`, waited for up to 30 seconds and held for
 at most 90, so two paths registering at once leave one entry.
-An entry that is cancelled, failed or missing is replaced, and the replacement prints
+An entry that is cancelled, failed, missing or unregistered is replaced, and the replacement prints
 `recreated the swarm tick cron entry as <new id>: entry '<old id>' was <state>`. Registration while Redis is down
 prints `the scheduled swarm tick could not be registered for <caller>: <ExcType>: <message>`; the next tick pass or swarm start
 retries it.
@@ -4713,7 +4713,7 @@ retries it.
 | What | Where |
 |---|---|
 | Tick pass output | `journalctl --user -t agentihooks-swarm`; in `swarm-tick.log` when `systemd-cat` is missing |
-| Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder |
+| Holder errors, such as a failed delivery record | `swarm-tick.log` in the scheduler runtime folder for a holder the scheduler cron started; `journalctl --user -u agentihooks-swarm.service` for the fallback holder |
 | Scheduler supervisor output | `scheduler.log` in the scheduler runtime folder when the supervisor was not started by `agentihooks-scheduler.service`; that unit's journal otherwise |
 
 The runtime folder is `~/.cache/agentihooks/scheduler/` for the local Redis at `127.0.0.1:6379/0` on a machine that
@@ -4727,7 +4727,7 @@ TZ=UTC journalctl --user -t agentihooks-swarm --since "-10min" --until now --no-
 On a machine that ticks, the journal shows a pass every minute, and `systemctl --user list-timers 'agentihooks-*'`
 lists no `agentihooks-swarm.timer` once delivery is proven. On an upgraded machine, swarm start, the tick and the
 waits pass remove the old timer and service after that proof, as
-[Retiring the systemd timer](#retiring-the-systemd-timer) describes; the installer writes no timer. A workstation whose swarms are all served in Anton runs
+[Retiring the systemd timer](#retiring-the-systemd-timer) describes. The installer writes no swarm timer; while the delivery guard keeps it, swarm start or a tick pass rewrites it. A workstation whose swarms are all served in Anton runs
 no tick at all (see [Workstation tick retirement](#workstation-tick-retirement)).
 
 | Symptom | Cause | Fix |

@@ -919,7 +919,7 @@ read.
 
 ```bash
 D=rig-grade-swarm-doctor
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
+TZ=UTC journalctl --user -t agentihooks-swarm --since "-6h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep '"step": "doctor.trace"' \
   | sed 's/^[^{]*//' \

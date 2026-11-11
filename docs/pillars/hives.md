@@ -1421,7 +1421,7 @@ Read the spills of the last hour from the tick journal, and the records the live
 environment agentihooks is installed in, from its checkout:
 
 ```bash
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 hour" --until now --no-pager | grep hive_placement_spill
+TZ=UTC journalctl --user -t agentihooks-swarm --since "-1 hour" --until now --no-pager | grep hive_placement_spill
 python -c '
 from scripts.swarm.store import connect
 s, slug = connect(), "my-swarm"
@@ -1437,7 +1437,7 @@ both its reading and the spills of the last ten minutes:
 agentihooks hive set worker-1 prefer=eng:1,ci:1,plan:1,dispatch:1
 agentihooks hive set worker-2 prefer=eng:2,ci:2,plan:2,dispatch:2
 agentihooks hive list          # worker-1 available-mb falls as it takes agents
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10 min" --until now --no-pager | grep --line-buffered hive_placement_spill
+TZ=UTC journalctl --user -t agentihooks-swarm --since "-10 min" --until now --no-pager | grep --line-buffered hive_placement_spill
 ```
 
 Each spill line while `worker-1` is under its memory line names the other limit that refused it.
@@ -2563,7 +2563,7 @@ spawning, as described above.
 ```bash
 agentihooks swarm <id> status
 agentihooks hive list
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now -g "local slot claim" --no-pager
+TZ=UTC journalctl --user -t agentihooks-swarm --since "1 hour ago" --until now -g "local slot claim" --no-pager
 ```
 
 An agent placed on a hive shows that hive in `status`; an agent that fell back runs in a local herdr pane. Each
