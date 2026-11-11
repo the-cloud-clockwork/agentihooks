@@ -64,7 +64,8 @@ def test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pu
     steps = callee["jobs"]["tick-scale"]["steps"]
     assert any(str(step.get("run", "")).startswith("python -m tests.tick_scale.gate") for step in steps)
     plant = next(step for step in steps if step.get("run") == "git apply tests/tick_scale/whole_hash.patch")
-    assert plant["if"] == "inputs.plant"
+    assert plant["if"] == "inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant'"
+    assert callee[True]["push"]["branches"] == ["diffcheck/tick-scale-*"]
 
 
 def _graded_needs(promote, analysis="A1"):

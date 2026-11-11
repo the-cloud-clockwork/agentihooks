@@ -13,6 +13,8 @@ on:
         type: string
         required: false
         default: ''
+  push:
+    branches: ['diffcheck/tick-scale-*']
 
 permissions:
   contents: read
@@ -52,11 +54,11 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --constraint .github/test-requirements.lock --excludes .github/test-excludes.txt -e '.[dev,all]'
       - name: Plant the whole hash execution update fault
-        if: inputs.plant
+        if: inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant'
         run: git apply tests/tick_scale/whole_hash.patch
       - name: Seed a production sized store and fail when a launch path step outruns its budgets floor
         env:
-          AGENTIHOOKS_TICK_PROFILE_STEPS: ${{ inputs.profile }}
+          AGENTIHOOKS_TICK_PROFILE_STEPS: ${{ github.ref == 'refs/heads/diffcheck/tick-scale-profile' && 'track outages,reap,spawn,tick view' || inputs.profile }}
         run: python -m tests.tick_scale.gate --redis redis://127.0.0.1:6379/1 --report tick-scale.json
       - name: Stop Redis
         if: always()
@@ -66,7 +68,7 @@ jobs:
         uses: ./.github/actions/retry-upload
         with:
           after-cancel: true
-          name: tick-scale${{ inputs.plant && '-planted' || '' }}
+          name: tick-scale${{ (inputs.plant || github.ref == 'refs/heads/diffcheck/tick-scale-plant') && '-planted' || '' }}
           path: tick-scale.json
           if-no-files-found: warn
           retention-days: 7

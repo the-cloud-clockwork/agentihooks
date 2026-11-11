@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts, tick-scale]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -27,15 +27,6 @@ on:
         type: boolean
         required: false
         default: false
-      plant:
-        description: Plant the tick scale proof's whole hash execution update fault, which must turn it red
-        type: boolean
-        required: false
-        default: false
-      profile:
-        description: Comma separated tick steps the tick scale proof profiles
-        required: false
-        default: ''
 
 concurrency:
   group: ${{ inputs.proof == 'tests' && format('focused-proof-{0}', github.run_id) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
@@ -48,13 +39,6 @@ permissions:
   actions: read
 
 jobs:
-  tick-scale:
-    if: inputs.proof == 'tick-scale'
-    uses: ./.github/workflows/tick-scale.yml
-    with:
-      plant: ${{ inputs.plant }}
-      profile: ${{ inputs.profile }}
-
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'
     uses: ./.github/workflows/mutation-deadline-proof.yml

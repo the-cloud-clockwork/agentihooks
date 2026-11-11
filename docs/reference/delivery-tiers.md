@@ -56,10 +56,13 @@ names, then `spawn`) and the `tick view` must end ok within its
 abandoned, does not end ok or never runs fails the gate. Unit fixtures hold a
 few rows, so they cannot catch a step whose cost grows with stored data.
 
-The Proofs workflow runs the same gate with `proof: tick-scale`. With
-`plant: true` it first applies the planted fault in
-`tests/tick_scale/whole_hash.patch`, where every fenced write rewrites every
-record it loaded. This planted fault must turn the gate red.
+A push to a `diffcheck/tick-scale-*` branch runs the same gate on that branch.
+On `diffcheck/tick-scale-plant` it first applies the planted fault in
+`tests/tick_scale/whole_hash.patch`. In that fault every fenced write loads the
+execution archive and rewrites every record it loaded. This planted fault must
+turn the gate red. On `diffcheck/tick-scale-profile` the gate profiles
+`track outages`, `reap`, `spawn` and `tick view` with cProfile. The profiled
+walls are evidence only. A caller can also pass `plant` and `profile` inputs.
 
 ### Scheduling and runner isolation
 
