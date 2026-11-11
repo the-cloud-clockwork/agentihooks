@@ -108,6 +108,7 @@ def test_no_keys_claim_clears_the_hub_skip_without_copying(buses, command, capsy
     assert target.get("foreign") is None
 
 
+@pytest.mark.feature("legacy-state-migration-command")
 def test_interrupted_move_reports_failure_and_stays_pending(buses, command, monkeypatch, capsys):
     from scripts.events import nats_migration
 
@@ -138,6 +139,44 @@ def test_dry_run_of_a_bucket_without_keys_reports_nothing(buses, command, capsys
     code, report = _run(command, capsys, ["--swarm", "rig", "--bucket", bucket])
     assert code == 0
     assert (report["keys"], report["unowned"], report["retained"], report["would_move"]) == ([], [], 0, 0)
+
+
+def test_dry_run_claims_each_named_key_once_in_order(buses, command, capsys):
+    legacy, _ = buses
+    _seed(legacy)
+    code, report = _run(
+        command,
+        capsys,
+        ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned", "--key", "foreign", "--key", "owned"],
+    )
+    assert code == 0
+    assert (report["keys"], report["unowned"], report["retained"]) == (["foreign", "owned"], [], 3)
+
+
+def test_dry_run_reads_an_import_kept_under_the_legacy_stream_name(buses, command, capsys):
+    from scripts.events.nats_migration import IMPORT_PLAN
+    from scripts.events.resource_names import legacy_stream_name
+    from scripts.events.subjects import subject
+
+    legacy, _ = buses
+    _seed(legacy)
+    legacy._loop.run(
+        legacy._js.add_stream(
+            name=legacy_stream_name("rig", "STATE_spoke-work"),
+            subjects=[f"{subject('rig', 'state', 'spoke-work')}.>"],
+            metadata={IMPORT_PLAN: "done"},
+        )
+    )
+    code, report = _run(command, capsys, ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned"])
+    assert code == 0
+    assert (report["imported"], report["would_move"]) == (True, 0)
+
+
+def test_dry_run_needs_no_provisioning(command, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_BUS_BIND", "1")
+    code, report = _run(command, capsys, ["--swarm", "rig", "--bucket", "absent"])
+    assert code == 0
+    assert report["applied"] is False
 
 
 @pytest.mark.parametrize(
