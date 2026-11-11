@@ -1,7 +1,7 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 
-from hooks.proc import processes
+from hooks.proc import Process, processes
 from scripts.swarm.store import (
     APP_SERVER_TRANSPORT,
     LEGACY_TRANSPORT,
@@ -50,12 +50,18 @@ def complete(config: SwarmConfig, name: str, placed: Placed, terminate: Callable
         raise SpawnError(str(exc), pane_id=placed.pane_id) from exc
 
 
-def admit_legacy(store: RedisStore, slug: str, agent: AgentRecord, runtime: Runtime) -> AgentRecord:
+def admit_legacy(
+    store: RedisStore,
+    slug: str,
+    agent: AgentRecord,
+    runtime: Runtime,
+    table: Callable[[], Mapping[int, Process]] = processes,
+) -> AgentRecord:
     if agent.harness != "codex" or agent.transport != LEGACY_TRANSPORT or agent.execution_id:
         return agent
     try:
         pid = agent.profile_decision.get("validation", {}).get("pid")
-        target = process.launch_target(pid, process.local_namespace(), processes())
+        target = process.launch_target(pid, process.local_namespace(), table())
         previous = store.execution_occupants(slug).get(agent.seat)
         from scripts.swarm.commands import hive_id
 

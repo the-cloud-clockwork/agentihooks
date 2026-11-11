@@ -246,6 +246,8 @@ class Runtime(Protocol):
 class Processes(Protocol):
     def scan(self, *, deadline: Deadline) -> object: ...
 
+    def rescan(self, *, deadline: Deadline) -> object: ...
+
 
 @runtime_checkable
 class Inbox(Protocol):
@@ -266,6 +268,8 @@ class Llm(Protocol):
 @runtime_checkable
 class Metrics(Protocol):
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object: ...
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object: ...
 
 
 @runtime_checkable

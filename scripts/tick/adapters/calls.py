@@ -1,5 +1,6 @@
 """Bind tick tool ports to a step deadline for legacy reap helpers."""
 
+import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any
 
 from scripts.swarm.store import PREFIX, AgentRecord, SwarmConfig
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports import Coordination, Inbox, Ledger, Runtime
+from scripts.tick.ports import Coordination, Inbox, Ledger, Metrics, Processes, Runtime
 from scripts.tick.ports.contracts import STORE_READS
 
 
@@ -172,3 +173,40 @@ class LedgerCalls:
 
     def comment(self, slug: str, task_id: str, text: str, by: str) -> None:
         self.port.comment(task_id, text, by, deadline=self.deadline)
+
+
+@dataclass(frozen=True)
+class MetricsCalls:
+    """The gate log, metrics spool and process table of the spawn helpers, over the metrics and processes ports."""
+
+    metrics: Metrics
+    processes: Processes
+    deadline: Deadline
+
+    def log(self, slug: str, rows: Sequence[object]) -> None:
+        self.metrics.log(slug, rows, deadline=self.deadline)
+
+    def record(self, table: Any, rows: list[dict[str, object]]) -> list[str]:
+        try:
+            self.metrics.emit({table.name: rows}, deadline=self.deadline)
+        except (sqlite3.Error, OSError, ValueError, KeyError, TimeoutError) as exc:
+            return [f"metrics outbox failed: {exc}"]
+        return []
+
+    def table(self) -> Any:
+        return self.processes.rescan(deadline=self.deadline)
+
+
+class LocalMetrics:
+    """The gate log and process table of spawn helpers run outside a tick step, on this host."""
+
+    def log(self, slug: str, rows: Sequence[object]) -> None:
+        from scripts.gates import log as gate_log
+
+        for row in rows:
+            gate_log.append(slug, row)
+
+    def table(self) -> Any:
+        from hooks.proc import processes
+
+        return processes()

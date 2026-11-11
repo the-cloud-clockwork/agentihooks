@@ -324,6 +324,9 @@ class FakeProcesses:
     def scan(self, *, deadline: Deadline) -> object:
         return _record(self, "scan", (), deadline)
 
+    def rescan(self, *, deadline: Deadline) -> object:
+        return _record(self, "rescan", (), deadline)
+
 
 @dataclass
 class FakeInbox:
@@ -372,6 +375,9 @@ class FakeMetrics:
 
     def emit(self, measurements: Mapping[str, object], *, deadline: Deadline) -> object:
         return _record(self, "emit", (measurements,), deadline)
+
+    def log(self, slug: str, rows: Sequence[object], *, deadline: Deadline) -> object:
+        return _record(self, "log", (slug, tuple(rows)), deadline)
 
 
 @dataclass

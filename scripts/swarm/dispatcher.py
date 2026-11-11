@@ -172,13 +172,24 @@ def _merged(task, known):
     return [dep for dep in task.get("depends_on") or [] if known.get(dep, {}).get("state") == "done"]
 
 
-def chain_claimed(slug, config, ledger, doc, task, lane, now_ms):
+def chain_claimed(
+    slug: str,
+    config: Any,
+    ledger: Any,
+    doc: dict[str, Any],
+    task: dict[str, Any],
+    lane: str,
+    now_ms: int,
+    port: Any = None,
+) -> list[str]:
     if config.autonomy not in APPLIES or task["id"] not in guarded(doc, freeze.fix_phase(config)):
         return []
-    return _chain_report(slug, ledger, doc, task, lane, now_ms)
+    return _chain_report(slug, ledger, doc, task, lane, now_ms, port)
 
 
-def _chain_report(slug, ledger, doc, task, lane, now_ms):
+def _chain_report(
+    slug: str, ledger: Any, doc: dict[str, Any], task: dict[str, Any], lane: str, now_ms: int, port: Any = None
+) -> list[str]:
     known, stamps = {t["id"]: t for t in doc["tasks"]}, doc.get("_meta", {}).get("stamps", {})
     times = [
         (stamps[f"tasks/{dep}/state"]["at"], dep) for dep in _merged(task, known) if f"tasks/{dep}/state" in stamps
@@ -190,7 +201,7 @@ def _chain_report(slug, ledger, doc, task, lane, now_ms):
     text = CHAIN_CLAIM.format(task=task["id"], elapsed=elapsed, dep=dep)
     said = _comment(slug, ledger, task, CHAIN_CLAIMED.format(lane=lane, elapsed=elapsed))
     action = Action(CHAIN, "apply", text + said, task)
-    return [action.text] + log(slug, [action], now_ms)
+    return [action.text] + log(slug, [action], now_ms, port)
 
 
 def _band(task, fixed, guard):
@@ -356,15 +367,22 @@ def priorities(store, slug, doc, ledger, view, now_ms):
     return found + log(slug, [Action(PRIORITIES, "apply", text, {}) for text in found], now_ms)
 
 
-def log(slug, actions, now_ms):
+def log(slug: str, actions: list[Any], now_ms: int, port: Any = None) -> list[str]:
+    """Write each action's gate log row and dispatch row, through ``port`` when the caller holds one."""
     from scripts.swarm import metrics
 
     if not actions:
         return []
-    for action in actions:
-        row = gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
-        gate_log.append(slug, row)
+    gated = [
+        gate_log.Row(now_ms, AUTHOR, action.mode, AUTHOR, action.task.get("id", ""), action.rule, action.text)
+        for action in actions
+    ]
     rows = [dispatch_row(slug, index, action, now_ms) for index, action in enumerate(actions)]
+    if port is not None:
+        port.log(slug, gated)
+        return port.record(TABLE, rows)
+    for row in gated:
+        gate_log.append(slug, row)
     return metrics.record(TABLE, rows, now_ms)
 
 

@@ -116,13 +116,13 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
             ]
         ),
     ),
-    "processes": (frozenset([Processes.scan.__name__]), frozenset()),
+    "processes": (frozenset([Processes.scan.__name__, Processes.rescan.__name__]), frozenset()),
     "inbox": (
         frozenset([Inbox.read.__name__]),
         frozenset([Inbox.send.__name__, Inbox.close.__name__, Inbox.settle_exit.__name__]),
     ),
     "llm": (frozenset(), frozenset([Llm.classify.__name__])),
-    "metrics": (frozenset(), frozenset([Metrics.emit.__name__])),
+    "metrics": (frozenset(), frozenset([Metrics.emit.__name__, Metrics.log.__name__])),
     "host": (frozenset([Host.read.__name__]), frozenset([Host.run.__name__])),
 }
 
