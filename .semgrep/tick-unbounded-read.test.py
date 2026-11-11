@@ -51,6 +51,12 @@ def expiry_on_another_key(redis, key, index):
     return redis.hgetall(key)
 
 
+def expiry_beside_key_scan(redis, other):
+    redis.expire(other, 60)
+    # ruleid: tick-unbounded-store-read
+    return redis.scan(0, match="swarm:*")
+
+
 def keyword_cursor(redis):
     # ruleid: tick-unbounded-store-read
     return redis.scan(cursor=0, match="swarm:*")

@@ -156,7 +156,7 @@ def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_ta
     assert all(path.endswith(".py") and "*" not in path for path in allowed)
     assert all(isinstance(task, str) and task.startswith("t-") for task in allowed.values())
     fixture = (_ROOT / ".semgrep/tick-unbounded-read.test.py").read_text()
-    assert fixture.count("# ruleid: tick-unbounded-store-read") == 11
+    assert fixture.count("# ruleid: tick-unbounded-store-read") == 12
     assert fixture.count("# ok: tick-unbounded-store-read") == 10
 
 
