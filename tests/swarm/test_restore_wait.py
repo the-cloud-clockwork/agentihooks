@@ -51,6 +51,29 @@ def test_the_wait_counts_from_when_a_retried_decision_first_awaited(store):
     assert found.measure == 20
 
 
+def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    waiting(store, at=0)
+    store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, pane_id="pm1", seat="master@sw"))
+    (found,) = restore_wait.findings(store, "sw", 20 * MINUTE)
+    shown = [{"id": found.id, "kind": found.kind, "subject": found.subject, "summary": found.summary}]
+    inbox = InboxStore(store.redis)
+    ledger_events.findings_pass(inbox, store, "sw", shown, {"phases": [], "tasks": [], "_meta": {"rev": 1}})
+    (item,) = inbox.pending_items("master@sw")
+    assert "restore wait" in item.text and "eng-1@sw" in item.text
+
+
+def test_the_seats_current_occupant_is_judged_before_an_older_record_of_the_same_seat(store):
+    older = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw")
+    current = AgentRecord("sw-master-2", MASTER, MASTER, seat="master@sw")
+    seatless = AgentRecord("sw-eng-9", "eng", "t9")
+    store.seats.occupy("master@sw", "sw-master-2", 1)
+    ordered = resume.occupants_first(store, [older, seatless, current])
+    assert [a.name for a in ordered] == ["sw-eng-9", "sw-master-2", "sw-master-1"]
+
+
 def two_masters_saved(store, tmp_path):
     store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
     for name in ("sw-master-1", "sw-master-2"):
