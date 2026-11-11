@@ -13,6 +13,7 @@
   "codex-cache.yml/seed": "standard",
   "count-record.yml/count-record": "standard",
   "coverage-stability.yml/compare": "batch",
+  "docs-sanity.yml/scan": "light",
   "equivalence.yml/ledger-equivalence": "standard",
   "feature-suite.yml/features": "standard",
   "gate-protected.yml/grade": "hosted",

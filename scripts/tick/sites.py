@@ -8,7 +8,7 @@ from importlib import import_module
 from typing import Any
 
 from scripts.swarm import reaper
-from scripts.tick import engine, steps
+from scripts.tick import engine, hook_reads, steps
 from scripts.tick import registry as step_registry
 from scripts.tick.adapters.processes import PassProcesses
 from scripts.tick.deadline import Deadline
@@ -46,6 +46,7 @@ BOX = "box"
 SLEEPING = "sleeping"
 FINISHED = "finished"
 CONFIG = "config"
+TICK_HOOK_READS = {"agents": TICK_KEYS, "tasks": frozenset({CONFIG})}
 
 
 class _GraphView:
@@ -81,8 +82,9 @@ class TickSites:
     scan: Token[PassProcesses | None] | None = None
 
     def hooks(self) -> dict[str, Callable[[], bool]]:
-        """Return the checks run before the start, agents and tasks sites."""
-        return {START: self._start, "agents": self._listed, "tasks": self._configured}
+        """Return the checks run before the start, agents and tasks sites, each guarded on the box keys it reads."""
+        found = {START: self._start, "agents": self._listed, "tasks": self._configured}
+        return hook_reads.guarded(found, TICK_HOOK_READS)
 
     def shut(self, step: Step) -> bool:
         """Return whether ``step`` stays shut: every step once a step held an exception; a tick site past the start
