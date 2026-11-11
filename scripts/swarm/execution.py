@@ -130,7 +130,7 @@ class ExecutionRegistry:
 
         def move(doc: dict[str, Any]) -> Any:
             rows = {key: row for key, row in doc["executions"].items() if _archivable(row)}
-            heads = latest(rows.values(), "seat")
+            heads: dict[str, dict[str, Any]] = latest(rows.values(), "seat")
             old = [key for key, row in rows.items() if _stale(row, heads[row["seat"]], listed)]
             if not old and "archive_ref" in doc:
                 return 0
