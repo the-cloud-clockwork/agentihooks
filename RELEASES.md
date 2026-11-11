@@ -2,6 +2,32 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.802 · 2026-11-11
+
+### 2026-11-10 · b12b8c4d290c · #10567 · @agenticore-app
+
+**Ignore the project local enforcements store so checkouts holding it stay clean**
+
+This change adds the `.agentihooks/enforcements.json` local enforcements store, and its `.tmp` write sibling, to `.gitignore`, without touching or moving the store itself. Previously, running `agentihooks enforcement --local` left an untracked file that git saw as dirty, which caused the push stop gate to wrongly refuse stops on otherwise clean checkouts. Regression tests confirm checkouts with the store now read clean to the stop guard, the post `wt.sh done` sync check, and plain `git status`, fixing the false refusals engineers were hitting.
+
+### 2026-11-10 · aadcd1521ca4 · #10555 · @agenticore-app
+
+**Guard tick site hook pass box reads at runtime**
+
+This change extends the recorded pass box discipline, previously checked only in a dedicated test, into runtime for both tick site hooks and the wrapper's hooks. A new `scripts.tick.hook_reads.guarded` wraps hook maps so every pass box read made while a hook runs is checked against its declared keys, with `PassBox` reporting reads to the guard. Behaviour is controlled by `AGENTIHOOKS_TICK_HOOK_READS`, defaulting to log-only `observe` mode, with `enforce` and `off` available. This closes a gap where undeclared reads outside the test harness went unnoticed, matching the enforcement-rollout rule of logging before raising.
+
+### 2026-11-10 · 50675d08affc · #10515 · @agenticore-app
+
+**Add a project agnostic docs sanity check and scrub public docs**
+
+This change adds a standard-library docs sanity scanner that flags private IPs, personal emails, internal hostnames, and secret-like tokens without printing matched text, wired into Tests' lint job via a reusable workflow so pull requests can't weaken the rules that grade them. It also scrubs 145 real hits across 18 docs/evidence files, replacing them with documentation-safe placeholders (RFC 5737 addresses, example.com, example.internal), preserving table meaning while preventing accidental leakage of sensitive data in public documentation going forward.
+
+### 2026-11-10 · abd90fb95a28 · #10554 · @agenticore-app
+
+**Count workstation agents by headed hive, not the sampler's hive id**
+
+This fix corrects `metrics_swarm.placement_counts`, which was miscounting workstation agents as zero because it compared each agent's `runtime_target.host_id` against the sampling process's own hive id, now the Anton controller pod rather than a workstation. The sampler now identifies workstation agents as local agents on a headed hive (`ui=yes`) from the hive registry, falling back to its own hive if none is headed, matching the existing `placement.workstation_hives` rule and preserving old behavior for agents with missing host ids. This restores agreement between the Grafana panel and the hive registry's local agent counts, regardless of where the sampler runs.
+
 ## v2.17.801 · 2026-11-11
 
 ### 2026-11-10 · 79882da9fbeb · #10512 · @nestorcolt
