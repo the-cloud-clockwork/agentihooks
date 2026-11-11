@@ -105,6 +105,8 @@ def test_report_prints_each_step_ready_to_start_gap(capsys: pytest.CaptureFixtur
         {**counts, "pass_id": "a", "step": "waits", "ready_s": 2.0, "start_s": 13.7},
         {**counts, "pass_id": "a", "step": "merge pass", "ready_s": 3.0, "start_s": 3.0},
         {**counts, "pass_id": "a", "step": "legacy", "start_s": 3.0},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 5.0, "start_s": 5.0, "skipped": True},
+        {**counts, "pass_id": "a", "step": "waits", "ready_s": 6.0, "start_s": 6.0, "held": True},
         {**counts, "pass_id": "other", "step": "waits", "ready_s": 0.0, "start_s": 90.0},
     ]
     report = tick_report.summarize(passes, [], records)

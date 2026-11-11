@@ -159,14 +159,15 @@ class _Run:
             return self.given_up
 
 
-@dataclass
 class _Start:
-    """When one scheduled step's run began, decided once under a lock against the end of its lane."""
+    """When one scheduled step's run began, by its lane clock and by wall time, decided once under a lock against
+    the end of its lane."""
 
     clock: Callable[[], float]
     lock: Lock = field(default_factory=Lock)
     at: float | None = None
     closed: bool = False
+    wall: float | None = None
 
     def begin(self) -> bool:
         """Record that the run starts now and return True, or return False when its lane end already closed it."""
@@ -174,6 +175,7 @@ class _Start:
             if self.closed:
                 return False
             self.at = self.clock()
+            self.wall = time.time()
             return True
 
     def close(self) -> float | None:
@@ -440,7 +442,9 @@ def _critical(step: Step) -> bool:
 def _journal(step: Step, record: StepRecord, offset: float | None) -> StepRecord:
     """Append one ``tick:records`` row for ``record`` while a pass is recording, and return the record unchanged.
 
-    A step on the critical chain moves the pass record's ``critical_end_s`` to its end offset when that is later. An
+    The row's ``ready_s`` is the pass offset at which the step became ready and its ``start_s`` the offset at which
+    its run began, the ready offset when it never ran. A step on the critical chain moves the pass record's
+    ``critical_end_s`` to its start offset plus its wall time when that is later. An
     abandoned step that started counts every write domain it declares as dropped, since its result never applies.
     """
     store, slug, current = timing.STORE.get(), timing.SWARM.get(), timing.PASS.get()
@@ -619,7 +623,7 @@ def _expire(
                 left = StepRecord(step.name, 0.0, step.budget_s, abandoned=True, skipped=True)
             else:
                 _lost_writes(step, CUT_EVENT)
-                left = StepRecord(step.name, clock() - began, step.budget_s, cut=True)
+                left = StepRecord(step.name, clock() - began, step.budget_s, cut=True, started_at=start.wall)
             records[step.name] = _ended(found, left)
 
 

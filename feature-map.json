@@ -1104,6 +1104,7 @@
         "tests/tick/test_engine_records.py::test_step_row_carries_its_ready_time_beside_the_later_start_of_its_run",
         "tests/tick/test_engine_records.py::test_step_that_never_ran_starts_at_its_ready_time",
         "tests/tick/test_engine_records.py::test_abandoned_and_held_rows_keep_their_run_start_apart_from_their_ready_time",
+        "tests/tick/test_engine_records.py::test_step_cut_at_its_lane_end_keeps_the_start_of_its_queued_run",
         "tests/swarm/test_tick_report.py::test_report_prints_each_step_ready_to_start_gap"
       ]
     },

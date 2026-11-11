@@ -80,10 +80,10 @@ def outcomes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def ready_gaps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return each step's count, median and largest gap from becoming ready to starting its run, read from the
-    ``tick:records`` rows that carry a ready time, sorted by name."""
+    ``tick:records`` rows that carry a ready time and whose run started, sorted by name."""
     grouped: dict[str, list[float]] = defaultdict(list)
     for row in records:
-        if "ready_s" in row:
+        if "ready_s" in row and not row["skipped"] and not row["held"]:
             grouped[row["step"]].append(row["start_s"] - row["ready_s"])
     return [
         {"step": name, "count": len(gaps), "median_s": median(gaps), "max_s": max(gaps)}
