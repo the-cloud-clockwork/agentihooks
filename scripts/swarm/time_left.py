@@ -4,7 +4,7 @@ import sqlite3
 from typing import Any
 
 from scripts.swarm import capacity, ci_speed, freeze
-from scripts.swarm.ledger_client import LedgerRefused
+from scripts.swarm.ledger_client import LedgerRefused, LedgerUnreachable
 
 WATCHED_KEPT = 100
 WATCHED_LENGTH = 2000
@@ -37,4 +37,6 @@ def refresh(slug: str, store: Any, ledger: Any, runtime: Any, config: Any, doc: 
             writer(slug, inputs["slots"], inputs["ci_minutes"], **focus(config, doc))
         except sqlite3.DatabaseError as exc:
             raise LedgerRefused(f"time left write failed: {exc}") from exc
+        except LedgerUnreachable as exc:
+            return [f"skipped the time left write: {exc}"]
     return []

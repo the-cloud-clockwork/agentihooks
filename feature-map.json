@@ -366,6 +366,16 @@
       ]
     },
     {
+      "id": "tick-time-left-server-error",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-tick-time-left-escape",
+      "behaviour": "A tick pass whose time left write meets a ledger server error skips that write and still runs its remaining steps, placing claimable tasks.",
+      "seam": "scripts.swarm.tick.tick with a LedgerClient time left write whose ledger call answers server refused 500",
+      "tests": [
+        "tests/swarm/test_tick_time_left.py::test_a_ledger_server_error_on_the_time_left_write_keeps_the_pass_running"
+      ]
+    },
+    {
       "id": "swarm-tick-slow-export",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2161",
