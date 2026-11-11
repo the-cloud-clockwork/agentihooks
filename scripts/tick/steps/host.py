@@ -246,6 +246,11 @@ def pass_view(slug: str, view: Any) -> Any:
     return PENDING_VIEW if earlier is None else earlier
 
 
+def settled_view(view: Any) -> Any:
+    """Return ``view``, or None while it is still ``PENDING_VIEW``."""
+    return None if view is PENDING_VIEW else view
+
+
 def _keep_view(slug: str, built: Future[Any], order: int) -> None:
     """Keep the view ``built`` made as the last view of swarm ``slug`` when the build ended without an error and no
     build the swarm started after it, by ``order``, is kept already."""

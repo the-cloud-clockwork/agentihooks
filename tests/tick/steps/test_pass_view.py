@@ -135,6 +135,14 @@ def test_a_first_build_outside_a_pass_is_awaited() -> None:
 
 
 @pytest.mark.feature("swarm-tick-view-lane-fit")
+def test_a_pending_view_settles_to_no_view_and_a_view_to_itself() -> None:
+    view = object()
+    assert host.settled_view(host.PENDING_VIEW) is None
+    assert host.settled_view(view) is view
+    assert host.settled_view(None) is None
+
+
+@pytest.mark.feature("swarm-tick-view-lane-fit")
 def test_the_tick_view_step_builds_nothing_while_the_first_build_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     built: list[tuple[Any, ...]] = []
     monkeypatch.setattr(host.ledger_events, "tick_view", lambda *args: built.append(args))
