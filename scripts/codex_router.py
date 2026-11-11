@@ -103,7 +103,7 @@ class RoutingError(RuntimeError):
     pass
 
 
-def _claims(token: str) -> dict:
+def _claims(token: str) -> dict[str, object]:
     parts = token.split(".")
     if len(parts) != 3:
         return {}
@@ -179,6 +179,19 @@ def expires_at(account: CodexAccount, environ: Mapping[str, str]) -> float | Non
     token = environ.get(account.env_name)
     exp = _claims(token).get("exp") if token else None
     return exp if isinstance(exp, int | float) else None
+
+
+def recheck_expired(account: CodexAccount, quota: CodexQuota | None, environ: Mapping[str, str], now: float) -> bool:
+    """An expired reading whose bearer token exp is still ahead: one refused usage read is not a dead login."""
+    if quota is None or not quota.expired:
+        return False
+    try:
+        bearer = _bearer(account, environ)
+    except RoutingError:
+        return False
+    claims = _claims(bearer[0]) if bearer else {}
+    exp = claims.get("exp")
+    return isinstance(exp, int | float) and exp > now
 
 
 def bearer_overrides() -> list[str]:
@@ -490,7 +503,8 @@ def fresh_quotas(
         stale = seen is None or quota_freshness.stale(
             seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
         )
-        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        recheck = recheck_expired(account, seen, environ, now)
+        due = force or recheck or (stale and not session_bands.fresh(attempts.get(account.name), now))
         if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen

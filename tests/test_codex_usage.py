@@ -12,7 +12,7 @@ from scripts import agents_quota, codex_router, codex_usage
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
 from scripts.hive import quota_refresh
-from tests.codex_fakes import NOW, access_token
+from tests.codex_fakes import NOW, access_token, jwt
 
 WEEK = {"used_percent": 12.0, "limit_window_seconds": 604800, "reset_after_seconds": 9, "reset_at": NOW + 100_000}
 FIVE = {"used_percent": 40.0, "limit_window_seconds": 18000, "reset_at": NOW + 600}
@@ -291,6 +291,7 @@ def _replay(monkeypatch, days_left, replies):
 
 def _seats(account, environ, now):
     reading = codex_router.quotas([account], environ)[account.name]
+    assert reading is not None
     return reading.state_at(now), codex_router.account_cap(reading, now)
 
 
@@ -318,3 +319,27 @@ def test_an_expired_reading_for_a_token_past_its_exp_stays_expired_and_is_not_pr
     assert quota_refresh.due(environ, later) is False
     assert quota_refresh.refresh(environ, later) is False
     assert _seats(account, environ, later) == ("EXPIRED", 0)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
+@pytest.mark.parametrize(
+    "account, token, quota, expected",
+    [
+        ("alpha", access_token(7), CodexQuota(NOW, "?", expired=True), True),
+        ("alpha", access_token(7), None, False),
+        ("alpha", access_token(7), codex_usage.parse(PRO, NOW), False),
+        ("alpha", access_token(0), CodexQuota(NOW, "?", expired=True), False),
+        ("alpha", "sk-x", CodexQuota(NOW, "?", expired=True), False),
+        (
+            "alpha",
+            jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "ws-1"}}),
+            CodexQuota(NOW, "?", expired=True),
+            False,
+        ),
+        ("default", access_token(7), CodexQuota(NOW, "?", expired=True), False),
+    ],
+    ids=["live-token", "no-reading", "healthy", "exp-now", "routing-error", "no-exp", "default-without-file"],
+)
+def test_only_an_expired_reading_of_a_token_whose_exp_is_ahead_is_rechecked(account, token, quota, expected):
+    found = codex_router.CodexAccount(account, "" if account == "default" else "AH_CX_TOKEN_alpha")
+    assert codex_router.recheck_expired(found, quota, {"AH_CX_TOKEN_alpha": token}, NOW) is expected
