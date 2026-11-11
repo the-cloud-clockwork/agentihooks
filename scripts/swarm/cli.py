@@ -485,9 +485,11 @@ class _Wrapper:
         return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
-        commands once the ledger was binned or gone, and as the tick's sites say."""
-        stopped = step.group != "wrapper probes" and "stop" in self.box
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, past the commands once the ledger was binned or gone, and as the tick's sites
+        say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
         return stopped or self.ended is not None or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:

@@ -31,6 +31,7 @@ from scripts.tick.steps.tasks import PHASE_CHANGED, PHASES, WriteStep
 
 Get = Callable[[str], Any]
 JUDGING = "judging"
+REDIS_ONLY = frozenset({"host pressure", "prompt backlog", "hive sweep", "outbox migration"})
 VIEW_RESERVE_S = 20.0
 _LAST_VIEWS: dict[str, Any] = {}
 _VIEW_ORDER: dict[str, int] = {}
