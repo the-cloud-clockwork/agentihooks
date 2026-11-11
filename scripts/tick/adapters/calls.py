@@ -202,11 +202,11 @@ class LocalMetrics:
     """The gate log and process table of spawn helpers run outside a tick step, on this host."""
 
     append: Callable[[str, Any], object]
-    scan: Callable[[], Any]
+    processes: Callable[[], Any]
 
     def log(self, slug: str, rows: Sequence[object]) -> None:
         for row in rows:
             self.append(slug, row)
 
     def table(self) -> Any:
-        return self.scan()
+        return self.processes()
