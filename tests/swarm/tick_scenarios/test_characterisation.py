@@ -312,6 +312,9 @@ def test_tick_matches_golden(scenario: str, entry: str, monkeypatch: pytest.Monk
     compare(record, scenario, entry)
 
 
+@pytest.mark.feature("swarm-tick-declared-reads")
+@pytest.mark.parametrize("entry", ["tick", "run_tick"])
+@pytest.mark.parametrize("scenario", SCENARIOS)
 def test_recorded_passes_read_only_declared_values(
     scenario: str, entry: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

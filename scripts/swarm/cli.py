@@ -67,7 +67,7 @@ from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
@@ -193,7 +193,7 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
-from scripts.tick import engine, pool
+from scripts.tick import engine, hook_reads, pool
 from scripts.tick import registry as step_registry
 from scripts.tick import view as ledger_view
 from scripts.tick.adapters.coordination import StoreCoordination
@@ -268,6 +268,7 @@ WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
 PASS_HOOK_KEYS = {**WRAPPER_HOOK_KEYS, **TICK_HOOK_KEYS}
 PASS_SHUT_KEYS = {site: pass_domains("stop") | TICK_SHUT_KEYS.get(site, NONE) for site in PASS_SITES[1:]}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
+WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 ENDS_AFTER = ("wrapper probes", *HEALTH_SITES)
 CONFIG_KEYS = {
     **SCALING_KEYS,
@@ -390,18 +391,16 @@ def _hold_stored(slug: str, exc: OSError) -> None:
     ledger_client.SLOW.set(ledger_view.timed_out(exc))
 
 
-def _stopped_tick(store, slug, ledger, runtime, held):
+def _stopped_tick(store: RedisStore, slug: str, ledger: Any, held: Any) -> tuple[list[str], dict[str, Any]]:
     from scripts.swarm import command_runner, controller
 
-    runtime = controller.FencedRuntime(
-        store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
-    )
+    fenced = _fenced(held, controller.deployment_for(store.config(slug), os.environ))
     controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
-        return controls + _bin_stop(store, slug, ledger, runtime), {}
+        return controls + _bin_stop(store, slug, ledger, fenced), {}
     doc = timing.call(ledger_client.pass_state, ledger, slug)
     store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
-    return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
+    return controls + timing.call(tick, slug, store, ledger, fenced, now_ms()), doc
 
 
 def _intent_pass(inbox: Any, store: Any, slug: str, doc: dict, ledger: Any, config: Any) -> tuple[Future, list[str]]:
@@ -474,8 +473,9 @@ class _Wrapper:
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
-        later site's step may spawn before its hook runs."""
-        return {
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site."""
+        found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
             "wrapper phases": self._read,
@@ -484,6 +484,7 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
+        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
         """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
@@ -512,10 +513,7 @@ class _Wrapper:
         from scripts.swarm import controller
 
         deployment = controller.deployment_for(self.store.config(self.slug), os.environ)
-        runtime = controller.FencedRuntime(self.store, self.slug, self.held, self.state["runtime"], deployment)
-        self.state["runtime"] = runtime
-        if tools := PASS_TOOLS.get():
-            cast(Any, tools.runtime).legacy = runtime
+        self.state["runtime"] = _fenced(self.held, deployment)
         return True
 
     def _watch(self) -> bool:
@@ -556,7 +554,7 @@ class _Wrapper:
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
-            self.box["view"] = view.result() if isinstance(view, Future) else view
+            self.box["view"] = host_steps.pass_view(self.slug, view)
         return True
 
     def _reread(self) -> bool:
@@ -591,6 +589,24 @@ class _PassSpool:
         self._box.append_many(batches, checkpoint)
 
 
+def _fencing(store: RedisStore, slug: str) -> Callable[[object, str, Any], Any]:
+    """Return the fence the runtime port of swarm ``slug`` puts its pass runtime behind: the lease held, in a
+    deployment."""
+
+    def fence(held: object, deployment: str, runtime: Any) -> Any:
+        from scripts.swarm import controller
+
+        return controller.FencedRuntime(store, slug, held, runtime, deployment)
+
+    return fence
+
+
+def _fenced(held: object, deployment: str) -> Any:
+    """Fence the pass runtime to the lease ``held`` through the runtime port of the pass tools and return it."""
+    tools: Any = PASS_TOOLS.get()
+    return tools.runtime.fence(held, deployment, deadline=Deadline.after(TICK_LOCK_MS / 1000))
+
+
 def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, runtime: Any = None) -> Tools:
     """Build the port tools of one tick pass of swarm ``slug`` from the real adapters, acting as ``owner``."""
 
@@ -604,7 +620,7 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
         ledger=ClientLedger(slug, resource_client(slug, service=True)) if ledger is None else PassLedger(slug, ledger),
         coordination=StoreCoordination(store, slug, owner),
         source_control=GitHubSourceControl("", Path.cwd(), "dev"),
-        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime),
+        runtime=RouterRuntime(routed(os.environ).router, agent, legacy=runtime, fencing=_fencing(store, slug)),
         processes=PassProcesses(),
         inbox=StoreInbox(InboxStore(swarm.redis), f"tick@{slug}"),
         llm=ApiLlm(settings.models[0], settings.url),
@@ -676,7 +692,7 @@ def run_tick(
         run_group("before")
         if store.config(slug).state == "stopped":
             _hold_view(beating, slug, ledger)
-            actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
+            actions, doc = _stopped_tick(store, slug, ledger, held)
             return actions
         state = {"store": store, "slug": slug, "runtime": runtime, "box": box, "ledger": ledger}
         state |= {"inbox": InboxStore(store.redis), "scheduled": scheduled}

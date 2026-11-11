@@ -236,6 +236,19 @@ def test_search_hits_carry_citation_metadata_and_no_resume(inputs, bank):
         assert not [key for key in result if "resume" in key]
 
 
+def test_search_through_every_name_skips_a_deleted_session_before_the_sweep(inputs: dict, bank: Bank) -> None:
+    uid, domain = bank.uid("lock"), inputs["grant"]["corpus"]
+    stored = "SELECT COUNT(*) FROM search_chunk WHERE access_domain = ? AND session_uid = ?"
+    request = body(inputs, query=inputs["queries"]["hit"])
+    assert any(result["session_uid"] == uid for result in bank.ask("session_search", request)["results"])
+    bank.revoke("lock")
+    assert bank.corpus.catalog.db.execute(stored, (domain, uid)).fetchone()[0] > 0
+    for name in ("session_search", "search_semantic"):
+        answer = bank.ask(name, request)
+        assert answer["state"] == "answered"
+        assert all(result["session_uid"] != uid for result in answer["results"])
+
+
 def test_search_refusals_pass_through_with_their_class(inputs, bank):
     refused = bank.ask("session_search", {**body(inputs, query="x"), "access_domain": "personal-corpus"})
     assert error(refused) == {"class": "forbidden_scope", "retry": "never", "detail": core.SCOPE_REFUSED}

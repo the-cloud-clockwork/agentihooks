@@ -42,6 +42,8 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
             [
                 Coordination.lease.__name__,
                 Coordination.lock.__name__,
+                Coordination.tick_lock.__name__,
+                Coordination.release_tick_lock.__name__,
                 Coordination.configure.__name__,
                 Coordination.mark.__name__,
                 Coordination.store_write.__name__,
@@ -110,6 +112,7 @@ _OPERATIONS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
                 Runtime.admit.__name__,
                 Runtime.release_admission.__name__,
                 Runtime.activate_admission.__name__,
+                Runtime.fence.__name__,
             ]
         ),
     ),

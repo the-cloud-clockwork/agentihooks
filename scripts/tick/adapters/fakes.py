@@ -112,6 +112,12 @@ class FakeCoordination:
     def lock(self, name: str, *, deadline: Deadline) -> object:
         return _record(self, "lock", (name,), deadline)
 
+    def tick_lock(self, held: object, ttl_ms: int, caller: str, *, deadline: Deadline) -> str | None:
+        return _record(self, "tick_lock", (held, ttl_ms, caller), deadline)
+
+    def release_tick_lock(self, token: str, caller: str, *, deadline: Deadline) -> None:
+        _record(self, "release_tick_lock", (token, caller), deadline)
+
     def configure(self, settings: "SwarmConfig", *, deadline: Deadline) -> object:
         return _record(self, "configure", (settings,), deadline)
 
@@ -305,6 +311,9 @@ class FakeRuntime:
 
     def activate_admission(self, slug: str, task_id: str, reservation: str, *, deadline: Deadline) -> bool:
         return _record(self, "activate_admission", (slug, task_id, reservation), deadline)
+
+    def fence(self, held: object, deployment: str, *, deadline: Deadline) -> Any:
+        return _record(self, "fence", (held, deployment), deadline)
 
 
 @dataclass

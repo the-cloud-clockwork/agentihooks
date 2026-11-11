@@ -1,10 +1,13 @@
 import json
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
+from typing import Any
 
 import pytest
 
 from scripts.swarm import capacity, cli, host_budget, tick
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, HiveAcks
 
 CAPS = {"eng": 2, "ci": 1, "plan": 0}
@@ -35,6 +38,10 @@ def _decide(store, room, reason=MEMORY, limit="memory", slug="sw", granted_at=1_
 
 def _ledger():
     return FakeLedger([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}, {"id": "t3", "lane": "ci"}])
+
+
+def _as_sw(method: Callable[..., Any], ledger: FakeLedger, slug: str, *args: Any, **kwargs: Any) -> Any:
+    return method(ledger, "sw", *args, **kwargs)
 
 
 def _workers(runtime):
@@ -72,17 +79,16 @@ def test_another_swarm_counts_spawns_from_the_startup_lag_before_its_grant(store
     _decide(store, 2)
     tick.tick("sw", store, _ledger(), FakeRuntime(), now_ms=1_000)
     store.create(SwarmConfig("doc", "/repo", max_eng=2, max_ci=1))
-    ledger = FakeLedger([])
+    ledger = FakeLedger([{"id": "d1", "lane": "eng"}])
     ledger.notify = lambda slug, text: None
+    ledger.update_task = partial(_as_sw, FakeLedger.update_task, ledger)
     runtime = FakeRuntime()
     _decide(store, 2, slug="doc", granted_at=1_000 + tick.HOST_START_LAG_MS)
     actions = tick.tick("doc", store, ledger, runtime, now_ms=31_000)
-    assert _held(2, 2, who="the master spawn") in actions
-    assert runtime.masters == [] and runtime.spawned == []
+    assert any(action.startswith("holding spawns: host memory room 2, ") for action in actions)
+    assert len(runtime.masters) == 1 and runtime.spawned == []
     _decide(store, 2, slug="doc", granted_at=1_001 + tick.HOST_START_LAG_MS)
-    actions = tick.tick("doc", store, ledger, runtime, now_ms=31_001)
-    ((name, _),) = runtime.masters
-    assert f"spawned master {name}" in actions
+    assert tick._host_full("doc", store, 31_001) == ""
     assert tick.HOST_START_LAG_MS == 30_000
 
 
@@ -102,20 +108,16 @@ def test_a_decision_without_a_host_reading_never_holds(store):
     assert _workers(runtime) == ["t1", "t3", "t2"]
 
 
-def test_the_master_seat_waits_for_host_room(store):
+def test_the_master_seat_spawns_past_a_full_host_while_workers_wait(store):
     runtime = FakeRuntime()
     reason = "one minute load 1.60 per CPU is above the high watermark 1.50, no room"
     _decide(store, 0, reason, "load")
-    actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=1_000)
-    held = _held(0, 0, reason, "load", "the master spawn")
-    assert held in actions
-    assert tick.spawn_holds(store, "sw") == [held]
-    assert runtime.masters == []
-    assert [a for a in store.agents("sw") if a.lane == MASTER] == []
-    _decide(store, 1, granted_at=61_000)
-    actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=61_000)
+    actions = tick.tick("sw", store, _ledger(), runtime, now_ms=1_000)
     assert "spawned master master@a1b2c3-0001" in actions
-    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 61_000.0)]
+    assert not any(action.startswith("holding the master spawn") for action in actions)
+    assert runtime.spawned == []
+    assert any(action.startswith("holding spawns: host load room 0, ") for action in actions)
+    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 1_000.0)]
 
 
 def test_hive_launches_never_spend_the_workstation_host_room(store):

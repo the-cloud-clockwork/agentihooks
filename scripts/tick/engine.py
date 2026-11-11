@@ -717,7 +717,8 @@ def _eager(
 
 PASS_BUDGET_HOLD = "tick:budget-hold"
 PASS_WINDOW = 10
-STAGE_TARGETS = {"S1": 384.0, "S2": 240.0, "S3": 120.0, "S4": 60.0}
+GOLDEN_PASS_S = 100.0
+STAGE_TARGETS = {"S1": 384.0, "S2": 240.0, "S3": 120.0, "S4": GOLDEN_PASS_S}
 
 
 def pass_budget_hold(store: Any, slug: str) -> str:

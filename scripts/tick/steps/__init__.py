@@ -3,9 +3,9 @@
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from functools import partial
 from importlib import import_module
-from typing import Any, TypedDict, Unpack, cast
+from typing import Any, TypedDict, TypeGuard, Unpack, cast
 
-from scripts.tick import registry
+from scripts.tick import hook_reads, registry
 from scripts.tick.engine import StepRecord
 from scripts.tick.step import Context, Domain, Lane, Result, Write
 from scripts.tick.steps import budgets
@@ -90,6 +90,11 @@ class CallStep:
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
+def _is_box(found: object) -> TypeGuard[dict[str, Any]]:
+    """Return whether the pass value ``found`` is a box of values a step may read."""
+    return isinstance(found, dict)
+
+
 def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) -> Any:
     """Return the step deadline or tools, else the pass value under key once step ``step`` declares it; the pass
     box comes back as a view refusing every box value the step does not declare."""
@@ -98,10 +103,9 @@ def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) ->
     if key == DEADLINE:
         return ctx.deadline
     found = ctx.view.read(PASS, key)
-    if key == BOX or isinstance(found, PassBox):
-        return DeclaredBox(cast(dict[str, Any], found), step, allowed)
-    box = ctx.view.read(PASS, BOX)
-    if key not in allowed and (key in BOX_KEYS or (isinstance(box, Mapping) and key in box)):
+    if _is_box(found) and (key == BOX or isinstance(found, PassBox)):
+        return DeclaredBox(found, step, allowed)
+    if key not in allowed and key in BOX_KEYS:
         refuse(step, key)
     return found
 
@@ -134,7 +138,7 @@ def hook_domains(*keys: str) -> frozenset[Domain]:
 def declared_keys(domains: Iterable[Domain]) -> frozenset[str]:
     """Return the pass box keys ``domains`` name, through step and site hook domains alike, with the held
     exception every step may read."""
-    keys = {domain.split(":", 1)[1] for domain in domains if domain.startswith((PASS_PREFIX, HOOK_PREFIX))}
+    keys = {domain.partition(":")[2] for domain in domains if domain.startswith((PASS_PREFIX, HOOK_PREFIX))}
     return frozenset(keys | {RAISED})
 
 
@@ -235,6 +239,21 @@ class PassBox(dict[str, Any]):
     def __missing__(self, key: str) -> Any:
         """Raise ``Left`` naming the value no step stored."""
         raise Left(key)
+
+    def __getitem__(self, key: str) -> Any:
+        """Return the value under ``key`` once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Return the value under ``key``, else ``default``, once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        """Return whether the box holds ``key`` once the site hook guard saw the read."""
+        hook_reads.seen(key)
+        return super().__contains__(key)
 
 
 def note_left(box: object, records: Iterable[StepRecord]) -> None:

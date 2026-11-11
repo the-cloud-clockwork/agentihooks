@@ -6,12 +6,15 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from scripts.swarm import controller, lease, tick
 from scripts.swarm.store import MASTER, AgentRecord
+from scripts.tick.adapters.coordination import StoreCoordination
+from scripts.tick.adapters.fakes import FakeCoordination, FakeRuntime, fake_tools
+from scripts.tick.ports.tools import Tools
 from scripts.tick.steps import masters
 
 pytestmark = pytest.mark.unit
@@ -266,10 +269,7 @@ def test_a_master_without_a_slot_is_recorded_as_waiting(monkeypatch: pytest.Monk
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
-@pytest.mark.parametrize(("past_host", "said"), [(False, ["host held"]), (True, ["the master waits: no room"])])
-def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
-    monkeypatch: pytest.MonkeyPatch, past_host: bool, said: list[str]
-) -> None:
+def test_a_host_hold_never_stops_the_master(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = Calls()
     _starts(monkeypatch, {})
     record = _master_record()
@@ -280,9 +280,7 @@ def test_a_host_hold_stops_the_master_unless_it_starts_past_the_host(
 
     _seats(monkeypatch, host="host held", place=place, room=True)
     config = SimpleNamespace(state="running")
-    store, runtime = _store(calls), _runtime(calls)
-    started = masters._master("sw", config, store, runtime, NOW, past_host=True) if past_host else None
-    assert (started or masters._master("sw", config, store, runtime, NOW)) == said
+    assert masters._master("sw", config, _store(calls), _runtime(calls), NOW) == ["the master waits: no room"]
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
@@ -503,27 +501,42 @@ def unlocked(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     """Run each act under a fake tick lock with config ``running`` and record its slug, store and caller."""
     seen: list[tuple[Any, ...]] = []
 
-    def locked(slug: str, store: Any, act: Any, caller: str) -> Any:
-        seen.append((slug, caller))
+    def locked(slug: str, store: Any, act: Any, caller: str, coordination: Any) -> Any:
+        seen.append((slug, caller, coordination))
         return act(SimpleNamespace(state="running", name="config"), "held")
 
     monkeypatch.setattr(tick, "_under_tick_lock", _given(locked))
     return seen
 
 
+def _ported(monkeypatch: pytest.MonkeyPatch, fenced: Any) -> tuple[Tools, list[tuple[Any, ...]]]:
+    """Hand the master placement fake port tools whose runtime port fences to ``fenced``; return them and the
+    swarm, store and runtime the tools were built for."""
+    tools = fake_tools()
+    cast(FakeRuntime, tools.runtime).answers["fence"] = fenced
+    built: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        masters, "_master_tools", lambda slug, store, runtime: built.append((slug, store, runtime)) or tools
+    )
+    return tools, built
+
+
 @pytest.mark.feature("swarm-tick-master-placement")
 def test_place_master_starts_the_master_on_its_deployment_under_the_lock(
     monkeypatch: pytest.MonkeyPatch, unlocked: list[tuple[Any, ...]]
 ) -> None:
-    fenced: list[tuple[Any, ...]] = []
+    tools, built = _ported(monkeypatch, "fenced")
     monkeypatch.setattr(controller, "deployment_for", lambda config, env: f"deploy {config.name}")
-    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: fenced.append(args) or "fenced")
+    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: pytest.fail("fenced outside the runtime port"))
     monkeypatch.setattr(
         tick, "_master", _given(lambda slug, config, store, runtime, now_ms: [f"{runtime} {config.name} {now_ms}"])
     )
     assert masters.place_master("sw", "store", "runtime", NOW) == [f"fenced config {NOW}"]
-    assert fenced == [("store", "sw", "held", "runtime", "deploy config")]
-    assert unlocked == [("sw", "place master")]
+    assert built == [("sw", "store", "runtime")]
+    assert [(c.operation, c.args) for c in cast(FakeRuntime, tools.runtime).calls] == [
+        ("fence", ("held", "deploy config"))
+    ]
+    assert unlocked == [("sw", "place master", tools.coordination)]
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
@@ -540,14 +553,20 @@ def test_respawn_master_drops_gone_leads_then_adopts_or_spawns(
     worker = AgentRecord("engineer@abc123-0006", "eng", "t1")
     store = _store(calls, [gone, live, finished, starting, seated, worker])
     runtime = SimpleNamespace(live_names=lambda: {live.name})
-    fenced: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: fenced.append(args) or runtime)
+    tools, built = _ported(monkeypatch, runtime)
+    monkeypatch.setattr(controller, "FencedRuntime", lambda *args: pytest.fail("fenced outside the runtime port"))
     monkeypatch.setattr(tick, "_recover_master", _given(lambda slug, config, store, runtime, now_ms: recovered))
     monkeypatch.setattr(tick, "_master", _given(lambda slug, config, store, runtime, now_ms: ["spawned"]))
     assert masters.respawn_master("sw", store, "runtime", NOW) == [f"dropped the gone master {gone.name}", *said]
-    assert calls == [("drop_agent", ("sw", gone.name))]
-    assert fenced == [(store, "sw", "held", "runtime", controller.LOCAL)]
-    assert unlocked == [("sw", "respawn master")]
+    assert calls == []
+    assert [(c.operation, c.args) for c in cast(FakeCoordination, tools.coordination).calls] == [
+        ("store_write", ("drop_agent", ("sw", gone.name), {}))
+    ]
+    assert built == [("sw", store, "runtime")]
+    assert [(c.operation, c.args) for c in cast(FakeRuntime, tools.runtime).calls] == [
+        ("fence", ("held", controller.LOCAL))
+    ]
+    assert unlocked == [("sw", "respawn master", tools.coordination)]
 
 
 def _lock(
@@ -572,25 +591,30 @@ def _lock(
     return store, calls
 
 
+def _coordination(store: Any) -> StoreCoordination:
+    """Return the coordination port of swarm ``sw`` over ``store``, acting as the hive ``hive``."""
+    return StoreCoordination(store, "sw", "hive")
+
+
 @pytest.mark.feature("swarm-tick-master-placement")
 @pytest.mark.parametrize("state", ["stopping", "stopped"])
 def test_the_tick_lock_is_never_taken_for_a_stopping_swarm(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
     store, calls = _lock(monkeypatch, [state])
-    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
+    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller", _coordination(store)) == []
     assert calls == []
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_waits_without_a_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running"], held=None)
-    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
+    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller", _coordination(store)) == []
     assert calls == [("acquire", ("sw", "hive"))]
 
 
 @pytest.mark.feature("swarm-tick-master-placement")
 def test_the_tick_lock_waits_when_another_pass_holds_it(monkeypatch: pytest.MonkeyPatch) -> None:
     store, calls = _lock(monkeypatch, ["running"], token=None)
-    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
+    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller", _coordination(store)) == []
     assert calls == [("acquire", ("sw", "hive")), ("take", ("sw", "held", 30, "caller"))]
 
 
@@ -600,7 +624,7 @@ def test_the_tick_lock_releases_without_acting_once_the_swarm_stops(
     monkeypatch: pytest.MonkeyPatch, state: str
 ) -> None:
     store, calls = _lock(monkeypatch, ["running", state])
-    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller") == []
+    assert masters._under_tick_lock("sw", store, lambda config, held: ["acted"], "caller", _coordination(store)) == []
     assert calls[-1] == ("release", (store, "sw", "token", "caller"))
     assert "held pass" not in calls.names()
 
@@ -613,7 +637,7 @@ def test_the_tick_lock_acts_inside_the_held_pass_and_releases(monkeypatch: pytes
         calls.append(("act", (config.state, held)))
         return ["acted"]
 
-    assert masters._under_tick_lock("sw", store, act, "caller") == ["acted"]
+    assert masters._under_tick_lock("sw", store, act, "caller", _coordination(store)) == ["acted"]
     assert calls == [
         ("acquire", ("sw", "hive")),
         ("take", ("sw", "held", 30, "caller")),
@@ -631,5 +655,5 @@ def test_the_tick_lock_releases_when_the_act_raises(monkeypatch: pytest.MonkeyPa
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="^boom$"):
-        masters._under_tick_lock("sw", store, act, "caller")
+        masters._under_tick_lock("sw", store, act, "caller", _coordination(store))
     assert calls[-1] == ("release", (store, "sw", "token", "caller"))

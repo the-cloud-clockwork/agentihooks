@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -117,8 +118,20 @@ def test_order_ack_and_live_execution(setup):
         "account": "account",
         "model": config.codex_model,
         "effort": config.effort_min,
+        "overlays": [],
     }
     assert not setup.redis.xrange(setup.orders.stream("host"))
+
+
+def test_a_hive_ack_carries_the_remote_control_its_launch_recorded(setup):
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    off = {"state": "off", "detail": "subscription token fallback"}
+    placed = replace(setup.runtime.spawn.return_value.value, remote_control=off)
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    setup.orders.send("host", setup.order)
+    assert setup.consumer.poll() == 1
+    assert setup.orders.ack(setup.order).execution["remote_control"] == off
 
 
 @pytest.mark.parametrize(
@@ -787,7 +800,36 @@ def test_launch_keeps_lane_settings_and_selected_assignment(
         "account": "account",
         "model": expected_model,
         "effort": expected_effort,
+        "overlays": [],
     }
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_the_member_resolves_the_overlays_on_its_own_bundle_into_the_launch_assignment(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ("frontend",)))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    ack = setup.consumer.apply(setup.order)
+    assert ack is not None and ack.status == "live"
+    assert setup.runtime.spawn.call_args.args[0].task["launch_assignment"]["overlays"] == ["frontend"]
+
+
+@pytest.mark.feature("hosted-overlay-on-hive")
+def test_a_member_that_cannot_resolve_an_overlay_fails_the_order_without_launching(
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.hive.orders import Ack
+    from scripts.targets import _common
+    from tests.swarm.overlay_installer import installer
+
+    monkeypatch.setattr(_common, "_install_module", installer(tmp_path, ()))
+    setup.store.update("fixture", overlays={"engineer": ["frontend"]})
+    assert setup.consumer.apply(setup.order) == Ack("failed", {}, "overlays: overlay frontend not found")
+    setup.runtime.spawn.assert_not_called()
 
 
 def test_spawn_without_validation_is_reported_ambiguous(setup):

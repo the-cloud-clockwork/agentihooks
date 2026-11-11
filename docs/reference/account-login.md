@@ -161,9 +161,9 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
 
 - **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
   list of emails, for example
-  `nestor.colt@gmail.com,thecloudclockwork@gmail.com`); logins it does not
+  `operator@example.com,second@example.com`); logins it does not
   name follow in slot order. The first entry is the primary login: at or under
-  `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` (default 20) of its week left,
+  `AGENTIHOOKS_PRIMARY_LOGIN_RESERVE_PCT` (default 2) of its week left,
   nothing new places there and it is skipped for the next login in order,
   above that reserve it is still offered first. A login with 10% or less left
   on its five hour or week window (the shared drain floor) is skipped, and so

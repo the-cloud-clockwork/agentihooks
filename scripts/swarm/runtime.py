@@ -864,7 +864,10 @@ class HerdrRuntime:
             choice=agent_choice.choice_kind(reason),
             overlays=list(decision.overlays),
             route_kind=placed_kind,
-            remote_control=remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
+            remote_control=remote_control.landed(
+                remote_control.decision(lane, agent, placed_kind, config.slug, login) if front else {},
+                placed.placement,
+            ),
             desired_route_kind=None
             if lane != MASTER
             else "interactive"
@@ -938,7 +941,7 @@ class HerdrRuntime:
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
             route_kind=kind,
-            remote_control=rc,
+            remote_control=remote_control.landed(rc, placed.placement),
             desired_route_kind=agent.desired_route_kind,
         )
 

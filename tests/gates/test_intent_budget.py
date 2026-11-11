@@ -1,5 +1,6 @@
 """The intent check stays inside its tick step budget with thirty tasks in pr."""
 
+import contextvars
 import json
 import re
 import threading
@@ -200,12 +201,69 @@ def test_pull_texts_reads_twenty_pulls_a_document_and_keeps_only_those_with_a_he
         + "}"
         for batch in (urls[:20], urls[20:])
     ]
-    assert source.documents == expected
+    assert sorted(source.documents) == sorted(expected)
     assert sorted(found) == sorted(url for url in urls if url != urls[2])
     assert found[urls[0]] == {"head": "h0", "title": "T0", "body": "B", "state": "OPEN", "draft": False}
     assert found[urls[1]] == {"head": "h1", "title": "", "body": "", "state": "", "draft": False}
     assert found[urls[3]]["draft"] is True
     assert ledger_events.pull_texts([], cast(Any, source)) == {} and len(source.documents) == 2
+
+
+class _MeetingGraph(_Graph):
+    """A source whose reads each wait until ``parties`` reads are in flight at once."""
+
+    def __init__(self, pulls: dict[str, dict[str, Any]], parties: int) -> None:
+        """Answer reads of ``pulls`` once ``parties`` reads meet."""
+        super().__init__(pulls)
+        self.meeting = threading.Barrier(parties, timeout=5)
+
+    def graph(self, document: str, variables: dict[str, str], *, deadline: Any) -> dict[str, Any]:
+        """Wait for the other reads, then answer as the plain source does."""
+        self.meeting.wait()
+        return super().graph(document, variables, deadline=deadline)
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_pull_texts_reads_its_batches_at_the_same_time() -> None:
+    from scripts.swarm import ledger_events
+
+    urls = [f"https://github.com/o/r/pull/{i}" for i in range(45)]
+    raw = {url: {"headRefOid": f"h{i}", "title": "T", "body": "B", "state": "OPEN"} for i, url in enumerate(urls)}
+    source = _MeetingGraph(raw, parties=3)
+    found = ledger_events.pull_texts(urls, cast(Any, source))
+    assert sorted(found) == sorted(urls)
+    assert len(source.documents) == 3
+
+
+_READER: contextvars.ContextVar[str] = contextvars.ContextVar("reader", default="none")
+
+
+class _ContextGraph(_Graph):
+    """A source that records the reader each read runs under."""
+
+    def __init__(self, pulls: dict[str, dict[str, Any]]) -> None:
+        """Answer reads of ``pulls`` and record no reader yet."""
+        super().__init__(pulls)
+        self.readers: list[str] = []
+
+    def graph(self, document: str, variables: dict[str, str], *, deadline: Any) -> dict[str, Any]:
+        """Record the reader, then answer as the plain source does."""
+        self.readers.append(_READER.get())
+        return super().graph(document, variables, deadline=deadline)
+
+
+@pytest.mark.feature("swarm-intent-check-budget")
+def test_pull_texts_reads_each_batch_in_the_callers_context() -> None:
+    from scripts.swarm import ledger_events
+
+    urls = [f"https://github.com/o/r/pull/{i}" for i in range(25)]
+    source = _ContextGraph({url: {"headRefOid": "h"} for url in urls})
+    token = _READER.set("tick")
+    try:
+        ledger_events.pull_texts(urls, cast(Any, source))
+    finally:
+        _READER.reset(token)
+    assert source.readers == ["tick", "tick"]
 
 
 @pytest.mark.feature("swarm-intent-check-budget")

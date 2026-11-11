@@ -37,9 +37,7 @@ def run(
         if refused := seat_spawn.placed_elsewhere(runtime, MASTER, {"id": seat_name}):
             actions.append(refused)
             continue
-        if refused := (
-            seat_spawn.no_slot(config, runtime, MASTER) or seat_spawn.host_hold(slug, store, now_ms, MASTER)
-        ):
+        if refused := seat_spawn.no_slot(config, runtime, MASTER):
             return [*actions, refused]
         actions.append(_place(slug, config, store, runtime, seat_name, now_ms, doc))
     return actions

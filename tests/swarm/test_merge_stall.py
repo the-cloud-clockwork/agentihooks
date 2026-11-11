@@ -308,12 +308,12 @@ def test_every_github_request_renews_the_tick_before_waiting(monkeypatch):
 
 
 @pytest.mark.parametrize("length", [0, None])
-def test_an_empty_or_absent_dev_queue_returns_no_entries(rig, length):
+def test_an_empty_or_absent_dev_queue_returns_no_entries_and_the_last_dev_merge(rig, length):
     from scripts.swarm.health import merge_stall
 
     store, config, state = rig
     state["queue"] = length
-    assert merge_stall.queue(config.repo, REPO) == (0, 0)
+    assert merge_stall.queue(config.repo, REPO) == (0, AT - HOUR)
 
 
 @pytest.mark.parametrize("length,age", [(0, HOUR), (None, HOUR), (3, HOUR - 1), (3, 0)])
@@ -323,7 +323,7 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
     store, config, state = rig
     state.update(queue=length, merged=AT - age)
     expected_length = 0 if length is None else length
-    expected_merged = AT - age if length else 0
+    expected_merged = AT - age
     assert merge_stall.observe(config.repo, AT) == {
         "repo": REPO,
         "queue": expected_length,

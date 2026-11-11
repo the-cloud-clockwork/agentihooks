@@ -14,12 +14,15 @@ import re
 import subprocess
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage, stack
+from scripts.swarm.health import stall_blockers
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -497,26 +500,32 @@ PULL_TEXT = "resource(url:$url){...on PullRequest{headRefOid title body state is
 
 def pull_texts(urls: list[str], source: SourceControl | None = None) -> dict[str, dict[str, Any]]:
     """Return the head, title, body, state and draft flag of each pull request in ``urls``, read in batches of
-    twenty, leaving out every pull request a read did not return."""
+    twenty at once, leaving out every pull request a read did not return."""
     unique = list(dict.fromkeys(urls))
     if not unique:
         return {}
     port = source or stack.login_source_control()
+    batches = [unique[start : start + 20] for start in range(0, len(unique), 20)]
+    with ThreadPoolExecutor() as workers:
+        reads = [workers.submit(copy_context().run, _pull_batch, batch, port) for batch in batches]
+        return {url: pull for read in reads for url, pull in read.result().items()}
+
+
+def _pull_batch(batch: list[str], port: SourceControl) -> dict[str, dict[str, Any]]:
+    """Return what one document read of up to twenty pull requests in ``batch`` found with a head."""
+    fields = [f"p{i}:" + PULL_TEXT.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
+    data = _graphql("{" + " ".join(fields) + "}", port)
     found: dict[str, dict[str, Any]] = {}
-    for start in range(0, len(unique), 20):
-        batch = unique[start : start + 20]
-        fields = [f"p{i}:" + PULL_TEXT.replace("$url", json.dumps(url)) for i, url in enumerate(batch)]
-        data = _graphql("{" + " ".join(fields) + "}", port)
-        for i, url in enumerate(batch):
-            raw = data.get(f"p{i}")
-            if raw and raw.get("headRefOid"):
-                found[url] = {
-                    "head": raw["headRefOid"],
-                    "title": raw.get("title") or "",
-                    "body": raw.get("body") or "",
-                    "state": raw.get("state") or "",
-                    "draft": bool(raw.get("isDraft")),
-                }
+    for i, url in enumerate(batch):
+        raw = data.get(f"p{i}")
+        if raw and raw.get("headRefOid"):
+            found[url] = {
+                "head": raw["headRefOid"],
+                "title": raw.get("title") or "",
+                "body": raw.get("body") or "",
+                "state": raw.get("state") or "",
+                "draft": bool(raw.get("isDraft")),
+            }
     return found
 
 
@@ -662,11 +671,13 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     events = doc.get("_meta", {}).get("events", [])
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     raised = _raised_for_operator(doc, events)
+    held = functools.partial(_merged_held, mail, now_ms=now_ms)
     return (
         _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
         + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
+        + stall_blockers.observe(store, slug, doc, tasks.values(), github, now_ms, held)  # pyright: ignore[reportUnknownArgumentType]
         + _settle_red_notices(mail, github)
         + _move_task_notices(mail, ledger, tasks)
         + _priorities(mail, doc, raised)

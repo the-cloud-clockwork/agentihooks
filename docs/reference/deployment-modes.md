@@ -325,7 +325,7 @@ members post `hive refresh` to is the chart's `hive-join` Deployment. The antonc
 hive:
   join:
     enabled: true
-    memberRedisUrl: rediss://swarm-internal.homeofanton.com:6379/0
+    memberRedisUrl: rediss://swarm-internal.example.com:6379/0
     tlsSecretName: agentihooks-swarm-redis-tls
     serveLedgerCa: false        # hives keep trusting the workstation ledger's CA
     natsSigner:
@@ -333,7 +333,7 @@ hive:
 ```
 
 The antoncore manifest `k8s/manifests/agentihooks-swarm/services.yaml` publishes it on the LAN as the
-LoadBalancer `agentihooks-swarm-hive-join-lan`, port `join` 8770, on the shared MetalLB address `10.10.30.207`
+LoadBalancer `agentihooks-swarm-hive-join-lan`, port `join` 8770, on the shared MetalLB address `192.0.2.207`
 that [Swarm LAN services](swarm-lan-services.md) describes. That address and port form the `--url` given to
 `hive add`.
 
@@ -370,12 +370,12 @@ Read the live endpoint without credentials:
 kubectl -n agentihooks-swarm get deploy -l app.kubernetes.io/component=hive-join
 kubectl -n agentihooks-swarm get service agentihooks-swarm-hive-join-lan \
   -o jsonpath='{.status.loadBalancer.ingress[*].ip}{" "}{.spec.ports[?(@.name=="join")].port}{"\n"}'
-# 10.10.30.207 8770
+# 192.0.2.207 8770
 ```
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `hive refresh refused: the hive at <url> is unreachable` from an Anton hive | The `hive-join` Deployment is not running, or the LAN Service holds no `10.10.30.207` ingress | Run the two commands above; for the address, follow [Inspect service ownership](swarm-lan-services.md#inspect-service-ownership). Change the endpoint through the antoncore overlay and its GitOps delivery |
+| `hive refresh refused: the hive at <url> is unreachable` from an Anton hive | The `hive-join` Deployment is not running, or the LAN Service holds no `192.0.2.207` ingress | Run the two commands above; for the address, follow [Inspect service ownership](swarm-lan-services.md#inspect-service-ownership). Change the endpoint through the antoncore overlay and its GitOps delivery |
 | A change to `hive.join` values in antoncore passes `ci-validate` and still breaks refresh | No antoncore check renders the `hive-join` Deployment | Read the rendered Deployment with `helm template` against the overlay before merging, and run the agentihooks helm kind smoke for template changes |
 | A search for the hive join render checker in antoncore finds nothing | It was deleted in antoncore pull request 1002 | Use the checkers in the table above; none replaces it |
 
@@ -455,13 +455,13 @@ In this example a worker hive reaches the hosted ledger over its internal name w
 address. In the hive's environment:
 
 ```bash
-AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.homeofanton.com:8765
+AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.example.com:8765
 ```
 
 In the bundle's `profiles/<profile>/.claude/settings.overrides.json`:
 
 ```json
-{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.homeofanton.com"}}
+{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.example.com"}}
 ```
 
 Agents launched on that hive start with the internal address. A workstation tick whose env file leaves the variable
@@ -529,7 +529,7 @@ A workstation that reaches the hosted ledger for its own swarm only.
 ```bash
 AGENTIHOOKS_DEPLOYMENT=local
 AGENTIHOOKS_SWARM=rig-grade-swarm
-SWARM_URL=https://swarm.homeofanton.com
+SWARM_URL=https://swarm.example.com
 ```
 
 To see which way a shell resolves, from an agentihooks checkout:
@@ -545,6 +545,48 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 - An `AGENTIHOOKS_DEPLOYMENT` that is set but empty counts as a mode other than `local`, so the client is remote.
 - A remote client cannot make service writes with the page credential; the operator credential stays on its host.
 
+### Plan read on a remote client
+
+`agentihooks plan read` prints a task's plan chunk, or with `--phase` a phase's whole plan range, from the plan
+stored on the ledger. It resolves the client mode with the rules above, without naming a ledger, so a `SWARM_URL`
+makes it remote whichever ledger `AGENTIHOOKS_SWARM` names.
+
+| Client | Tasks, phases and artifacts | Stored plan text |
+|---|---|---|
+| Local | The local ledger folder | The local artifact folder |
+| Remote | The hosted ledger API, one collection read each for `tasks`, `phases` and `artifacts` | `GET <ledger address>/artifacts/<slug>/<file id>` on the hosted ledger server |
+
+The ledger address is the one a remote client sends to: an active ledger route, an answering
+`AGENTIHOOKS_HOSTED_LEDGER_URL`, else `SWARM_URL`, else `LEDGER_URL`. The collection reads carry the credentials in
+[Credentials a remote client sends](#credentials-a-remote-client-sends); the artifact request carries only the
+access headers from `SWARM_ACCESS_CLIENT_ID` and `SWARM_ACCESS_CLIENT_SECRET` (else the `CF_ACCESS_` pair). An agent
+on a remote hive therefore reads its plan lines with no ledger folder and no artifact folder on that machine. A
+local client reads as before.
+
+On a worker hive whose environment carries the hub address, inside a swarm task session:
+
+```bash
+# AGENTIHOOKS_DEPLOYMENT=compose, LEDGER_URL=https://swarm.example.internal:8765,
+# AGENTIHOOKS_SWARM and AGENTIHOOKS_SWARM_TASK set by the launch
+agentihooks plan read
+agentihooks plan read --phase <phase id>
+agentihooks plan read --slug rig-grade-swarm --task <task id>
+```
+
+A task without plan lines prints `This task has no plan lines; its description is the whole spec.` and the task
+description, in both modes.
+
+| Output | Cause |
+|---|---|
+| `no ledger <slug>` | The hosted ledger answered 404 for one of the three collections: it holds no ledger by that name |
+| `no stored artifact <file id>` | The hosted ledger holds the ledger but answered 404 for the plan file |
+| `unauthenticated: the ledger server refused the credential` | A collection read was answered 403 with the server's credential refusal |
+| An HTTP error traceback with its status | The hosted ledger refused with any other status, such as 503 once the read retries are spent; the error is not rewritten |
+
+`tests/swarm_ledger/test_plan_read.py` covers the remote read in compose mode with no local ledger folder: the
+three collection reads, the artifact request with its address and timeout, both 404 errors and a passed on 503. The credential refusal
+comes from the shared remote read retry, outside these tests.
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -558,6 +600,8 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |
 | Hive agents fail `ledger_join` and `ledger_write` launch checks while the hive controller reaches the hosted ledger | The agent's rendered `settings.json` holds a different `AGENTIHOOKS_HOSTED_LEDGER_URL` than the hive's environment: the hive runs a release before v2.17.330, or the controller process lacks the variable | Set the variable in `hive.env` or the worker pod's environment, run agentihooks v2.17.330 or later (the first release with the rule) on the hive, and restart the controller; the next launch rerenders the home |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
+| `agentihooks plan read` on a hive prints `no ledger <slug>` | The hive is a remote client and the hosted ledger holds no ledger by that name, or `SWARM_URL` points at another ledger server | Pass `--slug` with the swarm's ledger, or set the hub address the swarm's ledger lives on |
+| `agentihooks plan read` on a hive prints `no stored artifact <file id>` | The phase or task names a plan artifact the hosted ledger does not serve | Publish the plan to that ledger again with `publish-plan`; the command exits with this error until then, so work from the task description |
 
 ## Regulated site recipe
 
@@ -584,7 +628,7 @@ In `.env` next to `compose.yaml`:
 
 ```bash
 AGENTIHOOKS_DEPLOYMENT=compose
-SWARM_BIND=10.20.0.5                                  # the private interface, never 0.0.0.0 on a public host
+SWARM_BIND=198.51.100.5                               # the private interface, never 0.0.0.0 on a public host
 SWARM_PUBLIC_URL=http://swarm.example.internal:8765
 SWARM_ALLOWED_HOSTS=swarm.example.internal:8765
 SWARM_REDIS_PASSWORD=<from your secret store>
