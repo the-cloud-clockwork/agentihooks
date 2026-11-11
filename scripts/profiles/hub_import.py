@@ -4,7 +4,10 @@ Each package under ``agents/<agent>/package`` becomes ``profiles/<name>`` in the
 bundle: ``command.yml`` turns into ``profile.yml``, instructions, skills and rules
 are copied, and Claude settings become overrides with absolute paths removed.
 Secret files, symlinks, unsafe names and taken names refuse the whole import
-before any file is read for content or written.
+before any file is read for content or written; literal credential values and
+guard hooks the import would drop refuse it before any write. Profiles are
+staged first and moved into place only once all are written; an error while
+moving them removes the ones already moved.
 """
 
 from __future__ import annotations
@@ -12,10 +15,14 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import TypeGuard
 
 import yaml
+
+from hooks import secrets
 
 PROFILE_KEYS = ("description", "capabilities")
 CLAUDE_KEYS = ("model", "effort")
@@ -39,6 +46,11 @@ SECRET_NAMES = frozenset(
 )
 SECRET_SUFFIXES = (".env", ".key", ".p12", ".pem", ".pfx")
 RESTRICTIONS = ("deny", "ask")
+GUARD_EVENTS = ("PreToolUse", "PermissionRequest", "UserPromptSubmit")
+CREDENTIAL_KEY = re.compile(
+    r"(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIALS?)$", re.IGNORECASE
+)
+ENV_REFERENCE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*")
 ENV_TEMPLATES = frozenset({"dist", "example", "sample", "template"})
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 ABSOLUTE = re.compile(r"(?:^|[\s(=\"'])(?:/|~/|[A-Za-z]:[\\/]|file:/|\\\\)")
@@ -154,6 +166,8 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
         _refuse_lost_restrictions(settings, settings_path)
+        _refuse_lost_guards(settings, settings_path)
+        _refuse_literal_credentials(settings, settings_path)
         portable = _portable(settings)
         if portable is not _DROP:
             files[OVERRIDES] = (json.dumps(portable, indent=2) + "\n").encode()
@@ -171,15 +185,54 @@ def _refuse_lost_restrictions(settings: object, path: Path) -> None:
             raise ValueError(f"{key} rule with an absolute path refused: {path}")
 
 
+def _refuse_lost_guards(settings: object, path: Path) -> None:
+    """Refuse settings whose guard hooks carry an absolute path that import would drop."""
+    hooks = settings.get("hooks") if _is_mapping(settings) else None
+    if not _is_mapping(hooks):
+        return
+    for event in GUARD_EVENTS:
+        if any(ABSOLUTE.search(text) for text in secrets.iter_strings(hooks.get(event))):
+            raise ValueError(f"{event} hook with an absolute path refused: {path}")
+
+
+def _refuse_literal_credentials(settings: object, path: Path) -> None:
+    """Refuse settings holding a credential value instead of an environment reference."""
+    env = settings.get("env") if _is_mapping(settings) else None
+    if _is_mapping(env):
+        for key, value in env.items():
+            if CREDENTIAL_KEY.search(key) and isinstance(value, str) and value and not ENV_REFERENCE.fullmatch(value):
+                raise ValueError(f"literal credential refused, use an environment reference: {key} in {path}")
+    if any(secrets.scan(text, mode="strict") for text in secrets.iter_strings(settings)):
+        raise ValueError(f"literal credential refused: {path}")
+
+
 def _write(out: Path, plans: dict[str, dict[str, bytes]]) -> None:
-    """Write every planned profile, refusing one whose folder appeared since planning."""
-    for name, files in plans.items():
-        base = out / "profiles" / name
-        base.mkdir(parents=True)
-        for relative, data in files.items():
-            target = base / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+    """Stage every planned profile, then move them into place together, leaving none on failure or naming the one left behind."""
+    profiles = out / "profiles"
+    profiles.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=out))
+    committed: list[Path] = []
+    try:
+        for name, files in plans.items():
+            for relative, data in files.items():
+                target = staging / name / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+        for name in plans:
+            target = profiles / name
+            if target.exists():
+                raise ValueError(f"profile name taken: {name}")
+            (staging / name).rename(target)
+            committed.append(target)
+    except BaseException as exc:
+        for target in committed:
+            try:
+                target.rename(staging / target.name)
+            except OSError:
+                exc.add_note(f"remove left over profile: {target}")
+        raise
+    finally:
+        shutil.rmtree(staging)
 
 
 def main(argv: list[str] | None = None) -> int:

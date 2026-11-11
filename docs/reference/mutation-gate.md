@@ -336,9 +336,121 @@ test merely to meet a time target.
 | A changed function has no recorded unit | Keep candidate files whole for that source path |
 | Manifest has no commit, a shared test helper or conftest changed, dependency inputs or the unit test workflow changed, or a Python module outside the measured roots changed | Disable narrowing; retain candidate files |
 | Inserted or deleted source cannot map directly | Include tests reaching the affected recorded functions; added or removed modules use their recorded units |
-| Import-time source changes or replaced lines outside a function | Include tests reaching recorded units in that module |
+| Import-time source changes or replaced lines outside a function that change the module shape | Include tests reaching recorded units in that module. Edits that leave the shape unchanged keep line selection; see [Class body edits outside a function](#class-body-edits-outside-a-function) |
 | Changed data file was opened by a recorded test | Retain that test as a covering candidate |
 | Narrowing would leave a source path with no tests | Keep its original candidate list |
+
+#### Class body edits outside a function
+
+An edit to a plain class attribute, such as a dataclass field or a constant in
+a class body, no longer selects every test that touched the file. Selection for
+that file comes from the tests that executed the changed function lines and the
+functions enclosing inserted or deleted lines, as for any other edit inside a
+function.
+
+The planner compares the module's shape before and after each change between
+the manifest commit and the head. The shape is the list of top level
+statements, where a class is reduced to its name, bases, keywords and
+decorators, its methods by name and decorators, its nested classes reduced the
+same way as a top level class, and its attributes whose value is a dict
+literal. A top level function is reduced to its name and decorators, so its
+signature and body are not part of the shape. Every other top level statement,
+such as an assignment or an import, is compared in full. Plain class attributes
+and method bodies are not part of the shape.
+No module wide fallback is added when the shape is unchanged, or when every
+top level change is additive: new imports, new undecorated functions, new
+assignments to unused names, or new entries appended to an existing top level
+list, tuple, set or dict literal, where a dict gains new constant keys and no
+new entry contains a call. That last exemption covers
+only a top level assignment; the same append to a dict literal inside a class
+body changes the shape.
+
+| Change outside any function | Module shape | Selection for that file |
+|---|---|---|
+| A class attribute value changes, `X = 1` to `X = 2`, annotated or not | Unchanged | Tests that executed the changed lines |
+| A class attribute is added or removed, such as a new dataclass field | Unchanged | Tests that executed the changed lines |
+| A class attribute whose value is a dict literal changes, such as a dispatch table | Changed | Every test reaching a recorded unit of the module |
+| A top level assignment changes, `SETTING = 1` to `SETTING = 2` | Changed | Every test reaching a recorded unit of the module |
+| A new entry is appended to a top level literal, `HANDLERS = {"a": f}` to `HANDLERS = {"a": f, "b": g}` | Changed, exempt as additive | Tests that executed the changed lines, plus tests that executed a line reading that table, plus any test that executed a line of that file and whose own test file names the table. A dict subscript lookup outside a `try` block is not counted as a read, because only a test passing the new key reaches the new entry |
+| A class base, keyword or decorator changes | Changed | Every test reaching a recorded unit of the module |
+| A decorator on a function or method is added, removed or changed | Changed | Every test reaching a recorded unit of the module |
+| A method or nested class is added, removed or renamed | Changed | Every test reaching a recorded unit of the module |
+| The new source does not parse while the old one does | Changed | Every test reaching a recorded unit of the module |
+
+A replaced line still maps to its recorded line, so a test whose recorded
+lines include the changed class body line is selected. An inserted or deleted
+line inside a function still adds the tests reaching that function, and a
+replaced function header line still adds that function's tests. The table rows
+that mean "changed" are the cases where a top level rebinding, a new dispatch
+entry or a changed decorator can alter behavior in code no changed line
+belongs to.
+
+For example, a pull request adds one field to a configuration dataclass and
+changes one line in the method that reads it. The names below illustrate the
+shape of the measured change; they are not the store's source:
+
+```diff
+ @dataclass
+ class Config:
+     slug: str
++    mode: str = "legacy"
+
+ class Store:
+     def config(self, slug: str) -> Config:
+-        raw = self._read(slug)
++        raw = self._read(slug) or {}
+         return Config(**raw)
+```
+
+The shape of the module is the same before and after, so the selection for
+that file holds the tests whose recorded lines include the changed `config`
+line, plus helper callers and any whole files the other fallbacks keep. Before
+this rule, the added field selected every test reaching any unit of the
+module.
+
+##### Configuration
+
+There is no switch or threshold. The rule runs inside the existing planner
+command whenever a usable line manifest is found, and does not apply when the
+manifest is missing or narrowing is disabled by the drift rows above.
+
+##### Inspect the class body selection
+
+Download the selection as in [Inspect the selection](#inspect-the-selection)
+and count the entries for the changed file. A count near the number of tests
+reaching any unit of the module means the module wide fallback fired:
+
+```bash
+jq -r --arg path scripts/swarm/store.py '.[$path] | length' \
+  EVIDENCE_DIR/selection/.mutation-selection.json
+```
+
+##### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| A class field edit still selects thousands of tests | Look for another change in the same file since the manifest commit: a top level assignment, a decorator, a new or removed method, or a dict literal class attribute changes the shape and restores the module wide fallback |
+| A test that reads the new attribute is absent | The attribute line itself runs at import time, so only tests whose recorded lines include the changed line or a changed function line are selected. Change or cover a function line that reads the attribute, or rely on the test's file being kept by another fallback |
+| A survivor appears in code that reads the attribute | The mutant's line was not executed by a selected test. Add a test that executes that function line; the next dev record carries it |
+
+##### Delivery evidence
+
+[Pull request 7170](https://github.com/the-cloud-clockwork/agentihooks/pull/7170)
+delivered this rule for issue 7165. The measurement used one `SwarmConfig`
+field and one `RedisStore.config` line on a proof branch, read through the
+Proofs mutation workflow:
+
+| Run | Selection for `scripts/swarm/store.py` | Shards |
+|---|---|---|
+| [Before, Proofs 40193087658](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40193087658) | 7216 tests | About 976 s of the 1080 s budget; seven of ten shards ran out the budget on the original repair |
+| [After, Proofs 40310822438](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40310822438) | 583 tests | Nine shards, each completed in 640 to 1040 s |
+| [Planted fault, Proofs 40219199912](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40219199912) | 566 tests | A fault planted in the engine default of the reader; all 64 mutants killed and the report green |
+
+The regression cases are
+`test_statistics_select_only_contexts_executing_the_edited_branch`, with the
+`constant`, `dropped`, `rebound` and `decorator` modes, and
+`test_only_top_level_statement_edits_change_the_module_keys` in
+`tests/test_ci_mutation_planned_selection.py`.
 
 Escape-only tests do not supply recorded mutant coverage: their child process
 uses a light bootstrap that does not record trampoline hits. They cannot
