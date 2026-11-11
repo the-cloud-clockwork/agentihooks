@@ -1421,7 +1421,7 @@ Read the spills of the last hour from the tick journal, and the records the live
 environment agentihooks is installed in, from its checkout:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-1 hour" --no-pager | grep hive_placement_spill
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1 hour" --until now --no-pager | grep hive_placement_spill
 python -c '
 from scripts.swarm.store import connect
 s, slug = connect(), "my-swarm"
@@ -1430,14 +1430,14 @@ for a in s.agents(slug):
         print(a.name, a.hive, a.profile_decision["placement_spill"])'
 ```
 
-To confirm the first ranked hive takes launches until its memory line, set the rank and watch both its reading and the
-spills while the swarm fills:
+To confirm the first ranked hive takes launches until its memory line, set the rank, let the swarm fill, then read both its reading and the
+spills of the last ten minutes:
 
 ```bash
 agentihooks hive set worker-1 prefer=eng:1,ci:1,plan:1,dispatch:1
 agentihooks hive set worker-2 prefer=eng:2,ci:2,plan:2,dispatch:2
 agentihooks hive list          # worker-1 available-mb falls as it takes agents
-journalctl --user -t agentihooks-swarm -f --no-pager | grep --line-buffered hive_placement_spill
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-10 min" --until now --no-pager | grep --line-buffered hive_placement_spill
 ```
 
 Each spill line while `worker-1` is under its memory line names the other limit that refused it.
@@ -2563,7 +2563,7 @@ spawning, as described above.
 ```bash
 agentihooks swarm <id> status
 agentihooks hive list
-journalctl --user -t agentihooks-swarm --since "1 hour ago" -g "local slot claim" --no-pager
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now -g "local slot claim" --no-pager
 ```
 
 An agent placed on a hive shows that hive in `status`; an agent that fell back runs in a local herdr pane. Each

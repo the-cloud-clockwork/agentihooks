@@ -1255,7 +1255,7 @@ prints `slow lane step <name> failed: scripts.tick.ports.contracts.UndeclaredEff
 tick with:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "1 hour ago" | grep UndeclaredEffect
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now | grep UndeclaredEffect
 ```
 
 ## Fakes for tests

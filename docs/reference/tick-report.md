@@ -208,7 +208,7 @@ pass reads yet, the scheduler cron stays every minute, and every pass still runs
 
 | Symptom | Cause and action |
 |---|---|
-| `Tick report: 0 recorded passes` | No pass has recorded for this swarm. Check the swarm id, that the scheduler ticks (`journalctl --user -t agentihooks-swarm`), and the journal for `swarm_tick_record_failed`. |
+| `Tick report: 0 recorded passes` | No pass has recorded for this swarm. Check the swarm id, that the scheduler ticks (`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`), and the journal for `swarm_tick_record_failed`. |
 | Many passes without retained steps | Steps outnumber passes, so `tick:steps` trims first. Read a shorter window. |
 | No `Lane` lines | The window holds no step record with a lane. Check that the swarm runs the current tick code. |
 | `Lane tick` above 40 percent | The critical lane takes more step CPU than the 40 percent threshold. Find its heaviest rows and check whether each needs to finish before spawn; one that does not can move to the slow lane, see [Lanes](tick-engine-steps.md#lanes). |

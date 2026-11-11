@@ -675,7 +675,7 @@ the Anton host.
 Count the swarm tick's Redis timeouts in the window:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "2026-10-20 11:00" --until "2026-10-20 11:40" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "2026-10-20 11:00" --until "2026-10-20 11:40" \
   | grep -c "alias lookup failed"
 ```
 
@@ -919,7 +919,7 @@ read.
 
 ```bash
 D=rig-grade-swarm-doctor
-journalctl --user -t agentihooks-swarm --since "-6h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-6h" --until now \
   | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"' \
   | grep "\"slug\": \"$D\"" | grep '"step": "doctor.trace"' \
   | sed 's/^[^{]*//' \
