@@ -240,6 +240,14 @@ def test_a_master_remote_or_live_launch_closes_its_pane_on_retirement(store, age
     assert runtime.closed == [agent.pane_id] and failed_panes.held(store, "sw") == {}
 
 
+def test_a_hive_hosted_launch_keeps_its_pane_off_the_controller_hold(store, monkeypatch):
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    runtime = PaneRuntime()
+    agent = AgentRecord("engineer@a1b2c3-0004", "eng", "t1", pane_id="w5M:p1", runtime_target={"host_id": "root"})
+    assert tick_module._retire_launch("sw", store, runtime, agent, FAILED_AT) is True
+    assert runtime.closed == ["w5M:p1"] and failed_panes.held(store, "sw") == {}
+
+
 def test_a_failed_retirement_holds_no_pane(store):
     runtime = PaneRuntime()
     agent = AgentRecord("engineer@a1b2c3-0003", "eng", "t1", pane_id="w1:p3")
