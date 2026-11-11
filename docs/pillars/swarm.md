@@ -4682,8 +4682,9 @@ supervisor's checkout in its own session. The holder owns one machine tick for i
    `systemd-cat` is on the path. The child inherits the open lock file through `AGENTIHOOKS_SWARM_TICK_LOCK_FD`
    and keeps that lock instead of taking a second one, so the machine holds exactly one tick lock while the pass
    runs. The child's environment carries only `HOME`, `LANG`, `LOGNAME`, `SHELL`, `USER`, `XDG_RUNTIME_DIR`,
-   `XDG_DATA_DIRS` and a fixed `PATH` (`~/.local/bin`, `~/.cargo/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`); a
-   variable exported in an interactive shell never reaches a scheduled tick.
+   `XDG_DATA_DIRS`, `AGENTIHOOKS_SWARM_TICK_LOCK_FD` and a fixed `PATH` (`~/.local/bin`, `~/.cargo/bin`,
+   `/usr/local/bin`, `/usr/bin`, `/bin`); a variable exported in an interactive shell never reaches a scheduled
+   tick.
 3. It waits 540 seconds for the pass. A pass still running then gets SIGTERM on its process group and 90 more
    seconds, then SIGKILL.
 4. After a pass that timed out or exited non-zero, it sweeps the process group: SIGTERM, up to 10 seconds, then
@@ -4731,7 +4732,7 @@ no tick at all (see [Workstation tick retirement](#workstation-tick-retirement))
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `journalctl --user -u agentihooks-swarm.service` shows nothing new | The timer and its service were retired; scheduled ticks log under the identifier, not the unit. | Read `journalctl --user -t agentihooks-swarm`. |
+| `journalctl --user -u agentihooks-swarm.service` shows nothing new | Scheduled ticks log under the identifier, not the unit; the timer and its service are retired once delivery is proven, and while the delivery guard keeps them the fallback's pass output logs under the identifier too. | Read `journalctl --user -t agentihooks-swarm`. |
 | `another swarm tick is running on this machine` from a hand run | A scheduled pass holds the machine lock. | Expected. Wait for the pass to end, or read its output in the journal. |
 | A pass ends every minute near the nine minute mark | The pass ran past 540 seconds and the holder stopped it. | Read the pass's output for the slow step; [Tick report](../reference/tick-report.md) times each step. |
 | A setting exported in a shell has no effect on scheduled ticks | The holder passes only its fixed environment. | Record the setting in `~/.agentihooks/.env`. |
