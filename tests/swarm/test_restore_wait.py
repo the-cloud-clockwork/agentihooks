@@ -91,7 +91,8 @@ def test_swarm_status_reports_a_restore_wait_at_the_current_time(store, monkeypa
     waiting(store, at=10 * MINUTE)
     monkeypatch.setattr(status, "now_ms", lambda: 30 * MINUTE + 30_000)
     rows = status.findings(store, "sw", store.config("sw"), [], [])
-    assert [(r["subject"], r["measure"]) for r in rows if r["kind"] == "restore wait"] == [("sw-eng-1", 20)]
+    summary = "seat eng-1@sw has waited 20 minutes on a resume or fresh restore decision"
+    assert [(r["subject"], r["summary"]) for r in rows if r["kind"] == "restore wait"] == [("sw-eng-1", summary)]
 
 
 def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
