@@ -90,8 +90,8 @@ def test_swarm_status_reports_a_restore_wait_at_the_current_time(store, monkeypa
     swarm(store)
     waiting(store, at=10 * MINUTE)
     monkeypatch.setattr(status, "now_ms", lambda: 30 * MINUTE + 30_000)
-    found = [f for f in status.findings(store, "sw", store.config("sw"), [], []) if f.kind == "restore wait"]
-    assert [(f.subject, f.measure) for f in found] == [("sw-eng-1", 20)]
+    rows = status.findings(store, "sw", store.config("sw"), [], [])
+    assert [(r["subject"], r["measure"]) for r in rows if r["kind"] == "restore wait"] == [("sw-eng-1", 20)]
 
 
 def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
