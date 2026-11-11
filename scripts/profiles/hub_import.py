@@ -290,7 +290,7 @@ def _portable_path(match: re.Match[str], relative: str, agents: dict[str, str]) 
 
 
 def _home_form(rest: str, agents: dict[str, str]) -> str | None:
-    """Map a path below a home folder to its profile path when it names a hub agent, else to ``$HOME``."""
+    """Map a path below a home folder to its profile path, ``None`` for an agent file outside one, else ``$HOME``."""
     parts = rest.split("/")
     for index, part in enumerate(parts[:-1]):
         if part == "agents" and parts[index - 1] != ".claude":
