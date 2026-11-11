@@ -3431,6 +3431,20 @@
         "tests/swarm_ledger/test_row_diff.py::test_an_only_focus_filter_deletes_only_the_dropped_focus_rows",
         "tests/swarm_ledger/test_row_diff.py::test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze"
       ]
+    },
+    {
+      "id": "tick-master-placement-coordination",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-master-placement-ports",
+      "behaviour": "The master placement takes and releases the controller tick lock and drops gone lead masters only through the Tools coordination port: the port takes, refuses and releases the tick lock over the swarm store, both lock operations count as coordination writes a step must declare, the placement waits when the port refuses the lock, and the respawn drops a gone master through a coordination store write.",
+      "seam": "scripts.tick.ports.contracts.Coordination.tick_lock and release_tick_lock, implemented by scripts.tick.adapters.coordination.StoreCoordination",
+      "tests": [
+        "tests/tick/test_master_placement_coordination.py::test_the_store_coordination_takes_refuses_and_releases_the_tick_lock",
+        "tests/tick/test_master_placement_coordination.py::test_the_tick_lock_is_a_coordination_write_a_step_must_declare",
+        "tests/tick/test_master_placement_coordination.py::test_the_master_placement_takes_and_releases_the_tick_lock_through_the_port",
+        "tests/tick/test_master_placement_coordination.py::test_the_master_placement_waits_when_the_port_refuses_the_tick_lock",
+        "tests/tick/test_master_placement_coordination.py::test_respawn_master_drops_a_gone_master_through_the_coordination_port"
+      ]
     }
   ],
   "unmapped_rules": [
