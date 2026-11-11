@@ -11,6 +11,21 @@
       ]
     },
     {
+      "id": "claude-trust-lock-reclaim",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-trust-lock-reclaim",
+      "behaviour": "An agent launch that marks its folder trusted in a shared profile home's Claude config reclaims a lock directory left past the Claude lockfile stale bound by a killed launch and marks the folder, while a lock younger than the bound still blocks until the timeout.",
+      "seam": "claude_trust.ensure_trusted through _mark and _reclaim on the Claude config lock directory",
+      "tests": [
+        "tests/test_claude_trust.py::test_an_abandoned_lock_from_a_killed_launch_is_reclaimed_and_the_folder_marked",
+        "tests/test_claude_trust.py::test_a_lock_held_by_a_live_holder_still_blocks_the_mark",
+        "tests/test_claude_trust.py::test_a_lock_just_inside_the_stale_bound_is_left_to_its_holder",
+        "tests/test_claude_trust.py::test_a_lock_past_the_stale_bound_is_removed_and_a_vanished_one_reads_as_free",
+        "tests/test_claude_trust.py::test_a_stale_lock_another_launch_removed_first_reads_as_free",
+        "tests/test_claude_trust.py::test_a_lock_exactly_at_the_stale_bound_is_reclaimed"
+      ]
+    },
+    {
       "id": "swarm-master-skips-host-hold",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t1845",
@@ -3621,6 +3636,16 @@
         "tests/tick/test_master_placement_coordination.py::test_the_master_placement_takes_and_releases_the_tick_lock_through_the_port",
         "tests/tick/test_master_placement_coordination.py::test_the_master_placement_waits_when_the_port_refuses_the_tick_lock",
         "tests/tick/test_master_placement_coordination.py::test_respawn_master_drops_a_gone_master_through_the_coordination_port"
+      ]
+    },
+    {
+      "id": "swarm-exit-after-release",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-agent-self-exit",
+      "behaviour": "A tick launched worker that already handed off its seat with ready, park or handoff, so the tick already counts it ended, can run swarm exit to end its own session without the swarm up refusal; the claim the swarm carries for its pull request stays in place and the next tick pass retires the finished agent and closes its pane.",
+      "seam": "swarm exit against the tick retire path for a finished worker",
+      "tests": [
+        "tests/swarm/test_cli_self_exit.py::test_a_released_worker_exits_and_the_next_tick_retires_it"
       ]
     }
   ],
