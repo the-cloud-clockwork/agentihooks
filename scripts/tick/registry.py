@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import copy
 from dataclasses import dataclass
 from importlib import import_module
@@ -6,7 +6,7 @@ from itertools import combinations
 from math import isfinite
 
 from scripts.tick.pool import RESERVES
-from scripts.tick.step import Step
+from scripts.tick.step import Domain, Step
 
 __all__ = [
     "Catalogue",
@@ -52,6 +52,8 @@ def _catalogue_errors(steps: list[Step], catalogue: Catalogue) -> list[str]:
 
 
 PASS_BOX = "pass:"
+HOOK_BOX = "hook:"
+HookKeys = tuple[frozenset[Domain], frozenset[Domain]]
 PASS_BOX_INTERVAL_S = 60.0
 SLOW_LANE = "slow"
 
@@ -211,9 +213,12 @@ def _needing(step: Step, needs: frozenset[str]) -> Step:
     return edged
 
 
-def _barrier(step: Step, needs: frozenset[str]) -> Step:
-    """Return a copy of ``step`` that needs ``needs`` too, the barrier edges of its site."""
-    return _needing(step, step.needs | needs)
+def _boxed(domains: Iterable[Domain]) -> frozenset[Domain]:
+    """Return ``domains`` with each site hook value named as the pass value of the same name, one box key."""
+    return frozenset(
+        Domain(PASS_BOX + domain.removeprefix(HOOK_BOX)) if domain.startswith(HOOK_BOX) else domain
+        for domain in domains
+    )
 
 
 def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]:
@@ -227,29 +232,69 @@ def _backward(steps: tuple[Step, ...], sites: Sequence[str]) -> tuple[Step, ...]
     return tuple(found)
 
 
-def site_edges(steps: Iterable[Step], sites: Sequence[str], joins: Mapping[str, str] | None = None) -> tuple[Step, ...]:
-    """Return ``steps`` in order, each step of a site in ``sites`` also needing every step of the nearest earlier
-    site that holds steps; steps of groups outside ``sites`` keep their own needs.
+def site_edges(
+    steps: Iterable[Step],
+    sites: Sequence[str],
+    hooks: Mapping[str, HookKeys] | None = None,
+    shuts: Mapping[str, frozenset[Domain]] | None = None,
+) -> tuple[Step, ...]:
+    """Return ``steps`` in order, each step of a site in ``sites`` also needing each step of an earlier site that
+    writes a value it reads or writes, reads a value it writes, or writes a value the hook of a site between them,
+    its own included, reads or writes; steps of groups outside ``sites`` keep their own needs.
 
-    A step of a site needs no step of a later site, so each site runs after the one before it. A slow lane or
-    reserved step, and every step needing one, is no barrier for a later site. A site that ``joins`` maps to a later
-    site is no barrier for the sites between: only the steps of the site it names need it too. The barrier holds
-    whatever a step declares, because site hooks and steps read pass values no declaration names.
+    A step of a site needs no step of a later site. ``hooks`` holds the values each site hook reads and writes and
+    ``shuts`` the values the shut check reads for the steps of each site; a hook value and a pass value of the same
+    name are one box value. A slow lane or reserved step, and every step needing one, is no edge of a later site.
     """
     found = _backward(tuple(steps), sites)
+    order = {site: index for index, site in enumerate(sites)}
     late = _late(found)
-    members = {site: tuple(s for s in found if s.group == site and s.name not in late) for site in sites}
-    barrier: dict[str, tuple[Step, ...]] = {}
-    held: dict[str, tuple[Step, ...]] = {}
-    previous: tuple[Step, ...] = ()
-    for site in sites:
-        barrier[site] = previous + held.pop(site, ())
-        if joins and site in joins:
-            held[joins[site]] = held.get(joins[site], ()) + members[site]
-        else:
-            previous = members[site] or previous
-    edged = ((step, frozenset(other.name for other in barrier.get(step.group, ()))) for step in found)
-    return tuple(_barrier(step, needs) if needs else step for step, needs in edged)
+    early = tuple(step for step in found if step.group in order and step.name not in late)
+    hooked = {site: _boxed(reads | writes) for site, (reads, writes) in (hooks or {}).items() if site in order}
+    edged: list[Step] = []
+    for step in found:
+        if step.group not in order:
+            edged.append(step)
+            continue
+        uses = _Uses.of(step, (shuts or {}).get(step.group, frozenset()))
+        held = _hook_values(hooked, order, order[step.group])
+        needs = frozenset(
+            other.name
+            for other in early
+            if order[other.group] < order[step.group] and uses.after(other, held(order[other.group]))
+        )
+        edged.append(_needing(step, step.needs | needs))
+    return tuple(edged)
+
+
+@dataclass(frozen=True)
+class _Uses:
+    """The values one sited step reads, its shut check included, and writes."""
+
+    reads: frozenset[Domain]
+    writes: frozenset[Domain]
+
+    @classmethod
+    def of(cls, step: Step, shut: frozenset[Domain]) -> "_Uses":
+        """Return the values ``step`` reads, with ``shut``, and writes."""
+        return cls(step.reads | shut, step.writes)
+
+    def after(self, other: Step, hooked: frozenset[Domain]) -> bool:
+        """Return whether the step runs after ``other``: ``other`` writes a value it reads or writes, or the box key
+        of a ``hooked`` value, or reads a value it writes."""
+        written = other.writes & (self.reads | self.writes) or _boxed(other.writes) & hooked
+        return bool(written or other.reads & self.writes)
+
+
+def _hook_values(
+    hooked: Mapping[str, frozenset[Domain]], order: Mapping[str, int], at: int
+) -> Callable[[int], frozenset[Domain]]:
+    """Return the values the hooks of the sites after a given site and up to site ``at`` read or write."""
+
+    def between(start: int) -> frozenset[Domain]:
+        return frozenset[Domain]().union(*(keys for site, keys in hooked.items() if start < order[site] <= at))
+
+    return between
 
 
 def _late(steps: tuple[Step, ...]) -> frozenset[str]:

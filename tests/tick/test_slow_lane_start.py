@@ -53,7 +53,7 @@ def _pass_graph() -> dict[str, frozenset[str]]:
     sites = scripts.swarm.cli.PASS_SITES
     order = {site: index for index, site in enumerate(sites)}
     found = sorted((s for s in registry.steps() if s.group in order), key=lambda s: order[s.group])
-    edged = registry.site_edges(found, sites, scripts.swarm.cli.INTENT_JOINS)
+    edged = registry.site_edges(found, sites, scripts.swarm.cli.PASS_HOOK_KEYS, scripts.swarm.cli.PASS_SHUT_KEYS)
     return {step.name: step.needs for step in edged}
 
 
