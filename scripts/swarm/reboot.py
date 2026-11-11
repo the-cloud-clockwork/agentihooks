@@ -183,7 +183,7 @@ def _succeed(slug: str, store: RedisStore, ledger: Any, agent: AgentRecord) -> s
     return action
 
 
-def _await_decision(slug, store, ledger, agent, now_ms):
+def _await_decision(slug: str, store: RedisStore, ledger: Any, agent: AgentRecord, now_ms: int) -> str:
     """A failed reboot resume waits for the master or operator to choose resume or fresh, never a silent fresh start;
     the agent keeps its recorded account for that choice."""
     if peer := resume.waiting_peer(store, slug, agent):

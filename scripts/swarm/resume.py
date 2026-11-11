@@ -76,11 +76,11 @@ def restored_text(slug, agent, ledger):
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
 
 
-def occupants_first(store, agents):
+def occupants_first(store: RedisStore, agents: list[AgentRecord]) -> list[AgentRecord]:
     return sorted(agents, key=lambda a: bool(a.seat) and store.seats.occupant(a.seat).occupant != a.name)
 
 
-def waiting_peer(store, slug, agent) -> str:
+def waiting_peer(store: RedisStore, slug: str, agent: AgentRecord) -> str:
     if not agent.seat:
         return ""
     occupant = store.seats.occupant(agent.seat).occupant
@@ -90,7 +90,15 @@ def waiting_peer(store, slug, agent) -> str:
     return occupant if waiting else ""
 
 
-def reopen(store, slug, worktrees, runtime, now_ms, ledger, has_quota=account_quota):
+def reopen(
+    store: RedisStore,
+    slug: str,
+    worktrees: dict[str, str],
+    runtime: "Runtime",
+    now_ms: int,
+    ledger: object,
+    has_quota: object = account_quota,
+) -> list["Outcome"]:
     context = RestoreContext(runtime, now_ms, ledger, has_quota)
     store.redis.set(store.key(slug, "restore-worktrees"), json.dumps(worktrees))
     outcomes = []
@@ -113,7 +121,9 @@ class RestoreContext:
     has_quota: object = account_quota
 
 
-def _attempt(store, slug, agent, worktree, context, transfer):
+def _attempt(
+    store: RedisStore, slug: str, agent: AgentRecord, worktree: str, context: "RestoreContext", transfer: dict
+) -> "Outcome":
     if peer := waiting_peer(store, slug, agent):
         store.put_agent(slug, replace(agent, state="finished"))
         reason = f"seat {agent.seat} already waits on {peer}"
