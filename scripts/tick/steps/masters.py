@@ -452,7 +452,7 @@ def respawn_master(slug: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
         for agent in store.agents(slug):
             gone = agent.state not in ("finished", "starting") and agent.name not in live
             if agent.lane == tick.MASTER and gone and tick.master_seats.is_lead(slug, agent):
-                store.drop_agent(slug, agent.name)
+                tools.coordination.store_write("drop_agent", (slug, agent.name), {}, deadline=_lease_deadline())
                 actions.append(f"dropped the gone master {agent.name}")  # pyright: ignore[reportUnknownMemberType]
         return actions + (
             tick._recover_master(slug, config, store, fenced, now_ms)
@@ -476,14 +476,14 @@ def place_master(slug: Any, store: Any, runtime: Any, now_ms: Any) -> Any:
 
 
 def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str, coordination: Coordination) -> Any:
-    from scripts.swarm import controller, lease
+    from scripts.swarm import lease
 
     if store.config(slug).state in ("stopping", "stopped"):
         return []
     held: Any = coordination.lease(deadline=_lease_deadline())
     if held is None:
         return []
-    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms(), caller)
+    token = coordination.tick_lock(held, lease.ttl_ms(), caller, deadline=_lease_deadline())
     if token is None:
         return []
     try:
@@ -493,7 +493,7 @@ def _under_tick_lock(slug: str, store: RedisStore, act: Any, caller: str, coordi
         with lease.held_pass(store, slug, held):
             return act(config, held)
     finally:
-        controller.release_tick_lock(store, slug, token, caller)
+        coordination.release_tick_lock(token, caller, deadline=_lease_deadline())
 
 
 def _lease_deadline() -> Deadline:

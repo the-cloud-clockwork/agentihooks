@@ -541,7 +541,7 @@ class _Wrapper:
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
-            self.box["view"] = view.result() if isinstance(view, Future) else view
+            self.box["view"] = host_steps.pass_view(self.slug, view)
         return True
 
     def _reread(self) -> bool:

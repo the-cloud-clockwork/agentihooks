@@ -13,7 +13,7 @@ import pytest
 from scripts.swarm import controller, lease, tick
 from scripts.swarm.store import MASTER, AgentRecord
 from scripts.tick.adapters.coordination import StoreCoordination
-from scripts.tick.adapters.fakes import FakeRuntime, fake_tools
+from scripts.tick.adapters.fakes import FakeCoordination, FakeRuntime, fake_tools
 from scripts.tick.ports.tools import Tools
 from scripts.tick.steps import masters
 
@@ -563,7 +563,10 @@ def test_respawn_master_drops_gone_leads_then_adopts_or_spawns(
     monkeypatch.setattr(tick, "_recover_master", _given(lambda slug, config, store, runtime, now_ms: recovered))
     monkeypatch.setattr(tick, "_master", _given(lambda slug, config, store, runtime, now_ms: ["spawned"]))
     assert masters.respawn_master("sw", store, "runtime", NOW) == [f"dropped the gone master {gone.name}", *said]
-    assert calls == [("drop_agent", ("sw", gone.name))]
+    assert calls == []
+    assert [(c.operation, c.args) for c in cast(FakeCoordination, tools.coordination).calls] == [
+        ("store_write", ("drop_agent", ("sw", gone.name), {}))
+    ]
     assert built == [("sw", store, "runtime")]
     assert [(c.operation, c.args) for c in cast(FakeRuntime, tools.runtime).calls] == [
         ("fence", ("held", controller.LOCAL))
