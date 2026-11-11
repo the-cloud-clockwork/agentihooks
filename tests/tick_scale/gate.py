@@ -16,6 +16,7 @@ from tests.tick_scale.seed import SLUG, ScaleLedger, seed_store
 GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
 PASSES = 3
 OK = "success"
+IDLE_HOST = {"cpus": 64, "load5": 0.5, "available_mb": 240_000, "total_mb": 256_000}
 
 
 def miss(record: Mapping[str, Any]) -> str:
@@ -48,7 +49,7 @@ def run_passes(store: RedisStore) -> int:
     with every GitHub and terminal reach replaced by the recorded fakes the tick command tests use."""
     import pytest
 
-    from scripts.swarm import cli, publish
+    from scripts.swarm import cli, controller, publish
     from scripts.swarm.health import merge_stall
     from scripts.swarm.ledger_events import PullRequest
     from tests.swarm.test_delivery import FakeHerdr
@@ -56,7 +57,7 @@ def run_passes(store: RedisStore) -> int:
     ledger, runtime = ScaleLedger(), FakeRuntime()
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
-        patch.setenv("AGENTIHOOKS_DEPLOYMENT", "kubernetes")
+        patch.setattr(controller, "_host_reading", lambda store, machine: IDLE_HOST)
         patch.setattr(
             merge_stall,
             "observe",
