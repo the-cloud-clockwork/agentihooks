@@ -101,6 +101,6 @@ def command(store: Any, args: argparse.Namespace) -> None:
     ledger: Any = LedgerClient()
     steps: Any = masters
     slug: str = args.slug
-    doc: dict[str, Any] = ledger.state(slug)
+    doc: dict[str, Any] = {"tasks": ledger.tasks(slug)}
     drill = Drill(store, slug, ledger, routed(herdr=HerdrRuntime()), doc, now_ms(), steps._night_watch)
     print(json.dumps(run(drill)))

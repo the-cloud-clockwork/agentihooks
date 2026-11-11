@@ -24,9 +24,9 @@ class Ledger:
         """Start with no alerts."""
         self.alerts: list[tuple[str, str, str]] = []
 
-    def state(self, slug: str) -> dict[str, Any]:
-        """Serve an empty ledger document."""
-        return {"tasks": []}
+    def tasks(self, slug: str) -> list[dict[str, Any]]:
+        """Serve no tasks."""
+        return []
 
     def raise_alert(self, slug: str, source: str, text: str) -> None:
         """Record a raised alert."""
