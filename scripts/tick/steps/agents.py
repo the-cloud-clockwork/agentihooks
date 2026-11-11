@@ -191,7 +191,8 @@ def _retire_ended(slug: Any, store: Any, ledger: Any, runtime: Any, rows: Any, a
     store.redis.hset(retired, agent.name, now_ms)
     tick._refund_parked(slug, store, rows, agent)
     store.release(slug, agent.task, agent.name)
-    store.drop_agent(slug, agent.name)
+    if store.drop_agent(slug, agent.name) is False:
+        return [f"kept {agent.name}{DROP_REFUSED}"]
     row = rows.get(agent.task, {})
     goes_on = (
         tick._current_owner(agent, row)
