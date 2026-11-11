@@ -1,6 +1,18 @@
 {
   "features": [
     {
+      "id": "local-enforcements-store-ignored",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1758",
+      "behaviour": "The repository ignore rules cover the project local enforcements store and its write temp file, so a checkout holding only that store reads clean to the push stop gate and to the dev sync after wt.sh done.",
+      "seam": "push_stop.inspect and git status on a checkout carrying the repository .gitignore after add_enforcement with local",
+      "tests": [
+        "tests/gates/test_local_enforcements_ignored.py::test_the_repo_ignore_rules_cover_the_local_enforcements_store",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_stop_gate_reads_a_checkout_holding_only_the_store_as_clean",
+        "tests/gates/test_local_enforcements_ignored.py::test_the_dev_sync_after_wt_done_reads_a_checkout_holding_only_the_store_as_clean"
+      ]
+    },
+    {
       "id": "fleet-worker-reserved-master-ceiling",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2443",
@@ -332,7 +344,10 @@
         "tests/tick/test_offline_view.py::test_a_first_read_stores_the_view_even_at_generation_zero",
         "tests/tick/test_offline_view.py::test_a_server_that_stops_mid_pass_keeps_the_held_view_until_it_refuses",
         "tests/tick/test_offline_view.py::test_a_failed_health_probe_stops_the_pass_only_without_a_stored_view",
-        "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on"
+        "tests/tick/test_offline_view.py::test_a_step_needing_a_fresh_read_is_skipped_offline_and_the_pass_goes_on",
+        "tests/tick/test_offline_view.py::test_a_pass_whose_first_ledger_call_fails_refuses_the_next_read_at_once",
+        "tests/tick/test_offline_view.py::test_a_refusal_or_other_failure_leaves_the_held_view_online",
+        "tests/tick/test_offline_view.py::test_a_timeout_without_a_held_view_marks_nothing"
       ]
     },
     {
@@ -858,6 +873,23 @@
         "tests/tick/test_pass_edges.py::test_every_pass_box_read_is_declared_with_a_need_on_its_writer",
         "tests/tick/test_pass_edges.py::test_a_planted_undeclared_read_is_named",
         "tests/tick/test_pass_edges.py::test_a_planted_missing_need_is_named"
+      ]
+    },
+    {
+      "id": "swarm-tick-hook-reads",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-tick-hook-read-guard",
+      "behaviour": "Every tick and wrapper site hook runs under a runtime guard on the pass box keys it declares; a keyed read of any other key, by item, get or membership, logs a warning naming the site and key in observe mode, the default, raises in enforce mode and is not checked when AGENTIHOOKS_TICK_HOOK_READS is off.",
+      "seam": "scripts.tick.hook_reads.guarded, the reads of scripts.tick.steps.PassBox, scripts.tick.sites.TickSites.hooks and scripts.swarm.cli._Wrapper.hooks",
+      "tests": [
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_tick_site_hook_logs_in_observe_mode_and_the_hook_still_answers",
+        "tests/tick/test_hook_reads.py::test_an_undeclared_read_by_a_wrapper_site_hook_raises_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_the_real_hook_bodies_read_only_their_declared_keys_in_enforce_mode",
+        "tests/tick/test_hook_reads.py::test_each_site_hook_declares_exactly_the_box_keys_it_reads",
+        "tests/tick/test_hook_reads.py::test_off_mode_hands_back_the_hooks_unguarded",
+        "tests/tick/test_hook_reads.py::test_an_unknown_or_missing_mode_observes",
+        "tests/tick/test_hook_reads.py::test_reads_outside_a_hook_and_after_it_ends_are_not_checked",
+        "tests/tick/test_hook_reads.py::test_each_keyed_pass_box_read_reaches_the_guard_and_keeps_its_answer"
       ]
     },
     {
@@ -1483,6 +1515,30 @@
       ]
     },
     {
+      "id": "hub-import-core",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
+      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
+        "tests/profiles/test_hub_import.py::test_settings_remove_absolute_paths_but_keep_environment_references",
+        "tests/profiles/test_hub_import.py::test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls",
+        "tests/profiles/test_hub_import.py::test_restrictions_on_absolute_paths_refuse_the_import",
+        "tests/profiles/test_hub_import.py::test_dry_run_reports_the_same_files_without_writing",
+        "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
+        "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
+        "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
+        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them",
+        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report",
+        "tests/profiles/test_hub_import.py::test_hooks_with_portable_commands_and_safe_restrictions_are_kept",
+        "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
+        "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
+        "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused",
+        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
@@ -1602,6 +1658,7 @@
       "seam": "waits.end_pass resolving a reply wait through InboxStore.locate",
       "tests": [
         "tests/swarm/test_waits.py::test_a_hive_members_reply_wait_holds_while_its_item_is_pending_and_ends_on_the_reply",
+        "tests/swarm/test_waits.py::test_a_reply_wait_on_a_master_seat_holds_while_pending_there_and_ends_on_the_masters_reply",
         "tests/swarm/test_waits.py::test_a_reply_wait_ends_when_its_item_is_gone_from_the_inbox",
         "tests/swarm/test_waits.py::test_a_member_scoped_tick_holds_a_reply_wait_on_an_item_its_world_cannot_see"
       ]
@@ -1667,6 +1724,21 @@
       "tests": [
         "tests/inbox/test_settlement.py::test_information_closes_on_receipt_and_work_needs_explicit_settlement",
         "tests/inbox/test_settlement.py::test_confirmed_work_reminds_its_receiver_until_explicit_settlement"
+      ]
+    },
+    {
+      "id": "controller-drains-pass-on-stop-signal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-sigint-finish",
+      "behaviour": "The controller treats the interrupt signal the swarm image stops it with like the terminate signal: a stop signal during a tick pass lets that pass finish and then exits, a stop signal between passes or a second one exits at once releasing held tick locks, and the controller Pod grace period outlasts the golden pass with margin.",
+      "seam": "scripts.swarm.controller.main run with its stop signal handler, and the agentihooks-swarm chart controller terminationGracePeriodSeconds",
+      "tests": [
+        "tests/swarm/test_controller_drain.py::test_the_interrupt_and_terminate_signals_share_one_stop_handler_restored_on_exit",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_during_a_pass_lets_the_pass_finish_then_exits",
+        "tests/swarm/test_controller_drain.py::test_a_stop_signal_between_passes_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_a_pass_that_fails_after_a_stop_signal_exits_without_waiting_for_another",
+        "tests/swarm/test_controller_drain.py::test_a_second_stop_signal_during_a_pass_exits_at_once",
+        "tests/swarm/test_controller_drain.py::test_the_controller_grace_period_outlasts_the_golden_pass_with_margin"
       ]
     },
     {
@@ -3319,27 +3391,14 @@
       ]
     },
     {
-      "id": "hub-import-core",
-      "origin": "inventory",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/ahm1",
-      "behaviour": "Import hub packages as portable bundle profiles, refusing secret files, unsafe names, symlinks and occupied names before writing.",
-      "seam": "scripts.profiles.hub_import.import_hub",
+      "id": "master-primary-login-reserve-2pct",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-reserve-2pct",
+      "behaviour": "A master on the primary claude ai login hands off only once that login has 2% of its week left (PRIMARY_RESERVE_DEFAULT=2.0, ceiling 98% used) instead of the prior 20% reserve, and a master session itself leaves its own reserved account at 98% of the week used (MASTER_LEAVES=98.0) rather than at the session_bands week floor complement.",
+      "seam": "scripts.routing.reservation.primary_reserved, primary_login_ceiling and MASTER_LEAVES through hooks.context.quota_policy.evaluate",
       "tests": [
-        "tests/profiles/test_hub_import.py::test_import_converts_metadata_and_copies_content",
-        "tests/profiles/test_hub_import.py::test_settings_remove_absolute_paths_but_keep_environment_references",
-        "tests/profiles/test_hub_import.py::test_settings_drop_file_urls_and_drive_paths_but_keep_web_urls",
-        "tests/profiles/test_hub_import.py::test_restrictions_on_absolute_paths_refuse_the_import",
-        "tests/profiles/test_hub_import.py::test_dry_run_reports_the_same_files_without_writing",
-        "tests/profiles/test_hub_import.py::test_secret_files_refuse_the_entire_import",
-        "tests/profiles/test_hub_import.py::test_taken_profile_names_are_never_overwritten",
-        "tests/profiles/test_hub_import.py::test_unsafe_profile_names_are_refused",
-        "tests/profiles/test_hub_import.py::test_symlinks_are_refused_without_following_them",
-        "tests/profiles/test_hub_import.py::test_command_line_prints_the_dry_run_report",
-        "tests/profiles/test_hub_import.py::test_hooks_with_portable_commands_and_safe_restrictions_are_kept",
-        "tests/profiles/test_hub_import.py::test_dotenv_templates_are_copied",
-        "tests/profiles/test_hub_import.py::test_a_command_without_a_name_takes_the_agent_folder_name",
-        "tests/profiles/test_hub_import.py::test_symlinked_agent_folders_are_refused",
-        "tests/profiles/test_hub_import.py::test_a_command_that_is_not_a_mapping_is_refused"
+        "tests/context/test_quota_policy.py::test_a_master_on_the_primary_login_at_90_percent_used_gets_no_handoff",
+        "tests/routing/test_reservation.py::test_primary_reserved_holds_room_until_2_percent_of_the_week_is_left"
       ]
     },
     {
@@ -3362,6 +3421,28 @@
         "tests/test_docs_sanity.py::test_no_keyword_source_loads_no_keywords",
         "tests/test_docs_sanity.py::test_a_passing_match_does_not_hide_a_later_hit_on_the_line",
         "tests/test_docs_sanity.py::test_each_edge_of_the_built_in_rules"
+      ]
+    },
+    {
+      "id": "tick-status-publish-survives-dropped-findings",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-fu-status-publish-drop",
+      "behaviour": "The closing group runs status publish even when the health findings step it needs was dropped or cut, waiting at most its own budget, so the swarm status is published every pass.",
+      "seam": "engine.run_group on the closing group with the registered status publish step",
+      "tests": [
+        "tests/tick/test_closing_lane.py::test_status_publish_runs_when_the_health_findings_it_needs_were_dropped"
+      ]
+    },
+    {
+      "id": "ledger-row-diff-keyed-lists",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2476",
+      "behaviour": "A freeze or focus insert, clear or only filter stores only the new and removed rows and the position rows of moved siblings: the row diff may visit the whole freezes list, and changes drops every row whose stored tuple is unchanged before write_rows writes.",
+      "seam": "scripts.swarm_ledger.repository.rows.changes over rows.diff, as write_rows stores it",
+      "tests": [
+        "tests/swarm_ledger/test_row_diff.py::test_a_top_focus_insert_into_a_large_freeze_list_writes_only_the_new_row_and_the_moved_focus",
+        "tests/swarm_ledger/test_row_diff.py::test_an_only_focus_filter_deletes_only_the_dropped_focus_rows",
+        "tests/swarm_ledger/test_row_diff.py::test_a_freeze_clear_in_the_middle_rewrites_no_field_row_of_a_kept_freeze"
       ]
     }
   ],
