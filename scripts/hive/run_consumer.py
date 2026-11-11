@@ -2,7 +2,7 @@
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from scripts.hive import daemon
 from scripts.hive.orders import DONE, FAILED, Ack
@@ -31,9 +31,7 @@ class RunConsumer:
 
     def poll(self) -> int:
         """Consumes one batch of the hive's run orders and returns how many entries it read."""
-        entries = cast(
-            "list[tuple[str, dict[str, str]]]", self.redis.xrange(self.orders.stream(self.hive), count=BATCH)
-        )
+        entries: list[tuple[str, dict[str, str]]] = self.redis.xrange(self.orders.stream(self.hive), count=BATCH)  # pyright: ignore[reportAssignmentType]
         for item, fields in entries:
             self.consume(item, fields)
         return len(entries)

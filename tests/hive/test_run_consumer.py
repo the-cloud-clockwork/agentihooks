@@ -80,7 +80,18 @@ def test_a_run_order_starts_one_detached_run_in_the_project_checkout(setup):
     assert (name, text, folder, run_id, owner) == ("project-only", "case text", str(project), "run-1", "owner@fixture")
     assert Path(case) == run_consumer.case_file("run-1")
     assert store.ack(sent) == Ack("done", {"host_id": "host"})
+    assert redis.hget(store.receipt(sent), "started") == "1000000"
     assert redis.xlen(store.stream("host")) == 0
+
+
+def test_a_poll_starts_one_batch_of_run_orders(setup):
+    redis, run_consumer, run_orders, start, _ = setup
+    store = run_orders.RunOrders(redis)
+    for index in range(run_consumer.BATCH + 1):
+        store.send("host", order(run_orders, run_id=f"run-{index}"))
+    assert run_consumer.RunConsumer(redis, "host").poll() == run_consumer.BATCH
+    assert len(start.calls) == run_consumer.BATCH
+    assert redis.xlen(store.stream("host")) == 1
 
 
 def test_a_run_order_is_claimed_once_by_its_receipt(setup):
