@@ -3057,12 +3057,129 @@ samples included, run at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`
 (default 10) per swarm, and a held sample counts for up to twenty minutes or
 until the next sample.
 
-The same pass writes the ledger probe's latest pass to `ledger_probes`
-(`read_s`, `write_s`, `read_failure`, `write_failure`, `wall_s`; a failure
-reads `timed out`, `gave no answer` or `answered with a server error`) and one
-`hive_samples` row per registered hive (`hive`, `name`, `live`,
-`heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
-`hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
+The same pass writes the ledger probe's latest pass to `ledger_probes` and one
+`hive_samples` row per registered hive. See
+[Ledger response time and hive recovery](#ledger-response-time-and-hive-recovery).
+
+### Ledger response time and hive recovery
+
+Each metrics collector pass writes two tables to the outbox, both with the
+common outbox columns (`event_id`, `ledger`, `ts_ms`, and empty `plan`,
+`phase`, `slice` and `task`).
+
+**`ledger_probes`** holds the ledger probe's latest pass, one row per probe
+pass. The tick's ledger probe step times one ledger read and one ledger
+write; the row keeps the probe's own time in `ts_ms`, so a pass already
+exported is written again under the same `event_id` and collapses in a `FINAL`
+read.
+
+| Column | Meaning |
+|---|---|
+| `read_s` | Seconds the ledger read took, failed or not. |
+| `write_s` | Seconds the ledger write took, failed or not. |
+| `read_failure` | Empty when the read answered or the ledger refused it; otherwise `timed out`, `gave no answer` or `answered with a server error`. |
+| `write_failure` | The same for the write. |
+| `wall_s` | Seconds the whole probe pass took. |
+
+A refused request, such as a 4xx answer, is not a failure: the server
+answered, so its failure column stays empty.
+
+**`hive_samples`** holds one row per registered hive at each pass:
+
+| Column | Meaning |
+|---|---|
+| `hive` | The hive id. |
+| `name` | The hive name, for example `anton-1`. |
+| `live` | 1 when the hive's last heartbeat is within 90 seconds and its last finished beat within 5 minutes of the pass, else 0. |
+| `heartbeat_age_s` | Seconds from the hive's last heartbeat to the pass time. 0 when the beat landed after the pass took its time, -1 when the hive never beat. |
+
+Hives beat on their own clock, so a beat often lands between the moment the
+pass reads its time and the moment it reads the hive registry. That beat is
+newer than the sample and reads age 0, never a negative age. A hive recovery
+is a `hive_samples` row with `live` 1 after one with `live` 0 for the same
+hive.
+
+Check the latest rows for one swarm:
+
+```sql
+SELECT ts_ms, read_s, write_s, read_failure, write_failure, wall_s
+FROM swarm.ledger_probes FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC LIMIT 10;
+
+SELECT ts_ms, name, live, heartbeat_age_s
+FROM swarm.hive_samples FINAL
+WHERE ledger = 'example-swarm'
+ORDER BY ts_ms DESC, name LIMIT 20;
+```
+
+#### Ledger and hives panels
+
+The Swarm Ledger Grafana dashboard, defined in the antoncore observability
+stack, groups eight panels under the **Ledger and hives** row. Each is filtered
+by the dashboard's `ledger` variable and the time range.
+
+| Panel | Source | Shows |
+|---|---|---|
+| Ledger read, p95 | `swarm.ledger_probes` | 95th percentile of `read_s` over passes whose read did not fail. |
+| Ledger write, p95 | `swarm.ledger_probes` | 95th percentile of `write_s` over passes whose write did not fail. |
+| Ledger timeouts | `swarm.ledger_probes` | Reads plus writes whose failure is `timed out`. |
+| Hive recoveries | `swarm.hive_samples` | Rows with `live` 1 whose previous row for the same hive had `live` 0. |
+| Ledger response time | `swarm.ledger_probes` | `read_s` and `write_s` per pass, failed passes included. |
+| Ledger read and write timeouts per hour | `swarm.ledger_probes` | Read timeouts, write timeouts and passes with any failure, per hour. |
+| Hive heartbeat age | `swarm.hive_samples` | `heartbeat_age_s` per hive name; hives that never beat (-1) are left out. |
+| Hive recovery per hive | `swarm.hive_samples` | Per hive: recoveries, samples with `live` 0, `live` at the latest sample and the last sample time. |
+
+The panels draw a point only per metrics pass, so they update at most once per
+`AGENTIHOOKS_METRICS_EVERY_MINUTES` (default 10). A recovery counts only when
+both the down and the up sample fall inside the time range; a hive that went
+down and came back between two passes shows no recovery.
+
+#### Task counts on the dashboard and in status
+
+`agentihooks swarm <slug> status` and the dashboard count the same task set.
+The `tasks` line of status, and the `tasks` object of `status --json`, count
+only in scope tasks by state: `open`, `claimed`, `blocked`, `pr` and `done`.
+The `ledger_snapshots` rows the dashboard reads (measure `tasks`) count an out
+of scope task under the state `out_of_scope` and never under its own state.
+The two therefore agree on each state at the same minute, apart from tasks
+that moved between the snapshot and the status read. A snapshot is written at
+most once every five minutes, on a metrics pass.
+
+Compare them side by side. Read the latest snapshot:
+
+```sql
+SELECT max(ts) AS at,
+       argMaxIf(value, ts_ms, state = 'open') AS open,
+       argMaxIf(value, ts_ms, state = 'claimed') AS claimed,
+       argMaxIf(value, ts_ms, state = 'blocked') AS blocked
+FROM swarm.ledger_snapshots FINAL
+WHERE ledger = 'example-swarm' AND measure = 'tasks' AND item = '' AND lane = '';
+```
+
+Then read status within the same minute:
+
+```bash
+agentihooks swarm example-swarm status | grep '^tasks'
+```
+
+```text
+tasks  open 617  claimed 3  blocked 14  pr 2  done 1480
+```
+
+Matching `open`, `claimed` and `blocked` figures confirm the counts agree; a
+difference of a task or two means a task changed state between the two reads.
+
+#### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Hive heartbeat age is empty while hives are live. | The metrics collectors are on a release older than the zero clamp, which wrote a negative age for every beat newer than the sample. Update agentihooks on the host that runs the tick. |
+| Hive heartbeat age is empty for one hive. | The hive never beat, so its age is -1. Check the hive's registration and its heartbeat with `SELECT name, live, heartbeat_age_s FROM swarm.hive_samples FINAL WHERE ledger = 'example-swarm' ORDER BY ts_ms DESC LIMIT 20`. |
+| Ledger read or write p95 is empty. | Every pass in range failed, or the probe never ran. Read `ledger_probes` for the failure columns. |
+| Ledger timeouts stays above zero. | The ledger server is slow or down; the probe also raises a slow ledger notice to the master after two slow passes. Check the server's process and its database. |
+| Status shows more open or blocked tasks than the dashboard. | The status side is on a release that still counted out of scope tasks. Update agentihooks, then compare again. |
+| The dashboard shows no snapshot for the last minutes. | Snapshots are written at most every five minutes, and only when the metrics outbox has a ClickHouse sink. Compare the snapshot `at` time with the status time. |
 
 ### Admission and hive headroom samples
 
