@@ -1,9 +1,9 @@
 """Registered tick steps that run a hand written call of the tick pass against the pass state."""
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from functools import partial
 from importlib import import_module
-from typing import Any, TypedDict, Unpack, cast
+from typing import Any, TypedDict, TypeGuard, Unpack, cast
 
 from scripts.tick import hook_reads, registry
 from scripts.tick.engine import StepRecord
@@ -15,6 +15,27 @@ AGENTS = Domain("agents")
 TASKS = Domain("tasks")
 SWARM = Domain("swarm")
 DEADLINE = "deadline"
+BOX = "box"
+RAISED = "raised"
+PASS_PREFIX = "pass:"
+HOOK_PREFIX = "hook:"
+BOX_KEYS = frozenset(
+    {
+        "agents",
+        "config",
+        "count",
+        "doc",
+        "finished",
+        "found",
+        "judged",
+        "live",
+        "phase changed",
+        "rows",
+        "sleeping",
+        "stop",
+        "view",
+    }
+)
 
 
 class Declared(TypedDict, total=False):
@@ -64,15 +85,29 @@ class CallStep:
 
     def run(self, ctx: Context) -> Result:
         """Run the call with the tick module and a reader of the pass state, writing its actions."""
-        found = self.call(import_module("scripts.swarm.tick"), partial(_pass_or_deadline, ctx))
+        reader = partial(declared_read, ctx, self.name, declared_keys(self.reads | self.writes))
+        found = self.call(import_module("scripts.swarm.tick"), reader)
         return Result((Write(actions_of(self.name), self.name, list(found or [])),))
 
 
-def _pass_or_deadline(ctx: Context, key: str) -> Any:
-    """Return the step deadline or tools, else the pass value under key."""
+def _is_box(found: object) -> TypeGuard[dict[str, Any]]:
+    """Return whether the pass value ``found`` is a box of values a step may read."""
+    return isinstance(found, dict)
+
+
+def declared_read(ctx: Context, step: str, allowed: frozenset[str], key: str) -> Any:
+    """Return the step deadline or tools, else the pass value under key once step ``step`` declares it; the pass
+    box comes back as a view refusing every box value the step does not declare."""
     if key == "tools":
         return ctx.tools
-    return ctx.deadline if key == DEADLINE else ctx.view.read(PASS, key)
+    if key == DEADLINE:
+        return ctx.deadline
+    found = ctx.view.read(PASS, key)
+    if _is_box(found) and (key == BOX or isinstance(found, PassBox)):
+        return DeclaredBox(found, step, allowed)
+    if key not in allowed and key in BOX_KEYS:
+        refuse(step, key)
+    return found
 
 
 def actions_of(name: str) -> Domain:
@@ -88,6 +123,76 @@ def pass_domain(key: str) -> Domain:
 def pass_domains(*keys: str) -> frozenset[Domain]:
     """Return the domains of the pass box values stored under ``keys``."""
     return frozenset(map(pass_domain, keys))
+
+
+def hook_domain(key: str) -> Domain:
+    """Return the domain of the pass box value a site hook stores under ``key``."""
+    return Domain(f"{HOOK_PREFIX}{key}")
+
+
+def hook_domains(*keys: str) -> frozenset[Domain]:
+    """Return the domains of the pass box values site hooks store under ``keys``."""
+    return frozenset(map(hook_domain, keys))
+
+
+def declared_keys(domains: Iterable[Domain]) -> frozenset[str]:
+    """Return the pass box keys ``domains`` name, through step and site hook domains alike, with the held
+    exception every step may read."""
+    keys = {domain.partition(":")[2] for domain in domains if domain.startswith((PASS_PREFIX, HOOK_PREFIX))}
+    return frozenset(keys | {RAISED})
+
+
+class UndeclaredRead(Exception):
+    """A step read a pass box value its reads and writes do not declare."""
+
+
+def refuse(step: str, key: str) -> None:
+    """Raise ``UndeclaredRead`` naming step ``step`` and the pass value ``key`` it does not declare."""
+    raise UndeclaredRead(f"step {step} reads pass value {key} it does not declare")
+
+
+class DeclaredBox(MutableMapping[str, Any]):
+    """The pass box as one step sees it: reading a box value the step does not declare raises ``UndeclaredRead``,
+    writes go to the box itself."""
+
+    def __init__(self, box: dict[str, Any], step: str, allowed: frozenset[str]) -> None:
+        """Keep the pass ``box``, the name of the step reading it and the keys it declares."""
+        self.box = box
+        self.step = step
+        self.allowed = allowed
+
+    def _check(self, key: str) -> None:
+        """Refuse ``key`` when it names a box value, known or stored, the step does not declare."""
+        if key not in self.allowed and (key in BOX_KEYS or key in self.box):
+            refuse(self.step, key)
+
+    def __getitem__(self, key: str) -> Any:
+        """Return the box value under ``key`` once the step declares it, raising ``Left`` when no step stored it."""
+        self._check(key)
+        if key not in self.box:
+            raise Left(key)
+        return self.box[key]
+
+    def __contains__(self, key: object) -> bool:
+        """Return whether the box holds ``key`` once the step declares it."""
+        self._check(str(key))
+        return key in self.box
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Store ``value`` under ``key`` in the box."""
+        self.box[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        """Remove ``key`` from the box."""
+        del self.box[key]
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate the box keys the step declares."""
+        return iter([key for key in self.box if key in self.allowed])
+
+    def __len__(self) -> int:
+        """Return the number of box keys the step declares."""
+        return len(list(iter(self)))
 
 
 def actions(records: Iterable[StepRecord]) -> list[str]:

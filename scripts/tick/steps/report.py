@@ -29,10 +29,14 @@ from scripts.tick import registry
 from scripts.tick.engine import SLOW, cadence_s, interval_s
 from scripts.tick.pool import CLOSING_LANE
 from scripts.tick.step import Lane
-from scripts.tick.steps import CallStep, pass_domains
+from scripts.tick.steps import CallStep, hook_domains, pass_domains
 from scripts.tick.steps.host import held, viewed
 
 Get = Callable[[str], Any]
+
+
+def _reread(get: Get) -> Callable[[str], Any]:
+    return ledger_events.fresh_reader(get("view"), cache=get("store").redis)
 
 
 def _event_pass(cli: Any, get: Get) -> Any:
@@ -80,14 +84,14 @@ def _waits_end(cli: Any, get: Get) -> Any:
         get("inbox"),
         get("view"),
         cli.now_ms(),
-        ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
+        _reread(get),
     )
 
 
 def _merge_pass(cli: Any, get: Get) -> Any:
     return cli.skip_refused(
         ready.merge_pass,  # pyright: ignore[reportUnknownMemberType]
-        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), ledger_events.view, cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
+        ready.Pass(get("store"), get("slug"), get("ledger"), get("view"), _reread(get), cli.now_ms()),  # pyright: ignore[reportUnknownMemberType]
         get("rows"),
     )
 
@@ -108,7 +112,7 @@ def _stall_watch(cli: Any, get: Get) -> Any:
             stall_watch.ready_lanes(slug, store, ledger, get("doc"), cli.now_ms()),
             cli.now_ms(),
             released=release_wait.checker(get("config")),  # pyright: ignore[reportUnknownMemberType]
-            reread=ledger_events.view,  # pyright: ignore[reportUnknownMemberType]
+            reread=_reread(get),
         ),
         get("doc"),
     )
@@ -244,21 +248,36 @@ EARLY = "early"
 VIEWED = frozenset({"tick view"})
 FOUND = frozenset({"health findings"})
 VIEW = pass_domains("view")
+DOC = hook_domains("doc")
+ROWS = hook_domains("rows")
+CONFIGURED = hook_domains("config", "doc")
 
 STEPS = (
     CallStep(
-        "ledger event pass", "wrapper events", held(viewed("ledger event pass", _event_pass)), VIEWED, VIEW, lane=SLOW
+        "ledger event pass",
+        "wrapper events",
+        held(viewed("ledger event pass", _event_pass)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
     ),
-    CallStep("done recheck", "wrapper events", held(viewed("done recheck", _done_recheck)), VIEWED, VIEW, lane=SLOW),
     CallStep(
-        "progress checks", "wrapper events", held(viewed("progress checks", _progress_checks)), VIEWED, VIEW, lane=SLOW
+        "done recheck", "wrapper events", held(viewed("done recheck", _done_recheck)), VIEWED, VIEW | DOC, lane=SLOW
+    ),
+    CallStep(
+        "progress checks",
+        "wrapper events",
+        held(viewed("progress checks", _progress_checks)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
     ),
     CallStep(
         "waits end",
         "wrapper events",
         held(viewed("waits end", _waits_end)),
         VIEWED,
-        VIEW,
+        VIEW | ROWS,
         lane=CallStep.lane,
         kept=True,
     ),
@@ -267,7 +286,7 @@ STEPS = (
         "wrapper events",
         held(viewed("merge pass", _merge_pass)),
         VIEWED,
-        VIEW,
+        VIEW | ROWS,
         lane=CallStep.lane,
         kept=True,
     ),
@@ -276,25 +295,36 @@ STEPS = (
         "wrapper events",
         held(viewed("stall watch", _stall_watch)),
         VIEWED | {"page relay"},
-        pass_domains("agents", "view"),
+        pass_domains("agents", "view") | CONFIGURED,
         pass_domains("live"),
     ),
-    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"}), pass_domains("live")),
-    CallStep("quiet pass", "wrapper events", held(_quiet)),
-    CallStep("doc report", "wrapper events", held(_doc_report), lane=SLOW),
+    CallStep("overrun pass", "wrapper events", held(_overrun), frozenset({"stall watch"}), pass_domains("live") | DOC),
+    CallStep("quiet pass", "wrapper events", held(_quiet), reads=ROWS),
+    CallStep("doc report", "wrapper events", held(_doc_report), reads=CONFIGURED, lane=SLOW),
     CallStep(
-        "priorities sweep", "wrapper events", held(viewed("priorities sweep", _priorities)), VIEWED, VIEW, lane=SLOW
+        "priorities sweep",
+        "wrapper events",
+        held(viewed("priorities sweep", _priorities)),
+        VIEWED,
+        VIEW | DOC,
+        lane=SLOW,
     ),
     CallStep(
-        "health findings", "wrapper events", held(_health_findings), VIEWED, VIEW, pass_domains("found"), lane=SLOW
+        "health findings",
+        "wrapper events",
+        held(_health_findings),
+        VIEWED,
+        VIEW | CONFIGURED,
+        pass_domains("found"),
+        lane=SLOW,
     ),
-    CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found"), lane=SLOW),
+    CallStep("findings pass", "wrapper events", held(_findings_pass), FOUND, pass_domains("found") | DOC, lane=SLOW),
     CallStep(
         "metrics record",
         "wrapper metrics",
         held(viewed("metrics record", _metrics)),
         FOUND,
-        pass_domains("found", "view"),
+        pass_domains("found", "view") | hook_domains("doc", "count"),
         lane=SLOW,
     ),
     CallStep("bottleneck status", "wrapper metrics", held(_bottleneck_status), lane=SLOW),
@@ -303,13 +333,13 @@ STEPS = (
     ),
     CallStep("snapshot job", "wrapper metrics", held(_snapshot_job), writes=frozenset()),
     CallStep("last tick", CLOSING_GROUP, held(_last_tick), lane=CLOSING),
-    CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), lane=CLOSING),
+    CallStep("heartbeat", CLOSING_GROUP, held(_heartbeat), reads=DOC, lane=CLOSING),
     CallStep(
         "status publish",
         CLOSING_GROUP,
         held(_status_publish),
         FOUND,
-        pass_domains("found", "view"),
+        pass_domains("found", "view") | DOC,
         lane=CLOSING,
         kept=True,
     ),

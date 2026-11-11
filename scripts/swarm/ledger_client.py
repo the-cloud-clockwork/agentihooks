@@ -148,6 +148,9 @@ class LedgerClient:
         except ledger.Missing as exc:
             raise LedgerGone(str(exc)) from exc
         except SystemExit as exc:
+            from scripts.tick import view
+
+            view.stopped(exc.__context__)
             refused = str(exc).startswith("server refused: 4")
             unreachable = str(exc).startswith(UNREACHABLE)
             if unreachable and held_offline and ops:
@@ -167,7 +170,13 @@ class LedgerClient:
         if offline():
             raise LedgerOffline(f"ledger {slug}: {OFFLINE_READ}")
         bound: dict[str, Any] = {} if self.read_timeout is None else {"timeout": self.read_timeout, "attempts": 1}
-        return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        try:
+            return _ledger().resource(slug, path, service=self.service, collection=collection, **bound)
+        except OSError as exc:
+            from scripts.tick import view
+
+            view.stopped(exc)
+            raise
 
     def state(self, slug):
         return self._call(slug)

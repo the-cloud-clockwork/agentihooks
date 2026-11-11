@@ -224,7 +224,7 @@ underlying call stopped or that retrying it cannot overlap.
 
 Every step abandoned while still running prints one JSON line to standard
 error when it declares write domains beyond its own `actions:<name>` domain.
-The tick journal (`journalctl --user -t agentihooks-swarm`) keeps it:
+The tick journal (`TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --until now`) keeps it:
 
 ```json
 {"event": "swarm_tick_step_abandoned", "slug": "rig-grade-swarm", "step": "fleet red notice", "budget_s": 30.0, "writes": ["fleet red", "fleet red lifted", "fleet red listings"]}
@@ -256,7 +256,7 @@ more, so an abandoned call step with no extra writes also writes no line. A
 Find the lines of the last twelve hours and count them per step:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-12h" \
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-12h" --until now \
   | grep '"event": "swarm_tick_step_abandoned"' \
   | sed 's/^[^{]*//' \
   | python3 -c 'import sys, json, collections

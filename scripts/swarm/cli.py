@@ -210,7 +210,8 @@ from scripts.tick.ports.contracts import SourceControl
 from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_SITES, TickSites, run_sites
-from scripts.tick.steps import Left, PassBox, budgets
+from scripts.tick.step import Domain
+from scripts.tick.steps import Left, PassBox, budgets, hook_domains, pass_domains
 from scripts.tick.steps import actions as actions_of
 from scripts.tick.steps import host as host_steps
 from scripts.tick.steps import report as report_steps
@@ -255,6 +256,16 @@ WRAPPER_PREFIX = (
 )
 PASS_SITES = (*WRAPPER_PREFIX, *TICK_SITES, "wrapper relay", "wrapper view", "wrapper events", "wrapper metrics")
 INTENT_JOINS = {"wrapper intent": "wrapper relay"}
+NONE: frozenset[Domain] = frozenset()
+WRAPPER_HOOK_KEYS: dict[str, tuple[frozenset[Domain], frozenset[Domain]]] = {
+    "wrapper probes": (NONE, NONE),
+    "wrapper commands": (NONE, NONE),
+    "wrapper phases": (NONE, hook_domains("doc")),
+    "wrapper intent": (NONE, hook_domains("doc", "config")),
+    "wrapper relay": (pass_domains("judged"), hook_domains("view")),
+    "wrapper view": (pass_domains("agents"), hook_domains("agents", "doc", "config", "rows")),
+    "wrapper metrics": (NONE, hook_domains("count")),
+}
 HEALTH_SITES = ("wrapper health", "wrapper commands")
 WRAPPER_HOOK_READS = {"wrapper relay": frozenset({"raised", "judged"}), "wrapper view": frozenset({"agents"})}
 CONFIG_KEYS = {
@@ -460,7 +471,8 @@ class _Wrapper:
     def hooks(self) -> dict[str, Callable[[], bool]]:
         """Return the checks run before the wrapper's probes, commands, phases, intent, relay, view and metrics
         sites. The runtime is fenced at the first site, because the health site's steps run in the slow lane and a
-        later site's step may spawn before its hook runs."""
+        later site's step may spawn before its hook runs. Each check reads and writes the keys
+        ``WRAPPER_HOOK_KEYS`` declares for its site."""
         found = {
             "wrapper probes": self._fence,
             "wrapper commands": self._watch,
@@ -470,12 +482,14 @@ class _Wrapper:
             "wrapper view": self._reread,
             "wrapper metrics": self._count,
         }
-        return hook_reads.guarded(found, WRAPPER_HOOK_READS)
+        return hook_reads.guarded({site: found[site] for site in WRAPPER_HOOK_KEYS}, WRAPPER_HOOK_READS)
 
     def shut(self, step: Any) -> bool:
-        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass, past the
-        commands once the ledger was binned or gone, and as the tick's sites say."""
-        stopped = step.group != "wrapper probes" and "stop" in self.box
+        """Return whether ``step`` stays shut: past the probes once the ledger health probe stopped the pass unless it
+        needs only Redis and the host, past the commands once the ledger was binned or gone, and as the tick's sites
+        say."""
+        open_past_stop = step.group == "wrapper probes" or step.name in host_steps.REDIS_ONLY
+        stopped = not open_past_stop and "stop" in self.box
         return stopped or self.ended is not None or self.ticks.shut(step)
 
     def actions(self, records: Iterable[Any]) -> list[str]:
@@ -539,7 +553,7 @@ class _Wrapper:
         host_steps.raise_held(self.judging)
         if "judged" in self.judging:
             view, self.checked = self.judging["judged"]
-            self.box["view"] = view.result() if isinstance(view, Future) else view
+            self.box["view"] = host_steps.pass_view(self.slug, view)
         return True
 
     def _reread(self) -> bool:
@@ -662,7 +676,7 @@ def run_tick(
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     wrapper: _Wrapper | None = None
-    failed: Exception | None = None
+    failed: BaseException | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
@@ -702,7 +716,7 @@ def run_tick(
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)
-    except Exception as exc:
+    except (Exception, ledger_link.Cleartext) as exc:
         failed = exc
         return host_steps.held_failure(exc, box, getattr(wrapper, "judging", {}))
     finally:
@@ -1193,12 +1207,13 @@ def cmd_agent_up(store, args):
     print(json.dumps(asdict(launched)))
 
 
-def cmd_exit(store, args):
+def cmd_exit(store: RedisStore, args: argparse.Namespace) -> None:
     name = store.names.resolve(args.name or Who.from_env().name)
     agent = next((a for a in store.agents(args.slug) if a.name == name), None)
-    if agent and agent.lane != MASTER and _claimless(store, args.slug, agent):
+    released = agent is not None and agent.lane != MASTER and agent.state == "finished"
+    if agent and agent.lane != MASTER and not released and _claimless(store, args.slug, agent):
         _retire(store, args.slug, agent, "finished its session without a claim")
-    else:
+    elif not released:
         agent_up.retire(store, args.slug, name, now_ms())
     print(json.dumps({"exited": name}), flush=True)
     HerdrRuntime().reap_name(name)

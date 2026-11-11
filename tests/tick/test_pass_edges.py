@@ -11,7 +11,7 @@ import pytest
 
 from scripts.tick import registry
 from scripts.tick.step import Context, Domain, Result, Step
-from scripts.tick.steps import PassBox, pass_domain
+from scripts.tick.steps import PassBox, UndeclaredRead, pass_domain
 from tests.swarm.tick_scenarios.test_characterisation import SCENARIOS, replay
 
 tick_module = import_module("scripts.swarm.tick")
@@ -211,8 +211,8 @@ def test_every_pass_box_read_is_declared_with_a_need_on_its_writer(
 def test_a_planted_undeclared_read_is_named(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     verify = next(step for step in registry.steps() if step.name == "verify")
     monkeypatch.setattr(verify, "reads", verify.reads - {pass_domain("rows")})
-    rec = replayed(monkeypatch, tmp_path, (("running", "tick"),))
-    assert "verify reads pass rows without declaring it" in violations(rec)
+    with pytest.raises(UndeclaredRead, match="step verify reads pass value rows it does not declare"):
+        replayed(monkeypatch, tmp_path, (("running", "tick"),))
 
 
 @pytest.mark.feature("swarm-tick-pass-edges")

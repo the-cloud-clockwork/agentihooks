@@ -283,9 +283,9 @@ def test_nothing_new_leaves_the_sync_clean():
     assert derived([{"id": "o", "text": "x", "state": "open"}], [("sync", "x")], ["x"])[1] is False
 
 
-def test_an_alert_op_on_a_ledger_without_alerts_is_refused():
+def test_an_alert_op_on_a_ledger_without_alerts_is_refused() -> None:
     op = {"op": "alert_claim", "id": "k", "target": "al-1-0"}
-    assert ledger_alerts.apply({}, op, SimpleNamespace(at=1)) is False
+    assert ledger_alerts.apply({}, op, SimpleNamespace(at=1, refused=[])) is False
 
 
 def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
@@ -847,3 +847,54 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
     with pytest.raises(InterruptedError, match="scan observed"):
         ledger_server.watch_ledgers(interval=0)
     assert len(sleeps) == 16
+
+
+BACKEND_MASTER = f"master-2@{SLUG}"
+
+
+@pytest.mark.feature("alert-writer-closes-its-sync-alert")
+def test_a_backend_master_claims_and_closes_the_sync_alert_its_refused_write_raised() -> None:
+    make_ledger()
+    taken = {"op": "phase_append", "id": "bad", "by": BACKEND_MASTER, "phases": [{"phase": "p1", "title": "Taken"}]}
+    state, _ = sync([taken])
+    [alert] = state["alerts"]
+    assert (alert["source"], alert["writer"], alert["target"]) == ("sync", BACKEND_MASTER, BACKEND_MASTER)
+    sync([{"op": "phase_append", "id": "good", "by": BACKEND_MASTER, "phases": [{"phase": "p2", "title": "Second"}]}])
+    claim = {"op": "alert_claim", "id": "claim", "target": alert["id"], "by": BACKEND_MASTER}
+    close = {**claim, "op": "alert_close", "id": "close", "outcome": "Appended the phase under a new id"}
+    for op in (claim, close):
+        state, rejected = sync([op])
+        assert rejected == []
+    assert [(a["state"], a["closed_by"]) for a in state["alerts"]] == [("done", BACKEND_MASTER)]
+
+
+@pytest.mark.feature("alert-writer-closes-its-sync-alert")
+@pytest.mark.parametrize(
+    "before, kind, reason",
+    [
+        ("", "alert_claim", "does not exist on this ledger"),
+        ("", "alert_close", "does not exist on this ledger"),
+        ("alert_claim", "alert_claim", "is claimed by boss"),
+        ("alert_close", "alert_claim", "is already closed by boss: Trimmed"),
+        ("alert_close", "alert_close", "is already closed by boss: Trimmed"),
+    ],
+)
+def test_a_refused_alert_claim_or_close_carries_the_server_reason(before: str, kind: str, reason: str) -> None:
+    state = make_ledger(LONG)
+    target = state["alerts"][0]["id"] if before else "al-99-9"
+    if before:
+        first = {"op": before, "id": "first", "target": target, "by": "boss"}
+        sync([{**first, "outcome": "Trimmed"} if before == "alert_close" else first])
+    op = {
+        "op": kind,
+        "id": "second",
+        "target": target,
+        "by": "other",
+        **({"outcome": "Fixed"} if "close" in kind else {}),
+    }
+    state, rejected = sync([op])
+    assert rejected == ["second"]
+    with pytest.raises(SystemExit) as refusal:
+        ledger.refused({**state, "rejected": rejected}, [op])
+    assert str(refusal.value) == f"{kind} refused: alert {target} {reason}"
+    assert [a for a in state["alerts"] if a["source"] == "sync"] == []
