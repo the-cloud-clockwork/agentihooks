@@ -5721,12 +5721,11 @@ the other swarms. The herdr sweep after a pass took at most 23 seconds over 139 
 All of these only read.
 
 ```bash
-# Stopped ticks in the last hour. The tick holder runs the tick under systemd-cat with the identifier
-# agentihooks-swarm, so -t matches ticks from the scheduler cron and from the fallback unit alike
-TZ=UTC journalctl --user -t agentihooks-swarm --since "-1h" --no-pager | grep -E "the swarm tick stopped"
+# Stopped ticks in the last hour
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now --no-pager | grep -E "the swarm tick stopped"
 
 # Any start timeout of the fallback unit
-TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-1h" --no-pager | grep -E "timed out|Failed with result"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "1 hour ago" --until now --no-pager | grep -E "timed out|Failed with result"
 
 # The installed fallback unit's timeout
 systemctl --user show -p TimeoutStartUSec agentihooks-swarm.service
