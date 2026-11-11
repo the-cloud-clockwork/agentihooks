@@ -140,7 +140,8 @@ def test_runtime_rejects_a_shed_fraction_outside_zero_to_one(fraction: object) -
 @pytest.mark.parametrize("fraction", [0, 1])
 def test_runtime_accepts_shed_bounds(fraction: float) -> None:
     budget = {"coreMinutesPerDay": 1440, "shed": {"backfill": fraction}}
-    assert delivery.runtime({**RUNTIME, "budget": budget})["budget"]["shed"] == {"backfill": fraction}
+    document = {**RUNTIME, "budget": budget}
+    assert delivery.runtime(document) == document
 
 
 @pytest.mark.parametrize(
