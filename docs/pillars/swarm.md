@@ -5553,7 +5553,7 @@ nothing there, so the file grows only when a job fails.
 Find the tick actions with:
 
 ```bash
-journalctl --user -t agentihooks-swarm --since "-2h" --no-pager | grep "started automatic snapshot"
+TZ=UTC journalctl --user -u agentihooks-swarm.service --since "-2h" --until now --no-pager | grep "started automatic snapshot"
 ```
 
 `tests/swarm/test_snapshot_job.py` pins this behaviour.
