@@ -68,11 +68,15 @@ def viewed(name: str, call: Callable[[Any, Get], Any]) -> Callable[[Any, Get], A
     return run
 
 
-def held_failure(exc: Exception, *boxes: dict[str, Any]) -> list[str]:
-    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes``, else
-    raise it again."""
+def held_failure(exc: BaseException, *boxes: dict[str, Any]) -> list[str]:
+    """Return the line ending the pass as failed when ``exc`` is an exception a step held in one of ``boxes`` or a
+    ledger address refusing the credential over plain http, else raise it again."""
     from redis.exceptions import RedisError
 
+    from scripts.swarm_ledger.ledger_link import Cleartext
+
+    if isinstance(exc, Cleartext):
+        return failed_pass(exc)
     if isinstance(exc, RedisError) or not any(box.get("raised") is exc for box in boxes):
         raise exc
     return failed_pass(exc)

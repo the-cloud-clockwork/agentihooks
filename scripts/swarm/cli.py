@@ -662,7 +662,7 @@ def run_tick(
     keeping = timing.BEFORE_STEP.set(before_step)
     doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     wrapper: _Wrapper | None = None
-    failed: Exception | None = None
+    failed: BaseException | None = None
     try:
         beating.enter_context(lease.held_pass(store, slug, held))
         beating.callback(PASS_TOOLS.reset, PASS_TOOLS.set(_pass_tools(store, slug, held.owner, ledger, runtime)))
@@ -702,7 +702,7 @@ def run_tick(
     except Left as missing:
         ended = report_steps.EARLY
         return report_steps.early_end(store, slug, missing, box.left)
-    except Exception as exc:
+    except (Exception, ledger_link.Cleartext) as exc:
         failed = exc
         return host_steps.held_failure(exc, box, getattr(wrapper, "judging", {}))
     finally:
