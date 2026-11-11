@@ -50,3 +50,10 @@ def test_a_gated_step_that_only_rested_never_ran() -> None:
 
 def test_steps_outside_the_gate_are_ignored() -> None:
     assert gate.misses([*_all_kept(), _record("metrics record", 999.0, outcome="failed")]) == []
+
+
+@pytest.mark.parametrize("url", ["redis://redis.swarm.svc:6379/1", "redis://10.0.0.5:6379/0"])
+def test_the_gate_refuses_a_redis_that_is_not_loopback_before_flushing_it(url: str) -> None:
+    with pytest.raises(SystemExit) as refused:
+        gate.main(["--redis", url, "--report", "report.json"])
+    assert refused.value.code == 2

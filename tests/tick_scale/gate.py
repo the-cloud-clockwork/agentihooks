@@ -7,6 +7,7 @@ import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from scripts.swarm.store import RedisStore
 from scripts.tick.steps.budgets import SPAWN_NEEDS, floor_of
@@ -16,6 +17,7 @@ from tests.tick_scale.seed import SLUG, ScaleLedger, seed_store
 GATED = frozenset(SPAWN_NEEDS | {"spawn", "tick view"})
 PASSES = 3
 OK = "success"
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 IDLE_HOST = {"cpus": 64, "load5": 0.5, "available_mb": 240_000, "total_mb": 256_000}
 
 
@@ -82,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--redis", required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
+    if urlsplit(args.redis).hostname not in LOCAL_HOSTS:
+        parser.error("the gate flushes its Redis database, so --redis must name a loopback host")
     now_ms = time.time_ns() // 1_000_000
     store = seed_store(redis.Redis.from_url(args.redis, decode_responses=True), now_ms)
     launched = run_passes(store)
