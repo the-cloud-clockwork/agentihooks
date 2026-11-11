@@ -127,8 +127,8 @@ class ExecutionRegistry:
             old = [
                 key
                 for key, row in rows.items()
-                if row["name"] not in listed
-                and (row["generation"] < heads[row["seat"]]["generation"] or row.get("state") in TERMINAL_STATES)
+                if row.get("state") in TERMINAL_STATES
+                and not (row["generation"] >= heads[row["seat"]]["generation"] and row["name"] in listed)
             ]
             if not old and "archive_ref" in doc:
                 return 0
