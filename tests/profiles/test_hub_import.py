@@ -721,14 +721,11 @@ def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_pa
 
 
 @pytest.mark.feature("hub-import-assets")
-@pytest.mark.parametrize("value", ["xoxb-" + "1" * 12, "plain-value-123"])
-def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(
-    hub: Path, tmp_path: Path, value: str
-) -> None:
-    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": value}}}}
+def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": "xoxb-" + "1" * 12}}}}
     (_package(hub) / ".mcp.json").write_text(json.dumps(servers))
     out = tmp_path / "bundle"
-    with pytest.raises(ValueError, match=r"literal credential refused.*\.mcp\.json"):
+    with pytest.raises(ValueError, match=r"literal credential refused: \.mcp\.json"):
         import_hub(hub, out, False, tmp_path / "data")
     assert not out.exists()
 

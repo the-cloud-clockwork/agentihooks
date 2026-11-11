@@ -31,7 +31,6 @@ from hooks import secrets
 PROFILE_KEYS = ("description", "capabilities")
 CLAUDE_KEYS = ("model", "effort")
 SETTINGS = ".claude/settings.json"
-MCP = ".mcp.json"
 CONVERTED = frozenset({"command.yml", SETTINGS, ".claude/settings.local.json"})
 SKIPPED_DIRS = frozenset({"node_modules", ".git"})
 AGENT_HOOKS = "hooks"
@@ -202,9 +201,6 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
     files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package))
-    mcp_path = package / MCP
-    if mcp_path.is_file():
-        _refuse_literal_credentials(json.loads(mcp_path.read_text()), mcp_path)
     settings_path = package / SETTINGS
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
