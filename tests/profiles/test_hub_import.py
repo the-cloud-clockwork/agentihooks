@@ -631,3 +631,75 @@ def test_an_eval_case_holding_a_credential_refuses_the_import(hub: Path, tmp_pat
     _case(hub, "leak.yaml", {"name": "leak", "expected": {"token": ["xoxb-" + "1" * 12]}})
     with pytest.raises(ValueError, match=r"literal credential refused: .*leak\.yaml"):
         import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+ASSETS = (
+    ".mcp.json",
+    ".claude/hooks/limit_inline_images.py",
+    ".claude/scripts/render.sh",
+    "scripts/run.py",
+    "runners/daily.py",
+    "docs/guide.md",
+    "knowledge/facts.md",
+    "src/pipeline/render.ts",
+    "package.json",
+    ".gitignore",
+)
+SKIPPED = (
+    "command.yml",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    "node_modules/left/index.js",
+    ".git/HEAD",
+)
+
+
+def _assets(hub: Path) -> None:
+    package = _package(hub)
+    for relative in (*ASSETS, *SKIPPED[2:]):
+        (package / relative).parent.mkdir(parents=True, exist_ok=True)
+        (package / relative).write_text(f"{relative}\n")
+    (package / ".mcp.json").write_text(json.dumps({"mcpServers": {"tools": {"url": "https://tools", "env": {}}}}))
+    (package / "package.json").write_text(json.dumps({"name": "pipeline"}))
+    (hub / "agents/diagram/hooks").mkdir()
+    (hub / "agents/diagram/hooks/render_diagram.py").write_text("print('render')\n")
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_path: Path) -> None:
+    _assets(hub)
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    profile, package = out / "profiles/diagram", _package(hub)
+    for relative in ASSETS:
+        assert (profile / relative).read_bytes() == (package / relative).read_bytes()
+        assert f"profiles/diagram/{relative}" in report["files"]
+    assert (profile / "hooks/render_diagram.py").read_text() == "print('render')\n"
+    assert "profiles/diagram/hooks/render_diagram.py" in report["files"]
+    for relative in SKIPPED:
+        assert not (profile / relative).exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": "xoxb-" + "1" * 12}}}}
+    (_package(hub) / ".mcp.json").write_text(json.dumps(servers))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=r"literal credential refused.*\.mcp\.json"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize("name", ["link.py", ".env"])
+def test_an_unsafe_file_in_agent_hooks_refuses_the_import(hub: Path, tmp_path: Path, name: str) -> None:
+    hooks = hub / "agents/diagram/hooks"
+    hooks.mkdir()
+    (hooks / "real.py").write_text("")
+    if name == ".env":
+        (hooks / name).write_text("")
+    else:
+        (hooks / name).symlink_to(hooks / "real.py")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"refused: .*hooks/{name}"):
+        import_hub(hub, out, True, tmp_path / "data")

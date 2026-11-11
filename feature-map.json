@@ -1788,6 +1788,18 @@
       ]
     },
     {
+      "id": "hub-import-assets",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2486",
+      "behaviour": "A hub import carries every file of the agent package and the agent level hooks folder into the profile, leaving out only the command file, converted and machine local settings, moved state, node modules and git metadata, and refusing a package MCP file holding a literal credential or an unsafe file in the agent hooks.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_an_import_carries_every_package_asset_and_agent_hooks",
+        "tests/profiles/test_hub_import.py::test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_an_unsafe_file_in_agent_hooks_refuses_the_import"
+      ]
+    },
+    {
       "id": "swarm-claim-hold",
       "origin": "inventory",
       "behaviour": "A verification hold with no window for over an hour tells the master once, and a skipped hold never hides the eligible task behind it.",
