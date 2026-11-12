@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts.gates import log as gate_log
-from scripts.swarm import capacity, cli, night_watch_drill, tick
+from scripts.swarm import capacity, cli, night_watch_drill, redis_budget, tick
 from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MANUAL_SCALING, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -142,12 +142,75 @@ def test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched(rig: dict[str, A
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
-def test_the_drill_refuses_a_scratch_swarm_that_is_not_running(rig: dict[str, Any]) -> None:
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_the_drill_refuses_a_scratch_swarm_that_is_not_running(rig: dict[str, Any], state: str) -> None:
     store = rig["store"]
-    store.update(SCRATCH, state="paused")
-    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_RUNNING.format(slug=SCRATCH, state='paused')}$"):
+    store.update(SCRATCH, state=state)
+    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_RUNNING.format(slug=SCRATCH, state=state)}$"):
         drill(store, SCRATCH)
     assert store.config(SCRATCH).gates == {} and rig["started"] == []
+    assert store.config(SCRATCH).state == state
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert stored["recovered"] is True and stored["respawned"] == NOW
+    assert rig["started"] == [(SCRATCH, NOW)]
+    assert store.config(SCRATCH).state == "paused"
+    assert store.config(SCRATCH).gates["nightwatch"] == "enforce"
+    assert [source for _, source, _ in rig["ledger"].alerts] == ["seat"]
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running(rig: dict[str, Any]) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    seen: list[str] = []
+
+    def watch_pass(*args: Any) -> list[str]:
+        seen.append(args[1].config(SCRATCH).state)
+        args[1].redis.set(args[1].key(SCRATCH, "probe"), "1")
+        return []
+
+    found = night_watch_drill.Drill(store, SCRATCH, rig["ledger"], rig["runtime"], {"tasks": []}, NOW, watch_pass)
+    night_watch_drill.run(found)
+    assert seen == ["running", "running", "running"]
+    assert store.redis.get(store.key(SCRATCH, "probe")) == "1"
+    assert store.config(SCRATCH).state == "paused"
+    store.update("live-swarm", state="paused")
+    assert night_watch_drill.running(store, SCRATCH).config("live-swarm").state == "paused"
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_an_update_through_the_running_view_keeps_the_stored_state_paused(rig: dict[str, Any]) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    view = night_watch_drill.running(store, SCRATCH)
+    written = view.update(SCRATCH, gates={"nightwatch": "enforce"})
+    assert written.state == "paused" and written.gates == {"nightwatch": "enforce"}
+    assert store.config(SCRATCH).state == "paused" and store.config(SCRATCH).gates == {"nightwatch": "enforce"}
+    assert view.config(SCRATCH).state == "running"
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_redis_budget_rebinds_every_part_of_the_running_view(rig: dict[str, Any]) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    view = night_watch_drill.running(store, SCRATCH)
+    assert view.execution_registry.store is view and store.execution_registry.store is store
+    budget = redis_budget.Budget(store.redis, 30)
+    bound = redis_budget.bounded(view, budget)
+    assert bound.redis is budget and bound.seats.redis is budget and bound.memory.redis is budget
+    assert bound.execution_registry.store is bound
+    assert bound.config(SCRATCH).state == "running" and bound.config("live-swarm").state == "running"
+    store.update("live-swarm", state="paused")
+    assert bound.config("live-swarm").state == "paused"
 
 
 @pytest.mark.feature("swarm-night-watch-drill")

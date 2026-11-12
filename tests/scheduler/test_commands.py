@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
@@ -90,6 +92,8 @@ def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
         "name": "nightly",
         "case": str(case.resolve()),
         "project": str(case.parent),
+        "placement": "local",
+        "needs": [],
     }
 
 
@@ -107,6 +111,64 @@ def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
 def test_a_case_fits_only_a_named_workflow_target(case, target, name, message):
     with refused(message):
         commands.target_slot(target, name, str(case))
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_workflow_target_takes_a_hive_placement_with_its_needs(
+    case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    slot = commands.target_slot("workflow", "nightly", str(case), placement="hive", needs="build, lint,build")
+    assert slot == WorkflowSlot("nightly", str(case), str(tmp_path), "hive", ("build", "lint"))
+    assert slot.record()["placement"] == "hive"
+    assert slot.record()["needs"] == ["build", "lint"]
+    assert restore(slot.record()) == slot
+    assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot(
+        "nightly", str(case), str(tmp_path), "local", ()
+    )
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_stored_workflow_slot_without_a_placement_runs_locally(case: Path) -> None:
+    record = {"kind": "workflow", "name": "nightly", "case": str(case), "project": "/repo"}
+    assert restore(record) == WorkflowSlot("nightly", str(case), "/repo", "local", ())
+
+
+@pytest.mark.parametrize(
+    ("target", "name", "placement", "needs", "message"),
+    [
+        ("workflow", "nightly", "cloud", "", "placement must be local or hive, not cloud"),
+        ("workflow", "nightly", "local", "build", "only a hive placement takes needs"),
+        ("workflow", "nightly", "", "build", "only a hive placement takes needs"),
+        ("swarm", "sw", "hive", "", "only the workflow target takes a placement"),
+        ("swarm", "sw", "", "build", "only the workflow target takes a placement"),
+        ("fleet", "", "local", "", "only the workflow target takes a placement"),
+    ],
+)
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_placement_that_does_not_fit_is_refused(
+    case: Path, target: str, name: str, placement: str, needs: str, message: str
+) -> None:
+    with refused(message):
+        commands.target_slot(target, name, str(case) if target == "workflow" else "", placement=placement, needs=needs)
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(
+    case: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import fakeredis
+
+    from scripts.hive import run_placement
+    from scripts.workflows import scheduled
+
+    placed = []
+    monkeypatch.setattr(scheduled, "start", lambda *args: pytest.fail("a hive run started locally"))
+    monkeypatch.setattr(run_placement, "dispatch", lambda run, redis: placed.append((run, redis)))
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    slot = WorkflowSlot("nightly", str(case), "/repo", "hive", ("build",))
+    slot.deliver({"owner": OWNER, "payload": "go"}, "delivery-1", RedisStateStore(redis, "scheduler"))
+    assert placed == [(run_placement.Run("delivery-1", "nightly", str(case), "/repo", OWNER, ("build",)), redis)]
 
 
 @pytest.mark.feature("scheduler-workflow-target-case")

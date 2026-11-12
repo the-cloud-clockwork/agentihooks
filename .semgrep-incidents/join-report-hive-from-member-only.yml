@@ -1,0 +1,15 @@
+rules:
+  - id: join-report-hive-from-member-only
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hive join report keyed only on the AGENTIHOOKS_HIVE_ID member id is never written by sessions on the root
+      hive, which is not a joined member, so their launch check finds the report missing. Fall back to the hive id
+      the hive runner uses, scripts.swarm.commands.hive_id.
+    patterns:
+      - pattern-inside: |
+          def $F(...):
+              ...
+              join_report.$CALL(...)
+              ...
+      - pattern: $HIVE = os.environ.get("AGENTIHOOKS_HIVE_ID")

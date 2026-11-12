@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.hive import daemon
-from scripts.hive.orders import DONE, FAILED, Ack
+from scripts.hive.orders import DONE, FAILED, RECEIPT_SECONDS, Ack
 from scripts.hive.run_orders import RunOrder, RunOrders
 from scripts.workflows import cli, loader, scheduled, store
 
@@ -55,8 +55,10 @@ class RunConsumer:
         """Claims the order by its receipt, then starts its run or names why it cannot start."""
         now = int(time.time() * 1000)
         expired = order.expires_at <= now
-        if not self.redis.hsetnx(self.orders.receipt(order), "started", str(now)):
+        receipt = self.orders.receipt(order)
+        if not self.redis.hsetnx(receipt, "started", str(now)):
             return Ack(FAILED, {}, EXPIRED) if expired else None
+        self.redis.pexpire(receipt, max(order.expires_at - now, 0) + RECEIPT_SECONDS * 1000)
         if expired:
             return Ack(FAILED, {}, EXPIRED)
         checkout = daemon.local_checkout(order.repository)
