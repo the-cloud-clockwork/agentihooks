@@ -101,6 +101,33 @@ def test_plain_falls_back_when_nothing_is_left():
     assert notice_text.plain("") == notice_text.FALLBACK
 
 
+JOB = "https://github.com/o/r/actions/runs/19234567890/job/54123456789"
+PULL = "https://github.com/o/r/pull/1961"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"Tests run over budget; job {JOB} at quota_handoff", f"Tests run over budget, job {JOB} at quota handoff"),
+        (f"{JOB} ran (slow)", f"{JOB} ran slow"),
+        (f"see {PULL} and {JOB}", f"see {PULL} and {JOB}"),
+        (f"merged {PULL}", f"merged {PULL}"),
+    ],
+)
+def test_plain_keeps_every_web_link_whole(text, expected):
+    shown = notice_text.plain(text)
+    assert shown == expected
+    assert ledger_comments.problems(shown, "comment") == []
+
+
+def test_a_swarm_followup_reaches_the_ledger_with_its_link_intact(monkeypatch):
+    sent = _capture(monkeypatch)
+    LedgerClient().followup("sw", f"Tests run over budget on dev, gate job {JOB}")
+    (op,) = sent[0]
+    assert JOB in op["text"].split()
+    assert ledger_comments.problems(op["text"], "item") == []
+
+
 def _capture(monkeypatch, refuse=False):
     sent = []
 
