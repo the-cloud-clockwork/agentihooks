@@ -233,6 +233,8 @@ def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str])
         merged = sorted(closed.intersection([*(row.get("depends_on") or []), *(row.get("parked_on") or [])]))
         if not merged or task_id in closed or row.get("state") not in ("claimed", "pr") or not row.get("pr_url"):
             continue
+        if row.get("state") == "pr" and getattr(run.github(row["pr_url"]), "merge_problem", ""):
+            continue
         pull = run.reread(row["pr_url"])
         if pull is None or pull.state != "OPEN" or not pull.merge_problem:
             continue
