@@ -73,6 +73,40 @@
       }
     },
     {
+      "name": "engineer whose pull request checks are green",
+      "label": "none",
+      "source": "an engineer delivering a green pull request is exempt from the transition ratio",
+      "history": {
+        "tasks": [{"id": "t44", "state": "pr", "claimed_by": "engineer@32a0c1-0832", "pr_url": "https://example.test/pull/44"}],
+        "events": [
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 1000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 2000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 3000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 4000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 5000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 6000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 7000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 8000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 9000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 10000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 11000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 12000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 13000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 14000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 15000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 16000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 17000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 18000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 19000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 20000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 21000},
+          {"kind": "comment added", "target": "phases/p4", "by": "engineer@32a0c1-0832", "at": 22000}
+        ],
+        "agents": [{"name": "engineer@32a0c1-0832", "lane": "eng", "task": "t44", "idle_ticks": 0}],
+        "green": ["t44"]
+      }
+    },
+    {
       "name": "engineer that kept talking past the budget after its outcome",
       "label": "finding",
       "source": "the talk gate budget between outcomes",

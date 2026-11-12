@@ -53,9 +53,9 @@ def test_a_flipped_label_fails_the_replay(tmp_path: Path, capsys: pytest.Capture
     planted["cases"][0]["label"] = "none"
     (tmp_path / "stale_claim.json").write_text(json.dumps(planted))
     assert corpus.main([str(tmp_path)]) == 1
-    assert "flipped  stale claim  claim with no ledger change for forty five minutes: labelled none" in (
-        capsys.readouterr().out
-    )
+    out = capsys.readouterr().out.splitlines()
+    assert "flipped  stale claim  claim with no ledger change for forty five minutes: labelled none" in out
+    assert out[-1] == f"{len(cases())} cases, 1 flipped, 0 detectors unproven"
 
 
 @pytest.mark.feature("swarm-health-corpus")

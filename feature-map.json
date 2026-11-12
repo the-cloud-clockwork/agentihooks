@@ -1835,6 +1835,8 @@
       "seam": "agentihooks swarm status",
       "tests": [
         "tests/swarm/test_health_verdicts.py::test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings",
+        "tests/swarm/test_health_report.py::test_the_false_positives_line_leads_the_findings",
+        "tests/swarm/test_health_report.py::test_no_judged_finding_prints_no_false_positives_line",
         "tests/swarm/test_status_false_positives.py::test_status_counts_each_detector_s_false_positive_verdicts"
       ]
     },
