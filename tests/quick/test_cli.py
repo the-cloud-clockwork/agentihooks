@@ -120,8 +120,8 @@ def test_an_engineer_that_fails_to_start_fails_up_and_waits_for_a_relaunch(monke
 
 @pytest.mark.feature("quick-swarm")
 def test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch(
-    monkeypatch, quick_env, tmp_path, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, quick_env: dict[str, str], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     watched: list[str] = []
 
     def exited(seats: list[registry.Seat], bare: Callable[[str], bool]) -> list[str]:

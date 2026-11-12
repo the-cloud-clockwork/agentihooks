@@ -50,7 +50,7 @@ class FakePanes:
 
 
 @pytest.mark.feature("quick-swarm")
-def test_four_agents_fill_four_equal_columns_with_the_caller_first():
+def test_four_agents_fill_four_equal_columns_with_the_caller_first() -> None:
     panes = FakePanes(160)
     ordered = layout.build("w1:p1", 4, panes)
     assert ordered == ["w1:p1", "w1:p2", "w1:p3", "w1:p4"]
@@ -60,7 +60,7 @@ def test_four_agents_fill_four_equal_columns_with_the_caller_first():
 
 @pytest.mark.feature("quick-swarm")
 @pytest.mark.parametrize("count", [2, 3, 4, 5])
-def test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed(count):
+def test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed(count: int) -> None:
     panes = FakePanes(173)
     ordered = layout.build("w1:p1", count, panes)
     widths = [panes.rects[pane][1] for pane in ordered]

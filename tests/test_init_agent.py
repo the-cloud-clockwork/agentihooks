@@ -986,7 +986,7 @@ def test_codex_defaults_to_sol_at_medium_effort(tmp_path):
     assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="medium"' in line
 
 
-def test_a_codex_launch_never_stops_at_the_update_prompt(tmp_path):
+def test_a_codex_launch_never_stops_at_the_update_prompt(tmp_path: Path) -> None:
     argv = shlex.split(_command_line(tmp_path, {}, "codex"))
     assert argv[argv.index("check_for_update_on_startup=false") - 1] == "-c"
     assert argv.index("check_for_update_on_startup=false") > argv.index("codex")

@@ -155,7 +155,7 @@ def test_tell_skips_a_busy_seat_and_tells_an_idle_one(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
-def test_a_pane_left_at_a_bare_shell_is_never_typed_into(tmp_path):
+def test_a_pane_left_at_a_bare_shell_is_never_typed_into(tmp_path: Path) -> None:
     swarm = _swarm(tmp_path)
     room.post(tmp_path, "eng-1", "master", "plan ready", 100)
     room.post(tmp_path, "master", "eng-1", "go ahead", 101)
@@ -166,7 +166,7 @@ def test_a_pane_left_at_a_bare_shell_is_never_typed_into(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
-def test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does(tmp_path):
+def test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does(tmp_path: Path) -> None:
     _swarm(tmp_path)
     paths.plan(tmp_path, "eng-1").write_text("- [ ] stage one\n")
     herdr = FakeHerdr(bare=True)
@@ -180,7 +180,9 @@ def test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does(t
 
 
 @pytest.mark.feature("quick-swarm")
-def test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched(monkeypatch, tmp_path):
+def test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     def gone(pane_id: str, environ: dict[str, str]) -> dict[str, object]:
         raise tick.herdr_host.HerdrError("pane not found")
 
@@ -213,7 +215,7 @@ def test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched(monkeypatch
 
 
 @pytest.mark.feature("quick-swarm")
-def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path):
+def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path: Path) -> None:
     swarm = _swarm(tmp_path)
     seen: list[str] = []
     naps: list[float] = []
@@ -227,7 +229,7 @@ def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
-def test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds(tmp_path):
+def test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds(tmp_path: Path) -> None:
     swarm = _swarm(tmp_path)
     naps: list[float] = []
     assert launch.exited(swarm.seats[1:], lambda pane_id: False, wait_s=3.0, sleep=naps.append) == []
@@ -273,7 +275,7 @@ def test_a_successor_opening_carries_its_seed_and_the_handoff(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
-def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path):
+def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.PENDING)
     paths.handoff(tmp_path, "eng-1").write_text("# Handoff v2\nthe body\n")
     started: list[list[str]] = []
@@ -319,7 +321,7 @@ def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tm
 
 
 @pytest.mark.feature("quick-swarm")
-def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path):
+def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.PENDING)
     states: list[str] = []
 
@@ -341,7 +343,7 @@ def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path)
 
 
 @pytest.mark.feature("quick-swarm")
-def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching(tmp_path):
+def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching(tmp_path: Path) -> None:
     _swarm(tmp_path, eng_state=registry.PENDING)
     started: list[str] = []
     naps: list[float] = []
