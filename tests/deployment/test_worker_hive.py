@@ -156,6 +156,25 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
     ) in commands.splitlines()
 
 
+@pytest.mark.feature("hive-chart-capabilities")
+def test_the_charted_capabilities_are_registered_on_every_start(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIVE_CAPABILITIES", "anton,gpu")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "prefer= capabilities=anton,gpu"
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hive-chart-capabilities")
+def test_a_worker_without_charted_capabilities_keeps_the_stored_ones(tmp_path, monkeypatch):
+    monkeypatch.delenv("HIVE_CAPABILITIES", raising=False)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert not any("capabilities=" in line for line in commands.splitlines())
+
+
 def test_the_charted_release_name_is_registered_on_every_start(tmp_path, monkeypatch):
     monkeypatch.setenv("HIVE_NAME", "swarm-hive-002")
     result, commands, _, _ = startup(tmp_path)
