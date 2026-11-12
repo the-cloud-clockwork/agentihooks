@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/accounts.py:scripts.swarm_v2.accounts.x__backfill_index:59b88ffad212dd43150de4e17aa7e650ee50f29b93d5bf50a6875bff2d179c08": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its value unchanged at runtime, so cast(None, key) alters no output; the removeprefix it wraps is killed by the backfill test asserting the legacy account."
+  }
+}

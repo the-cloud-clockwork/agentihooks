@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/accounts.py:scripts.swarm_v2.accounts.xǁAccountCapacityǁ_write:cce5e125f66815239cc016b5ed7977fe8b132bafeed2d1ad122035af3e0a1986": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its value unchanged at runtime, so changing its type argument from Any to None alters no output; the sadd it wraps is killed by test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists."
+  }
+}

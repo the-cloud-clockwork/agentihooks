@@ -2,6 +2,7 @@ import json
 import threading
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from redis.exceptions import WatchError
@@ -493,6 +494,57 @@ class Ambiguous(Racing):
 
         pipe.execute = execute
         return pipe
+
+
+def _counting_scans(store: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    """Record every SCAN round trip the store's Redis client makes from now on."""
+    calls: list[tuple[Any, ...]] = []
+    real = store.redis.scan
+
+    def scan(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(store.redis, "scan", scan)
+    return calls
+
+
+def _without_account_keys(store: Any) -> None:
+    """Drop every account hash and the account index, so a test starts from a Redis that never held one."""
+    stale = list(store.redis.scan_iter(match=accounts.account_key("*")))
+    store.redis.delete(accounts.INDEX, accounts.INDEX_BUILT, *stale)
+
+
+@pytest.mark.feature("account-keys-indexed-not-scanned")
+def test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _without_account_keys(world.store)
+    world.store.redis.mset({f"{ROOT}:unrelated:{n}": "x" for n in range(INPUTS["unrelated_keys"])})
+    assert accounts.stored_accounts(world.store) == []
+    scans = _counting_scans(world.store, monkeypatch)
+    world.running(HELD)
+
+    assert accounts.stored_accounts(world.store) == [ACCOUNT]
+    assert accounts.fleet_held(world.store, world.clock[0]) == {ACCOUNT: 1}
+    assert scans == []
+
+
+@pytest.mark.feature("account-keys-indexed-not-scanned")
+def test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _without_account_keys(world.store)
+    legacy = Slot("legacy", f"{SLUG}/{HELD}", "exec-legacy", 1, RESERVED, world.clock[0] + TTL)
+    world.store.redis.hset(accounts.account_key("legacy"), legacy.holder, accounts.encode(legacy))
+    scans = _counting_scans(world.store, monkeypatch)
+
+    assert accounts.stored_accounts(world.store) == ["legacy"]
+    walked = len(scans)
+    assert accounts.stored_accounts(world.store) == ["legacy"]
+    assert walked >= 1
+    assert len(scans) == walked
+    assert world.store.redis.ttl(accounts.INDEX_BUILT) == 3600
 
 
 def test_a_reservation_retried_after_a_lost_reply_or_restart_has_one_effect(world):
