@@ -1,0 +1,12 @@
+rules:
+  - id: controller-done-keeps-awaiting
+    languages: [python]
+    severity: ERROR
+    message: Controller completion fields must clear awaiting when writing done.
+    paths:
+      include:
+        - /scripts/swarm_v2/outcomes.py
+        - controller-done-keeps-awaiting.py
+    patterns:
+      - pattern: '{"state": "done", ...}'
+      - pattern-not: '{"awaiting": "", ...}'
