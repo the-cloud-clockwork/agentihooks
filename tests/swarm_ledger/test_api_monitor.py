@@ -183,8 +183,10 @@ def test_a_swarm_store_error_answers_503_storage_error() -> None:
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
-def test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane() -> None:
-    published = {"machines": {"master": {"claude": 4, "codex": 1}}, "silent": [], "measured_at": NOW}
+@pytest.mark.parametrize("operator_panes", [1, 2])
+def test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane(operator_panes: int) -> None:
+    machine = {"claude": 3 + operator_panes, "codex": 1}
+    published = {"machines": {"master": machine}, "silent": [], "measured_at": NOW}
     readings = {"root": {**HOST, "agents": {"claude": 5}}, AUTOMATION["id"]: {**HOST, "agents": {"claude": 9}}}
     registered = {
         "one": [
@@ -227,18 +229,50 @@ def test_a_seat_on_a_hive_no_longer_live_keeps_its_registered_name_and_an_unknow
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
-def test_a_seat_without_a_hive_is_placed_by_its_runtime_target_then_on_this_hive() -> None:
-    registered = {"one": [seat("engineer@1", host="pod"), seat("engineer@2")]}
+@pytest.mark.parametrize(
+    ("hive", "host", "rows"),
+    [
+        ("pod", "", [1, 1]),
+        ("", "pod", [1, 1]),
+        ("", "", [2, 0]),
+    ],
+)
+def test_a_seat_is_placed_by_its_hive_then_its_runtime_target_then_this_hive(
+    hive: str, host: str, rows: list[int]
+) -> None:
+    registered = {"one": [seat("master@one", hive="root"), seat("engineer@1", hive=hive, host=host)]}
     data = viewed(Store({"one": "running"}, registered), *ports_for([ROOT, POD_HIVE], {}))
-    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 1}, {"name": "swarm-hive-001", "agents": 1}]
+    assert [row["agents"] for row in data["hives"]["rows"]] == rows
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
-def test_a_seat_with_no_harness_or_another_harness_counts_in_its_row_and_the_total_outside_the_split() -> None:
-    registered = {"one": [seat("engineer@1", harness=""), seat("engineer@2", "codex"), seat("engineer@3", "copilot")]}
-    data = viewed(Store({"one": "running"}, registered), *ports_for([ROOT], {}))
-    assert data["agents"] == {"total": 3, "of": 1, "claude": 0, "codex": 1}
-    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 3}]
+@pytest.mark.parametrize(
+    ("harness", "claude", "codex"),
+    [("claude", 1, 0), ("codex", 0, 1), ("copilot", 0, 0), ("", 0, 0)],
+)
+def test_a_seat_counts_in_its_row_and_the_total_and_in_the_split_only_for_claude_or_codex(
+    harness: str, claude: int, codex: int
+) -> None:
+    data = viewed(Store({"one": "running"}, {"one": [seat("engineer@1", harness)]}), *ports_for([ROOT], {}))
+    assert data["agents"] == {"total": 1, "of": 1, "claude": claude, "codex": codex}
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 1}]
+
+
+@pytest.mark.feature("monitor-counts-registered-seats")
+@pytest.mark.parametrize(
+    ("state", "counted"), [("working", 1), ("launching", 1), ("suspect", 1), ("idle", 1), ("finished", 0)]
+)
+def test_every_seat_state_counts_except_finished(state: str, counted: int) -> None:
+    data = viewed(Store({"one": "running"}, {"one": [seat("engineer@1", state=state)]}), *ports_for([ROOT], {}))
+    assert data["agents"]["total"] == counted
+
+
+@pytest.mark.feature("monitor-counts-registered-seats")
+@pytest.mark.parametrize("lane", ["master", "dispatch", "plan", "eng", "ci"])
+def test_a_seat_counts_whatever_its_lane_masters_included(lane: str) -> None:
+    agent = SimpleNamespace(**vars(seat(f"{lane}@one")), lane=lane)
+    data = viewed(Store({"one": "running"}, {"one": [agent]}), *ports_for([ROOT], {}))
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 1}]
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")

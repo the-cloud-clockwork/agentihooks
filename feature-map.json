@@ -4888,8 +4888,10 @@
         "tests/swarm_ledger/test_api_monitor.py::test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane",
         "tests/swarm_ledger/test_api_monitor.py::test_a_live_hive_with_no_seat_shows_zero_never_a_missing_count",
         "tests/swarm_ledger/test_api_monitor.py::test_a_seat_on_a_hive_no_longer_live_keeps_its_registered_name_and_an_unknown_hive_its_id",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_without_a_hive_is_placed_by_its_runtime_target_then_on_this_hive",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_with_no_harness_or_another_harness_counts_in_its_row_and_the_total_outside_the_split"
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_is_placed_by_its_hive_then_its_runtime_target_then_this_hive",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_counts_in_its_row_and_the_total_and_in_the_split_only_for_claude_or_codex",
+        "tests/swarm_ledger/test_api_monitor.py::test_every_seat_state_counts_except_finished",
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_counts_whatever_its_lane_masters_included"
       ]
     },
     {
