@@ -147,6 +147,7 @@ SURVIVORS = [
         "identity": "id1",
     },
     {"name": "hooks.example.x_g__mutmut_2", "status": "no tests", "lines": [4], "fingerprint": "fp2"},
+    {"name": "hooks.example.x_h__mutmut_3", "status": "killed", "lines": [], "fingerprint": ""},
 ]
 SURVIVOR_KEYS = {
     "hooks.example.x_f__mutmut_1": "hooks/example.py:hooks.example.x_f:id1",
@@ -161,7 +162,9 @@ SURVIVOR_KEYS = {
         {"hooks/example.py": SURVIVORS},
     ],
 )
-def test_write_command_records_each_named_survivor_under_its_report_key(tmp_path, report, capsys, monkeypatch):
+def test_write_command_records_each_named_survivor_under_its_report_key(
+    tmp_path: Path, report: dict, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.ci_mutation.clearances import main
 
     source = tmp_path / "report.json"
@@ -176,19 +179,20 @@ def test_write_command_records_each_named_survivor_under_its_report_key(tmp_path
     assert printed == [clearance_path(tmp_path, SURVIVOR_KEYS[name]).as_posix() for name in names]
 
 
-def test_write_command_refuses_a_name_missing_from_the_report_and_writes_nothing(tmp_path):
+def test_write_command_refuses_killed_or_absent_names_and_writes_nothing(tmp_path: Path) -> None:
     from scripts.ci_mutation.clearances import main
 
     source = tmp_path / "report.json"
     source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
-    argv = ["write", str(source), "hooks.example.x_f__mutmut_1", "hooks.example.absent__mutmut_9"]
-    with pytest.raises(ValueError, match="^Mutants not in the report: hooks.example.absent__mutmut_9$"):
-        main([*argv, "--reader", "Standards", "--reason", "Equivalent", "--root", str(tmp_path)])
+    names = ["hooks.example.x_f__mutmut_1", "hooks.example.x_h__mutmut_3", "hooks.example.absent__mutmut_9"]
+    message = "^Mutants not surviving in the report: hooks.example.x_h__mutmut_3, hooks.example.absent__mutmut_9$"
+    with pytest.raises(ValueError, match=message):
+        main(["write", str(source), *names, "--reader", "Standards", "--reason", "Equivalent", "--root", str(tmp_path)])
     assert not (tmp_path / "mutation-clearances").exists()
 
 
 @pytest.mark.parametrize("missing", ["--reader", "--reason"])
-def test_write_command_requires_a_reader_and_a_reason(tmp_path, missing):
+def test_write_command_requires_a_reader_and_a_reason(tmp_path: Path, missing: str) -> None:
     from scripts.ci_mutation.clearances import main
 
     source = tmp_path / "report.json"
@@ -202,7 +206,9 @@ def test_write_command_requires_a_reader_and_a_reason(tmp_path, missing):
     assert not (tmp_path / "mutation-clearances").exists()
 
 
-def test_bare_command_still_migrates_the_legacy_file(tmp_path, monkeypatch, capsys):
+def test_bare_command_still_migrates_the_legacy_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.ci_mutation.clearances import main
 
     (tmp_path / "mutation-cleared.txt").write_text(json.dumps({KEY: RULING}))

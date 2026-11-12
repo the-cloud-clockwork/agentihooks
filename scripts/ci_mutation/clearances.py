@@ -49,10 +49,15 @@ def report_keys(report: dict[str, Any], names: list[str]) -> list[str]:
     files: list[dict[str, Any]] = (
         report["files"] if "files" in report else [{"path": path, "failures": rows} for path, rows in report.items()]
     )
-    keys = {row["name"]: clearance_key(entry["path"], row) for entry in files for row in entry["failures"]}
+    keys = {
+        row["name"]: clearance_key(entry["path"], row)
+        for entry in files
+        for row in entry["failures"]
+        if row["status"] in {"survived", "no tests"}
+    }
     missing = [name for name in names if name not in keys]
     if missing:
-        raise ValueError(f"Mutants not in the report: {', '.join(missing)}")
+        raise ValueError(f"Mutants not surviving in the report: {', '.join(missing)}")
     return [keys[name] for name in names]
 
 
