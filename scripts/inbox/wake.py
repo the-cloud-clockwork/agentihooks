@@ -33,6 +33,8 @@ WAKE_TEXT = (
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
 PASSED, FROZEN = "passed_master", "frozen"
 ALERTED = "alerted"
+HELD = "held it until it can be closed"
+SHUT = "closed it"
 
 
 def window_ms(environ):
@@ -184,7 +186,8 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         elif step in (TO_MASTER, TO_OPERATOR):
             notice = item.sender == ledger_alerts.SENDER
             if not notice and not _alert(inbox, slug, ledger, item):
-                actions.append(f"the ledger page refused message {item.id}, closed it")
+                outcome = SHUT if inbox.get(item.id).state in CLOSED else HELD
+                actions.append(f"the ledger page refused message {item.id}, {outcome}")
                 continue
             shown = "its alert is already on the ledger page" if notice else "shown to the operator on the ledger page"
             inbox.note(item.id, TO_OPERATOR, BY, shown, now_ms)
