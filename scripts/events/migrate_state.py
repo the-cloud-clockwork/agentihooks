@@ -9,6 +9,7 @@ from nats.errors import Error as NatsError
 from nats.js.errors import APIError, NotFoundError
 
 from .config import BusConfig
+from .envelope import Envelope
 from .nats import DEFAULT_URL, NatsBus, NatsStateStore
 from .nats_migration import IMPORT_PLAN
 from .nats_state import IMPORT_PENDING
@@ -48,6 +49,30 @@ def _legacy(bus: Any, bucket: str, keys: list[str]) -> tuple[list[str], int]:
     return present, sum(1 for key in keys for _ in store.watch(key))
 
 
+def _envelope_keys(bus: Any, swarm: str, bucket: str, present: list[str]) -> list[str]:
+    """Live legacy keys whose current value decodes as an event envelope of this swarm."""
+    if not present:
+        return []
+    store = NatsStateStore(bus._loop, bus._js, bucket, False)
+    owned: list[str] = []
+    for key in present:
+        entry = store.get(key)
+        try:
+            envelope = Envelope.decode(entry.value) if entry else None
+        except ValueError:
+            continue
+        if envelope is not None and envelope.swarm == swarm:
+            owned.append(key)
+    return owned
+
+
+def _purge(bus: Any, bucket: str, keys: list[str]) -> list[str]:
+    """Remove every retained revision of the named keys from the legacy bucket's stream."""
+    for key in keys:
+        bus._loop.run(bus._js.purge_stream(f"KV_{bucket}", subject=f"$KV.{bucket}.{key}"))
+    return keys
+
+
 def _parser() -> argparse.ArgumentParser:
     """The command line of the state migration."""
     parser = argparse.ArgumentParser(
@@ -60,6 +85,11 @@ def _parser() -> argparse.ArgumentParser:
     owners.add_argument("--no-keys", action="store_true", help="Claim that this swarm owns no legacy key")
     parser.add_argument("--apply", action="store_true", help="Move the owned keys; default is a read only dry run")
     parser.add_argument("--quiescent", action="store_true", help="Confirm legacy writers of the bucket are quiet")
+    parser.add_argument(
+        "--purge-envelopes",
+        action="store_true",
+        help="After a clean apply, delete the legacy keys holding this swarm's event envelopes",
+    )
     return parser
 
 
@@ -69,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.apply and (not args.quiescent or not (args.key or args.no_keys)):
         parser.error("--apply requires explicit --key or --no-keys ownership and --quiescent")
+    if args.purge_envelopes and not args.no_keys:
+        parser.error("--purge-envelopes requires --no-keys: it drops envelope keys instead of importing them")
     config = BusConfig.from_environ()
     if config.backend != "nats" or args.apply and not config.provision:
         parser.error("migration requires the NATS backend and privileged provisioning for --apply")
@@ -77,30 +109,36 @@ def main(argv: list[str] | None = None) -> int:
     try:
         present, retained = _legacy(bus, args.bucket, keys)
         before, imported = _target(bus, args.swarm, args.bucket, keys)
+        envelope_keys = _envelope_keys(bus, args.swarm, args.bucket, present) if args.purge_envelopes else []
         failures: list[str] = []
         moved = 0
+        purged: list[str] = []
         if args.apply:
             try:
                 bus.migrate_state(args.swarm, args.bucket, keys)
             except (RuntimeError, ValueError, PermissionError, APIError, NatsError) as error:
                 failures.append(str(error))
             moved = _target(bus, args.swarm, args.bucket, keys)[0] - before
-        print(
-            json.dumps(
-                {
-                    "applied": args.apply,
-                    "swarm": args.swarm,
-                    "bucket": args.bucket,
-                    "keys": keys,
-                    "unowned": [key for key in present if key not in keys],
-                    "retained": retained,
-                    "imported": imported,
-                    "would_move": 0 if imported else retained - before,
-                    "moved": moved,
-                    "failures": failures,
-                }
-            )
-        )
+            if args.purge_envelopes and not failures:
+                try:
+                    purged = _purge(bus, args.bucket, envelope_keys)
+                except (APIError, NatsError) as error:
+                    failures.append(str(error))
+        report: dict[str, Any] = {
+            "applied": args.apply,
+            "swarm": args.swarm,
+            "bucket": args.bucket,
+            "keys": keys,
+            "unowned": [key for key in present if key not in keys],
+            "retained": retained,
+            "imported": imported,
+            "would_move": 0 if imported else retained - before,
+            "moved": moved,
+            "failures": failures,
+        }
+        if args.purge_envelopes:
+            report.update(envelope_keys=envelope_keys, purged=purged)
+        print(json.dumps(report))
         return 1 if failures else 0
     finally:
         bus.close()

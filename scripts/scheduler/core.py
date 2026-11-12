@@ -390,3 +390,10 @@ class Scheduler:
                     self._deliver(entry_id, now, lease)
             self._reap(lease, now)
             return fired
+
+    def collect_runs(self) -> int:
+        """Collect the finished hive runs among the run orders this scheduler sent; return how many it collected."""
+        from scripts.hive import run_collect
+        from scripts.scheduler.slots import swarm_store
+
+        return len(run_collect.poll(swarm_store(self.state).redis, self.key(run_collect.SENT)))
