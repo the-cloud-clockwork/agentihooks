@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -230,7 +231,9 @@ def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path,
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_cron_add_places_a_workflow_on_a_hive_with_its_needs(capsys, scheduler, tmp_path):
+def test_cron_add_places_a_workflow_on_a_hive_with_its_needs(
+    capsys: pytest.CaptureFixture[str], scheduler: object, tmp_path: Path
+) -> None:
     case = tmp_path / "case.json"
     case.write_text("{}")
     argv = ["add", "--expr", "0 9 * * *", "--workflow", "nightly", "--case", str(case)]

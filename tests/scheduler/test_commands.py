@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from scripts.events.redis_state import RedisStateStore
@@ -109,7 +111,9 @@ def test_a_case_fits_only_a_named_workflow_target(case, target, name, message):
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_workflow_target_takes_a_hive_placement_with_its_needs(case, tmp_path, monkeypatch):
+def test_a_workflow_target_takes_a_hive_placement_with_its_needs(
+    case: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     slot = commands.target_slot("workflow", "nightly", str(case), placement="hive", needs="build, lint,build")
     assert slot == WorkflowSlot("nightly", str(case), str(tmp_path), "hive", ("build", "lint"))
@@ -122,7 +126,7 @@ def test_a_workflow_target_takes_a_hive_placement_with_its_needs(case, tmp_path,
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_stored_workflow_slot_without_a_placement_runs_locally(case):
+def test_a_stored_workflow_slot_without_a_placement_runs_locally(case: Path) -> None:
     record = {"kind": "workflow", "name": "nightly", "case": str(case), "project": "/repo"}
     assert restore(record) == WorkflowSlot("nightly", str(case), "/repo", "local", ())
 
@@ -139,13 +143,17 @@ def test_a_stored_workflow_slot_without_a_placement_runs_locally(case):
     ],
 )
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_placement_that_does_not_fit_is_refused(case, target, name, placement, needs, message):
+def test_a_placement_that_does_not_fit_is_refused(
+    case: Path, target: str, name: str, placement: str, needs: str, message: str
+) -> None:
     with refused(message):
         commands.target_slot(target, name, str(case) if target == "workflow" else "", placement=placement, needs=needs)
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(case, monkeypatch):
+def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(
+    case: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fakeredis
 
     from scripts.hive import run_placement

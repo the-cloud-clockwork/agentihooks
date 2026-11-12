@@ -13,7 +13,7 @@ REPO = "/home/worker/dev/agentihooks"
 RUN = run_placement.Run("delivery-1", "grade", "/cases/grade.json", REPO, "owner@fixture", ("build", "lint"))
 
 
-def hive(hive_id: str, **changes: object) -> dict:
+def hive(hive_id: str, **changes: object) -> dict[str, object]:
     return {
         "id": hive_id,
         "repos": [REPO],
@@ -39,7 +39,7 @@ class Orders:
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs():
+def test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs() -> None:
     hives = [hive("busy"), hive("calm"), hive("idle-b"), hive("idle-a")]
     running = {"busy": 3, "calm": 1}
     assert run_placement.choose(hives, REPO, ("build",), running, NOW) == "idle-a"
@@ -56,19 +56,19 @@ def test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs():
     ],
 )
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen(unfit):
+def test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen(unfit: dict[str, object]) -> None:
     hives = [hive("unfit", **unfit), hive("fit")]
     assert run_placement.choose(hives, REPO, RUN.needs, {"fit": 9}, NOW) == "fit"
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_no_live_hive_listing_the_repo_names_the_repo():
+def test_no_live_hive_listing_the_repo_names_the_repo() -> None:
     hives = [hive("other", repos=["/home/worker/dev/agentibrain-kernel"]), hive("old", heartbeat_at=0)]
     assert run_placement.choose(hives, REPO, RUN.needs, {}, NOW) == Wait(f"no live hive lists the repo {REPO}")
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_no_hosting_hive_with_every_need_names_the_missing_needs():
+def test_no_hosting_hive_with_every_need_names_the_missing_needs() -> None:
     hives = [hive("half", capabilities=["build"]), hive("other", capabilities=["lint"])]
     assert run_placement.choose(hives, REPO, RUN.needs, {}, NOW) == Wait(
         f"no live hive that lists the repo {REPO} declares build, lint"
@@ -76,7 +76,7 @@ def test_no_hosting_hive_with_every_need_names_the_missing_needs():
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_placed_run_sends_one_run_order_to_the_chosen_hive():
+def test_a_placed_run_sends_one_run_order_to_the_chosen_hive() -> None:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -87,7 +87,7 @@ def test_a_placed_run_sends_one_run_order_to_the_chosen_hive():
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing():
+def test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing() -> None:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -102,7 +102,7 @@ def test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing():
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_a_later_placement_clears_the_recorded_wait():
+def test_a_later_placement_clears_the_recorded_wait() -> None:
     import fakeredis
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -113,7 +113,7 @@ def test_a_later_placement_clears_the_recorded_wait():
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
-def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch):
+def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch: pytest.MonkeyPatch) -> None:
     import fakeredis
 
     from scripts.hive import registry, run_orders
