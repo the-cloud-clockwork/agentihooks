@@ -47,6 +47,7 @@ def _is_python(word):
 
 
 @pytest.mark.parametrize("case", CASES)
+@pytest.mark.feature("init-agent-launcher-python-safe-path")
 def test_every_python_line_in_the_launcher_runs_with_the_safe_path_flag(tmp_path, case):
     environ, spec, expected = CASES[case]
     launcher, _ = init_agent._write_launcher(

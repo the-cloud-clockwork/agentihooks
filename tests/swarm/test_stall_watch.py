@@ -1476,6 +1476,7 @@ def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue
     ) in ledger_events.PULL_QUERY
 
 
+@pytest.mark.feature("ledger-events-fresh-reader-batches-rereads")
 def test_the_tick_rereads_a_stall_from_github_before_acting():
     import inspect
 

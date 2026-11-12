@@ -864,6 +864,7 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         box.close()
 
 
+@pytest.mark.feature("workstation-agent-count-by-headed-hive")
 def test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs(monkeypatch):
     import fakeredis
 

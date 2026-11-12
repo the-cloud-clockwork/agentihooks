@@ -220,6 +220,7 @@ def test_a_session_not_retained_is_not_searched(inputs, corpus):
     assert not any(label.startswith("kernel:") for label in sv2_idx04_cases.named(labels, wide))
 
 
+@pytest.mark.feature("memory-search-skips-deleted-session")
 def test_a_deleted_session_is_not_searched_before_the_sweep(inputs: dict, corpus: Corpus) -> None:
     uid = inputs["sessions"][2]["session_uid"]
     stored = "SELECT chunk_id FROM search_chunk WHERE access_domain = ? AND session_uid = ?"

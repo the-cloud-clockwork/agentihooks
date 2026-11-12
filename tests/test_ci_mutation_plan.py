@@ -828,6 +828,7 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     assert budget_overrun(planned, 1080).startswith("Mutant scripts.sample.x__mutmut_1 alone needs 3000")
 
 
+@pytest.mark.feature("mutation-replan-all-killed-plan")
 def test_a_plan_the_probe_killed_whole_passes_even_when_the_probe_left_less_budget_than_setup() -> None:
     from scripts.ci_mutation.measured import budget_overrun
 

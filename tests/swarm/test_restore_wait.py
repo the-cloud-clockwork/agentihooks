@@ -28,6 +28,7 @@ def waiting(store, at, name="sw-eng-1", task="t1", seat="eng-1@sw", awaited_at=0
     return agent
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_first_restore_wait_counts_from_its_restore_and_is_a_finding_for_the_master(store):
     swarm(store)
     waiting(store, at=10 * MINUTE)
@@ -45,6 +46,7 @@ def test_a_first_restore_wait_counts_from_its_restore_and_is_a_finding_for_the_m
     assert found[0].id == "restore-wait/sw-eng-1"
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_seatless_taskless_wait_names_the_agent_and_no_task(store):
     swarm(store)
     waiting(store, at=10 * MINUTE, task="", seat="")
@@ -53,12 +55,14 @@ def test_a_seatless_taskless_wait_names_the_agent_and_no_task(store):
     assert found.evidence == ("restore outcome: worktree gone", "task none")
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_seat_waiting_within_one_tick_window_raises_no_finding(store):
     swarm(store)
     waiting(store, at=10 * MINUTE)
     assert restore_wait.findings(store, "sw", 10 * MINUTE + 30_000) == []
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_wait_of_exactly_one_tick_window_raises_no_finding(store):
     swarm(store)
     waiting(store, at=10 * MINUTE)
@@ -66,6 +70,7 @@ def test_a_wait_of_exactly_one_tick_window_raises_no_finding(store):
     assert [f.subject for f in restore_wait.findings(store, "sw", 10 * MINUTE + lease.tick_ms() + 1)] == ["sw-eng-1"]
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_wait_within_the_window_never_hides_a_later_seat_past_it(store):
     swarm(store)
     waiting(store, at=29 * MINUTE + 50_000, name="sw-eng-1")
@@ -74,6 +79,7 @@ def test_a_wait_within_the_window_never_hides_a_later_seat_past_it(store):
     assert [(f.subject, f.measure) for f in found] == [("sw-eng-2", 20)]
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_a_decided_restore_raises_no_finding_and_never_hides_a_later_wait(store):
     swarm(store)
     agent = waiting(store, at=10 * MINUTE, name="sw-eng-1")
@@ -84,6 +90,7 @@ def test_a_decided_restore_raises_no_finding_and_never_hides_a_later_wait(store)
     assert [f.subject for f in found] == ["sw-eng-2"]
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_the_wait_counts_from_when_a_retried_decision_first_awaited(store):
     swarm(store)
     waiting(store, at=29 * MINUTE + 30_000, awaited_at=10 * MINUTE)
@@ -91,6 +98,7 @@ def test_the_wait_counts_from_when_a_retried_decision_first_awaited(store):
     assert found.measure == 20
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_swarm_status_reports_a_restore_wait_at_the_current_time(store, monkeypatch):
     from scripts.swarm import status
 
@@ -102,6 +110,7 @@ def test_swarm_status_reports_a_restore_wait_at_the_current_time(store, monkeypa
     assert [(r["subject"], r["summary"]) for r in rows if r["kind"] == "restore wait"] == [("sw-eng-1", summary)]
 
 
+@pytest.mark.feature("restore-wait-health-finding")
 def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
     from scripts.inbox.store import InboxStore
     from scripts.swarm import ledger_events
@@ -117,6 +126,7 @@ def test_the_tick_sends_a_restore_wait_finding_to_the_master(store):
     assert "restore wait" in item.text and "eng-1@sw" in item.text
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_the_seats_current_occupant_is_judged_before_an_older_record_of_the_same_seat(store):
     older = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw")
     current = AgentRecord("sw-master-2", MASTER, MASTER, seat="master@sw")
@@ -136,6 +146,7 @@ def two_masters_saved(store, tmp_path):
     store.redis.flushall()
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_restore_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(store, tmp_path):
     two_masters_saved(store, tmp_path)
     outcomes = restore(store, ResumingRuntime())
@@ -148,6 +159,7 @@ def test_restore_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(sto
     assert store.seats.occupant("master@sw").occupant == waited.name
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_restore_lets_the_seats_current_occupant_wait_before_an_older_record(store, tmp_path):
     two_masters_saved(store, tmp_path)
     store.seats.occupy("master@sw", "sw-master-2", 1)
@@ -163,6 +175,7 @@ class Notes:
         self.lines.append((slug, text))
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(store):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     first = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw", state=resume.AWAITING)
@@ -178,6 +191,7 @@ def test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits(st
     assert notes.lines == [("sw", f"{action}; one restore decision covers the seat.")]
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_a_stale_waiting_record_that_no_longer_holds_the_seat_never_refuses_its_occupant(store):
     store.create(SwarmConfig("sw", "/repo", 2, 1))
     stale = AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw", state=resume.AWAITING)
@@ -190,6 +204,7 @@ def test_a_stale_waiting_record_that_no_longer_holds_the_seat_never_refuses_its_
     assert {a.name: a.state for a in store.agents("sw")}["sw-master-2"] == resume.AWAITING
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_restore_refuses_a_second_agent_of_a_waiting_seat_even_when_its_own_conversation_could_reopen(store, tmp_path):
     store.create(SwarmConfig("sw", str(tmp_path), 2, 1))
     store.put_agent(
@@ -216,12 +231,14 @@ def test_restore_refuses_a_second_agent_of_a_waiting_seat_even_when_its_own_conv
     }
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_a_seatless_agent_has_no_waiting_peer(store):
     swarm(store)
     store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, state=resume.AWAITING))
     assert resume.waiting_peer(store, "sw", AgentRecord("sw-eng-1", "eng", "t1")) == ""
 
 
+@pytest.mark.feature("restore-refuses-second-waiting-seat-agent")
 def test_another_seat_waiting_never_makes_a_working_occupant_a_waiting_peer(store):
     swarm(store)
     store.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, seat="master@sw"))
