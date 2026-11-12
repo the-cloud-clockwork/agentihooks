@@ -3670,7 +3670,8 @@
       "seam": "scripts.events.scheduler_state open_scheduler_state; scripts.scheduler.process_timer Timer",
       "tests": [
         "tests/events/test_scheduler_state.py::test_a_scoped_bus_without_a_swarm_setting_opens_the_unscoped_scheduler_state",
-        "tests/events/test_scheduler_state.py::test_the_controller_process_timer_fires_on_a_scoped_bus_without_a_swarm_setting"
+        "tests/events/test_scheduler_state.py::test_the_controller_process_timer_fires_on_a_scoped_bus_without_a_swarm_setting",
+        "tests/events/test_scheduler_state.py::test_the_supervisor_a_scoped_controller_spawns_opens_the_same_scheduler_state"
       ],
       "rules": [
         "bus-scope-swarm-setting-indexed"

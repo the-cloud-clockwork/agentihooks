@@ -105,6 +105,34 @@ def test_the_controller_process_timer_fires_on_a_scoped_bus_without_a_swarm_sett
         scheduler_state._bus.cache_clear()
 
 
+@pytest.mark.feature("controller-scoped-scheduler-state")
+def test_the_supervisor_a_scoped_controller_spawns_opens_the_same_scheduler_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.events import factory
+    from scripts.scheduler import service
+
+    controller = {
+        "AGENTIHOOKS_STATE_BACKEND": "bus",
+        "AGENTIHOOKS_BUS": "memory",
+        "AGENTIHOOKS_BUS_SCOPED": "1",
+    }
+    opened = Mock()
+    monkeypatch.setattr(factory, "open_bus", opened)
+    monkeypatch.setattr(scheduler_state, "atexit", Mock())
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    configs = []
+    for environ in (controller, service._spawn_env(controller)):
+        scheduler_state._bus.cache_clear()
+        for key, value in environ.items():
+            monkeypatch.setenv(key, value)
+        scheduler_state.open_scheduler_state("scheduler-member")
+        configs.append(opened.call_args.args[0])
+    scheduler_state._bus.cache_clear()
+    assert configs[0] == configs[1]
+    assert configs[0].scoped is False
+
+
 def test_scheduler_dispatches_against_real_nats_and_reuses_its_connection(tmp_path, monkeypatch):
     scheduler_state._bus.cache_clear()
     monkeypatch.setenv("AGENTIHOOKS_STATE_BACKEND", "bus")
