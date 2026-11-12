@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from scripts.gates import log as gate_log
-from scripts.swarm import capacity, cli, night_watch_drill, tick
+from scripts.swarm import capacity, cli, night_watch_drill, redis_budget, tick
 from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import MANUAL_SCALING, MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -184,20 +184,22 @@ def test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running(rig: dic
     assert store.redis.get(store.key(SCRATCH, "probe")) == "1"
     assert store.config(SCRATCH).state == "paused"
     store.update("live-swarm", state="paused")
-    assert night_watch_drill.Running(store, SCRATCH).config("live-swarm").state == "paused"
+    assert night_watch_drill.running(store, SCRATCH).config("live-swarm").state == "paused"
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
-def test_a_copied_running_view_keeps_its_store_and_has_no_private_store_attributes(rig: dict[str, Any]) -> None:
-    import copy
-
+def test_the_redis_budget_rebinds_every_part_of_the_running_view(rig: dict[str, Any]) -> None:
     store = rig["store"]
     store.update(SCRATCH, state="paused")
-    view = copy.copy(night_watch_drill.Running(store, SCRATCH))
-    assert view.config(SCRATCH).state == "running" and view.redis is store.redis
-    with pytest.raises(AttributeError) as missing:
-        view.__getattr__("_hidden")
-    assert str(missing.value) == "_hidden"
+    view = night_watch_drill.running(store, SCRATCH)
+    assert view.execution_registry.store is view and store.execution_registry.store is store
+    budget = redis_budget.Budget(store.redis, 30)
+    bound = redis_budget.bounded(view, budget)
+    assert bound.redis is budget and bound.seats.redis is budget and bound.memory.redis is budget
+    assert bound.execution_registry.store is bound
+    assert bound.config(SCRATCH).state == "running" and bound.config("live-swarm").state == "running"
+    store.update("live-swarm", state="paused")
+    assert bound.config("live-swarm").state == "paused"
 
 
 @pytest.mark.feature("swarm-night-watch-drill")

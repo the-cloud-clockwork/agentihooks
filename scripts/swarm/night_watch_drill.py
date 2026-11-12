@@ -4,6 +4,7 @@ took. A paused scratch swarm stays paused while its passes read it as running. A
 paused scratch proof swarm, or whose front door seat a live master holds, is refused untouched."""
 
 import argparse
+import copy
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -44,24 +45,29 @@ class Drill:
 
 
 class Running:
-    """A store view that reads the drilled swarm as running and forwards everything else to the store, so a paused
-    scratch swarm's night watch passes act while its stored state stays paused."""
+    """A store mixin that reads the drilled swarm as running, so a paused scratch swarm's night watch passes act while
+    its stored state stays paused."""
 
-    def __init__(self, store: Any, slug: str) -> None:
-        """Wrap ``store`` for the swarm ``slug``."""
-        self._store = store
-        self._slug = slug
+    drilled: str = ""
 
     def config(self, slug: str) -> Any:
         """The stored config, with the drilled swarm's state read as running."""
-        config: Any = self._store.config(slug)
-        return replace(config, state="running") if slug == self._slug else config
+        config: Any = super().config(slug)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        return replace(config, state="running") if slug == self.drilled else config
 
-    def __getattr__(self, name: str) -> Any:
-        """Every other public store attribute, unchanged; a private one is missing, so a copy of this view stays whole."""
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(self._store, name)
+
+def running(store: Any, slug: str) -> Any:
+    """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night
+    watch's Redis budget rebinds the copy as it rebinds the store."""
+    view: Any = copy.copy(store)
+    view.__class__ = type(f"Running{type(store).__name__}", (Running, type(store)), {})
+    view.drilled = slug
+    for name, value in vars(store).items():
+        if getattr(value, "store", None) is store:
+            part: Any = copy.copy(value)
+            part.store = view
+            setattr(view, name, part)
+    return view
 
 
 def refusal(drill: Drill) -> str:
@@ -101,7 +107,7 @@ def run(drill: Drill) -> dict[str, Any]:
     aged = [drill.now_ms - night_watch.SEAT_MS, drill.now_ms - night_watch.GAP_MS]
     passes = [drill.now_ms] if observed is not None else [*aged, drill.now_ms]
     rows = {task["id"]: task for task in drill.doc["tasks"]}
-    store = Running(drill.store, drill.slug)
+    store = running(drill.store, drill.slug)
     for at in passes:
         asleep = lifetime.sleeping(drill.slug, drill.store, rows)
         actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
