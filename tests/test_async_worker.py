@@ -1,7 +1,9 @@
+import importlib
 import re
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -91,7 +93,7 @@ def test_timeout_is_logged_with_time_and_task(jobs):
     assert re.search(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ \[async\] slow-job: TIMEOUT after 1s$", log.read_text(), re.M)
 
 
-def _exited(pid):
+def _exited(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/stat") as handle:
             return handle.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
@@ -100,13 +102,12 @@ def _exited(pid):
 
 
 @pytest.mark.parametrize(("seconds", "timeout"), [(0, 30), (60, 1)], ids=["finished", "hung"])
-def test_a_finished_and_a_hung_job_both_exit(jobs, seconds, timeout):
-    import async_jobs
-
+def test_a_finished_and_a_hung_job_both_exit(jobs: Path, seconds: int, timeout: int) -> None:
     from hooks import _async
 
+    record_pid = getattr(importlib.import_module("async_jobs"), "record_pid")
     marker = jobs / "pid"
-    _async.fork_and_call(async_jobs.record_pid, str(marker), seconds, timeout_sec=timeout, task_name="exit-check")
+    _async.fork_and_call(record_pid, str(marker), seconds, timeout_sec=timeout, task_name="exit-check")
     assert _wait_for(lambda: marker.exists() and marker.read_text(), 8)
     pid = int(marker.read_text())
     assert _wait_for(lambda: _exited(pid), 8), (jobs / "logs" / "async-hooks.log").read_text()

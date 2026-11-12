@@ -162,8 +162,8 @@ def test_exporter_flushes_during_an_active_turn_and_once_after_the_owner_exits(h
     assert not trace_flush.owner_path("session").exists()
 
 
-def _idle_run(clock, calls):
-    def send(session, path, timeout, trigger):
+def _idle_run(clock: Clock, calls: list[tuple[float, str]]) -> str:
+    def send(session: str, path: str, timeout: float, trigger: str) -> bool:
         calls.append((clock(), trigger))
         return True
 
@@ -178,7 +178,7 @@ def _idle_run(clock, calls):
     )
 
 
-def test_exporter_exits_once_its_live_owner_has_no_new_work_for_the_idle_bound(home, tmp_path):
+def test_exporter_exits_once_its_live_owner_has_no_new_work_for_the_idle_bound(home: Path, tmp_path: Path) -> None:
     transcript = tmp_path / "t.jsonl"
     _grow(transcript)
     _request("session", transcript)
@@ -189,7 +189,7 @@ def test_exporter_exits_once_its_live_owner_has_no_new_work_for_the_idle_bound(h
     assert not trace_flush.owner_path("session").exists()
 
 
-def test_new_work_restarts_the_idle_bound(home, tmp_path):
+def test_new_work_restarts_the_idle_bound(home: Path, tmp_path: Path) -> None:
     transcript = tmp_path / "t.jsonl"
     _grow(transcript)
     _request("session", transcript)
@@ -200,13 +200,15 @@ def test_new_work_restarts_the_idle_bound(home, tmp_path):
     assert clock.now == 120
 
 
-def test_a_request_landing_at_the_idle_exit_keeps_the_exporter(home, tmp_path, monkeypatch):
+def test_a_request_landing_at_the_idle_exit_keeps_the_exporter(
+    home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     transcript = tmp_path / "t.jsonl"
     _grow(transcript)
     _request("session", transcript)
     clock, calls, unlink = Clock(), [], Path.unlink
 
-    def racing_unlink(path, missing_ok=False):
+    def racing_unlink(path: Path, missing_ok: bool = False) -> None:
         unlink(path, missing_ok=missing_ok)
         if path == trace_flush.owner_path("session") and clock.now == 60:
             _request("session", transcript, "prompt")
@@ -686,7 +688,9 @@ def test_spawn_detaches_the_exporter(monkeypatch):
     ]
 
 
-def test_run_keeps_the_job_bound_armed_lowers_priority_and_logs_the_outcome(monkeypatch, capsys):
+def test_run_keeps_the_job_bound_armed_lowers_priority_and_logs_the_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     calls = []
     monkeypatch.setattr(trace_flush.os, "nice", lambda n: calls.append(("nice", n)))
     monkeypatch.setattr(
