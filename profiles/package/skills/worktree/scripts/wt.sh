@@ -220,6 +220,9 @@ case "${cmd}" in
     TARGET="${WT_DIR}/${NAME}"
     [[ -d "${TARGET}" ]] || die "no such worktree: ${TARGET}"
     BR="$(git -C "${TARGET}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    UPSTREAM="$(git -C "${TARGET}" for-each-ref --format='%(upstream:remotename) %(upstream:remoteref)' "refs/heads/${BR}" 2>/dev/null || true)"
+    HEAD_BR="${BR}"
+    [[ "${UPSTREAM}" == "origin refs/heads/"?* ]] && HEAD_BR="${UPSTREAM#origin refs/heads/}"
     case "${BR}" in
       main|master|dev|"${BASE}") die "REFUSED — worktree is on protected branch '${BR}'" ;;
     esac
@@ -233,33 +236,40 @@ case "${cmd}" in
         || die "cannot read origin branches — worktree kept"
       REMOTE_HEAD="$(git -C "${REPO}" for-each-ref --format='%(refname)' --contains "$(git -C "${TARGET}" rev-parse HEAD)" refs/remotes/origin/)" \
         || die "cannot check origin containment — worktree kept"
-      [[ -n "${REMOTE_HEAD}" ]] \
-        || die "branch '${BR}' is not contained in an origin branch — worktree kept"
+      if [[ -z "${REMOTE_HEAD}" ]]; then
+        command -v gh >/dev/null 2>&1 && ORIGIN_REPO="$(origin_repo "${REPO}")" \
+          && [[ "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state merged --json headRefOid --jq '.[0].headRefOid' 2>/dev/null)" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
+          || die "branch '${BR}' is not contained in an origin branch — worktree kept"
+      fi
     elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
         ORIGIN_REPO="$(origin_repo "${REPO}")" || die "no origin remote in ${REPO} — worktree kept"
-        PR_STATE="$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
-          || die "cannot read pull requests for '${BR}' — worktree kept"
+        PR_STATE="$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
+          || die "cannot read pull requests for '${HEAD_BR}' — worktree kept"
         if [[ "${PR_STATE}" == "CLOSED "* ]]; then
           [[ "${FORCE}" -eq 1 ]] \
             || die "pull request ${PR_STATE#CLOSED } was closed without merging — pass --force to drop the worktree and branch ${BR}"
         else
           [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
             || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
-          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
-            || die "cannot read remote branch '${BR}' — worktree kept"
+          if [[ "${PR_STATE}" == MERGED && "${HEAD_BR}" != "${BR}" ]]; then
+            [[ "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state merged --json headRefOid --jq '.[0].headRefOid')" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
+              || die "branch '${BR}' has commits past the merged pull request of '${HEAD_BR}' — worktree kept"
+          fi
+          REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${HEAD_BR}")" \
+            || die "cannot read remote branch '${HEAD_BR}' — worktree kept"
           if [[ -n "${REMOTE_BRANCH}" ]]; then
             [[ "${PR_STATE}" == MERGED ]] \
-              || die "published branch '${BR}' has no confirmed merged pull request — worktree kept"
-            git -C "${REPO}" push origin --delete "${BR}" \
-              || die "cannot delete remote branch '${BR}' — worktree kept"
+              || die "published branch '${HEAD_BR}' has no confirmed merged pull request — worktree kept"
+            git -C "${REPO}" push origin --delete "${HEAD_BR}" \
+              || die "cannot delete remote branch '${HEAD_BR}' — worktree kept"
           fi
         fi
       else
         PUBLISHED=0
-        git -C "${REPO}" show-ref --verify --quiet "refs/remotes/origin/${BR}" || PUBLISHED=$?
+        git -C "${REPO}" show-ref --verify --quiet "refs/remotes/origin/${HEAD_BR}" || PUBLISHED=$?
         [[ "${PUBLISHED}" -eq 1 ]] \
-          || die "cannot verify the published branch '${BR}' merged without gh — worktree kept"
+          || die "cannot verify the published branch '${HEAD_BR}' merged without gh — worktree kept"
       fi
     fi
     release "${TARGET}"
@@ -289,7 +299,7 @@ case "${cmd}" in
       [[ -z "$(git -C "${REPO}" rev-list "origin/${BASE}..${BR}" 2>/dev/null)" ]] && MERGED=1
       if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1 && ORIGIN_REPO="$(origin_repo "${REPO}")"; then
         BR_HEAD="$(git -C "${REPO}" rev-parse "refs/heads/${BR}")"
-        [[ -n "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${BR}" --base "${BASE}" --state merged --json number,headRefOid --jq "map(select(.headRefOid == \"${BR_HEAD}\")) | .[0].number" 2>/dev/null)" ]] && MERGED=1
+        [[ -n "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state merged --json number,headRefOid --jq "map(select(.headRefOid == \"${BR_HEAD}\")) | .[0].number" 2>/dev/null)" ]] && MERGED=1
       fi
       if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 || "${PUSHED}" -eq 1 ]]; then
         git -C "${REPO}" branch -D "${BR}" >/dev/null && echo "wt: removed ${TARGET} and branch ${BR}"

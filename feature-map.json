@@ -140,6 +140,18 @@
       ]
     },
     {
+      "id": "host-room-counts-reserved-executions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The host budget sample counts managed Codex executions reserved on this host whose server has not started, and memory and load spawn room subtract them, so reserved launches are not invisible to host room.",
+      "seam": "scripts.swarm.host_budget.read_host, memory_room and load_room with hooks.context.account_sessions.reserved_executions",
+      "tests": [
+        "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
+        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room",
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher"
+      ]
+    },
+    {
       "id": "legacy-state-migration-command",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
@@ -185,6 +197,17 @@
         "tests/hive/test_holder_backfill.py::test_the_hive_holders_command_prints_the_backfill",
         "tests/hive/test_holder_backfill.py::test_the_hive_help_names_the_holders_command",
         "tests/auth/test_service.py::test_main_backfills_holder_records_before_it_serves"
+      ]
+    },
+    {
+      "id": "managed-dead-server-releases-slot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The runtime binding pass moves a managed Codex transport record on this host whose app server is proven dead to failed with the server died error class and frees its endpoint, so the account session count stops holding its slot; a record from another host or with unknown liveness is left as it is.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.settle and hooks.context.account_sessions.managed_held",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot",
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness"
       ]
     },
     {
@@ -5002,26 +5025,19 @@
       ]
     },
     {
-      "id": "managed-dead-server-releases-slot",
+      "id": "successor-upstream-branch",
       "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
-      "behaviour": "The runtime binding pass moves a managed Codex transport record on this host whose app server is proven dead to failed with the server died error class and frees its endpoint, so the account session count stops holding its slot; a record from another host or with unknown liveness is left as it is.",
-      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.settle and hooks.context.account_sessions.managed_held",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t549",
+      "behaviour": "A successor's worktree whose local branch tracks the earlier remote branch it continues is recorded under that remote branch, and wt.sh done reads its pull request and remote branch by that upstream name, so merged cleanup drops the local and remote branch and parking drops a worktree whose merged upstream left origin.",
+      "seam": "scripts.swarm.cli.worktree_branch and the wt.sh done command against a real origin",
       "tests": [
-        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot",
-        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness"
-      ]
-    },
-    {
-      "id": "host-room-counts-reserved-executions",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
-      "behaviour": "The host budget sample counts managed Codex executions reserved on this host whose server has not started, and memory and load spawn room subtract them, so reserved launches are not invisible to host room.",
-      "seam": "scripts.swarm.host_budget.read_host, memory_room and load_room with hooks.context.account_sessions.reserved_executions",
-      "tests": [
-        "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
-        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room",
-        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher"
+        "tests/swarm/test_cli.py::test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks",
+        "tests/swarm/test_cli.py::test_an_unpushed_checkout_tracking_a_base_branch_is_refused",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_branch_whose_own_merged_head_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_drops_a_successor_whose_upstream_branch_merged",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
       ]
     }
   ],
