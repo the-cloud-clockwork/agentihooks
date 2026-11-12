@@ -135,7 +135,8 @@
         "tests/events/test_migrate_state.py::test_dry_run_reports_what_it_would_move_and_writes_nothing",
         "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
         "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
-        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending"
+        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending",
+        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch"
       ]
     },
     {
@@ -886,6 +887,18 @@
         "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_releases_without_acting_once_the_swarm_stops",
         "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_acts_inside_the_held_pass_and_releases",
         "tests/tick/steps/test_master_placement_ops.py::test_the_tick_lock_releases_when_the_act_raises"
+      ]
+    },
+    {
+      "id": "retired-master-seat-owns-no-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t904",
+      "behaviour": "A master seat on the retired list is refused as a hive owner, checked in the same watched transaction that writes the owner, and a manual master count change rewrites the count and the retired list in one watched transaction, so a seat the tick retires while it runs stays retired.",
+      "seam": "scripts.swarm_v2.masters.MasterSeats own_hive, check_hives, set_count and keep_retired",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written",
+        "tests/test_swarm_v2_master_seats.py::test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired",
+        "tests/test_swarm_v2_master_seats.py::test_a_seats_write_that_keeps_losing_its_race_names_what_was_not_saved"
       ]
     },
     {
@@ -3550,6 +3563,17 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
+      "id": "root-hive-github-user-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
+      "behaviour": "The hive join github check probes the installation endpoint only when the auth mode is app, or is unset on a joined hive member; a root hive session with no auth mode and no member id probes its user login, so a workstation launch on a user gh login passes the check.",
+      "seam": "scripts.hive.join_checks.github_ready",
+      "tests": [
+        "tests/hive/test_join_checks.py::test_root_hive_without_an_auth_mode_checks_github_as_its_user_login",
+        "tests/hive/test_join_checks.py::test_a_member_with_a_token_auth_mode_checks_github_as_its_user"
       ]
     },
     {
