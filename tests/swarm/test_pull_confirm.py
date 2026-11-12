@@ -8,7 +8,7 @@ from typing import Any, NoReturn
 import pytest
 
 from scripts.gates import intent
-from scripts.swarm import cli
+from scripts.swarm import cli, pull_head
 from scripts.swarm.store import SwarmError
 from scripts.tick.adapters.fakes import FakeSourceControl
 from scripts.tick.ports.source_control import ChangeRef, ChangeState
@@ -53,12 +53,12 @@ def test_swarm_pr_stores_the_confirmed_number_and_head(env: Any, monkeypatch: py
 
 
 def test_the_pull_branch_returns_the_number_and_head_of_an_open_pull_request() -> None:
-    assert cli.pull_branch(URL, _ports("open")) == cli.PullHead(MINE, "", 3, "abc123")
+    assert pull_head.pull_branch(URL, _ports("open")) == cli.PullHead(MINE, "", 3, "abc123")
 
 
 def test_the_pull_branch_refuses_a_closed_pull_request() -> None:
     with pytest.raises(SwarmError) as refused:
-        cli.pull_branch(URL, _ports("closed"))
+        pull_head.pull_branch(URL, _ports("closed"))
     assert str(refused.value) == f"pull request {URL} is closed, not open"
 
 
@@ -67,7 +67,7 @@ def test_the_pull_branch_refuses_a_pull_request_github_does_not_confirm() -> Non
         raise KeyError("no such pull request")
 
     with pytest.raises(SwarmError) as refused:
-        cli.pull_branch(URL, ports)
+        pull_head.pull_branch(URL, ports)
     assert str(refused.value) == f"GitHub does not confirm pull request {URL}: 'no such pull request'"
 
 
@@ -168,7 +168,7 @@ def test_a_pull_request_without_a_number_stores_no_confirmation(
 def test_the_pull_branch_keeps_the_fork_repository_url() -> None:
     reference = ChangeRef("o/r", 3)
     change = ChangeState(reference, "open", "abc123", "dev", False, "u", MINE, "", False, "fork/r")
-    found = cli.pull_branch(URL, lambda url: (FakeSourceControl({"change": change}), reference))
+    found = pull_head.pull_branch(URL, lambda url: (FakeSourceControl({"change": change}), reference))
     assert found == cli.PullHead(MINE, "https://github.com/fork/r", 3, "abc123")
 
 
