@@ -281,6 +281,7 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
+CODEX_NO_UPDATE_PROMPT = ("-c", "check_for_update_on_startup=false")
 EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
@@ -470,6 +471,7 @@ def _agent_command(
             *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
+            *CODEX_NO_UPDATE_PROMPT,
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
             *(_model_args("codex", agent_args, environ) if spec.profile or spec.fallback_bare else []),
