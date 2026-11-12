@@ -22,10 +22,10 @@ WORKFLOW = (
 
 class Start:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str, str, str, str]] = []
+        self.calls: list[tuple[str, str, str, str, str, str, str]] = []
 
-    def __call__(self, name: str, case: str, project: str, delivery_id: str, owner: str) -> bool:
-        self.calls.append((name, case, Path(case).read_text(), project, delivery_id, owner))
+    def __call__(self, name: str, case: str, project: str, delivery_id: str, owner: str, *, hive: str = "") -> bool:
+        self.calls.append((name, case, Path(case).read_text(), project, delivery_id, owner, hive))
         return True
 
 
@@ -77,8 +77,15 @@ def test_a_run_order_starts_one_detached_run_in_the_project_checkout(setup: tupl
     sent = order(run_orders)
     store.send("host", sent)
     assert run_consumer.RunConsumer(redis, "host").poll() == 1
-    [(name, case, text, folder, run_id, owner)] = start.calls
-    assert (name, text, folder, run_id, owner) == ("project-only", "case text", str(project), "run-1", "owner@fixture")
+    [(name, case, text, folder, run_id, owner, hive)] = start.calls
+    assert (name, text, folder, run_id, owner, hive) == (
+        "project-only",
+        "case text",
+        str(project),
+        "run-1",
+        "owner@fixture",
+        "host",
+    )
     assert Path(case) == run_consumer.case_file("run-1")
     assert store.ack(sent) == Ack("done", {"host_id": "host"})
     assert redis.hget(store.receipt(sent), "started") == "1000000"
