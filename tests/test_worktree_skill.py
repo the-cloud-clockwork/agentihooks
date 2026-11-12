@@ -444,7 +444,14 @@ class Done(WtBase):
         fork = "https://github.com/fork-owner/agentihooks.git"
         _git(self.primary, "config", f"url.{self.origin}.insteadOf", fork, env=self.gitenv)
         _git(self.primary, "remote", "set-url", "origin", fork, env=self.gitenv)
-        _git(self.primary, "remote", "add", "upstream", "https://github.com/upstream-owner/agentihooks.git", env=self.gitenv)
+        _git(
+            self.primary,
+            "remote",
+            "add",
+            "upstream",
+            "https://github.com/upstream-owner/agentihooks.git",
+            env=self.gitenv,
+        )
         calls = Path(self.tmp) / "fork-gh-calls"
         gh = self.bin / "gh"
         gh.write_text(
