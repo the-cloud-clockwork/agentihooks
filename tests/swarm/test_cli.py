@@ -1877,8 +1877,46 @@ def test_the_worktree_branch_is_read_and_checked_on_origin():
     ]
 
 
+@pytest.mark.feature("successor-upstream-branch")
+def test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks() -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    answers = {
+        "branch": (0, "engineer-a1b2c3-0002\n"),
+        "rev-parse": (0, "origin/engineer-a1b2c3-0001\n"),
+        "engineer-a1b2c3-0002": (2, ""),
+        "engineer-a1b2c3-0001": (0, "abc\trefs/heads/engineer-a1b2c3-0001\n"),
+    }
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((argv, kwargs))
+        code, out = answers[argv[-1] if argv[1] == "ls-remote" else argv[1]]
+        return subprocess.CompletedProcess(argv, code, out, "")
+
+    assert cli.worktree_branch(None, run=run) == "engineer-a1b2c3-0001"
+    assert calls == [
+        (["git", "branch", "--show-current"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0002"], GIT_OPTS),
+        (["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], GIT_OPTS),
+        (["git", "ls-remote", "--exit-code", "--heads", "origin", "engineer-a1b2c3-0001"], GIT_OPTS),
+    ]
+
+
+@pytest.mark.feature("successor-upstream-branch")
+@pytest.mark.parametrize("base", ["dev", "main", "master", "v1"])
+def test_an_unpushed_checkout_tracking_a_base_branch_is_refused(base: str) -> None:
+    calls, fake = git_answers(
+        {"branch": (0, "engineer-a1b2c3-0002\n"), "rev-parse": (0, f"origin/{base}\n"), "ls-remote": (2, "")}
+    )
+    with pytest.raises(SwarmError) as refused:
+        cli.worktree_branch(None, run=fake)
+    assert str(refused.value) == (
+        "branch engineer-a1b2c3-0002 is not on origin; push it first with git push -u origin engineer-a1b2c3-0002"
+    )
+    assert [argv[-1] for argv, _ in calls if argv[1] == "ls-remote"] == ["engineer-a1b2c3-0002"]
+
+
 def test_a_branch_missing_on_origin_is_refused():
-    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "ls-remote": (2, "")})
+    _, fake = git_answers({"branch": (0, "engineer-a1b2c3-0001\n"), "rev-parse": (128, ""), "ls-remote": (2, "")})
     with pytest.raises(SwarmError) as refused:
         cli.worktree_branch(None, run=fake)
     assert str(refused.value) == (
