@@ -28,6 +28,15 @@ def split_task(**fields):
     }
 
 
+def resolve(args, **kwargs):
+    repo = args[args.index("--repo") + 1] if "--repo" in args else "o/r"
+    return subprocess.CompletedProcess(args, 0, stdout=f"https://github.com/{repo}/pull/{args[3]}\n")
+
+
+def gate():
+    return intent.IntentGate(run=resolve)
+
+
 def judged(tmp_path, task, verdict="pass"):
     intent.Check(
         SLUG, "enforce", NOW, Ledger(), Mail(), lambda url: VIEW, lambda state: (verdict, "judged"), home=tmp_path
@@ -69,11 +78,15 @@ def test_a_split_verdict_held_pending_by_the_tick_keeps_its_half(tmp_path, view)
         f"gh pr merge {SECOND} --squash",
         "gh pr merge 10",
         f"agentihooks swarm {SLUG} merge queue {SECOND}",
+        f"agentihooks swarm {SLUG} merge queue 10",
+        f"agentihooks swarm {SLUG} done --pr {SECOND}",
+        f"agentihooks swarm {SLUG} done --pr={SECOND}",
+        "gh pr merge 9 --repo o/other",
     ],
 )
 def test_a_half_the_verdict_did_not_judge_is_refused(tmp_path, command):
     verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
-    decision = intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path))
+    decision = gate().decide(bash(command), WHO, verdicts(tmp_path))
     assert not decision.allowed
     assert decision.reason == (
         f"intent for task {TASK} was judged on {FIRST}, not this pull request. Record this half first: "
@@ -87,12 +100,57 @@ def test_a_half_the_verdict_did_not_judge_is_refused(tmp_path, command):
         f"gh pr merge {FIRST} --squash",
         "gh pr merge 9",
         f"agentihooks swarm {SLUG} merge queue {FIRST}",
-        f"agentihooks swarm {SLUG} done --pr {SECOND}",
+        f"agentihooks swarm {SLUG} merge queue 9",
+        f"agentihooks swarm {SLUG} done --pr {FIRST}",
+        f"agentihooks swarm {SLUG} done",
+        "gh pr merge 9 --repo o/r",
     ],
 )
 def test_the_judged_half_or_no_named_target_passes(tmp_path, command):
     verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
-    assert intent.IntentGate().decide(bash(command), WHO, verdicts(tmp_path)).allowed
+    assert gate().decide(bash(command), WHO, verdicts(tmp_path)).allowed
+
+
+@pytest.mark.feature("intent-split-half-own-verdict")
+def test_done_refuses_a_registered_half_without_its_own_verdict(tmp_path, monkeypatch):
+    judged(tmp_path, split_task(split_pulls=[FIRST, SECOND]))
+    monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
+    refused = gate().decide(bash(f"agentihooks swarm {SLUG} done --pr {SECOND}"), WHO, verdicts(tmp_path))
+    assert not refused.allowed
+    assert refused.reason == "Intent must be checked on this pull request head and contract before it can merge."
+    assert gate().decide(bash(f"agentihooks swarm {SLUG} done --pr {FIRST}"), WHO, verdicts(tmp_path)).allowed
+
+
+@pytest.mark.feature("intent-split-half-own-verdict")
+def test_a_bare_number_matches_only_the_half_in_its_own_repository(tmp_path, monkeypatch):
+    other = "https://github.com/o/other/pull/10"
+    task = split_task(split_pulls=[FIRST, other])
+    judged(tmp_path, task)
+    judged(tmp_path, {**task, "pr_url": other})
+    monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
+    foreign = gate().decide(bash("gh pr merge 10"), WHO, verdicts(tmp_path))
+    assert not foreign.allowed
+    assert foreign.reason == "Intent requires a pull request registered on this task."
+    assert gate().decide(bash("gh pr merge 10 --repo o/other"), WHO, verdicts(tmp_path)).allowed
+    assert gate().decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+
+
+def test_an_unresolved_bare_number_is_refused_on_a_split_task(tmp_path):
+    verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
+    failing = intent.IntentGate(run=lambda args, **kwargs: subprocess.CompletedProcess(args, 1, stdout=""))
+    decision = failing.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path))
+    assert not decision.allowed
+    assert decision.reason.startswith(f"task {TASK} is split: name the pull request url")
+
+
+def test_done_target_reads_the_pr_flag():
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr", SECOND]) == SECOND
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done", f"--pr={SECOND}"]) == SECOND
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done"]) is None
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr"]) is None
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "ready", "--pr", SECOND]) is None
+    assert intent._done_target(["gh", "pr", "merge", "--pr", SECOND]) is None
+    assert intent._done_target(["FLAG=value"]) is None
 
 
 def test_an_unsplit_task_may_merge_another_pull_request(tmp_path):
@@ -122,7 +180,7 @@ def test_the_tests_first_intent_survives_recording_the_main_pull(tmp_path, monke
     intent.stamp(SLUG, TASK, SECOND, {**DOC, "tasks": [task]}, "enforce", NOW + 1, home=tmp_path)
     monkeypatch.setattr(intent, "pr_head", lambda url: head if url == FIRST else "main")
     state = verdicts(tmp_path)
-    decision = intent.IntentGate().decide(bash(f"agentihooks swarm {SLUG} merge queue {target}"), WHO, state)
+    decision = gate().decide(bash(f"agentihooks swarm {SLUG} merge queue {target}"), WHO, state)
     assert decision.allowed is allowed
     assert state.read(TASK)["verdict"] == "pending"
 
@@ -202,7 +260,7 @@ def test_recording_a_new_half_marks_it_registered_before_its_tick(tmp_path, monk
     decision = intent.IntentGate().decide(bash(f"gh pr merge {SECOND}"), WHO, verdicts(tmp_path))
     assert not decision.allowed
     assert decision.reason == "Intent must be checked on this pull request head and contract before it can merge."
-    foreign = intent.IntentGate().decide(bash("gh pr merge 99"), WHO, verdicts(tmp_path))
+    foreign = gate().decide(bash("gh pr merge 99"), WHO, verdicts(tmp_path))
     assert not foreign.allowed
     assert foreign.reason == "Intent requires a pull request registered on this task."
 
