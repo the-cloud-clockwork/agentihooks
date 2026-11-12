@@ -395,18 +395,26 @@ registry.register(
 )
 
 
-def _progress_heads(tick: Any, get: Callable[[str], Any]) -> list[str]:
-    """Return the actions of the progress heads step, given the tick module and a reader of the pass state."""
-    return []
+def _progress_heads(tick: Any, get: Get) -> Any:
+    """Return the outcomes the progress heads step recorded from the head GitHub shows for each held task."""
+    return tick.skip_refused(
+        progress.heads_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store").redis,
+        get("slug"),
+        get("doc")["tasks"],
+        get("view"),
+        tick.now_ms(),
+        progress.origin(get("config").repo),
+    )
 
 
 registry.register(
     CallStep(
         "progress heads",
         "wrapper events",
-        _progress_heads,
-        needs=frozenset(),
-        reads=frozenset(),
+        held(viewed("progress heads", _progress_heads)),
+        needs=VIEWED,
+        reads=VIEW | CONFIGURED,
         writes=frozenset(),
         lane=Lane("slow"),
         effects=frozenset({"source_control"}),
