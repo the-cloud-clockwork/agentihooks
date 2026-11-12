@@ -4909,6 +4909,7 @@
     {
       "id": "swarm-park-foreign-dependency-no-fetch",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
       "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
       "seam": "swarm park in scripts.swarm.stack",
       "tests": [

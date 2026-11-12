@@ -691,14 +691,16 @@ OTHER = "https://github.com/o/bundle"
 
 
 @pytest.mark.feature("swarm-park-foreign-dependency-no-fetch")
-def test_park_records_a_dependency_in_another_repository_without_fetching_its_branch(parked, capsys):
+@pytest.mark.parametrize("other", [OTHER, "git@github.com:O/bundle.git", "/srv/docs.git"])
+def test_park_records_a_dependency_in_another_repository_without_fetching_its_branch(parked, capsys, other):
     _, ledger, _, shell, doc = parked
-    ledger.rows["a"]["branch_repo"] = OTHER
+    ledger.rows["a"]["branch_repo"] = other
+    shell.fail = (("git", "fetch", "--"),)
     assert park(doc) == 0
-    fields = {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": [OTHER]}
+    fields = {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": [other]}
     assert ("t1", fields, AGENT) in ledger.updates
-    assert ledger.rows["t1"]["parked_repos"] == [OTHER]
-    body = f"Parked on branch `eng-t1` until a (`eng-a` in {OTHER}) merges. Stacked base `{BASE}`. {NOTE}"
+    assert ledger.rows["t1"]["parked_repos"] == [other]
+    body = f"Parked on branch `eng-t1` until a (`eng-a` in {other}) merges. Stacked base `{BASE}`. {NOTE}"
     assert shell.calls == [
         ["git", "ls-remote", "--heads", "origin", "eng-t1"],
         ["git", "rev-parse", "HEAD"],
@@ -711,7 +713,7 @@ def test_park_records_a_dependency_in_another_repository_without_fetching_its_br
         ["gh", "api", COMMENTS, "-f", f"body={body}"],
         REMOVE,
     ]
-    assert json.loads(capsys.readouterr().out)["parked_repos"] == [OTHER]
+    assert json.loads(capsys.readouterr().out)["parked_repos"] == [other]
 
 
 @pytest.mark.parametrize(
@@ -769,7 +771,9 @@ def _antoncore_dependency(parked, monkeypatch, origin):
 
 
 @pytest.mark.feature("swarm-park-foreign-dependency-no-fetch")
-@pytest.mark.parametrize("origin", ["git@github.com:O/antoncore.git", "git@github.com:o/bundle.git", ""])
+@pytest.mark.parametrize(
+    "origin", ["git@github.com:O/antoncore.git", "https://github.com/o/antoncore", "git@github.com:o/bundle.git", ""]
+)
 def test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url(parked, monkeypatch, origin):
     _, ledger, _, shell, doc = parked
     _antoncore_dependency(parked, monkeypatch, origin)
@@ -958,6 +962,7 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
         (("git", "remote", "get-url"), "cannot read the origin url"),
         (("git", "fetch", "origin"), "cannot fetch dev"),
         (("git", "merge-base", "HEAD"), "the task shares no history with dev"),
+        (("git", "rev-list", "--count"), f"cannot count {BASE}"),
     ],
 )
 def test_park_on_another_repository_refuses_when_a_command_fails(parked, capsys, failing, says):
