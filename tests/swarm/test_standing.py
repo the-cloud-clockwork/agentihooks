@@ -223,27 +223,41 @@ def test_the_detector_takes_over_a_stale_ci_budget_finding_in_task_hours(redis):
     _detected(redis, 0.4, "d1", later)
     row = standing.read(redis, "sw")["ci_overrun"]
     assert (row["value"], row["unit"], row["detail"], row["updated_at"]) == (0.4, "task hours", "", later)
+    assert (row["fired"], row["episodes"]) == (1, ["d1"])
     assert [found.measure for found in standing.findings(redis, "sw", later)] == [0.4]
 
 
 def test_a_whole_run_overrun_after_detector_episodes_counts_on_its_own_measure(redis):
     _detected(redis, 0.5, "d1", NOW)
-    _detected(redis, 0.6, "d2", NOW + 60_000)
     _overran(redis, 17.4, "run-1", NOW + 120_000)
     row = standing.read(redis, "sw")["ci_overrun"]
     assert (row["fired"], row["episodes"], row["detector_fired"], row["detector_episodes"]) == (
         1,
         ["run-1"],
-        2,
-        ["d1", "d2"],
+        1,
+        ["d1"],
     )
     (found,) = standing.findings(redis, "sw", NOW + 120_000)
-    assert (found.evidence[0], found.evidence[-1]) == ("Fired 1 time", "Stage detector fired 2 times")
+    assert (found.evidence[0], found.evidence[-1]) == ("Fired 1 time", "Stage detector fired 1 time")
     later = NOW + 120_000 + standing.STALE_MS
     _detected(redis, 0.4, "d3", later)
     row = standing.read(redis, "sw")["ci_overrun"]
-    assert (row["fired"], row["episodes"], row["unit"]) == (3, ["d1", "d2", "d3"], "task hours")
+    assert (row["fired"], row["episodes"], row["unit"]) == (2, ["d1", "d3"], "task hours")
     assert "detector_fired" not in row and "detector_episodes" not in row
+
+
+def test_a_task_hours_alert_for_an_episode_the_detector_counted_counts_once(redis):
+    counted = [f"d{n}" for n in range(standing.EPISODES + 1)]
+    row = {"stage": "ci_overrun", "seconds": 1800.0, "previous_seconds": 0.0, "trend": "rising"}
+    standing.update_detector(redis, "sw", {**row, "episodes": counted, "labels": [], "label": ""}, NOW, 0.25)
+    standing.fire(redis, "sw", "ci_overrun", reading(1.5, episode="d0"), NOW + 60_000)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["fired"], row["episodes"], row["unit"]) == (
+        standing.EPISODES + 1,
+        counted[1:],
+        "task hours in the window",
+    )
+    assert "detector_fired" not in row
 
 
 def _legacy(redis, fired):
