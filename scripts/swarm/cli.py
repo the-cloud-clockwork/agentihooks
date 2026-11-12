@@ -1995,7 +1995,7 @@ def worktree_branch(recorded: str | None, run: Callable[..., subprocess.Complete
     branch = recorded if recorded and recorded != branch and _upstream(run) == recorded else branch
     if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode == 0:
         return branch
-    upstream = "" if recorded else _upstream(run)
+    upstream = "" if recorded or (found := _upstream(run)) in ("dev", "main", "master", "v1") else found
     if not upstream or _git(run, "ls-remote", "--exit-code", "--heads", "origin", upstream).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
     return upstream
