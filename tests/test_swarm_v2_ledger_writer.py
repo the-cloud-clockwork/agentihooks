@@ -115,7 +115,9 @@ def test_a_released_lease_lets_the_next_writer_in(tmp_path, lease):
 
 @pytest.mark.feature("ledger-writer-lease-failed-record-releases")
 @pytest.mark.parametrize("step", ["pwrite", "ftruncate", "fsync"])
-def test_a_failed_holder_record_write_releases_the_lock(tmp_path, monkeypatch, step):
+def test_a_failed_holder_record_write_releases_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
     real = getattr(ledger_writer.os, step)
     closed = []
     real_close = ledger_writer.os.close
