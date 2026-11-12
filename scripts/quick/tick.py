@@ -1,6 +1,7 @@
-"""The quick tick: the round, run by the hourly safety nudge, that nudges idle engineers, tells seats of room lines
-and relaunches pending seats."""
+"""The quick tick: the round, run by the hourly safety nudge, that nudges idle engineers, tells seats of room lines,
+relaunches pending seats and starts again an engineer whose agent exited; it never types into a bare shell."""
 
+import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -54,10 +55,13 @@ class LiveHerdr:
         return herdr_host.typed(pane_id, self.environ)
 
     def bare(self, pane_id: str) -> bool:
-        """Whether only a shell runs in the pane."""
+        """Whether only a shell runs in the pane; a pane herdr no longer has is not bare."""
         from scripts.herdr_gc import bare_shell
 
-        return bare_shell(herdr_host.process_info(pane_id, self.environ))
+        try:
+            return bare_shell(herdr_host.process_info(pane_id, self.environ))
+        except (herdr_host.HerdrError, subprocess.TimeoutExpired):
+            return False
 
     def prompt(self, pane_id: str, text: str) -> bool:
         """Submit ``text`` as a prompt to the pane's agent."""
@@ -101,6 +105,8 @@ def _nudge(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> bool:
 
 
 def _busy(seat: registry.Seat, herdr: Herdr) -> str:
+    if herdr.bare(seat.pane_id):
+        return "skipped-bare"
     status = herdr.status(seat.pane_id)
     if status not in READY_STATES:
         return f"skipped-{status}"
@@ -129,6 +135,9 @@ def _outcome(folder: Path, seat: registry.Seat, herdr: Herdr, relaunch: Relaunch
         return f"relaunched-{relaunch(folder, seat.seat)}" if herdr.bare(seat.pane_id) else "pending"
     if seat.state != registry.READY:
         return seat.state
+    exited = seat.seat != MASTER and herdr.bare(seat.pane_id)
+    if exited and registry.take(folder, seat.seat, registry.READY, registry.PENDING):
+        return f"revived-{relaunch(folder, seat.seat)}"
     return _ready_seat(folder, seat, herdr, now)
 
 

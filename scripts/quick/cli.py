@@ -82,7 +82,8 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
         registry.save(folder, swarm)
         paths.register(environ, quick_id, folder)
     started = launch.start_all(folder, swarm, environ)
-    failed = sorted(name for name, code in started.items() if code != 0)
+    exited = launch.exited(swarm, tick.LiveHerdr(environ).bare)
+    failed = sorted({name for name, code in started.items() if code != 0} | set(exited))
     for name in failed:
         registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))

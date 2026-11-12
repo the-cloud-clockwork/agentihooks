@@ -35,8 +35,10 @@ a headless worker refuses, and [placement waits](hives.md#placement-waits) for t
 
 A quick swarm is the smallest swarm: one herdr tab on the workstation, with no Redis, no ledger server and no
 Docker Compose. The session that runs `agentihooks quick up` becomes the master in pane 1. Engineers open in the
-panes to its right, ordered left to right: three by default, four at most (`--agents 2` to `--agents 5`). Outside
-herdr, or with its server down, `quick up` refuses and says why.
+panes to its right, ordered left to right: three by default, four at most (`--agents 2` to `--agents 5`). Every
+agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
+says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a Codex seat
+with no account free, fails `quick up`, which names it and leaves it pending for the next round.
 
 | Piece | Where it lives |
 |---|---|
@@ -65,8 +67,10 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 - The quick tick runs inside the hourly safety nudge round (`agentihooks safety-nudge round`, installed by
   `quick up`), because a quick swarm has no Redis for the agentihooks scheduler. It nudges idle engineers whose
   plan has open stages, tells an idle seat of room lines it has not been told about and relaunches a pending seat
-  whose pane sits at a bare shell. It never types into a busy pane or one holding typed text, never nudges the
-  master, and retries a prompt herdr did not take on the next round.
+  whose pane sits at a bare shell. An engineer whose agent exited, leaving its pane at a bare shell, is started
+  again in that pane with its seed; the master never is. It never types into a pane at a bare shell, where herdr
+  can still report the exited agent idle and the shell would run the text as a command, nor into a busy pane or
+  one holding typed text. It never nudges the master and retries a prompt herdr did not take on the next round.
 - `agentihooks quick stop` removes the room and the registry; the seat folders stay.
 
 ## Event driven engine

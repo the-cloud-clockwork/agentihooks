@@ -16,8 +16,8 @@ MASTER = "master"
 class Panes(Protocol):
     """The herdr pane operations the layout needs."""
 
-    def split(self, pane_id: str) -> str:
-        """Split ``pane_id`` to the right and return the new pane's id."""
+    def split(self, pane_id: str, ratio: float) -> str:
+        """Split ``pane_id`` to the right, ``pane_id`` keeping ``ratio`` of its width; the new pane's id."""
         ...
 
     def columns(self, pane_id: str) -> dict[str, tuple[int, int]]:
@@ -32,9 +32,9 @@ class HerdrPanes:
     directory: Path
     environ: dict[str, str]
 
-    def split(self, pane_id: str) -> str:
-        """Split ``pane_id`` to the right and return the new pane's id."""
-        return herdr_host.split_right(pane_id, self.directory, self.environ).pane_id
+    def split(self, pane_id: str, ratio: float) -> str:
+        """Split ``pane_id`` to the right, ``pane_id`` keeping ``ratio`` of its width; the new pane's id."""
+        return herdr_host.split_right(pane_id, self.directory, self.environ, ratio).pane_id
 
     def columns(self, pane_id: str) -> dict[str, tuple[int, int]]:
         """Every pane in ``pane_id``'s tab with its column start and width."""
@@ -49,12 +49,10 @@ def seats(count: int) -> list[str]:
 
 
 def build(caller: str, count: int, panes: Panes) -> list[str]:
-    """The caller's pane, then the new panes left to right: each split halves the widest pane, the leftmost on a tie."""
+    """The caller's pane, then the new panes left to right, in ``count`` equal columns: each split keeps one share."""
     seats(count)
     owned = [caller]
-    while len(owned) < count:
-        columns = panes.columns(caller)
-        widest = min(owned, key=lambda pane: (-columns[pane][1], columns[pane][0]))
-        owned.append(panes.split(widest))
+    for shares in range(count, 1, -1):
+        owned.append(panes.split(owned[-1], 1 / shares))
     columns = panes.columns(caller)
     return [caller, *sorted(owned[1:], key=lambda pane: columns[pane][0])]

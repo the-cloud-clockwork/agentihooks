@@ -175,10 +175,10 @@ def existing_pane(pane_id: str, environ: dict[str, str]) -> Placement:
     return _placed(_cli(["pane", "get", pane_id], environ)["pane"])
 
 
-def split_right(pane_id: str, directory: Path, environ: dict[str, str]) -> Placement:
-    """Split the pane to the right; the new pane opens in ``directory`` and leaves focus where it was."""
-    args = ["pane", "split", pane_id, "--direction", "right", "--cwd", str(directory), "--no-focus"]
-    return _placed(_cli(args, environ)["pane"])
+def split_right(pane_id: str, directory: Path, environ: dict[str, str], ratio: float) -> Placement:
+    """Split the pane to the right, keeping ``ratio`` of its width; the new pane opens in ``directory`` unfocused."""
+    args = ["pane", "split", pane_id, "--direction", "right", "--ratio", str(ratio), "--cwd", str(directory)]
+    return _placed(_cli([*args, "--no-focus"], environ)["pane"])
 
 
 def columns(pane_id: str, environ: dict[str, str]) -> dict[str, tuple[int, int]]:

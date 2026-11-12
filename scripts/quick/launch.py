@@ -10,6 +10,7 @@ from scripts.quick import paths, registry, seeds
 from scripts.quick.member import DIR_ENV, QUICK_ENV, SEAT_ENV, Member
 
 WAIT_BARE_S = 60.0
+SETTLE_S = 20.0
 POLL_S = 1.0
 SWARM_KEYS = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_AGENT_NAME")
 Start = Callable[[list[str], dict[str, str]], int]
@@ -68,6 +69,25 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
         command = [sys.executable, "-m", "scripts.init_agent", *argv(swarm, seat, prompt_file)]
         running[seat.seat] = subprocess.Popen(command, env=environ(base, folder, swarm, seat))
     return {name: process.wait() for name, process in running.items()}
+
+
+def exited(
+    swarm: registry.Swarm,
+    bare: Callable[[str], bool],
+    *,
+    wait_s: float = SETTLE_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[str]:
+    """The engineers whose agent exited back to a bare shell within ``wait_s`` of their launch."""
+    watching = {seat.seat: seat.pane_id for seat in swarm.seats[1:]}
+    gone: list[str] = []
+    for _ in range(round(wait_s / POLL_S)):
+        gone += [name for name, pane in watching.items() if bare(pane)]
+        watching = {name: pane for name, pane in watching.items() if name not in gone}
+        if not watching:
+            break
+        sleep(POLL_S)
+    return sorted(gone)
 
 
 def relaunch(
