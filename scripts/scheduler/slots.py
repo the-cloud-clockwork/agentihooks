@@ -3,6 +3,7 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
+from pathlib import Path
 from types import FunctionType
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -140,8 +141,6 @@ class WorkflowSlot:
 
     def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
         if self.placement == HIVE:
-            from pathlib import Path
-
             from scripts.hive import run_collect, run_placement
             from scripts.scheduler.core import Scheduler
 
