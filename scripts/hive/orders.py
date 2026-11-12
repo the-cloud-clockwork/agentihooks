@@ -294,6 +294,7 @@ class Consumer:
         with self.store.redis.pipeline() as pipe:
             pipe.hsetnx(self.orders.receipt(order), "started", str(now))
             pipe.hsetnx(self.orders.receipt(order), "pod", self.pod)
+            pipe.expire(self.orders.receipt(order), RECEIPT_SECONDS)
             if not pipe.execute()[0]:
                 return None
         if order.expires_at - ACK_MARGIN_MS <= now:
