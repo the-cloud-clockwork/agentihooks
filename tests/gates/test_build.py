@@ -294,6 +294,59 @@ class TestCommit:
         assert staged.decide(tool="Bash", command="git commit -m x", cwd=elsewhere).allowed
 
 
+CHARTS = "- bake the runner chart | antoncore/k8s/charts | the runners need it\n"
+
+
+@pytest.fixture
+def antoncore(world):
+    repo = world.repo.parent / "antoncore"
+    (repo / "k8s" / "charts" / "runners").mkdir(parents=True)
+    (repo / "k8s" / "charts" / "runners" / "smoke.sh").write_text("a\n")
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base")
+    world.antoncore = repo
+    return world
+
+
+@pytest.mark.feature("build-gate-repository-named-areas")
+class TestRepositoryNamedAreas:
+    def test_an_area_naming_the_repository_allows_an_edit_inside_it(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
+
+    def test_an_area_naming_another_repository_does_not_match(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        denied = edit(antoncore, "k8s/charts/runners/smoke.sh")
+        assert not denied.allowed
+        assert "outside your traced plan: k8s/charts/runners/smoke.sh. " in denied.reason
+
+    def test_a_worktree_of_the_repository_matches_by_the_repository_name(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        tree = antoncore.antoncore.parent / "wt-1"
+        git(antoncore.antoncore, "worktree", "add", "-q", str(tree))
+        assert antoncore.decide(file_path=str(tree / "k8s/charts/runners/smoke.sh")).allowed
+
+    def test_a_commit_inside_the_repository_matches_its_named_area(self, antoncore):
+        antoncore.plan(CHARTS, kept=(True,))
+        (antoncore.antoncore / "k8s/charts/runners/smoke.sh").write_text("b\n")
+        git(antoncore.antoncore, "add", ".")
+        assert antoncore.decide(tool="Bash", command="git commit -m x", cwd=antoncore.antoncore).allowed
+
+    def test_a_territory_naming_the_repository_widens_it(self, antoncore):
+        antoncore.plan()
+        antoncore.territory("antoncore/k8s/charts/")
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+        assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
+
+    def test_a_plain_area_still_matches_inside_the_repository(self, antoncore):
+        antoncore.plan("- the chart | k8s/charts | the runners need it\n", kept=(True,))
+        assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+
+
 class TestTerritory:
     def test_a_missing_ledger_or_task_reads_as_no_territory(self, tmp_path):
         assert task_territory(tmp_path, SLUG, TASK) == []
