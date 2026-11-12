@@ -574,11 +574,14 @@ def run_once(
 
 
 def tickable(ledger: Any, slug: str) -> bool:
-    """Answer False for a swarm whose ledger is binned or closed; a gone or cleartext ledger ticks so its pass reports it once."""
+    """Answer False for a swarm whose ledger is binned or closed; a gone or cleartext ledger ticks so its pass reports it once,
+    and a ledger that cannot be reached ends the pass as unreachable."""
     try:
         return not (ledger.binned(slug) or ledger.closed(slug))
     except (LedgerGone, ledger_link.Cleartext):
         return True
+    except OSError as exc:
+        raise LedgerUnreachable(f"ledger {slug}: {exc}") from exc
 
 
 def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
