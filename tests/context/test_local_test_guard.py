@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from hooks.context.shell_commands import commands
@@ -394,11 +396,11 @@ def test_native_codex_mutation_gate_file_path_is_blocked(command, monkeypatch):
         "python3 scripts/ci_mutation/clearances.py",
     ],
 )
-def test_unrelated_script_paths_pass(command, monkeypatch):
+def test_unrelated_script_paths_pass(command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from hooks.context.local_test_guard import check_local_tests
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
-    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(tmp_path)})
 
 
 PLANNER_WRAPPER = (
