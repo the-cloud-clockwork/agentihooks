@@ -40,7 +40,7 @@ export function replayCommands(commands, actionOf, textOf) {
     else if (!dismissed.has(command.id)) noteFailure(actionOf(command), textOf(command), command.id || "");
   }
   seen = current;
-  drawFailures();
+  if (commands.length) drawFailures();
 }
 
 export function holdNote(text) {
