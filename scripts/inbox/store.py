@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
-from typing import Any, cast
+from typing import Any
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -552,7 +552,7 @@ class InboxStore:
 
     def _journal_keys(self, address: str) -> list[str]:
         """The receipts journal of address: its open deliveries, their records and reservations, and its seen marks."""
-        redis = cast(Any, self.redis)
+        redis = self.redis
         keys = [self.key("deliveries", address), self.key("seen", address)]
         for delivery_id in redis.smembers(self.key("deliveries", address)):
             record: dict[str, str] = redis.hgetall(self.key("delivery", delivery_id))
