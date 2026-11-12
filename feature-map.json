@@ -565,6 +565,31 @@
       ]
     },
     {
+      "id": "scheduled-run-hive-placement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
+      "behaviour": "A scheduled workflow slot runs locally by default; a slot placed on a hive sends its run to a live, undrained hive that lists the project repository and declares every needed capability, fewest running runs first, and with no fitting hive records a named wait reason and sends nothing, never starting the run on the workstation.",
+      "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
+      "tests": [
+        "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
+        "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
+        "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
+        "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
+        "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
+        "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
+        "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
+        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
+        "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
+        "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
+        "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",
+        "tests/scheduler/test_commands.py::test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally",
+        "tests/scheduler/test_cli.py::test_cron_add_places_a_workflow_on_a_hive_with_its_needs",
+        "tests/hive/test_run_placement.py::test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not",
+        "tests/hive/test_run_placement.py::test_a_placed_run_carries_the_hive_path_of_its_repository",
+        "tests/scheduler/test_cli.py::test_cron_add_refuses_an_unknown_placement"
+      ]
+    },
+    {
       "id": "swarm-tick-characterisation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a2",
