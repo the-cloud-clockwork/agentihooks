@@ -2489,6 +2489,17 @@
       ]
     },
     {
+      "id": "scout-sources-repo-relative",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-scout-relative-evidence",
+      "behaviour": "A scout that cites an absolute file path inside a git checkout, such as a hive worker checkout, records that source relative to the checkout's repository root, so the evidence schema accepts it and a hive placed workflow run no longer fails its scout stage; an absolute path outside any checkout is still refused.",
+      "seam": "scripts.scout.loop.run evidence sources through scripts.scout.cli.main and the evidence schema",
+      "tests": [
+        "tests/scout/test_cli.py::test_a_source_inside_a_worker_checkout_is_cited_relative_to_its_repository_root",
+        "tests/scout/test_cli.py::test_an_absolute_source_outside_any_checkout_is_still_refused"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
