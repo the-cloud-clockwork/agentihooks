@@ -51,10 +51,22 @@ def round_input(scout: Scout, items: list[dict]) -> str:
     return json.dumps({"question": scout.question, "until": scout.until, "rounds": 1, "known": known})
 
 
-def merged(items: list[dict], found: list[dict]) -> list[dict]:
+def repo_relative(source: str) -> str:
+    """The source relative to its repository root when it is an absolute path inside a git checkout."""
+    path = Path(source)
+    if not path.is_absolute():
+        return source
+    for root in path.parents:
+        if (root / ".git").exists():
+            return path.relative_to(root).as_posix()
+    return source
+
+
+def merged(items: list[dict[str, str]], found: list[dict[str, str]]) -> list[dict[str, str]]:
     seen = {(item["source"], item["excerpt"]) for item in items}
     out = list(items)
-    for item in found:
+    for reply in found:
+        item = {**reply, "source": repo_relative(reply["source"])}
         key = (item["source"], item["excerpt"])
         if key not in seen:
             seen.add(key)

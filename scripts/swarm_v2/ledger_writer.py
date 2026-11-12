@@ -78,9 +78,13 @@ class WriterLease:
                 record_conflict(self.directory, found, claimant)
                 raise WriterConflict(self.directory, found) from None
         record = json.dumps(claimant, sort_keys=True).encode()
-        os.pwrite(fd, record, 0)
-        os.ftruncate(fd, len(record))
-        os.fsync(fd)
+        try:
+            os.pwrite(fd, record, 0)
+            os.ftruncate(fd, len(record))
+            os.fsync(fd)
+        except BaseException:
+            os.close(fd)
+            raise
         self._fd = fd
         return self
 
