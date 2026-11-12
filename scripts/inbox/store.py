@@ -11,7 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields, replace
-from typing import Any
+from typing import Any, cast
 
 from scripts.inbox.seats import SeatRegistry, is_seat, master_of
 from scripts.swarm.keyspace import ROOT
@@ -533,8 +533,7 @@ class InboxStore:
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
-            keys += self.pool.keys_of(address)
-            keys += self._journal_keys(address)
+            keys += self.pool.keys_of(address) + self._journal_keys(address)
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
@@ -544,13 +543,14 @@ class InboxStore:
 
     def _journal_keys(self, address: str) -> list[str]:
         """The receipts journal of address: its open deliveries, their records and reservations, and its seen marks."""
+        redis = cast(Any, self.redis)
         keys = [self.key("deliveries", address), self.key("seen", address)]
-        for delivery_id in self.redis.smembers(self.key("deliveries", address)):
-            record = self.redis.hgetall(self.key("delivery", delivery_id))
+        for delivery_id in redis.smembers(self.key("deliveries", address)):
+            record: dict[str, str] = redis.hgetall(self.key("delivery", delivery_id))
             keys += [self.key("delivery", delivery_id), self.key("reservation", record["item"])]
             if record["ref"]:
                 keys.append(self.key("ref-reservation", address, record["ref"]))
-        return [key for key in keys if self.redis.exists(key)]
+        return [key for key in keys if redis.exists(key)]
 
     def read(self, item_id, reader):
         return self._move(item_id, reader, lambda item: (item.address,), "read", "")
