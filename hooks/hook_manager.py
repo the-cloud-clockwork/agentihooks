@@ -1148,6 +1148,17 @@ def _swarm_tool_end(payload: dict) -> None:
     finish(call_id=payload.get("tool_use_id") or "")
 
 
+def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
+    """Handle PostToolUseFailure: close the stall clock and count the failure in the retry breaker."""
+    _swarm_tool_end(payload)
+    from hooks.config import RETRY_BREAKER_ENABLED
+
+    if RETRY_BREAKER_ENABLED:
+        from hooks.context.retry_breaker import on_post_tool_result
+
+        on_post_tool_result(payload)
+
+
 def _operator_words(payload: dict) -> bool:
     try:
         from hooks.context.operator_words import typed
@@ -2707,7 +2718,7 @@ EVENT_HANDLERS = {
     "Notification": on_notification,
     "PreCompact": on_pre_compact,
     "PermissionRequest": on_permission_request,
-    "PostToolUseFailure": _swarm_tool_end,
+    "PostToolUseFailure": on_post_tool_use_failure,
 }
 
 
