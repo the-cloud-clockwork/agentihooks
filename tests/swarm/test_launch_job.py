@@ -312,8 +312,8 @@ def test_a_detached_spawn_returns_its_routed_account_model_and_profile(
 ) -> None:
     from types import SimpleNamespace
 
-    popen = Mock()
-    monkeypatch.setattr(launch_job.subprocess, "Popen", popen)
+    started = Mock()
+    monkeypatch.setattr(launch_job, "spawn", started)
 
     def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -334,7 +334,7 @@ def test_a_detached_spawn_returns_its_routed_account_model_and_profile(
     assert placed.launch_job and placed.pane_id == ""
     assert (placed.harness, placed.account) == ("claude", "acct-a")
     assert placed.model and placed.profile
-    popen.assert_not_called()
+    started.assert_not_called()
 
 
 def _job_entry(store, name, task, state="working", harness="claude"):
