@@ -44,6 +44,7 @@ LANE_USERS = {
     "hive-worker.yml",
     "lost-runner.yml",
     "chart-release.yml",
+    "gate-required.yml",
     "changelog.yml",
     "changelog-seed.yml",
     "tick-scale.yml",
