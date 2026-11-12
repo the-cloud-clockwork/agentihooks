@@ -58,7 +58,8 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 - At the compaction limit a quick seat writes its Handoff v2 to its seat folder (Read first takes `seat:<seat>`)
   and runs `agentihooks quick handoff`. At its next stop the session ends with its pane kept and the successor
   opens in the same pane with the seed and the handoff as its opening prompt.
-- `agentihooks quick send` tells the receiving seat at once when its pane sits idle with nothing typed.
+- `agentihooks quick send` tells the receiving seat at once when its pane sits idle with nothing typed; a busy
+  seat sees the waiting count in its `QUICK SWARM` block at its next tool call, because the block changes with it.
 - The quick tick runs inside the hourly safety nudge round (`agentihooks safety-nudge round`, installed by
   `quick up`), because a quick swarm has no Redis for the agentihooks scheduler. It nudges idle engineers whose
   plan has open stages, tells an idle seat of room lines it has not been told about and relaunches a pending seat

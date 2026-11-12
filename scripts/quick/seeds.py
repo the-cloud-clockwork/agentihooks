@@ -2,7 +2,7 @@
 
 import re
 
-from scripts.quick import paths
+from scripts.quick import paths, room
 from scripts.quick.layout import MASTER
 from scripts.quick.member import Member
 from scripts.quick.registry import Seat
@@ -89,6 +89,8 @@ def block(found: Member) -> str:
         f"QUICK SWARM — you are {seat.seat} of quick swarm {found.swarm.quick_id}, herdr pane {seat.position} "
         f"({role}). Seat folder {paths.seat_dir(found.folder, seat.seat)}. Plan: {progress}."
     )
+    waiting = room.waiting(found.folder, seat.seat)
+    head += f" Room: {waiting} message(s) for you; read them with `agentihooks quick room`." if waiting else ""
     culture = paths.read_text(paths.culture(found.folder)).strip()
     text = f"{head}\nCulture: {culture}" if culture else head
     return text[:MAX_CHARS]

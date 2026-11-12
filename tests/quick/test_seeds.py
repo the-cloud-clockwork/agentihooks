@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.quick import member, paths, registry, seeds
+from scripts.quick import member, paths, registry, room, seeds
 
 pytestmark = pytest.mark.unit
 
@@ -81,6 +81,14 @@ def test_the_injected_block_names_the_seat_its_folder_and_its_next_stage(tmp_pat
     assert str(paths.seat_dir(tmp_path, "eng-1")) in text
     assert "1 of 3 stages done; next: test it" in text and "Ship small." in text
     assert len(text) <= seeds.MAX_CHARS
+
+
+@pytest.mark.feature("quick-swarm")
+def test_the_block_tells_a_seat_of_room_lines_waiting_for_it(tmp_path):
+    found = _member(tmp_path, "master")
+    assert "Room:" not in seeds.block(found)
+    room.post(tmp_path, "eng-1", "master", "plan ready", 1)
+    assert "Room: 1 message(s) for you; read them with `agentihooks quick room`." in seeds.block(found)
 
 
 def test_the_block_without_a_plan_says_so_and_stays_within_its_cap(tmp_path):
