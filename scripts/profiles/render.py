@@ -569,7 +569,7 @@ def _codex_agents(claude_agents: Path, out: Path) -> None:
         try:
             front: object = yaml.safe_load(parts[1])
         except yaml.YAMLError:
-            front = None
+            continue
         meta: dict[str, object] = cast(dict[str, object], front) if isinstance(front, dict) else {}
         name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
         if isinstance(description, str) and description.strip() and body:

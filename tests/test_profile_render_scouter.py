@@ -61,6 +61,13 @@ def test_a_codex_agent_without_a_string_name_takes_its_file_name(world: dict[str
     assert agent == {"name": "helper", "description": "Plain helper.", "developer_instructions": "Help."}
 
 
+def test_a_codex_agent_takes_its_frontmatter_name_over_its_file_name(world: dict[str, Any]) -> None:
+    _seat(world, "engineer")
+    _write(world["bundle"] / ".claude" / "agents" / "file.md", "---\nname: given\ndescription: Named.\n---\nHelp.\n")
+    agent = tomllib.loads((_home("codex", "engineer") / "agents" / "file.toml").read_text())
+    assert agent == {"name": "given", "description": "Named.", "developer_instructions": "Help."}
+
+
 def test_a_codex_agent_keeps_a_dash_rule_inside_its_frontmatter_and_body(world: dict[str, Any]) -> None:
     _seat(world, "engineer")
     text = "---\ndescription: Runs the --- suite\n---\nStep one.\n---\nStep two.\n"
