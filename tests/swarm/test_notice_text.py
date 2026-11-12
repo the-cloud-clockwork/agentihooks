@@ -112,6 +112,7 @@ PULL = "https://github.com/o/r/pull/1961"
         (f"{JOB} ran (slow)", f"{JOB} ran slow"),
         (f"see {PULL} and {JOB}", f"see {PULL} and {JOB}"),
         (f"merged {PULL}", f"merged {PULL}"),
+        (f"see {PULL}(a)(b);c", f"see {PULL}%28a%29%28b%29%3Bc"),
     ],
 )
 def test_plain_keeps_every_web_link_whole(text, expected):
@@ -120,12 +121,19 @@ def test_plain_keeps_every_web_link_whole(text, expected):
     assert ledger_comments.problems(shown, "comment") == []
 
 
-def test_a_swarm_followup_reaches_the_ledger_with_its_link_intact(monkeypatch):
+@pytest.mark.parametrize(
+    ("write", "kind"),
+    [
+        (lambda c, text: c.followup("sw", text), "item"),
+        (lambda c, text: c.comment("sw", "t1", text, by="swarm"), "comment"),
+    ],
+)
+def test_a_swarm_followup_reaches_the_ledger_with_its_link_intact(monkeypatch, write, kind):
     sent = _capture(monkeypatch)
-    LedgerClient().followup("sw", f"Tests run over budget on dev, gate job {JOB}")
+    write(LedgerClient(), f"Tests run over budget on dev, gate job {JOB}")
     (op,) = sent[0]
     assert JOB in op["text"].split()
-    assert ledger_comments.problems(op["text"], "item") == []
+    assert ledger_comments.problems(op["text"], kind) == []
 
 
 def _capture(monkeypatch, refuse=False):

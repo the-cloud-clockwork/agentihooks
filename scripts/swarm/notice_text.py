@@ -12,12 +12,13 @@ SWAPS = (
     (re.compile(r"(?<=[a-z0-9])_(?=[a-z0-9])"), " "),
 )
 REPEATS = re.compile(r",{2,}")
+ENCODED = str.maketrans({"(": "%28", ")": "%29", ";": "%3B"})
 
 
 def plain(text: str, kind: str = "comment") -> str:
     links = ledger_comments.web_links()
     kept = [*links.findall(text), ""]
-    text = "".join(_prose(piece) + link for piece, link in zip(links.split(text), kept))
+    text = "".join(_prose(piece) + link.translate(ENCODED) for piece, link in zip(links.split(text), kept))
     words = " ".join(text.split()[: ledger_comments.LIMITS[kind]])
     text = REPEATS.sub(",", words.replace(" ,", ",").replace(" .", ".")).strip(" ,")
     return text or FALLBACK
