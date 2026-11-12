@@ -195,7 +195,7 @@ def unclocked(results: list) -> list:
         for key, raw in storage.items():
             try:
                 parsed = json.loads(raw)
-            except (TypeError, ValueError):
+            except ValueError:
                 continue
             storage[key] = json.dumps(unclock(parsed), ensure_ascii=False, separators=(",", ":"))
     return results

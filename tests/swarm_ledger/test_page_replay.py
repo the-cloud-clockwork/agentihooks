@@ -124,7 +124,7 @@ def _step(stamp: int, text: str = "Started t1", fixture: int = 1791294000000, ht
     }
 
 
-def test_unclocked_equates_replays_that_differ_only_in_page_clock_stamps():
+def test_unclocked_equates_replays_that_differ_only_in_page_clock_stamps() -> None:
     base = page_replay.unclocked([_step(1791300604360)])
     head = page_replay.unclocked([_step(1791300604340)])
     assert json.dumps(base) == json.dumps(head)
@@ -141,7 +141,7 @@ def test_unclocked_equates_replays_that_differ_only_in_page_clock_stamps():
         {"html": "<main>changed</main>"},
     ],
 )
-def test_unclocked_still_reports_a_real_page_difference(fault):
+def test_unclocked_still_reports_a_real_page_difference(fault: dict[str, object]) -> None:
     base = page_replay.unclocked([_step(1791300604360)])
     head = page_replay.unclocked([_step(1791300604340, **fault)])
     assert json.dumps(base) != json.dumps(head)
