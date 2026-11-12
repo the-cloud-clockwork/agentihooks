@@ -1,15 +1,16 @@
 """Relay: the master posts a decision the operator gave it in its own pane, as the operator's entry.
 
-A question takes it as an answer, any other item as a comment. Only the ledger's orchestrator may relay,
+A question takes it as an answer, any other item as a comment, and the notes list as a new note. Only the ledger's orchestrator may relay,
 and only words the hooks recorded from the operator in a master or planner session of its swarm, at any time;
 the entry carries those words, of any length and in any wording.
 """
 
 import re
+from typing import Any
 
 from scripts.swarm_ledger import ports
 
-ITEM_RE = re.compile(r"^(phases|questions|followups|tasks|notes)/[^/]+$")
+ITEM_RE = re.compile(r"^((phases|questions|followups|tasks|notes)/[^/]+|notes)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("relay",)
 RELAYED_FROM = "master pane"
@@ -81,7 +82,38 @@ def relayed(op, meta) -> str:
     return verified(op["by"], op["quote"]) if master else ""
 
 
-def apply(doc, op, ctx):
+def orchestrator_words(op: dict[str, Any], ctx: Any) -> str:
+    """The verified quoted span of an orchestrator's relay, or empty with the refusal recorded on ctx."""
+    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+        return ""
+    words = verified(op["by"], op["quote"])
+    if not words:
+        ctx.refused.append(
+            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            "in its recorded prompts or answers"
+        )
+    return words
+
+
+def add_note(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+    """A new operator note carrying the orchestrator's relayed text and the operator's verified words."""
+    if any(n["id"] == op["id"] for n in doc["notes"]):
+        return True
+    words = orchestrator_words(op, ctx)
+    if not words:
+        return False
+    marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
+    text = op["text"].strip()
+    doc["notes"].append({"id": op["id"], "by": "operator", "at": ctx.at, "text": text, "comments": [], **marks})
+    ctx.record("operator", "note added", "", id=op["id"], text=text, **marks)
+    ctx.stamp("notes", "operator")
+    return True
+
+
+def apply(doc: dict[str, Any], op: dict[str, Any], ctx: Any) -> bool:
+    if op["item"] == "notes":
+        return add_note(doc, op, ctx)
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id), None)
     if item is None:
@@ -90,15 +122,8 @@ def apply(doc, op, ctx):
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
-        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
-        return False
-    words = verified(op["by"], op["quote"])
+    words = orchestrator_words(op, ctx)
     if not words:
-        ctx.refused.append(
-            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
-            "in its recorded prompts or answers"
-        )
         return False
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     text = op["text"].strip()
