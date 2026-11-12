@@ -14,7 +14,11 @@ def _rows(finding: Any) -> dict[str, Any]:
     """The ledger rows and last outcome a finding carries once status attached them, else nothing."""
     if not finding.last_outcome:
         return {}
-    return {"rows": [dict(row) for row in finding.rows], "last_outcome": finding.last_outcome}
+    return {
+        "rows": [dict(row) for row in finding.rows],
+        "rows_total": finding.rows_total,
+        "last_outcome": finding.last_outcome,
+    }
 
 
 class VerdictStore:
@@ -30,8 +34,12 @@ class VerdictStore:
         for finding in found:
             before = json.loads(stored[finding.id]) if finding.id in stored else None
             record = {**(before or {"seen_at": now_ms, "verdict": None, "returned": False})}
-            record.update(evidence=list(finding.evidence), measure=finding.measure, metrics=list(finding.metrics))
-            record.update(_rows(finding))
+            record.update(
+                evidence=list(finding.evidence),
+                measure=finding.measure,
+                metrics=list(finding.metrics),
+                **_rows(finding),
+            )
             if finding.basis:
                 record["basis"] = finding.basis
             verdict = record["verdict"]

@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from scripts.swarm.health.findings import HELD, NOT_TRANSITIONS, Finding, _outcome, _task_id
+from scripts.swarm.health.findings import HELD, NOT_TRANSITIONS, Finding, has_outcome, target_task
 
 ROW_LIMIT = 20
 TEXT_LIMIT = 60
@@ -68,7 +68,7 @@ def _label(event: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> str:
         return str(event["text"])
     if event.get("after"):
         return f"after {event['after']}"
-    tid = _task_id(event.get("target") or "")
+    tid = target_task(event.get("target") or "")
     return (tasks.get(tid, {}).get("title") or "") if tid else str(event.get("error") or "")
 
 
@@ -79,12 +79,12 @@ def _last_outcome(events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]]
         if actor
         and e.get("by") == actor
         and e.get("kind") == "task done"
-        and _outcome(tasks.get(_task_id(e.get("target") or ""), {}))
+        and has_outcome(tasks.get(target_task(e.get("target") or ""), {}))
     ]
     if not done:
         return "none recorded"
     last = max(done, key=lambda e: e.get("at") or 0)
-    tid = _task_id(last["target"])
+    tid = target_task(last["target"])
     return f"{tasks[tid].get('title') or tid} at {_stamp(last.get('at') or 0)}"
 
 

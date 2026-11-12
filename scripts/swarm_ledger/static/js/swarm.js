@@ -122,6 +122,13 @@ function findingRows(f) {
   return h("li", {}, h("span", { text: head }), h("ul", {}, ...(f.rows || []).map(findingRow)));
 }
 
+function renderFindingRows(open) {
+  const shown = document.getElementById("alert-findings");
+  if (!open.length) return shown && shown.remove();
+  const list = shown || $("swarm-alert").appendChild(h("ul", { class: "sw-findings", id: "alert-findings" }));
+  list.replaceChildren(...open.map(findingRows));
+}
+
 function liveCaps(sw) {
   const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length, caps = laneCeilings(sw);
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${caps[key]}`);
@@ -351,7 +358,7 @@ export function renderSwarm(sw) {
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
   $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
-  $("alert-findings").replaceChildren(...open.map(findingRows));
+  renderFindingRows(open);
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);

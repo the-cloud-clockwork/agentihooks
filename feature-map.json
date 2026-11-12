@@ -1742,6 +1742,7 @@
     {
       "id": "swarm-health-finding-rows",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
       "behaviour": "Every health finding stores the ledger rows behind it with the agent's last outcome, marks rows doctrine or the task required, and swarm status and the Swarm health row print them.",
       "seam": "agentihooks swarm status health findings",
       "tests": [
@@ -1758,6 +1759,7 @@
     {
       "id": "swarm-health-proof-loop-parks",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
       "behaviour": "A claim that ended in a park is no proof loop rerun; review rounds still count.",
       "seam": "agentihooks swarm status health findings",
       "tests": [

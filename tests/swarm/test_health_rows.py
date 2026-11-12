@@ -121,10 +121,11 @@ def test_the_verdict_record_stores_the_rows_and_the_last_outcome() -> None:
 
     events = ceremony_events()
     [finding] = finding_rows.attach(health.ceremony(events, tasks(), health.Limits()), events, tasks(), [])
-    board = VerdictStore(FakeRedis(decode_responses=True), "findings")
+    redis = FakeRedis(decode_responses=True)
+    board = VerdictStore(redis, "findings")
     [shown] = board.visible([finding], NOW, MIN)
     assert shown["rows"][-1]["target"] == "tasks/t1"
-    record = json.loads(board.redis.hget("findings", finding.id))
+    record = json.loads(str(redis.hget("findings", finding.id)))
     assert record["rows"] == shown["rows"]
     assert record["last_outcome"] == finding.last_outcome
 
@@ -135,6 +136,8 @@ def test_a_task_claimed_four_times_with_three_parks_is_no_proof_loop() -> None:
     parked = [{**first, "at": NOW + n, "after": "park"} for n in (1, 2, 3)]
     tasks_ = {"t1": {"id": "t1", "state": "claimed"}}
     assert health.proof_loops([first, *parked], tasks_, health.Limits(), {}) == []
+    reopened = [{**first, "at": NOW + n, "after": "master"} for n in (1, 2, 3)]
+    assert health.proof_loops([first, *reopened], tasks_, health.Limits(), {}) == []
     plain = [{**first, "at": NOW + n} for n in (1, 2, 3)]
     [loop] = health.proof_loops([first, *plain], tasks_, health.Limits(), {})
     assert loop.evidence[1] == "started 4 times (3 reruns)"
