@@ -2064,7 +2064,7 @@ def cmd_branch(store, args):
     print(json.dumps({"task": agent.task, **fields, **carried}))
 
 
-def cmd_pr(store, args):
+def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
@@ -2072,7 +2072,7 @@ def cmd_pr(store, args):
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
     head, repo, number, sha = PullHead(*pull_branch(args.url))
-    pull_head.refuse_other_branch(row, args, PullHead(head, repo), keeps_main)
+    pull_head.refuse_other_branch(row, args, PullHead(head, repo))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
     confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
     fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})

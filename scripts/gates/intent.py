@@ -734,7 +734,7 @@ def _verdicts(definition, state, params, answers):
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
 
 
-def judged(state, decide=decide):
+def judged(state: dict[str, Any], decide: Any = decide) -> dict[str, Any]:
     stage = _stage(state)
     lacking = unready(state)
     if lacking:

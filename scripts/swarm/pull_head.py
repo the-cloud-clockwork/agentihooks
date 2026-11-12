@@ -37,13 +37,13 @@ def pull_branch(url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]
     return PullHead(change.head_branch, repo, change.reference.number, change.head)
 
 
-def refuse_other_branch(row: dict[str, Any], args: argparse.Namespace, pull: PullHead, keeps_main: bool) -> None:
+def refuse_other_branch(row: dict[str, Any], args: argparse.Namespace, pull: PullHead) -> None:
     """Refuse an undeclared pull request of the task's repository whose head is not the task's recorded branch."""
     recorded = row.get("branch") or ""
-    declared = keeps_main or args.stage is not None or args.prerequisite is not None or bool(row.get("split"))
+    declared = args.stage is not None or args.prerequisite is not None or bool(row.get("split"))
     if declared or not pull.branch or not recorded or pull.branch == recorded:
         return
-    if repo_key(row.get("branch_repo") or "") not in ("", repo_key(pull.repo)):
+    if pull.repo and repo_key(row.get("branch_repo") or "") not in ("", repo_key(pull.repo)):
         return
     raise SwarmError(f"pull request {args.url} is on branch {pull.branch}, not this task's recorded branch {recorded}")
 

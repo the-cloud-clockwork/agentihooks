@@ -108,15 +108,23 @@ def test_swarm_pr_keeps_a_pull_request_it_cannot_tell_apart_from_the_task_branch
 
 
 @pytest.mark.parametrize(
-    "recorded_repo", ["", "https://github.com/o/r", "https://github.com/o/r.git", "https://github.com/O/R"]
+    ("recorded_repo", "pull_repo"),
+    [
+        ("", "https://github.com/o/r"),
+        ("https://github.com/o/r", "https://github.com/o/r"),
+        ("https://github.com/o/r.git", "https://github.com/o/r"),
+        ("https://github.com/O/R", "https://github.com/o/r"),
+        ("https://github.com/o/r", ""),
+    ],
 )
 def test_swarm_pr_refuses_another_branch_of_the_same_repository(
     env: Any,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     recorded_repo: str,
+    pull_repo: str,
 ) -> None:
-    row = _started(env, monkeypatch, cli.PullHead("someone-else", "https://github.com/o/r", 3, "abc123"))
+    row = _started(env, monkeypatch, cli.PullHead("someone-else", pull_repo, 3, "abc123"))
     row["branch_repo"] = recorded_repo
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) != 0
