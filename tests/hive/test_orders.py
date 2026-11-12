@@ -178,8 +178,8 @@ def test_crashed_launch_is_ambiguous_and_never_relaunched(setup):
 
 @pytest.mark.feature("launch-order-receipt-outlives-order")
 def test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt(
-    setup, monkeypatch
-):
+    setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.hive.orders import RECEIPT_SECONDS
     from scripts.swarm import lease
 
