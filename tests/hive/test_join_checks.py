@@ -115,6 +115,20 @@ def test_root_hive_without_an_auth_mode_checks_github_as_its_user_login(monkeypa
     assert calls == [["gh", "api", "user", "--silent"]]
 
 
+@pytest.mark.feature("root-hive-github-user-login")
+def test_a_member_with_a_token_auth_mode_checks_github_as_its_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import join_checks
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "token")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        join_checks.subprocess, "run", lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(returncode=0)
+    )
+    assert join_checks.github_ready() is True
+    assert calls == [["gh", "api", "user", "--silent"]]
+
+
 def test_status_and_verdict_probe_only_the_engineer_keys():
     from fakeredis import FakeRedis
 
