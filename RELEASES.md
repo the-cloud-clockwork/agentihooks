@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.819 · 2026-11-12
+
+### 2026-11-12 · fc578f1734f0 · #10806 · @agenticore-app
+
+**Refresh the run order receipt on claim so an order outliving it starts once**
+
+This change fixes a bug where a run order could start twice: if a worker crashed between starting a run and acknowledging it, the message receipt (good for one day) could expire before a long-lived order (up to two days) did, letting a second poll re-trigger the same run. The fix refreshes the receipt when the order is claimed, extending its lifetime to one day past the order's own expiry, so the receipt always outlives the order and a crashed-then-resumed run cannot be started a second time. A failing test proved the race before the fix landed.
+
 ## v2.17.818 · 2026-11-12
 
 ### 2026-11-12 · 451c79285b8e · #10808 · @agenticore-app
