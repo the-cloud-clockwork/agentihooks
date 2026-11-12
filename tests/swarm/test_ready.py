@@ -825,6 +825,70 @@ def test_one_merge_pass_closes_a_merged_recorded_task_and_unparks_its_dependent_
     assert ready.merge_pass(run, MappingProxyType(copy.deepcopy(ledger.rows))) == []
 
 
+@pytest.mark.feature("merge-pass-dependent-conflict-on-prerequisite-merge")
+@pytest.mark.parametrize("prerequisite", ["t1", "t2"])
+@pytest.mark.parametrize("awaiting", ["", "merge"])
+def test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_clean_one(
+    merging: SimpleNamespace, awaiting: str, prerequisite: str
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    conflicting, clean = "https://github.com/o/r/pull/8", "https://github.com/o/r/pull/9"
+    owner, other = "engineer@a1b2c3-0003", "engineer@a1b2c3-0004"
+    merging.rows["t1"]["awaiting"] = awaiting
+    merging.rows["t1"]["group_members"] = ["t2"]
+    merging.rows["t3"] = {"id": "t3", "state": "pr", "claimed_by": owner, "pr_url": conflicting}
+    merging.rows["t3"]["depends_on"] = [prerequisite]
+    merging.rows["t4"] = {"id": "t4", "state": "claimed", "claimed_by": other, "pr_url": clean}
+    merging.rows["t4"]["parked_on"] = [prerequisite]
+    merging.store.put_agent("sw", AgentRecord(owner, "eng", "t3", state="working"))
+    merging.store.put_agent("sw", AgentRecord(other, "eng", "t4", state="working"))
+    stale = {URL: MERGED, conflicting: GREEN, clean: GREEN}
+    fresh = {**stale, conflicting: pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})}
+    run = ready.Pass(merging.store, "sw", merging.ledger, stale.get, fresh.get, NOW)
+    actions = ready.merge_pass(run, merging.rows)
+    assert merging.rows["t1"]["state"] == merging.rows[prerequisite]["state"] == "done"
+    told_line = f"task t3 {conflicting} has a merge conflict after task {prerequisite} merged, its owner was told"
+    assert told_line in actions
+    assert not [action for action in actions if "t4" in action]
+    told = InboxStore(merging.store.redis).inbox(owner)
+    assert len(told) == 1 and told[0].task == "t3" and "restack" in told[0].text.lower()
+    assert InboxStore(merging.store.redis).inbox(other) == []
+    assert InboxStore(merging.store.redis).inbox(AGENT) == []
+    assert merging.rows["t3"]["state"] == "pr" and merging.rows["t4"]["state"] == "claimed"
+
+
+@pytest.mark.feature("merge-pass-dependent-conflict-on-prerequisite-merge")
+@pytest.mark.parametrize("held", ["", "queue", "dependency"])
+def test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_already_failed(
+    merging: SimpleNamespace, held: str
+) -> None:
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.ledger_events import pull_request
+    from scripts.swarm.store import AgentRecord
+
+    dependent, owner = "https://github.com/o/r/pull/8", "engineer@a1b2c3-0003"
+    merging.rows["t1"]["awaiting"] = ""
+    merging.rows["t3"] = {"id": "t3", "state": "pr", "claimed_by": owner, "pr_url": dependent, "depends_on": ["t1"]}
+    merging.store.put_agent("sw", AgentRecord(owner, "eng", "t3", state="working"))
+    if held:
+        merging.rows["t3"]["awaiting"] = "merge"
+        merging.rows["t5"] = {"id": "t5", "state": "open", "claimed_by": ""}
+        found = ready.held_record(dependent, HEAD, TOP, owner, NOW)
+        if held == "dependency":
+            found["dependency"] = {"kind": "task", "target": "t5"}
+        ready.save(merging.store, "sw", "t3", found)
+    queued = pull_request({"state": "OPEN", "mergeable": "MERGEABLE", "mergeQueueEntry": {"state": "UNMERGEABLE"}})
+    stale = {URL: MERGED, dependent: queued}
+    fresh = {**stale, dependent: pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})}
+    run = ready.Pass(merging.store, "sw", merging.ledger, stale.get, fresh.get, NOW)
+    ready.merge_pass(run, merging.rows)
+    assert merging.rows["t1"]["state"] == "done"
+    assert len(InboxStore(merging.store.redis).inbox(owner)) == 1
+
+
 @pytest.mark.parametrize(
     "change",
     [{"kind": "tune"}, {"contract": {"after": "yes"}}, {"pr_url": ""}, {"state": "claimed"}, {"awaiting": "fix"}],

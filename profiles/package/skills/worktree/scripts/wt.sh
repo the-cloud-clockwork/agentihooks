@@ -298,12 +298,13 @@ case "${cmd}" in
       MERGED=0
       [[ -z "$(git -C "${REPO}" rev-list "origin/${BASE}..${BR}" 2>/dev/null)" ]] && MERGED=1
       if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1 && ORIGIN_REPO="$(origin_repo "${REPO}")"; then
-        [[ -n "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]] && MERGED=1
+        BR_HEAD="$(git -C "${REPO}" rev-parse "refs/heads/${BR}")"
+        [[ -n "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${HEAD_BR}" --base "${BASE}" --state merged --json number,headRefOid --jq "map(select(.headRefOid == \"${BR_HEAD}\")) | .[0].number" 2>/dev/null)" ]] && MERGED=1
       fi
       if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 || "${PUSHED}" -eq 1 ]]; then
         git -C "${REPO}" branch -D "${BR}" >/dev/null && echo "wt: removed ${TARGET} and branch ${BR}"
       else
-        echo "wt: removed ${TARGET}; branch ${BR} has commits not on origin/${BASE} and no merged PR — kept (--force drops it)" >&2
+        echo "wt: removed ${TARGET}; branch ${BR} has commits not on origin/${BASE} and no PR merged at its head — kept (--force drops it)" >&2
       fi
     else
       echo "wt: removed ${TARGET}"

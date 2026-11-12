@@ -2237,7 +2237,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
-    fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
+    fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
