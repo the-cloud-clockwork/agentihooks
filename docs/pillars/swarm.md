@@ -7420,8 +7420,8 @@ An agent is watched only while all of these hold:
 An agent is reported once for each task it holds in each life. The pass keeps a mark per agent in the Redis hash
 `agentihooks:swarm:<slug>:overrun` (the prefix follows `AGENTIHOOKS_SWARM_KEY_PREFIX` when set), holding the report
 time and the task. The mark is dropped when the agent's record finishes or is removed. An agent still in the swarm
-but off its claim keeps its mark, so it is not reported again if it reclaims the same task. When an agent moves to another task, or a successor takes the same task, the new task or the new agent
-starts its own 90 minute clock.
+but off its claim keeps its mark, so it is not reported again if it reclaims the same task. When an agent moves
+to another task, or a successor takes the same task, the new task or the new agent starts its own 90 minute clock.
 
 #### Configuration
 
@@ -7438,7 +7438,8 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL agentihooks:swarm:<slug>:ove
 
 The first command lists the master's open items. The second shows which agents were already reported, with the time
 in milliseconds. A tick that sends a report lists it among its actions as
-`overrun: told <master seat> that <agent> has run 90 minutes on task <id>`, naming the seat the item went to. `agentihooks swarm <slug> tick-report`
+`overrun: told <master seat> that <agent> has run 90 minutes on task <id>`, naming the seat the item went to.
+`agentihooks swarm <slug> tick-report`
 shows the step's wall time against its budget.
 
 | Symptom | Cause |
