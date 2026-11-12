@@ -430,6 +430,36 @@ def test_no_redis_holds_nothing(monkeypatch):
     assert acc.managed_held() == set()
 
 
+@pytest.mark.feature("host-room-counts-reserved-executions")
+def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+    from dataclasses import replace
+
+    from scripts.codex_session.binding import BindingStore, TransportRecord
+    from scripts.swarm.store import RedisStore
+
+    from scripts.codex_session import supervisor
+
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: 7 if pid == 70 else None)
+    bindings = BindingStore(RedisStore(_held_store(monkeypatch)))
+    here, there = socket.gethostname(), "another-host"
+    for execution, host, state, pid, bridge in (
+        ("exe-g001", here, "starting", 0, f"{here}:70"),
+        ("exe-g002", here, "starting", 42, f"{here}:70"),
+        ("exe-g003", here, "connected", 0, f"{here}:70"),
+        ("exe-g004", there, "starting", 0, f"{there}:70"),
+        ("exe-g005", here, "starting", 0, f"{here}:71"),
+    ):
+        record = TransportRecord(
+            execution, 1, "eng-1@sw", "engineer@1", "t1", _endpoint(execution), host_id=host, bridge_owner=bridge
+        )
+        bindings.reserve("sw", record)
+        bindings.put("sw", replace(record, state=state, server_pid=pid))
+    assert acc.reserved_executions() == 1
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
+    assert acc.reserved_executions() == 0
+
+
 def test_a_redis_failure_holds_what_the_store_last_held(monkeypatch):
     from redis.exceptions import RedisError
 

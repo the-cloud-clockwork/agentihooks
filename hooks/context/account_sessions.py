@@ -305,13 +305,16 @@ def managed_held() -> set[tuple[str, str]]:
 
 
 def _reserved_here(raw: str, host: str) -> bool:
-    from scripts.codex_session import binding
+    from scripts.codex_session import binding, supervisor
 
     try:
         record = binding.decode(raw)
     except (binding.BindingError, ValueError, TypeError, AttributeError):
         return False
-    return record.state == binding.STARTING and not record.server_pid and record.host_id == host
+    if record.state != binding.STARTING or record.server_pid or record.host_id != host:
+        return False
+    bridge = record.bridge_owner.rpartition(":")[2]
+    return not bridge.isdecimal() or supervisor.start_time(int(bridge)) is not None
 
 
 def reserved_executions() -> int:

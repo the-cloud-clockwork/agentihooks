@@ -4925,7 +4925,8 @@
       "seam": "scripts.swarm.host_budget.read_host, memory_room and load_room with hooks.context.account_sessions.reserved_executions",
       "tests": [
         "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
-        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room"
+        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room",
+        "tests/context/test_account_sessions.py::test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher"
       ]
     }
   ],
