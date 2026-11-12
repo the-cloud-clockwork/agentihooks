@@ -2643,6 +2643,17 @@
       ]
     },
     {
+      "id": "trace-plan-per-repository-size",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t447",
+      "behaviour": "Trace plan sizes each repository a plan names on its own, so a plan with one pull request per repository passes, while any single repository slice sized above one pull request fails the plan.",
+      "seam": "trace_plan.trace with the trace-plan classifier definition",
+      "tests": [
+        "tests/swarm/test_trace_plan.py::test_a_two_repository_plan_with_one_pull_request_each_is_accepted",
+        "tests/swarm/test_trace_plan.py::test_a_single_repository_plan_sized_above_one_pull_request_is_refused"
+      ]
+    },
+    {
       "id": "ledger-relay",
       "origin": "inventory",
       "behaviour": "The master relays only words the operator typed in a swarm pane onto a ledger item; words he never said are refused.",
