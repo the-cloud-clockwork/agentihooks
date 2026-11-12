@@ -4989,6 +4989,17 @@
       "tests": [
         "tests/test_swarm_v2_ledger_writer.py::test_a_failed_holder_record_write_releases_the_lock"
       ]
+    },
+    {
+      "id": "swarm-park-foreign-dependency-no-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
+      "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
+        "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
+      ]
     }
   ],
   "unmapped_rules": [
