@@ -333,6 +333,7 @@ def test_a_relay_to_the_notes_list_adds_a_new_operator_note_carrying_his_quoted_
         "text": "Keep the filters idea.",
         **marks,
     }
+    assert state["_meta"]["stamps"]["notes"]["by"] == "operator"
     again, rejected = core.sync(
         SLUG, ops=[relay(40, "notes", text="Keep the filters idea.", quote="keep the filters idea")]
     )
