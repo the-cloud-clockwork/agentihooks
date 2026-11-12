@@ -393,3 +393,31 @@ registry.register(
         feature="tick-step-starvation",
     )
 )
+
+
+def _progress_heads(tick: Any, get: Get) -> Any:
+    """Return the outcomes the progress heads step recorded from the head GitHub shows for each held task."""
+    return tick.skip_refused(
+        progress.heads_pass,  # pyright: ignore[reportUnknownMemberType]
+        get("store").redis,
+        get("slug"),
+        get("doc")["tasks"],
+        get("view"),
+        tick.now_ms(),
+        progress.origin(get("config").repo),
+    )
+
+
+registry.register(
+    CallStep(
+        "progress heads",
+        "wrapper events",
+        held(viewed("progress heads", _progress_heads)),
+        needs=VIEWED,
+        reads=VIEW | CONFIGURED,
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"source_control"}),
+        feature="tick-progress-heads",
+    )
+)
