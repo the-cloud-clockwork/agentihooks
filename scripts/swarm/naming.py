@@ -10,6 +10,7 @@ import logging
 import re
 import secrets
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property, partial
 from pathlib import Path
@@ -182,11 +183,21 @@ def is_worktree(name, environ, tmp=False):
     return re.fullmatch(rf"{base}-tmp-\d+" if tmp else rf"{base}(?:-\d+)?", name) is not None
 
 
-def scratch(environ, cwd):
-    """`<repo>/<swarm>-<task>` for a swarm task, else `<repo>/<session base>`."""
+def scratch(environ: Mapping[str, str], cwd: str | Path) -> str:
+    """`<repo>/<swarm>-<task>` for a swarm task, the quick swarm folder for a quick seat, else `<repo>/<session base>`."""
+    quick, quick_dir = environ.get("AGENTIHOOKS_QUICK_SWARM"), environ.get("AGENTIHOOKS_QUICK_DIR")
+    if quick and quick_dir:
+        return f"{Path(quick_dir).parent.name}/{Path(quick_dir).name}"
+    if quick:
+        return f"{repo_name(cwd)}/{_clean(quick)}"
     swarm, task = environ.get("AGENTIHOOKS_SWARM"), environ.get("AGENTIHOOKS_SWARM_TASK") or ""
     folder = scratch_folder(swarm, task) if swarm and _clean(task) else session_base(environ)
     return f"{repo_name(cwd)}/{folder}"
+
+
+def quick_id(environ: Mapping[str, str]) -> str:
+    """The quick swarm id, built from the session that starts it as master."""
+    return f"quick-{session_base(environ).removeprefix('session-')}"
 
 
 def scratch_folder(swarm, task):

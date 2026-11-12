@@ -26,6 +26,7 @@ DELEGATED_CLIS = {
     "judge": "scripts.judge.cli",
     "scout": "scripts.scout.cli",
     "safety-nudge": "scripts.swarm.safety_nudge",
+    "quick": "scripts.quick.cli",
 }
 
 

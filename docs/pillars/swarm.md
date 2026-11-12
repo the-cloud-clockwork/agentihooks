@@ -31,6 +31,38 @@ says where the controller, ledger and Redis run. See [repository matching across
 for local checkout paths matched by origin, [workstation fallback](hives.md#workstation-fallback-for-workers) when
 a headless worker refuses, and [placement waits](hives.md#placement-waits) for the tick's refusal messages.
 
+## Quick swarm
+
+A quick swarm is the smallest swarm: one herdr tab on the workstation, with no Redis, no ledger server and no
+Docker Compose. The session that runs `agentihooks quick up` becomes the master in pane 1. Engineers open in the
+panes to its right, ordered left to right: three by default, four at most (`--agents 2` to `--agents 5`). Outside
+herdr, or with its server down, `quick up` refuses and says why.
+
+| Piece | Where it lives |
+|---|---|
+| Seats | `seats.json` in the quick folder under `~/scratchpad/<repo>/quick-<id>/`: position, pane, harness, session name, state |
+| Seat notes | `seats/<seat>/` holds `plan.md` (checkbox stages), `notes.md`, `learned.md` and `handoff.md` |
+| Culture | `culture.md`, read into every seat's injected block |
+| Room | `room/chat.jsonl`, chat between seats that share no native channel |
+
+Every launched seat carries `AGENTIHOOKS_QUICK_SWARM`, `AGENTIHOOKS_QUICK_SEAT` and `AGENTIHOOKS_QUICK_DIR`;
+the original master is found by its herdr pane. agentihooks injects a `QUICK SWARM` block (role, seat folder,
+plan state, culture) on the first prompt, after compaction, when it changes and every 40 tool calls.
+
+- The master is the operator's front door. It takes work from whatever source the operator names, tells engineers
+  at the start to wait for the operator, and tracks each seat folder.
+- An engineer is briefed by the operator, writes its plan as checkbox stages, reports it to the master before it
+  starts and works one plan at a time.
+- Claude seats reach each other with Claude Code's own session messaging; any pair with a Codex seat uses
+  `agentihooks quick send <seat> "<text>"` and `agentihooks quick room`.
+- At the compaction limit a quick seat writes its Handoff v2 to its seat folder (Read first takes `seat:<seat>`)
+  and runs `agentihooks quick handoff`. At its next stop the session ends with its pane kept and the successor
+  opens in the same pane with the seed and the handoff as its opening prompt.
+- A per-minute quick tick (`* * * * *` crontab entry) nudges idle engineers whose plan has open stages, at most
+  every 10 minutes, tells an idle seat of new room lines and relaunches a pending seat whose pane sits at a bare
+  shell. It never types into a busy pane or one holding typed text, and never nudges the master.
+- `agentihooks quick stop` removes the tick, the room and the registry; the seat folders stay.
+
 ## Event driven engine
 
 Each swarm runs one of two engines, chosen by its `engine` setting:

@@ -1230,6 +1230,17 @@ def _refocus_blocks(session_id: str, event: str) -> list[str]:
     except Exception as e:
         log("swarm refocus failed", {"error": str(e)})
         return []
+    return [context] if context else _quick_blocks(session_id, event)
+
+
+def _quick_blocks(session_id: str, event: str) -> list[str]:
+    try:
+        from hooks.context.quick_swarm import refocus
+
+        context = refocus(session_id, event)
+    except Exception as e:
+        log("quick swarm refocus failed", {"error": str(e)})
+        return []
     return [context] if context else []
 
 
