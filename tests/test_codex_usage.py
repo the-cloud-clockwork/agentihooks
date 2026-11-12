@@ -344,6 +344,17 @@ def test_a_live_token_answered_401_again_is_probed_at_most_once_per_refresh_wind
 
 
 @pytest.mark.feature("codex-transient-expired-recovers")
+def test_an_expired_reading_recorded_without_a_probe_attempt_is_rechecked_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account, environ = _replay(monkeypatch, 7, [PRO])
+    codex_usage.store(account.name, CodexQuota(NOW, "?", expired=True))
+    monkeypatch.setattr(codex_router.time, "time", lambda: NOW)
+    codex_router.fresh_quotas([account], environ, NOW, _no_exec)
+    assert _seats(account, environ, NOW) == ("NORMAL", 6)
+
+
+@pytest.mark.feature("codex-transient-expired-recovers")
 @pytest.mark.parametrize(
     "account, token, quota, expected",
     [

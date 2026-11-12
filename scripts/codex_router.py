@@ -506,7 +506,8 @@ def fresh_quotas(
             seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
         )
         recheck = recheck_expired(account, seen, environ, now)
-        retry = recheck and now - attempts.get(account.name, 0.0) >= RECHECK_SECONDS
+        last = attempts.get(account.name)
+        retry = recheck and (last is None or now - last >= RECHECK_SECONDS)
         due = force or retry or (stale and not session_bands.fresh(attempts.get(account.name), now))
         if account.signed_in and due:
             attempts[account.name] = now

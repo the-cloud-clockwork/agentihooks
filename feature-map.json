@@ -3551,6 +3551,7 @@
         "tests/test_codex_usage.py::test_one_transient_401_token_expired_then_a_healthy_read_reopens_the_account_on_the_next_refresh",
         "tests/test_codex_usage.py::test_an_expired_reading_for_a_token_past_its_exp_stays_expired_and_is_not_probed_again",
         "tests/test_codex_usage.py::test_a_live_token_answered_401_again_is_probed_at_most_once_per_refresh_window",
+        "tests/test_codex_usage.py::test_an_expired_reading_recorded_without_a_probe_attempt_is_rechecked_at_once",
         "tests/test_codex_usage.py::test_only_an_expired_reading_of_a_token_whose_exp_is_ahead_is_rechecked"
       ]
     },
