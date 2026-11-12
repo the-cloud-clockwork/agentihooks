@@ -76,9 +76,10 @@ def run(drill: Drill) -> dict[str, Any]:
     drill.store.update(drill.slug, gates={**gates, NIGHT_WATCH.name: ENFORCE})
     observed = _observed(drill)
     actions: list[str] = []
-    start = drill.now_ms if observed is not None else drill.now_ms - night_watch.SEAT_MS
+    aged = [drill.now_ms - night_watch.SEAT_MS, drill.now_ms - night_watch.GAP_MS]
+    passes = [drill.now_ms] if observed is not None else [*aged, drill.now_ms]
     rows = {task["id"]: task for task in drill.doc["tasks"]}
-    for at in [*range(start, drill.now_ms, night_watch.GAP_MS), drill.now_ms]:
+    for at in passes:
         asleep = lifetime.sleeping(drill.slug, drill.store, rows)
         actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, asleep)
     respawned: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("respawned")
