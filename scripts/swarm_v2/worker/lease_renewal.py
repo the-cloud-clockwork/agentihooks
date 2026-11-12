@@ -175,6 +175,7 @@ class Renewer:
         print(json.dumps({"lease": event, **fields, **identity}), flush=True)
 
 
+@dataclass
 class Unleased:
     lost: str | None = None
 
