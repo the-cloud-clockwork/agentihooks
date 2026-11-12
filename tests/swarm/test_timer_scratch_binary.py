@@ -130,6 +130,7 @@ def test_reconcile_refuses_the_installed_binary_run_from_a_foreign_root(
     from scripts.targets._common import _install_module
 
     install = _install_module()
+    assert install is not None
     primary = tmp_path / "primary"
     monkeypatch.setattr(install, "install_root", lambda: primary)
     before, calls = _snapshot(shared.units), []

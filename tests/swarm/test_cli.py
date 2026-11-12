@@ -1028,6 +1028,7 @@ def shared_units(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Modul
     from scripts.targets._common import _install_module
 
     install = _install_module()
+    assert install is not None
     installed = tmp_path / "installed-agentihooks"
     monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", installed)
     monkeypatch.setattr(install, "install_root", lambda: installed)
