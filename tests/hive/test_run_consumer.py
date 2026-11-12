@@ -168,7 +168,7 @@ def test_a_run_order_whose_start_fails_acks_start_failed(
 
     redis, run_consumer, run_orders, _, _ = setup
 
-    def broken(name: str, case: str, project: str, delivery_id: str, owner: str) -> bool:
+    def broken(name: str, case: str, project: str, delivery_id: str, owner: str, *, hive: str = "") -> bool:
         raise OSError("spawn failed")
 
     monkeypatch.setattr(run_consumer.scheduled, "start", broken)
