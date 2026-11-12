@@ -304,6 +304,11 @@ CLEARANCE_WRITER = (
     "print(len(records))\n"
     "PY"
 )
+CLEARANCE_COMMAND = (
+    "python3 -m scripts.ci_mutation.clearances write ~/scratchpad/agentihooks/t466/report.json "
+    "hooks.example.x_f__mutmut_1 hooks.example.x_g__mutmut_2 "
+    "--reader 'Standards reader' --reason 'Same output for every input'"
+)
 
 
 @pytest.mark.parametrize(
@@ -312,6 +317,8 @@ CLEARANCE_WRITER = (
         {"cmd": CLEARANCE_WRITER},
         {"command": CLEARANCE_WRITER},
         {"cmd": "python3 -m scripts.ci_mutation.clearances"},
+        {"cmd": CLEARANCE_COMMAND},
+        {"command": CLEARANCE_COMMAND},
     ],
 )
 def test_native_clearance_writer_passes(args, monkeypatch):
@@ -332,6 +339,9 @@ def test_native_clearance_writer_passes(args, monkeypatch):
         CLEARANCE_WRITER.removesuffix("PY") + "import pytest\npytest.main()\nPY",
         CLEARANCE_WRITER + "\npython -m scripts.ci_mutation",
         "python3 -m scripts.ci_mutation",
+        CLEARANCE_WRITER.removesuffix("PY") + "from scripts.ci_mutation.report import clearance_key\nPY",
+        "python3 -c 'from scripts.ci_mutation.report import clearance_key; print(clearance_key(p, r))'",
+        CLEARANCE_COMMAND + " && python3 -m scripts.ci_mutation.report out.json 0 1 hooks/example.py",
     ],
 )
 def test_clearance_writer_mixed_with_a_runner_is_blocked(command, monkeypatch):

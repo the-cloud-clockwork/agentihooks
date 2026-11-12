@@ -136,3 +136,54 @@ def test_repository_folder_records_match_the_combined_loader():
     for path in (root / "mutation-clearances").glob("*.json"):
         key, ruling = next(iter(json.loads(path.read_text()).items()))
         assert cleared[key] == ruling
+
+
+SURVIVORS = [
+    {"name": "hooks.example.x_f__mutmut_1", "status": "survived", "lines": [3], "fingerprint": "fp1", "identity": "id1"},
+    {"name": "hooks.example.x_g__mutmut_2", "status": "no tests", "lines": [4], "fingerprint": "fp2"},
+]
+SURVIVOR_KEYS = {
+    "hooks.example.x_f__mutmut_1": "hooks/example.py:hooks.example.x_f:id1",
+    "hooks.example.x_g__mutmut_2": "hooks/example.py:hooks.example.x_g__mutmut_2:fp2",
+}
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {"files": [{"path": "hooks/example.py", "failures": SURVIVORS}], "not_mutated": [], "failed": True},
+        {"hooks/example.py": SURVIVORS},
+    ],
+)
+def test_write_command_records_each_named_survivor_under_its_report_key(tmp_path, report, capsys):
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps(report))
+    names = list(SURVIVOR_KEYS)
+    argv = ["write", str(source), *names, "--reader", RULING["reader"], "--reason", RULING["reason"]]
+    assert main([*argv, "--root", str(tmp_path)]) == 0
+    assert load_clearances(tmp_path) == {key: RULING for key in SURVIVOR_KEYS.values()}
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [clearance_path(tmp_path, SURVIVOR_KEYS[name]).as_posix() for name in names]
+
+
+def test_write_command_refuses_a_name_missing_from_the_report_and_writes_nothing(tmp_path):
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    argv = ["write", str(source), "hooks.example.x_f__mutmut_1", "hooks.example.absent__mutmut_9"]
+    with pytest.raises(ValueError, match="^Mutants not in the report: hooks.example.absent__mutmut_9$"):
+        main([*argv, "--reader", "Standards", "--reason", "Equivalent", "--root", str(tmp_path)])
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+def test_bare_command_still_migrates_the_legacy_file(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation.clearances import main
+
+    (tmp_path / "mutation-cleared.txt").write_text(json.dumps({KEY: RULING}))
+    monkeypatch.chdir(tmp_path)
+    assert main([]) == 0
+    assert capsys.readouterr().out == "Migrated 1 mutation clearances\n"
+    assert load_clearances(tmp_path) == {KEY: RULING}
