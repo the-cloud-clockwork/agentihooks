@@ -150,7 +150,14 @@
         "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
         "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
         "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending",
-        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch"
+        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch",
+        "tests/events/test_migrate_state.py::test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply",
+        "tests/events/test_migrate_state.py::test_purge_dry_run_names_the_keys_and_deletes_nothing",
+        "tests/events/test_migrate_state.py::test_purge_dry_run_of_a_missing_bucket_names_no_keys",
+        "tests/events/test_migrate_state.py::test_purge_is_skipped_when_the_apply_fails",
+        "tests/events/test_migrate_state.py::test_a_refused_purge_is_reported_as_a_failure",
+        "tests/events/test_migrate_state.py::test_purge_requires_the_no_keys_claim",
+        "tests/events/test_migrate_state.py::test_report_carries_no_purge_fields_without_the_option"
       ]
     },
     {
@@ -304,6 +311,18 @@
       "tests": [
         "tests/test_master_claude_login.py::test_a_refused_master_token_hive_slot_reports_only_the_refusal",
         "tests/test_master_claude_login.py::test_the_master_token_route_reports_routed_only_inside_the_admitted_callback"
+      ]
+    },
+    {
+      "id": "master-login-launch-folder-trust",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-folder-trust",
+      "behaviour": "A master launched on the master login route or its token fallback into a new folder finds that folder trusted in the config home it runs with, even when another master already holds the login home, so it never stops at the Claude folder trust question before its opening prompt; with launch folder trust turned off it marks nothing and reports the wait.",
+      "seam": "master_claude_login.launch_claude and launch_token and the Claude config of the home each runs with",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home",
+        "tests/test_master_claude_login.py::test_a_master_launch_with_folder_trust_off_reports_the_wait_and_marks_nothing",
+        "tests/test_master_claude_login.py::test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home"
       ]
     },
     {

@@ -697,6 +697,15 @@ def _token_lock(environ: Mapping[str, str]):
     return lock
 
 
+def trust_launch_folder(environ: Mapping[str, str], target: Path) -> None:
+    """Record the launch folder as trusted in the Claude config home target, reporting a folder left untrusted."""
+    from scripts.claude_trust import WAIT_NOTICE, ensure_trusted
+
+    trust, why = ensure_trusted(Path.cwd(), {**environ, "CLAUDE_CONFIG_DIR": str(target)})
+    if trust == "untrusted":
+        print(f"[agenti] Claude does not trust {Path.cwd()} ({why}); {WAIT_NOTICE}", file=sys.stderr)
+
+
 def launch_token(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from hooks.context.account_sessions import sessions_by_account
     from scripts import master_login_chain as chain
@@ -709,6 +718,7 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
             environ, claude_bin=binary, sessions=sessions_by_account(), exclude=(API_ACCOUNT,)
         )
         target = token_home(environ)
+        trust_launch_folder(environ, target)
         child_env = {**launch_environment(decision, environ), **dict.fromkeys(SELECTORS, str(target))}
 
         def invoke(env: dict[str, str]) -> None:
@@ -738,6 +748,7 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
     if prepared is None:
         return launch_token(binary, args, environ, report)
     target, found = prepared
+    trust_launch_folder(environ, target)
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
     execute(
