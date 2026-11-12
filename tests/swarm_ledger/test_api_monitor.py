@@ -203,7 +203,7 @@ def test_every_row_counts_registered_seats_masters_included_never_an_unregistere
         {"name": "automation-vm", "agents": 1},
         {"name": "swarm-hive-001", "agents": 1},
     ]
-    assert data["agents"] == {"total": 6, "source": "seats", "reporting": 3, "of": 3, "claude": 4, "codex": 2}
+    assert data["agents"] == {"total": 6, "of": 3, "claude": 4, "codex": 2}
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
@@ -237,7 +237,7 @@ def test_a_seat_without_a_hive_is_placed_by_its_runtime_target_then_on_this_hive
 def test_a_seat_with_no_harness_or_another_harness_counts_in_its_row_and_the_total_outside_the_split() -> None:
     registered = {"one": [seat("engineer@1", harness=""), seat("engineer@2", "codex"), seat("engineer@3", "copilot")]}
     data = viewed(Store({"one": "running"}, registered), *ports_for([ROOT], {}))
-    assert data["agents"] == {"total": 3, "source": "seats", "reporting": 1, "of": 1, "claude": 0, "codex": 1}
+    assert data["agents"] == {"total": 3, "of": 1, "claude": 0, "codex": 1}
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 3}]
 
 
@@ -248,7 +248,7 @@ def test_two_live_interface_hives_without_members_keep_a_row_each() -> None:
     data = viewed(Store({"one": "running"}, registered), *ports_for([ROOT, second], {}))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 0}, {"name": "swarm-master", "agents": 6}]
     assert data["hives"]["live"] == 2
-    assert data["agents"] == {"total": 6, "source": "seats", "reporting": 2, "of": 2, "claude": 6, "codex": 0}
+    assert data["agents"] == {"total": 6, "of": 2, "claude": 6, "codex": 0}
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")
@@ -269,7 +269,7 @@ def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats(ord
         {"name": "automation-vm", "agents": 9},
         {"name": "swarm-hive-001", "agents": 1},
     ]
-    assert data["agents"] == {"total": 12, "source": "seats", "reporting": 3, "of": 3, "claude": 11, "codex": 1}
+    assert data["agents"] == {"total": 12, "of": 3, "claude": 11, "codex": 1}
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")

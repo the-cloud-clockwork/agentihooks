@@ -57,7 +57,7 @@ def seats(
     return [(hive, names.get(hive, hive), counts) for hive, counts in counted.items()]
 
 
-def tally(source: str, machines: list[tuple[str, str, dict[str, int]]]) -> tuple[dict, list[dict]]:
+def tally(machines: list[tuple[str, str, dict[str, int]]]) -> tuple[dict, list[dict]]:
     """Agent totals and one row per distinct machine key, under its name, with its agents summed across every entry
     sharing that key. Totals and rows count every harness; the split names claude and codex only."""
     names = {key: name for key, name, _ in machines}
@@ -68,7 +68,7 @@ def tally(source: str, machines: list[tuple[str, str, dict[str, int]]]) -> tuple
             current[harness] = current.get(harness, 0) + count
     totals = {harness: sum(counts.get(harness, 0) for counts in merged.values()) for harness in HARNESSES}
     total = sum(sum(counts.values()) for counts in merged.values())
-    agents = {"total": total, "source": source, "reporting": len(merged), "of": len(merged), **totals}
+    agents = {"total": total, "of": len(merged), **totals}
     ordered = sorted(merged.items(), key=lambda item: (names[item[0]] != LOCAL, names[item[0]], item[0]))
     rows = [{"name": names[key], "agents": sum(counts.values())} for key, counts in ordered]
     return agents, rows
@@ -81,7 +81,7 @@ def view(store: object, now_ms: int) -> dict:
     live = [hive for hive in hives if registry.live(hive, now_ms)]
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
-    agents, rows = tally("seats", seats(store, hives, live))
+    agents, rows = tally(seats(store, hives, live))
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )
