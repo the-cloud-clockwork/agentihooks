@@ -143,7 +143,9 @@ def test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned(buses, c
 
 
 @pytest.mark.feature("hub-fan-in-unowned-state")
-def test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated(buses):
+def test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated(
+    buses: tuple[nats.NatsBus, nats.NatsBus],
+) -> None:
     legacy, hub = buses
     legacy.state("inbox").create("unknown-owner", b"retained")
     work = {"id": "work", "title": "work", "phase": "p1", "state": "open", "lane": "eng"}
