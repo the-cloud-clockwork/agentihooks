@@ -393,3 +393,23 @@ registry.register(
         feature="tick-step-starvation",
     )
 )
+
+
+def _progress_heads(tick: Any, get: Callable[[str], Any]) -> list[str]:
+    """Return the actions of the progress heads step, given the tick module and a reader of the pass state."""
+    return []
+
+
+registry.register(
+    CallStep(
+        "progress heads",
+        "wrapper events",
+        _progress_heads,
+        needs=frozenset(),
+        reads=frozenset(),
+        writes=frozenset(),
+        lane=Lane("slow"),
+        effects=frozenset({"source_control"}),
+        feature="tick-progress-heads",
+    )
+)

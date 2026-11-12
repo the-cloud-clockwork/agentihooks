@@ -5000,6 +5000,31 @@
         "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
         "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
       ]
+    },
+    {
+      "id": "tick-progress-heads",
+      "origin": "inventory",
+      "behaviour": "The tick step progress heads reads each claimed or in review task's pull request head, or its branch head and open pull request on GitHub at most every five minutes, and records a changed head as a pushed outcome and a newly opened pull request as a pull request opened outcome for the claimant, whatever harness or command made it; the first sight of a task is a baseline and a failed read records nothing.",
+      "seam": "scripts.gates.progress.heads_pass, branch_head and origin, called by scripts.tick.steps.report._progress_heads registered as tick step progress heads",
+      "tests": [
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads",
+        "tests/gates/test_progress.py::test_a_push_the_command_pattern_misses_is_still_an_outcome",
+        "tests/gates/test_progress.py::test_a_first_push_of_a_new_branch_is_an_outcome",
+        "tests/gates/test_progress.py::test_an_opened_pull_request_is_an_outcome",
+        "tests/gates/test_progress.py::test_a_new_head_on_a_recorded_pull_request_is_a_push_once",
+        "tests/gates/test_progress.py::test_a_recorded_pull_request_after_a_branch_read_is_an_opened_pull_request",
+        "tests/gates/test_progress.py::test_an_unread_pull_request_records_nothing",
+        "tests/gates/test_progress.py::test_a_failed_branch_read_keeps_no_baseline",
+        "tests/gates/test_progress.py::test_a_branch_is_read_at_most_once_per_lookup_window",
+        "tests/gates/test_progress.py::test_the_claimant_worktree_branch_on_the_swarm_repository_is_read_when_none_is_recorded",
+        "tests/gates/test_progress.py::test_only_held_tasks_with_a_claimant_and_a_repository_are_read",
+        "tests/gates/test_progress.py::test_a_new_claimant_starts_from_a_baseline",
+        "tests/gates/test_progress.py::test_branch_head_reads_the_branch_commit_and_its_open_pull_request",
+        "tests/gates/test_progress.py::test_branch_head_reads_a_missing_branch_as_empty",
+        "tests/gates/test_progress.py::test_branch_head_is_unread_when_github_fails_or_the_repository_is_elsewhere",
+        "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
+      ]
     }
   ],
   "unmapped_rules": [
