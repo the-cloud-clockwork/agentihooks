@@ -1854,7 +1854,8 @@
       "tests": [
         "tests/profiles/test_hub_import.py::test_workstation_paths_in_instructions_become_bundle_or_environment_forms",
         "tests/profiles/test_hub_import.py::test_a_workstation_path_with_no_portable_form_refuses_the_import",
-        "tests/profiles/test_hub_import.py::test_workstation_paths_outside_instructions_are_left_alone"
+        "tests/profiles/test_hub_import.py::test_workstation_paths_outside_instructions_are_left_alone",
+        "tests/profiles/test_hub_import.py::test_undecodable_instruction_bytes_survive_a_path_rewrite"
       ]
     },
     {

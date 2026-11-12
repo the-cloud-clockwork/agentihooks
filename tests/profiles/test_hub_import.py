@@ -822,6 +822,7 @@ def test_workstation_paths_in_instructions_become_bundle_or_environment_forms(
         "/home/iamroot/dev/agentihub/agents/diagram/bootstrap.sh",
         "/home/iamroot/dev/agentihub/agents/other/package/run.sh",
         "/home/iamroot/dev/agentihub/agents/other/bootstrap.sh",
+        "C:\\Users\\nesto\\BOX",
     ],
 )
 def test_a_workstation_path_with_no_portable_form_refuses_the_import(hub: Path, tmp_path: Path, path: str) -> None:
@@ -831,6 +832,14 @@ def test_a_workstation_path_with_no_portable_form_refuses_the_import(hub: Path, 
         import_hub(hub, out, False, tmp_path / "data")
     assert str(refused.value) == f"absolute path refused, no portable form: {path} in .claude/rules/render.md"
     assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-paths")
+def test_undecodable_instruction_bytes_survive_a_path_rewrite(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "CLAUDE.md").write_bytes(b"\xff\xfe Read /home/op/.config/x.\n")
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "profiles/diagram/CLAUDE.md").read_bytes() == b"\xff\xfe Read $HOME/.config/x.\n"
 
 
 @pytest.mark.feature("hub-import-paths")
