@@ -7220,25 +7220,10 @@ otherwise the watchdog reads it as green and not queued. Set the release it wait
 agentihooks ledger --slug <slug> task set <task> after_release=v2.17.1
 ```
 
-The value is a tag such as `v2.17.1` or `2.17.1`; any other value is refused. While the task is not done, the
-watchdog skips it and no lane claims it, until `git ls-remote --tags --refs origin` in the swarm repository lists a
-release tag with a higher version. Tags that are not three dotted numbers, with or without a leading `v`, are
-ignored. Clear the wait with an empty value:
-
-```bash
-agentihooks ledger --slug <slug> task set <task> after_release=
-```
-
-A tag lookup that fails, exits non zero or runs past 30 seconds lists no tags, so every waiting task stays held.
-So that a held task never stays held silently, a running tick raises one ledger alert to the master when it finds
-a task with `after_release` set, no open alert from source `release` and a failed lookup:
-
-```text
-The release tag lookup for /home/me/dev/project failed: git ls-remote exited 128. Tasks t834 stay held for a newer release until it works.
-```
-
-No second release alert is raised while one stays open. Close it once the lookup works again, for example after
-restoring the repository's `origin` remote or network access.
+While the task is not done, the watchdog skips it and no lane claims it, until the swarm repository's GitHub tags
+include a stable release newer than `v2.17.1`. Clear the wait with `after_release=` (an empty value). Accepted
+values, how the tags are read and the alert raised when the read fails are described in
+[Waiting for a newer release](#waiting-for-a-newer-release).
 
 #### Alerts and escalation
 
@@ -7261,8 +7246,8 @@ an outage are left alone. See the `set stall-gate` command for the modes.
 | Symptom | Cause | Fix |
 |---|---|---|
 | A green pull request held for the next release is reopened | No `after_release` on the task | `task set <task> after_release=<current release>` |
-| A task with `after_release` never resumes after the release | The new tag is not newer, or is not three dotted numbers | Check `git ls-remote --tags --refs origin` in the swarm repository against the task's tag |
-| A `release` alert names held tasks | The tag lookup fails | Fix the repository's `origin` remote or network, then close the alert |
+| A task with `after_release` never resumes after the release | The new tag is not newer, or is not three dotted numbers | Compare the task's tag with the GitHub tags: [Waiting for a newer release](#waiting-for-a-newer-release) |
+| A `release` alert names held tasks | The tag lookup fails | Fix the swarm repository's GitHub origin or `gh` access, then close the alert |
 | The green limit seems to restart | A push, a new owner session, the tick ending the owner's wait, or a pass that skipped or did not see the case restarted the clock | Queue the pull request once its checks pass |
 | A requeued request is reported as dropped | The decision may use an older installation or GitHub state different from the observed queue entry | Compare queue events, current head and required check state with the alert; verify the running controller includes the safeguards from #4597 |
 | A red alert follows a reopen or requeue | A failing check started after the latest event, its start time is unknown, or the controller predates the correction | Compare the current head's check start times with the latest reopen or queue entry, then fix any fresh failure |
@@ -7370,6 +7355,88 @@ nudge the pump delivers within two minutes of its sending interrupts a turn stil
 turn; a later one is delivered like any message. An agent on a long command declares a wait first; the [wait notice](#wait-notice-and-end-of-turn) reminds a worker that starts one without.
 The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
 no nudge.
+
+### Overrun report
+
+The [stale nudge](#stale-nudge) and the [stall watchdog](#stall-watchdog) notice an agent that goes silent. The
+overrun report notices the opposite case: an agent that keeps working on one task but never finishes it. Every tick,
+the `overrun pass` step (group `wrapper events`, after the stall watch) measures how long each live agent has held its
+task. At **90 minutes** it sends one inbox item, so a master sees the task while there is still time to unblock it.
+
+The item reads:
+
+```text
+Overrun on swarm rig-grade-swarm: engineer@323133-8301 has run 90 minutes on task t270 without finishing it. Last
+steps: pushed the red test; fixed the push guard; waiting on the queue. Only its context limit hands it off. Close
+this item once you have looked.
+```
+
+It comes from sender `swarm`, carries the ref `<slug>:overrun:<task>` and is tagged with the task. It goes to the
+master seat that owns the task's phase. When that seat is not live it goes to the lead master, or to the lowest
+numbered live master when the lead seat is not live either. The last steps are the last three non empty lines of
+the task's `progress.md`. For a task running on a hive, they come from the copy the hive
+published, so they match the task's progress on the ledger page. A task with no progress lines reads
+`no steps recorded in progress.md`.
+
+The report changes nothing else. Wall time never asks an agent to hand off, never ends it and never reopens its
+task: only the agent's [context recycle](#context-recycle) at its compact limit hands it off. The master
+decides what to do with the item: send the agent a hint by inbox, fix the blocker, or leave it to finish. Pull
+request 4858 first added a second limit that asked the agent to push and hand off at 150 minutes and ended it 15
+minutes later. Pull request 9725 added the Semgrep rule `feature-overrun-no-wall-time-handoff`, which refuses any
+message of either shape, and pull request 9793 removed both steps from the overrun pass.
+
+#### What counts toward the age
+
+The age runs from the agent's launch (`started_at` on its swarm agent record), not from the task's claim. Time
+during an open [outage](#outage-holds-and-recovery) is subtracted. Declared waits still count: an agent waiting on
+checks or on the merge queue for an hour has still run that hour on the task.
+
+An agent is watched only while all of these hold:
+
+| Condition | Agents left out |
+|---|---|
+| Lane `eng`, `ci` or `plan` | Masters and other seats |
+| A recorded launch time | Records with no `started_at` |
+| Its pane is live this tick | Dead or missing panes |
+| Its task is `claimed` or `pr` and `claimed_by` names it | Agents off their claim, tasks open, done or blocked |
+| Its record is not `finished` | Agents that released through `ready` or handed off |
+| No outage holds it | Agents in provider or Redis outage recovery |
+
+An agent is reported once for each task it holds in each life. The pass keeps a mark per agent in the Redis hash
+`agentihooks:swarm:<slug>:overrun` (the prefix follows `AGENTIHOOKS_SWARM_KEY_PREFIX` when set), holding the report
+time and the task. The mark is dropped when the agent's record finishes or is removed. An agent still in the swarm
+but off its claim keeps its mark, so it is not reported again if it reclaims the same task. When an agent moves
+to another task, or a successor takes the same task, the new task or the new agent starts its own 90 minute clock.
+
+#### Configuration
+
+There is no setting. The limit is the constant `REPORT_MINUTES` in `scripts.swarm.overrun`, and
+`test_the_limits_are_set_in_code` pins it. Changing it takes a pull request. The step's timing budget is the
+`overrun pass` row in the tick step budgets.
+
+#### Check a report
+
+```bash
+agentihooks msg inbox --of master@<slug>
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL agentihooks:swarm:<slug>:overrun
+```
+
+The first command lists the master's open items. The second shows which agents were already reported, with the time
+in milliseconds. A tick that sends a report lists it among its actions as
+`overrun: told <master seat> that <agent> has run 90 minutes on task <id>`, naming the seat the item went to.
+`agentihooks swarm <slug> tick-report`
+shows the step's wall time against its budget.
+
+| Symptom | Cause |
+|---|---|
+| No report for an agent past 90 minutes | It falls under a row of the table above, or an outage added paused time. Check its task state, `claimed_by` and pane |
+| A second report for the same task | A new agent took the task, or the agent's record finished and it came back. Each life gets one report |
+| `Last steps` is `no steps recorded in progress.md` | The agent appended nothing to `progress.md`, or its hive has not published its folder yet |
+| The agent kept running after the report | Expected. Only its context limit or the master ends it |
+
+Tests: `tests/swarm/test_overrun.py`, including
+`test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end` and
+`test_remote_overrun_quotes_the_same_progress_as_the_ledger`.
 
 ### Safe retire
 
@@ -7512,6 +7579,84 @@ becomes a wait retaining the claim; use park when the seat must be released.
 This behavior shipped in [pull request 4523](https://github.com/the-cloud-clockwork/agentihooks/pull/4523),
 after three Doctor seats were taken by measurements of unmerged fixes on
 18 October. That observation is the baseline, not a measured after result.
+
+## Waiting for a newer release
+
+A task whose work needs a release that does not exist yet, such as a proof that measures the next release, names
+the release it must come after. The tick holds its claim until the swarm repository carries a newer release tag,
+so no agent takes a seat only to find nothing to measure. This was added after release proofs were claimed while
+no release after `v2.17.1` existed and their agents spent their seats on zero qualifying releases.
+
+### Set and clear the wait
+
+```bash
+agentihooks ledger --slug <slug> task set <task> after_release=v2.17.1
+agentihooks ledger --slug <slug> task set <task> after_release=
+```
+
+The value is three dotted numbers with or without a leading `v`, such as `v2.17.1` or `2.17.1`, or empty to clear
+the wait. Any other value, a non string included, is refused on every ledger write that carries it:
+
+```text
+after_release must be a release tag such as v2.17.1, or empty to clear it
+```
+
+### When the task becomes claimable
+
+Each pass reads the repository's tags once and holds every task whose `after_release` has no newer tag. A tag
+counts only when it is three dotted numbers with or without a leading `v`; `v2.18.0-rc1`, `latest` and other
+names are ignored. Versions compare number by number, so `v2.17.10` is newer than `v2.17.9`, and `2.17.2` releases
+a task waiting on `v2.17.1`. A tag equal to the floor does not.
+
+While it is held, the task:
+
+- is not claimable in any lane, and an `events` swarm's hub readiness reactor does not offer it,
+- is not a dispatcher queue candidate,
+- is skipped by every [stall watchdog](#stall-watchdog) case,
+- raises no `urgent unclaimable` health finding when it is `urgent`; the urgent hold record names it as held
+  because `it waits on a release newer than v2.17.1`.
+
+Its rank, dependencies and every other claim rule still apply once the tag exists. On the first pass that reads a
+newer tag the task is claimable with no further write; the `after_release` value stays on the task.
+
+### Where the tags come from
+
+The tags are read through the GitHub API, `repos/<owner>/<repo>/git/matching-refs/tags`, with no local `git`
+call. The owner and name come from the swarm's stored repository origin, else the `origin` remote of the swarm's
+checkout. Each read has a 15 second deadline, and a failed read is tried once more.
+
+A read that fails twice, or a swarm repository that is not on `github.com`, yields no tags, so every waiting task
+stays held. Check the tags the tick sees with:
+
+```bash
+gh api repos/<owner>/<repo>/git/matching-refs/tags --jq '.[].ref'
+```
+
+### Release alert
+
+So that a held task never stays held silently, a tick that finds an unfinished task with `after_release` set, no
+open ledger alert from source `release` and a failed lookup raises one alert for the master and logs
+`raised the release alert: the tag lookup for <repo> failed`. A swarm whose checkout has no GitHub origin raises:
+
+```text
+The release tag lookup for /home/me/dev/project failed: /home/me/dev/project names no GitHub repository. Tasks t834 stay held for a newer release until it works.
+```
+
+A failed API read names the error it returned in place of the reason. No second release alert is raised while one
+stays open. Close it once the lookup works again.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `task set` refuses the value | It is not three dotted numbers with an optional `v` | Use a tag such as `v2.17.1`, or an empty value to clear |
+| The task stays unclaimed after the release | The new tag is a prerelease or other non stable name, or equals the floor | List the tags with the `gh api` command above and compare them with `after_release` |
+| A `release` alert names held tasks | The repository is not on GitHub, or the API read fails | Point the swarm checkout's `origin` at GitHub or restore `gh` access, then close the alert |
+| The task is unclaimed after the tag and no alert is open | Another rule holds it: a dependency, freeze, focus or phase | Check its dependencies and phase, and the [freeze and focus](#freeze-and-focus) holds in `agentihooks swarm <slug> status` |
+
+Delivered in [pull request 3979](https://github.com/the-cloud-clockwork/agentihooks/pull/3979). The test
+`test_a_task_waiting_on_a_release_is_unclaimable_until_a_newer_tag_exists` holds a task waiting on `v2.17.1` out of
+the claimable set while only `v2.17.1` exists and admits it once `v2.17.2` does.
 
 ## Queue rank
 

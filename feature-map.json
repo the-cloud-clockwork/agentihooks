@@ -2933,6 +2933,21 @@
       ]
     },
     {
+      "id": "snapshot-job-bounded-memory",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2497",
+      "behaviour": "The automatic snapshot job writes the snapshot document one entry at a time, loading the Redis export and the ledger one after the other and never building the whole document as one string, and source pruning reads the small refs file beside each kept snapshot instead of parsing every kept snapshot whole, so the job's peak memory stays near its largest single part instead of the sum of the export, the ledger, their text and two parsed snapshots.",
+      "seam": "scripts.swarm.snapshot.take, auto and referenced against the snapshot files and the refs file beside each",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string",
+        "tests/swarm/test_snapshot.py::test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot",
+        "tests/swarm/test_snapshot.py::test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it",
+        "tests/swarm/test_snapshot.py::test_each_entry_down_to_the_split_depth_is_written_as_its_own_string",
+        "tests/swarm/test_snapshot.py::test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot"
+      ],
+      "rules": []
+    },
+    {
       "id": "swarm-tick-delta-reads",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c1",
@@ -3010,6 +3025,20 @@
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon",
         "tests/tick/test_live_rows_replay.py::test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick"
+      ]
+    },
+    {
+      "id": "claude-tool-failure-breaker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t598",
+      "behaviour": "A failed Claude tool call, delivered as PostToolUseFailure with an error field and no tool response, is counted by the retry breaker and trips it at its threshold while still closing the stall clock, and the installed Claude settings keep that event registered.",
+      "seam": "hooks.hook_manager.EVENT_HANDLERS PostToolUseFailure through hooks.context.retry_breaker.on_post_tool_result, and scripts.targets.claude_target.ClaudeAdapter.write_settings",
+      "tests": [
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_payload_is_counted_by_the_retry_breaker",
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_trips_the_breaker_at_its_threshold",
+        "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
+        "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
+        "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
       ]
     },
     {
