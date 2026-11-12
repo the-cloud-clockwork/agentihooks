@@ -26,6 +26,8 @@ For an existing pull request, see [continuing with one push](swarm.md#continue-a
 
 See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer step reads, its interval setting and how to measure its wall time per pass.
 
+See [Master orders for its Doctor](swarm.md#master-orders-for-its-doctor) for how the watched master starts, resizes or stops its Doctor on the operator's quoted words, the thirty minute window, the relay notices on both ledgers and the refusals.
+
 See [Inbox escalation sender exclusion](swarm.md#inbox-escalation-sender-exclusion) for master handoffs, escalation timing, configuration, message history and delivery evidence.
 
 See [Inbox receiver read](swarm.md#inbox-receiver-read) for how the inbox detector resolves every receiver in a fixed number of Redis reads, the check command and the measured result.

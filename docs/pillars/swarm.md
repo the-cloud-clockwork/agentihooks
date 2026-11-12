@@ -7390,6 +7390,118 @@ nobody takes the task up (it is done or blocked, for example), each item is with
 item naming the agent and the message; a sender that has itself left is told through the master. Agents that
 exited between ticks are settled at the start of the next tick.
 
+## Master orders for its Doctor
+
+The operator runs a Doctor crew through the master of the swarm it watches. When he tells that master in its pane to
+start, resize or stop the Doctor, the master runs `agentihooks doctor` with `--quote` carrying his words. The command
+accepts the master only when those words are the operator's own, typed within the last thirty minutes.
+
+| Caller | `doctor <slug> start` and `doctor <slug> stop` |
+|---|---|
+| The operator, in his own shell or through the ledger page controls | Accepted with no quote; no relay notice is written |
+| The seated master of the watched swarm | Accepted only with a fresh `--quote`; each order is noted on both ledgers |
+| Any other agent, including the Doctor's own crew and engineers of the watched swarm | Refused: `only the operator or the master of swarm <slug> uses its swarm controls, and <name> is neither` |
+
+### Commands
+
+```bash
+agentihooks doctor <slug> start [--repo DIR] [--max-eng-agents N] [--max-ci-agents N] [--quote WORDS]
+agentihooks doctor <slug> stop [--quote WORDS]
+```
+
+- `start` takes the watched ledger as `<slug>`. It creates the Doctor ledger `<slug>-doctor` and its swarm when they
+  do not exist, links both ledgers, pairs the two masters as inbox peers and starts the Doctor, or reopens it when it
+  was closed.
+- `--max-eng-agents N` and `--max-ci-agents N` set the Doctor's engineer and CI lane caps. They apply to a new
+  Doctor and to one already running, and are stored as pinned caps, the same as
+  `agentihooks swarm <id> set max-eng-agents=N`. A `start` without them leaves a running Doctor's caps as they are.
+- `stop` takes the watched ledger or the Doctor ledger. It closes the Doctor ledger with every fix and the number it
+  moved and retires the Doctor's agents. The watched swarm keeps running.
+- `--quote` is needed only when the caller is the watched master.
+
+### How the quote is checked
+
+The check is the one `agentihooks ledger relay` uses (see
+[Relayed operator words](../reference/hosted-ledger-auth.md#relayed-operator-words)), with a time limit added:
+
+- The quote has at least three words, and they appear in order, ignoring case and spacing, inside one prompt or
+  question answer the operator gave.
+- That prompt or answer was recorded for the master's own names or another master or planner of its swarm. Words the
+  swarm types into a pane, such as inbox wakes and launch prompts, are never recorded.
+- It was recorded within the last 1800 seconds. The window is fixed in code as `RELAY_WINDOW_SEC` and has no setting.
+
+The check runs before anything changes. A failed check prints one message and leaves the Doctor, its ledger and its
+caps untouched:
+
+```text
+the master starts, scales or stops its Doctor only on the operator's order: pass --quote with his own words typed in the master pane within the last thirty minutes
+```
+
+### Relay notices
+
+Each accepted master order is written as a notice on the watched ledger and on the Doctor ledger. The notice names
+the master, with its dashes and `@` written as spaces, and quotes the matched words as the operator wrote them:
+
+```text
+master a1b2c3 0001 relayed the operator's order to start the Doctor crew. His words: restart the Doctor crew with two engineers
+```
+
+A start writes the notice after the Doctor has started. A stop writes it before the Doctor ledger closes, so the
+closed ledger keeps it.
+
+### Usage
+
+The operator types in the master pane of swarm `example-swarm`: "Restart the Doctor crew with two engineers." The
+master relays it within thirty minutes:
+
+```bash
+agentihooks doctor example-swarm start \
+  --max-eng-agents 2 \
+  --quote "restart the Doctor crew with two engineers"
+```
+
+To give a running Doctor one CI agent on a later order, run `start` again with the new cap and the new quote:
+
+```bash
+agentihooks doctor example-swarm start --max-ci-agents 1 --quote "give the Doctor one CI agent"
+```
+
+To close it on the operator's order:
+
+```bash
+agentihooks doctor example-swarm stop --quote "stop the Doctor crew now"
+```
+
+The `rig-doctor` skill, the master's usual route to its Doctor, takes the same flags and passes them through to
+`doctor start` and `doctor stop`:
+
+```bash
+python3 "$SKILL_DIR/scripts/rig_doctor.py" example-swarm \
+  --max-eng-agents 2 --quote "restart the Doctor crew with two engineers"
+python3 "$SKILL_DIR/scripts/rig_doctor.py" example-swarm stop --quote "stop the Doctor crew now"
+```
+
+Check the result with `agentihooks doctor example-swarm status`, which prints the link, the peers and the Doctor
+swarm's status, including its lane caps.
+
+### Limitations
+
+- A quote older than thirty minutes is refused even when the words are recorded. Ask the operator to repeat the order
+  in the master pane, then relay the new words.
+- The quote must come from one prompt or answer; words spread across two prompts do not match.
+- Only the watched swarm's master is accepted. A Doctor master, dispatcher, planner or engineer cannot start, resize or
+  stop a Doctor with any quote.
+- `start` refuses before the quote check when no bundle is linked with `agentihooks init --bundle DIR`.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `the master starts, scales or stops its Doctor only on the operator's order …` | No `--quote`, a quote under three words, words the operator never typed in a pane of this swarm, or words recorded more than thirty minutes ago | Quote at least three consecutive words from the operator's latest order in the master pane; when it is older than thirty minutes, have him repeat it |
+| `only the operator or the master of swarm <slug> uses its swarm controls, and <name> is neither` | The caller is not the seated master of the watched swarm, or `<slug>` names a different swarm | Run the command from the watched master's session with the watched ledger as `<slug>` |
+| `no Doctor watches <slug>; start one with agentihooks doctor <slug> start` on `stop` | No Doctor swarm exists for that ledger | Nothing to stop; use `start` to create one |
+| The Doctor started but no notice appears on either ledger | The caller was the operator, who writes no relay notice | Expected; only a master's relayed order is noted |
+
 ## Doctor measurement task readiness
 
 A measurement task uses kind `tune` and lists the fixes it measures in
