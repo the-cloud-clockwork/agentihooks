@@ -168,7 +168,7 @@ def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(
     redis = fakeredis.FakeRedis(decode_responses=True)
     slot = WorkflowSlot("nightly", str(case), "/repo", "hive", ("build",))
     slot.deliver({"owner": OWNER, "payload": "go"}, "delivery-1", RedisStateStore(redis, "scheduler"))
-    assert placed == [(run_placement.Run("delivery-1", "nightly", str(case), "/repo", OWNER, ("build",)), redis)]
+    assert placed == [(run_placement.Run("delivery-1", "nightly", case.read_text(), "/repo", OWNER, ("build",)), redis)]
 
 
 @pytest.mark.feature("scheduler-workflow-target-case")

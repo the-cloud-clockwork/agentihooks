@@ -104,6 +104,9 @@ def _task(key: str) -> str:
 
 
 def _scan(store: Any, slug: str, part: str) -> Any:
+    """Walks the keyspace for slug's legacy part keys only when the swarm kept a legacy controller epoch."""
+    if not store.redis.exists(store.key(slug, LEGACY_COUNTERS["epoch"])):
+        return iter(())
     return store.redis.scan_iter(match=store.key(slug, part, "*"))
 
 
