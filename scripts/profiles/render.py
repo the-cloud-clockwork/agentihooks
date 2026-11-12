@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -562,16 +563,19 @@ def _codex_agents(claude_agents: Path, out: Path) -> None:
 
     out.mkdir()
     for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
-        _, head, body = [*src.read_text().split("---", 2), "", ""][:3]
+        parts = re.split(r"^---[ \t]*$", src.read_text(), maxsplit=2, flags=re.M)
+        if len(parts) != 3 or parts[0]:
+            continue
         try:
-            front: object = yaml.safe_load(head)
+            front: object = yaml.safe_load(parts[1])
         except yaml.YAMLError:
             front = None
         meta: dict[str, object] = cast(dict[str, object], front) if isinstance(front, dict) else {}
-        name, description = meta.get("name"), meta.get("description")
-        if isinstance(description, str) and description.strip() and body.strip():
-            doc = {"name": name if isinstance(name, str) and name else src.stem, "description": description}
-            _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps({**doc, "developer_instructions": body.strip()}))
+        name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
+        if isinstance(description, str) and description.strip() and body:
+            named = name.strip() if isinstance(name, str) and name.strip() else src.stem
+            doc = {"name": named, "description": description, "developer_instructions": body}
+            _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps(doc))
 
 
 def render_codex(
