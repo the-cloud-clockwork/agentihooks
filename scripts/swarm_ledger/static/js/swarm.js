@@ -3,7 +3,7 @@ import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
-import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
+import { appliedCaps, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { tips } from "./state.js";
@@ -14,6 +14,7 @@ import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
 import { renderContext } from "./context.js";
+import { drawFailures } from "./status_note.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -26,9 +27,8 @@ export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
   if (!sw) return swarmLost("no swarm for this ledger");
-  if (swarmReadError && !pending) $("swarm-note").textContent = "";
+  if (swarmReadError) drawFailures(true);
   swarmReadError = false;
-  clearNoteError();
   const resend = reconcile(sw);
   settleCaps(sw);
   renderSwarm(sw);
