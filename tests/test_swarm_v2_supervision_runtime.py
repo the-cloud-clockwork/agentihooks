@@ -518,7 +518,7 @@ def test_drain_keeps_acknowledging_until_the_controller_accepts_the_archived_tra
     monkeypatch.setattr(runtime, "checkpoint", Mock(return_value="checkpoint"))
     monkeypatch.setattr(runtime.trees, "cleanup", Mock())
     monkeypatch.setattr(supervisor, "validated", lambda identifier, deadline: True)
-    wait = Mock()
+    wait = Mock(side_effect=[None, None])
     monkeypatch.setattr(supervisor, "wait", wait)
     supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
     protocol.write(
@@ -543,13 +543,13 @@ def test_drain_stops_acknowledging_when_the_checkpoint_budget_ends(supervisor, m
     monkeypatch.setattr(runtime, "checkpoint", Mock(return_value="checkpoint"))
     monkeypatch.setattr(runtime.trees, "cleanup", Mock())
     monkeypatch.setattr(supervisor, "validated", lambda identifier, deadline: True)
-    wait = Mock()
+    wait = Mock(side_effect=AssertionError("drain waited past the checkpoint budget"))
     monkeypatch.setattr(supervisor, "wait", wait)
     supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
     protocol.write(
         supervisor.root / "exporter.checkpoint.json", {**supervisor.scope, "status": "complete", "transcript_end": 10}
     )
-    acknowledge = Mock(return_value=False)
+    acknowledge = Mock(side_effect=[False])
     supervisor.lease = SimpleNamespace(lost=None, acknowledge=acknowledge)
 
     supervisor.drain("agent_completed")
