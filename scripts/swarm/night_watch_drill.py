@@ -55,21 +55,14 @@ class Running:
         config: Any = super().config(slug)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         return replace(config, state="running") if slug == self.drilled else config
 
-    def update(self, slug: str, **changes: Any) -> Any:
-        """Write ``changes`` over the stored config, so an update never writes the running state it reads."""
-        drilled, self.drilled = self.drilled, ""
-        try:
-            return super().update(slug, **changes)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        finally:
-            self.drilled = drilled
-
 
 def running(store: Any, slug: str) -> Any:
     """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night
-    watch's Redis budget rebinds the copy as it rebinds the store."""
-    view: Any = copy.copy(store)
-    view.__class__ = type(f"Running{type(store).__name__}", (Running, type(store)), {})
-    view.drilled = slug
+    watch's Redis budget rebinds the copy as it rebinds the store. Its updates go through ``store``, so a write never
+    stores the running state the copy reads."""
+    kind: Any = type(f"Running{type(store).__name__}", (Running, type(store)), {})
+    view: Any = kind.__new__(kind)
+    vars(view).update(vars(store), drilled=slug, update=store.update)
     for name, value in vars(store).items():
         if getattr(value, "store", None) is store:
             part: Any = copy.copy(value)
