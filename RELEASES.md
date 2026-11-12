@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.813 · 2026-11-11
+
+### 2026-11-11 · 63e2b3923645 · #10756 · @agenticore-app
+
+**Hub withdraws stale work offers before publishing fresh ones**
+
+Before publishing a fresh work offer, the hub readiness pass now walks every lane queue in the swarm and withdraws stale offers first, so tasks that are gone, claimed, closed, moved to another lane, or otherwise invalid no longer sit ahead of a valid offer in the queue. This fixes the October backlog of roughly 7000 withdrawn eng offers blocking fresh delivery. The withdraw capability was added to memory, NATS, and scoped work queues, with NATS deleting stale messages directly from the lane stream, and the controller's NATS credentials were extended accordingly, contingent on a matching grant in antoncore.
+
 ## v2.17.810 · 2026-11-11
 
 ### 2026-11-11 · ded55f07ab36 · #10671 · @agenticore-app
