@@ -249,6 +249,28 @@ def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
 
 
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore(store: RedisStore) -> None:
+    from scripts.inbox.dispatch import Dispatcher
+
+    item = seed(store, "sw")
+    dispatcher = Dispatcher(InboxStore(store.redis))
+    dispatcher.own("master@sw", "bridge-1")
+    [delivery] = dispatcher.reserve("master@sw", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("master@sw", "bridge-1")
+    assert restored.reserve("master@sw", "bridge-1") == []
+    assert [(d.id, d.state) for d in restored.receipts.recover("master@sw", "bridge-1")] == [(delivery.id, "unknown")]
+    assert restored.receipts.accept(delivery.id, "bridge-1", delivery.digest).committed
+    assert restored.reserve("master@sw", "bridge-1") == []
+    states = [h["state"] for h in InboxStore(store.redis).history(item.id)]
+    assert states.count("delivered") == 1
+
+
 def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     seed(store, "sw")
     store.update("sw", state="running")

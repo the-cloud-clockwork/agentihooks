@@ -342,6 +342,16 @@
       ]
     },
     {
+      "id": "swarm-snapshot-inbox-receipts",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t900",
+      "behaviour": "A swarm snapshot carries each inbox address's receipts journal: its open deliveries, their records, the item and ref reservations they hold and the address's seen marks, so a delivery in flight when Redis is lost is restored, recovered as unknown and delivered once instead of being reserved and sent again.",
+      "seam": "InboxStore.keys_at through RedisStore.export, snapshot.take and snapshot.restore",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore"
+      ]
+    },
+    {
       "id": "inbox-young-connection-ramp",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-inbox-read-reset",
