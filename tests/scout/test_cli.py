@@ -166,7 +166,9 @@ def test_a_source_inside_a_worker_checkout_is_cited_relative_to_its_repository_r
     module = checkout / "scripts" / "hive" / "daemon.py"
     module.parent.mkdir(parents=True)
     module.write_text("from scripts.hive.run_consumer import RunConsumer\n")
-    wired(FakeRunner([PEP, _found(str(module), "from scripts.hive.run_consumer import RunConsumer")]), FakeClassifier(1.0))
+    wired(
+        FakeRunner([PEP, _found(str(module), "from scripts.hive.run_consumer import RunConsumer")]), FakeClassifier(1.0)
+    )
 
     assert cli.main([QUESTION, "--rounds", "1"]) == 0
 
