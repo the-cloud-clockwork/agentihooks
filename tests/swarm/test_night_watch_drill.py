@@ -183,6 +183,21 @@ def test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running(rig: dic
     assert seen == ["running", "running", "running"]
     assert store.redis.get(store.key(SCRATCH, "probe")) == "1"
     assert store.config(SCRATCH).state == "paused"
+    store.update("live-swarm", state="paused")
+    assert night_watch_drill.Running(store, SCRATCH).config("live-swarm").state == "paused"
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_a_copied_running_view_keeps_its_store_and_has_no_private_store_attributes(rig: dict[str, Any]) -> None:
+    import copy
+
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    view = copy.copy(night_watch_drill.Running(store, SCRATCH))
+    assert view.config(SCRATCH).state == "running" and view.redis is store.redis
+    with pytest.raises(AttributeError) as missing:
+        view.__getattr__("_hidden")
+    assert str(missing.value) == "_hidden"
 
 
 @pytest.mark.feature("swarm-night-watch-drill")

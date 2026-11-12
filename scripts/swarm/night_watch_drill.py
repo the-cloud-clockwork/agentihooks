@@ -1,12 +1,12 @@
 """Night watch drill: run the night watch in enforcing mode against a scratch proof swarm whose front door master
 seat is empty, across the empty seat threshold through the tick's own night watch path, and record the recovery it
-took. A swarm that is not a running scratch proof swarm, or whose front door seat a live master holds, is refused
-untouched."""
+took. A paused scratch swarm stays paused while its passes read it as running. A swarm that is not a running or
+paused scratch proof swarm, or whose front door seat a live master holds, is refused untouched."""
 
 import argparse
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from scripts.gates.enforcement import NIGHT_WATCH
@@ -21,7 +21,8 @@ KEY = "night-watch-drill"
 ENFORCE = "enforce"
 REFUSED = "front door respawn refused"
 NOT_SCRATCH = "{slug} is not a scratch proof swarm; the night watch drill never runs on a live swarm"
-NOT_RUNNING = "scratch swarm {slug} is {state}; start it before the night watch drill"
+NOT_RUNNING = "scratch swarm {slug} is {state}; the night watch drill runs on a running or paused scratch swarm"
+DRIVEN = ("running", "paused")
 SEAT_HELD = "a live master holds the front door seat of {slug}; the night watch drill needs an empty seat"
 
 night_watch: Any = night_watch_module
@@ -42,12 +43,33 @@ class Drill:
     watch_pass: WatchPass
 
 
+class Running:
+    """A store view that reads the drilled swarm as running and forwards everything else to the store, so a paused
+    scratch swarm's night watch passes act while its stored state stays paused."""
+
+    def __init__(self, store: Any, slug: str) -> None:
+        """Wrap ``store`` for the swarm ``slug``."""
+        self._store = store
+        self._slug = slug
+
+    def config(self, slug: str) -> Any:
+        """The stored config, with the drilled swarm's state read as running."""
+        config: Any = self._store.config(slug)
+        return replace(config, state="running") if slug == self._slug else config
+
+    def __getattr__(self, name: str) -> Any:
+        """Every other public store attribute, unchanged; a private one is missing, so a copy of this view stays whole."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._store, name)
+
+
 def refusal(drill: Drill) -> str:
     """Why the drill may not run on this swarm, or an empty string when it may."""
     config: Any = drill.store.config(drill.slug)
     if not config.scratch or not naming.PROOF_RE.fullmatch(drill.slug):
         return NOT_SCRATCH.format(slug=drill.slug)
-    if config.state != "running":
+    if config.state not in DRIVEN:
         return NOT_RUNNING.format(slug=drill.slug, state=config.state)
     live: set[str] = drill.runtime.live_names()
     for agent in drill.store.agents(drill.slug):
@@ -79,9 +101,10 @@ def run(drill: Drill) -> dict[str, Any]:
     aged = [drill.now_ms - night_watch.SEAT_MS, drill.now_ms - night_watch.GAP_MS]
     passes = [drill.now_ms] if observed is not None else [*aged, drill.now_ms]
     rows = {task["id"]: task for task in drill.doc["tasks"]}
+    store = Running(drill.store, drill.slug)
     for at in passes:
         asleep = lifetime.sleeping(drill.slug, drill.store, rows)
-        actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, asleep)
+        actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
     respawned: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("respawned")
     record: dict[str, Any] = {
         "swarm": drill.slug,
