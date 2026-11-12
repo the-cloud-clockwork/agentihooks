@@ -1,8 +1,6 @@
-"""The HOME resource monitor: agent panes the master herdr client publishes for itself and its machines, CPU and memory
-from each live hive's headroom reading, and running swarms."""
+"""The HOME resource monitor: registered swarm seats on each hive, masters included, CPU and memory from each live
+hive's headroom reading, and running swarms."""
 
-import json
-import os
 import time
 from collections import Counter
 from typing import Any
@@ -32,55 +30,6 @@ def capacity(measured: dict) -> tuple[float, float, int, int]:
     return used, cores, max(total - available, 0), total
 
 
-def processes(store: object, hive: str, measured: dict | None) -> dict[str, int] | None:
-    """Agent processes on one hive by harness: this host's process table read now, else the one the hive's last
-    headroom reading took, else, from a hive that predates that reading, its beat's per-slot session report; None
-    when the hive has nothing fresh."""
-    if hive == ports.swarm().commands.hive_id():
-        found = {harness: len(pids) for harness, pids in ports.hooks().account_sessions.local_processes().items()}
-    elif measured is not None and "agents" in measured:
-        found = measured["agents"]
-    else:
-        sessions = store.redis.get(f"{ports.hive().registry.key(hive)}:sessions")
-        if sessions is None:
-            return None
-        found = {}
-        for slot, count in json.loads(sessions).items():
-            harness = slot.split(":")[0]
-            if harness in HARNESSES:
-                found[harness] = found.get(harness, 0) + count
-    return {harness: int(found.get(harness, 0)) for harness in HARNESSES}
-
-
-def herdr_machines(
-    redis: object, hives: list[dict[str, Any]], live: list[dict[str, Any]], now_ms: int
-) -> list[tuple[str, str, dict[str, int] | None]] | None:
-    """Each machine the herdr client on every live interface hive last counted, by hive id and row name, with None
-    for one that did not answer. A hive two readings name is counted once, from its own reading unless that one is
-    silent. A label matching a known hive is shown under that hive's current name and dropped if the hive is no
-    longer live; a label matching nothing in the registry is kept as herdr reported it."""
-    stats = ports.hive().herdr_stats
-    readings = [(hive, stats.read(redis, hive["id"], now_ms)) for hive in live if hive.get("ui") == "yes"]
-    published = [(hive, reading) for hive, reading in readings if reading is not None]
-    if not published:
-        return None
-    live_ids, names = {hive["id"] for hive in live}, labels(live)
-    by_id = {hive["id"]: hive for hive in hives}
-    by_name = {hive["name"]: hive for hive in hives}
-    counted: dict[str, tuple[str, dict[str, int] | None]] = {}
-    for publisher, reading in published:
-        for name, counts in {**reading["machines"], **dict.fromkeys(reading["silent"])}.items():
-            own = name == stats.MASTER
-            hive = publisher if own else by_name.get(name) or by_id.get(name)
-            if hive is not None and hive["id"] not in live_ids:
-                continue
-            key, row = (name, name) if hive is None else (hive["id"], names[hive["id"]])
-            held = counted.get(key)
-            if held is None or held[1] is None or (own and counts is not None):
-                counted[key] = (row, counts)
-    return [(key, row, counts) for key, (row, counts) in counted.items()]
-
-
 def labels(live: list[dict[str, Any]]) -> dict[str, str]:
     """Each live hive's row name by hive id: swarm-master for an interface hive, else its registered name, and its
     member names instead when another live hive shares that name and it has members."""
@@ -90,9 +39,23 @@ def labels(live: list[dict[str, Any]]) -> dict[str, str]:
     return {hive: named[hive] if shared[name] > 1 and named[hive] else name for hive, name in base.items()}
 
 
-def hive_machines(store: object, live: list[dict], readings: dict) -> list[tuple[str, str, dict | None]]:
-    names = labels(live)
-    return [(hive["id"], names[hive["id"]], processes(store, hive["id"], readings[hive["id"]])) for hive in live]
+def seats(
+    store: object, hives: list[dict[str, Any]], live: list[dict[str, Any]]
+) -> list[tuple[str, str, dict[str, int]]]:
+    """Registered seats of every swarm, masters included and finished ones left out, by the hive each runs on and the
+    harness it records, claude when it records none: one entry per live hive, empty where no seat runs, then one per
+    other hive a seat names, under its registered name or, when the registry does not know it, its id."""
+    here, host = ports.swarm().commands.hive_id(), ports.hive().reports.host
+    names = {hive["id"]: hive["name"] for hive in hives} | labels(live)
+    counted = {hive["id"]: dict.fromkeys(HARNESSES, 0) for hive in live}
+    for slug in store.slugs():
+        for agent in store.agents(slug):
+            if agent.state == "finished":
+                continue
+            counts = counted.setdefault(agent.hive or host(agent) or here, dict.fromkeys(HARNESSES, 0))
+            harness = agent.harness or HARNESSES[0]
+            counts[harness] = counts.get(harness, 0) + 1
+    return [(hive, names.get(hive, hive), counts) for hive, counts in counted.items()]
 
 
 def tally(source: str, machines: list[tuple[str, str, dict | None]]) -> tuple[dict, list[dict]]:
@@ -124,17 +87,7 @@ def view(store: object, now_ms: int) -> dict:
     live = [hive for hive in hives if registry.live(hive, now_ms)]
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
-    machines = herdr_machines(store.redis, hives, live, now_ms)
-    present = ports.presence().read(os.environ, now_ms / 1000)
-    if present:
-        seen, names = {hive["id"] for hive in present}, labels(live)
-        silent = [(hive["id"], names[hive["id"]], None) for hive in live if hive["id"] not in seen]
-        reported = [(hive["id"], names.get(hive["id"], hive["name"]), hive["agents"]) for hive in present]
-        agents, rows = tally("otel", reported + silent)
-    elif machines is None or all(counts is None for _, _, counts in machines):
-        agents, rows = tally("hives", hive_machines(store, live, readings))
-    else:
-        agents, rows = tally("herdr", machines)
+    agents, rows = tally("seats", seats(store, hives, live))
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )
