@@ -1,8 +1,8 @@
 """Swarm snapshot and restore: documents in the swarm's state folder carrying its Redis state, ledger and worktrees.
 
 Stop and the snapshot command write snapshot.json; while the swarm runs, a job the tick starts writes one automatic
-snapshot per interval into the snapshots folder and keeps the newest ten. Restore takes the newest of them all unless
-pointed at one.
+snapshot per interval into the snapshots folder and keeps the newest ten that fit one gibibyte. Restore takes the newest
+of them all unless pointed at one.
 
 A restore reopens each agent in its own conversation where it can and leaves the swarm paused. Every other agent is
 marked finished, so the next tick retires it, reopens its task and primes the successor with seat memory and handoffs.
@@ -23,6 +23,7 @@ from scripts.swarm_v2.checkpoints import git_capture, native
 
 VERSION = 1
 KEEP = 10
+KEEP_BYTES = 1 << 30
 MINUTES = 30
 SOURCE_SWITCH = "AGENTIHOOKS_SWARM_SOURCE_CAPTURE"
 SOURCE_REF = "AGENTIHOOKS_SWARM_SOURCE_REF"
@@ -74,10 +75,22 @@ def auto(store, slug, now_ms, environ, run=subprocess.run):
     if not due(store, slug, now_ms, environ):
         return None
     taken = take(store, slug, now_ms, run, auto_dir(slug) / f"auto-{now_ms}.json", environ)
-    for old in automatic(slug)[:-KEEP]:
+    for old in stale(automatic(slug)):
         old.unlink(missing_ok=True)
     prune_sources(slug)
     return taken
+
+
+def stale(files: list[Path]) -> list[Path]:
+    """The automatic snapshots to delete, oldest first: all but the newest KEEP whose sizes fit KEEP_BYTES summed from
+    the newest; the newest is always kept."""
+    total, kept = 0, 0
+    for file in reversed(files):
+        total += file.stat().st_size
+        if kept == KEEP or (kept and total > KEEP_BYTES):
+            break
+        kept += 1
+    return files[: len(files) - kept]
 
 
 def newest(slug):
