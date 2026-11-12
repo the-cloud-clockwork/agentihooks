@@ -39,8 +39,7 @@ class Progress:
     """Each swarm agent's progress mark, one Redis hash per agent."""
 
     def __init__(self, redis: Any, slug: str) -> None:
-        self.redis: Any = redis
-        self.slug = slug
+        self.redis, self.slug = redis, slug
 
     def key(self, agent: str) -> str:
         """The Redis key of the agent's progress hash."""
@@ -50,7 +49,7 @@ class Progress:
 
     def read(self, agent: str) -> Mark:
         """The agent's last outcome and its talk count since."""
-        raw: dict[str, str] = self.redis.hgetall(self.key(agent))
+        raw = self.redis.hgetall(self.key(agent))
         return Mark(int(raw.get("outcome_at") or 0), raw.get("outcome", ""), int(raw.get("talk") or 0))
 
     def talk(self, agent: str) -> int:
