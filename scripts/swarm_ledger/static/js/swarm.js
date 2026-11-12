@@ -14,7 +14,7 @@ import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
 import { renderContext } from "./context.js";
-import { drawFailures } from "./status_note.js";
+import { holdNote, releaseNote } from "./status_note.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -27,7 +27,7 @@ export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
   if (!sw) return swarmLost("no swarm for this ledger");
-  if (swarmReadError) drawFailures(true);
+  if (swarmReadError) releaseNote();
   swarmReadError = false;
   const resend = reconcile(sw);
   settleCaps(sw);
@@ -40,8 +40,7 @@ export function swarmLost(reason) {
   swarmReadError = true;
   renderSwarm(swarm);
   renderControls();
-  $("swarm-note").className = "sw-note bad";
-  $("swarm-note").textContent = `Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`;
+  holdNote(`Could not read swarm status: ${reason}. Retrying. ${swarm ? "Last observed state shown." : "State is unavailable."}`);
 }
 
 export function doctorOn(sw) {

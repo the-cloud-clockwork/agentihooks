@@ -94,3 +94,11 @@ def test_a_dismissed_command_row_stays_dismissed_when_the_line_redraws(open_page
     click_and_settle(page, "pause")
     assert page.puts == [{"action": "pause"}]
     assert note(page) == ""
+
+
+def test_a_dismissed_command_row_stays_dismissed_after_a_reload(open_page: OpenPage) -> None:
+    page = open_page(status(commands=[QUOTA_FAILED]), width=1920)
+    page.tab.get_by_role("button", name="Dismiss: Could not refresh quota").click()
+    page.tab.reload()
+    page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
+    assert note(page) == ""
