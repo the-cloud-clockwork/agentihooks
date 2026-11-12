@@ -1,7 +1,6 @@
 """The role seeds a quick swarm seat opens with and the short block injected into it on cadence."""
 
 import re
-from pathlib import Path
 
 from scripts.quick import paths
 from scripts.quick.layout import MASTER
@@ -23,13 +22,6 @@ def plan_state(text: str) -> tuple[int, int, str]:
     done = sum(1 for mark, _ in stages if mark.lower() == "x")
     upcoming = next((title.strip() for mark, title in stages if mark == " "), "")
     return done, len(stages), upcoming
-
-
-def _read(path: Path) -> str:
-    try:
-        return path.read_text()
-    except OSError:
-        return ""
 
 
 def _reach(sender: Seat, receiver: Seat) -> str:
@@ -90,13 +82,13 @@ def opening(found: Member) -> str:
 def block(found: Member) -> str:
     """The short quick swarm block injected into the seat on cadence, at most MAX_CHARS long."""
     seat = found.seat
-    done, total, upcoming = plan_state(_read(paths.plan(found.folder, seat.seat)))
+    done, total, upcoming = plan_state(paths.read_text(paths.plan(found.folder, seat.seat)))
     progress = f"{done} of {total} stages done; next: {upcoming or 'none'}" if total else "no plan yet"
     role = "master: the operator's front door" if seat.seat == MASTER else "engineer: follow your plan"
     head = (
         f"QUICK SWARM — you are {seat.seat} of quick swarm {found.swarm.quick_id}, herdr pane {seat.position} "
         f"({role}). Seat folder {paths.seat_dir(found.folder, seat.seat)}. Plan: {progress}."
     )
-    culture = _read(paths.culture(found.folder)).strip()
+    culture = paths.read_text(paths.culture(found.folder)).strip()
     text = f"{head}\nCulture: {culture}" if culture else head
     return text[:MAX_CHARS]

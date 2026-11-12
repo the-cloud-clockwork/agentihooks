@@ -1,5 +1,6 @@
 """Accept a quick seat's Handoff v2: check it, keep it in the seat folder and mark the seat for its successor."""
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from scripts.quick import paths, registry
 from scripts.quick.member import Member
 
 SEAT = "seat:"
+SEAT_NAME = re.compile(r"[\w-]+")
 
 
 def resolver(folder: Path) -> Callable[[str], bool]:
@@ -17,7 +19,7 @@ def resolver(folder: Path) -> Callable[[str], bool]:
     def resolves(address: str) -> bool:
         if address.startswith(SEAT):
             name = address.removeprefix(SEAT)
-            return bool(name) and "/" not in name and ".." not in name and (seats / name).is_dir()
+            return bool(SEAT_NAME.fullmatch(name)) and (seats / name).is_dir()
         if address.startswith("https://"):
             from scripts.handoff.resolve import Resolver
 

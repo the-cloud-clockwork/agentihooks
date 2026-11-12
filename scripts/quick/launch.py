@@ -34,10 +34,7 @@ def opening(found: Member) -> str:
     seed = seeds.opening(found)
     if found.seat.state == registry.READY:
         return seed
-    try:
-        handed = paths.handoff(found.folder, found.seat.seat).read_text().strip()
-    except OSError:
-        handed = ""
+    handed = paths.read_text(paths.handoff(found.folder, found.seat.seat)).strip()
     return (
         f"{seed}\n\nYour predecessor in this seat handed off. Continue from its handoff:\n\n{handed}"
         if handed

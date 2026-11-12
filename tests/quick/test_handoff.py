@@ -45,6 +45,7 @@ def test_a_seat_address_resolves_only_for_a_seat_of_this_quick_swarm(tmp_path):
     resolves = handoff.resolver(tmp_path)
     assert resolves("seat:eng-1") and resolves("seat:master")
     assert not resolves("seat:eng-7") and not resolves("seat:../eng-1") and not resolves("recap:x@y")
+    assert not resolves("seat:.") and not resolves("seat:") and not resolves("seat:..")
 
 
 @pytest.mark.feature("quick-swarm")

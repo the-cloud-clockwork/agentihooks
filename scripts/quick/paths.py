@@ -57,6 +57,14 @@ def create(folder: Path, seats: Iterable[str]) -> None:
             (seat_dir(folder, seat) / name).touch()
 
 
+def read_text(path: Path) -> str:
+    """The file's text; empty when it is missing or unreadable."""
+    try:
+        return path.read_text()
+    except OSError:
+        return ""
+
+
 def json_object(text: str) -> dict[str, Any]:
     """The JSON object in ``text``; empty when it is not JSON or not an object."""
     try:
@@ -69,10 +77,7 @@ def json_object(text: str) -> dict[str, Any]:
 
 def read_object(path: Path) -> dict[str, Any]:
     """The JSON object stored in ``path``; empty when it is missing or unreadable."""
-    try:
-        return json_object(path.read_text())
-    except OSError:
-        return {}
+    return json_object(read_text(path))
 
 
 def home(environ: Mapping[str, str]) -> Path:

@@ -76,11 +76,7 @@ def _number(path: Path) -> float:
 
 
 def _open_stages(folder: Path, seat: str) -> bool:
-    try:
-        text = paths.plan(folder, seat).read_text()
-    except OSError:
-        return False
-    done, total, _ = seeds.plan_state(text)
+    done, total, _ = seeds.plan_state(paths.read_text(paths.plan(folder, seat)))
     return done < total
 
 
