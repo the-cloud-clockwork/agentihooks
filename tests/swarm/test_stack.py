@@ -2,6 +2,7 @@ import dataclasses
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -87,6 +88,9 @@ class ShellPort(FakeSourceControl):
         path = f"repos/{reference.repository}/issues/{reference.number}/comments"
         self._run(["gh", "api", path, "-f", f"body={body}"])
         return Comment(reference, path)
+
+
+Parked = tuple[Any, ...]
 
 
 def _slug_checked(ledger, name):
@@ -692,7 +696,9 @@ OTHER = "https://github.com/o/bundle"
 
 @pytest.mark.feature("swarm-park-foreign-dependency-no-fetch")
 @pytest.mark.parametrize("other", [OTHER, "git@github.com:O/bundle.git", "/srv/docs.git"])
-def test_park_records_a_dependency_in_another_repository_without_fetching_its_branch(parked, capsys, other):
+def test_park_records_a_dependency_in_another_repository_without_fetching_its_branch(
+    parked: Parked, capsys: pytest.CaptureFixture[str], other: str
+) -> None:
     _, ledger, _, shell, doc = parked
     ledger.rows["a"]["branch_repo"] = other
     shell.fail = (("git", "fetch", "--"),)
@@ -732,7 +738,7 @@ def test_park_fetches_a_dependency_in_the_same_repository_from_origin(parked, re
     assert "a (`eng-a`) merges" in comment[-1]
 
 
-def test_park_names_each_other_repository_once_in_dependency_order(parked):
+def test_park_names_each_other_repository_once_in_dependency_order(parked: Parked) -> None:
     _, ledger, _, shell, doc = parked
     ledger.rows["b"].update({"state": "claimed", "branch_repo": "git@github.com:O/bundle.git"})
     ledger.rows["c"] = {"id": "c", "title": "Docs", "state": "pr", "branch": "eng-c", "branch_repo": "/srv/docs.git"}
@@ -774,7 +780,9 @@ def _antoncore_dependency(parked, monkeypatch, origin):
 @pytest.mark.parametrize(
     "origin", ["git@github.com:O/antoncore.git", "https://github.com/o/antoncore", "git@github.com:o/bundle.git", ""]
 )
-def test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url(parked, monkeypatch, origin):
+def test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
     _, ledger, _, shell, doc = parked
     _antoncore_dependency(parked, monkeypatch, origin)
     shell.fail = (("git", "-C", CHECKOUT), ("git", "fetch", "--"))
@@ -801,7 +809,9 @@ def _ssh_refused(shell, refused, inner=None, stderr=UNVERIFIED):
 
 
 @pytest.mark.parametrize("stderr", [UNVERIFIED, KEY_REFUSED])
-def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unverified(parked, monkeypatch, stderr):
+def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unverified(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, stderr: str
+) -> None:
     _, ledger, _, shell, doc = parked
     monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]], stderr=stderr))
     assert park(doc) == 0
@@ -820,7 +830,9 @@ ORIGIN_RETRY = [
 ]
 
 
-def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monkeypatch, capsys):
+def test_park_refuses_naming_both_errors_when_the_https_retry_fails(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
     monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
     shell.fail = (tuple(ORIGIN_RETRY[:3]),)
@@ -831,7 +843,9 @@ def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monk
     assert "parked_on" not in ledger.rows["t1"]
 
 
-def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkeypatch, capsys):
+def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
     inner = _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]])
 
@@ -865,7 +879,9 @@ def test_park_names_the_ssh_error_when_the_origin_url_cannot_be_read(parked, mon
     assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
-def test_park_refuses_an_unverified_fetch_from_an_origin_with_no_https_form(parked, monkeypatch, capsys):
+def test_park_refuses_an_unverified_fetch_from_an_origin_with_no_https_form(
+    parked: Parked, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
     shell.origin = "https://github.com/o/r"
     monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
@@ -874,7 +890,9 @@ def test_park_refuses_an_unverified_fetch_from_an_origin_with_no_https_form(park
     assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
 
 
-def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(parked, capsys):
+def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(
+    parked: Parked, capsys: pytest.CaptureFixture[str]
+) -> None:
     _, ledger, _, shell, doc = parked
     shell.fail = (("git", "fetch", "origin"),)
     _refused(parked, capsys, "cannot fetch eng-a: boom")
@@ -965,7 +983,9 @@ def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_updat
         (("git", "rev-list", "--count"), f"cannot count {BASE}"),
     ],
 )
-def test_park_on_another_repository_refuses_when_a_command_fails(parked, capsys, failing, says):
+def test_park_on_another_repository_refuses_when_a_command_fails(
+    parked: Parked, capsys: pytest.CaptureFixture[str], failing: tuple[str, ...], says: str
+) -> None:
     parked[1].rows["a"]["branch_repo"] = OTHER
     parked[3].fail = (failing,)
     _refused(parked, capsys, f"{says}: boom")
