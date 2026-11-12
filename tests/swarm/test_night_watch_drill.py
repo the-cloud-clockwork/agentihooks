@@ -368,7 +368,7 @@ def test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_dril
     name = "master@proof"
     held = front_door.seat(SCRATCH) if seat is None else f"{seat}@{SCRATCH}"
 
-    def master(slug: str, config: SwarmConfig, held_store: RedisStore, runtime: Runtime, at: int) -> list[str]:
+    def master(slug: str, config: SwarmConfig, _store: RedisStore, _runtime: Runtime, at: int) -> list[str]:
         store.put_agent(slug, AgentRecord(name, MASTER, MASTER, started_at=at, state=state, seat=held))
         if live:
             rig["runtime"].live.add(name)
@@ -391,3 +391,26 @@ def test_a_respawned_master_seated_on_the_front_door_is_a_recovery(
     assert stored["recovered"] is True
     master = next(agent for agent in store.agents(SCRATCH) if agent.lane == MASTER)
     assert master.seat == front_door.seat(SCRATCH) and master.name in rig["runtime"].live
+
+
+@pytest.mark.feature("swarm-night-watch-drill-needs-seat")
+@pytest.mark.parametrize(("wrote", "recovered"), [(NOW, True), (NOW - 1, False)])
+def test_a_respawned_starting_master_counts_as_seated_once_it_wrote_the_ledger_since_launch(
+    rig: dict[str, Any], wrote: int, recovered: bool
+) -> None:
+    store = rig["store"]
+    name = "master@proof"
+    doc = {"tasks": [], "_meta": {"events": [{"by": name, "at": wrote}]}}
+
+    def watch_pass(*args: Any) -> list[str]:
+        if args[5] == NOW:
+            seat = front_door.seat(SCRATCH)
+            store.put_agent(SCRATCH, AgentRecord(name, MASTER, MASTER, started_at=NOW, state="starting", seat=seat))
+            rig["runtime"].live.add(name)
+            state = {"at": NOW, night_watch.SEAT: {"since": NOW - night_watch.SEAT_MS, "respawned": NOW}}
+            store.redis.set(store.key(SCRATCH, night_watch.KEY), json.dumps(state))
+        return []
+
+    found = night_watch_drill.Drill(store, SCRATCH, rig["ledger"], rig["runtime"], doc, NOW, watch_pass)
+    record = night_watch_drill.run(found)
+    assert record["respawned"] == NOW and record["recovered"] is recovered
