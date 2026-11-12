@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -948,6 +948,170 @@ def test_a_supervisor_that_raises_names_the_exception_it_exits_on(monkeypatch, c
     assert capsys.readouterr().err == (
         f"the scheduler supervisor {os.getpid()} exits on RuntimeError: the runner record is unreadable\n"
     )
+
+
+def _monotonic(service: ModuleType, monkeypatch: pytest.MonkeyPatch, readings: list[int]) -> None:
+    ticks = iter(readings)
+    monkeypatch.setattr(service, "time", SimpleNamespace(monotonic=lambda: next(ticks), time=service.time.time))
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+async def test_a_runner_stops_once_its_state_store_stays_silent_past_the_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
+    _monotonic(service, monkeypatch, [0, 100, 300, 400])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 4:
+            stop.set()
+        raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is True
+    assert passes == [1, 1, 1]
+    assert capsys.readouterr().err.splitlines() == [
+        "scheduler pass skipped: the state store did not answer",
+        "scheduler pass skipped: the state store did not answer",
+        "scheduler stops: the state store did not answer for 300 seconds",
+    ]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+async def test_an_answer_restarts_the_silence_bound(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
+    _monotonic(service, monkeypatch, [0, 299, 598])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 4:
+            stop.set()
+        if len(passes) != 2:
+            raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1, 1, 1]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+@pytest.mark.parametrize("answer", ["Busy", "ResponseError", "StateConflict"])
+async def test_a_store_that_answers_with_an_error_restarts_the_silence_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answer: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.events.state import StateConflict
+    from scripts.scheduler import service
+    from scripts.scheduler.lease import Busy
+
+    answers = {"Busy": Busy, "ResponseError": exceptions.ResponseError, "StateConflict": StateConflict}
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
+    _monotonic(service, monkeypatch, [0, 300])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            raise answers[answer]("held")
+        if len(passes) == 4:
+            stop.set()
+            return
+        raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1, 1, 1]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+@pytest.mark.parametrize("swarm", ["rig-grade-swarm", ""])
+async def test_a_runner_outside_a_proof_swarm_keeps_waiting_for_its_state_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, swarm: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    _monotonic(service, monkeypatch, [0, 300, 600, 900])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 4:
+            stop.set()
+        raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1, 1, 1]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+def test_only_a_refused_or_timed_out_call_counts_as_an_unanswered_state_store() -> None:
+    from nats import errors
+    from redis import exceptions
+
+    from scripts.events import state
+
+    assert state.unanswered({}) == (exceptions.ConnectionError, exceptions.TimeoutError, OSError)
+    assert state.unanswered({"AGENTIHOOKS_STATE_BACKEND": "bus"}) == (
+        errors.ConnectionClosedError,
+        errors.NoServersError,
+        errors.TimeoutError,
+        OSError,
+    )
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+@pytest.mark.parametrize(("silent", "code"), [(True, 3), (False, 0)])
+def test_the_runner_entrypoint_exits_with_the_unreachable_code_only_when_it_stopped_on_silence(
+    monkeypatch: pytest.MonkeyPatch, silent: bool, code: int
+) -> None:
+    from scripts.scheduler import service
+
+    async def run(scheduler: object) -> bool:
+        return silent
+
+    monkeypatch.setattr(service, "Scheduler", Mock())
+    monkeypatch.setattr(service, "run", run)
+    assert service.main(["run"]) == code
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+def test_a_supervisor_ends_without_a_new_runner_once_its_runner_stopped_on_silence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    child = Mock(pid=101, returncode=3)
+    child.poll.return_value = 3
+    spawn = Mock(side_effect=[child, AssertionError("a silent endpoint got a new runner")])
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = False
+    service.supervise(stop)
+    spawn.assert_called_once()
+    assert capsys.readouterr().err.splitlines() == [
+        "the scheduler runner 101 exited with code 3",
+        f"the scheduler supervisor {os.getpid()} stops: its state store did not answer",
+    ]
 
 
 def test_a_takeover_whose_old_supervisor_will_not_drain_says_so(monkeypatch, tmp_path, capsys):
