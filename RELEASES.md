@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.818 · 2026-11-12
+
+### 2026-11-12 · 451c79285b8e · #10808 · @agenticore-app
+
+**Write the hive join report on the root hive**
+
+This change fixes hooks.context.hive_join.run so it writes a join report for root hive sessions, which previously had no AGENTIHOOKS_HIVE_ID and were skipped entirely. Without that report, the controller's launch_check.misses logic treated root agents as missing and retired them, breaking every workstation launch (8241, 8242, 8243, 8128). The fix falls back to scripts.swarm.commands.hive_id when the env var is unset, accepting one extra Redis lookup per call, and keeps hook_manager._hive_join failures non-fatal. Includes a regression test, feature map entry, and Semgrep rule to prevent recurrence.
+
+### 2026-11-12 · 379666f069da · #10812 · @agenticore-app
+
+**Guard a day long launch order against a second start after a crash and an aged receipt**
+
+This change adds a regression test to tests/hive/test_orders.py that locks in a bug fix for scripts.hive.orders Consumer.poll: a launch order whose expiry outlasts the one-day receipt window, crashed after spawn but before finish, and then polled again past a day must spawn exactly once and keep its started mark. No source code changed, only the test and a feature map entry, so this guards against a real double-start failure mode being silently reintroduced in future edits to the launch order logic.
+
+### 2026-11-12 · eef55f6b0452 · #10785 · @agenticore-app
+
+**Emit hive and agent presence over OpenTelemetry and read it in the HOME monitor**
+
+This change makes every hive and every running agent announce themselves over OpenTelemetry, so the HOME resource monitor can see live status directly instead of relying only on the Redis registry and herdr panes. Hives emit presence every 10 seconds with id, name, headed flag, release and per-harness agent counts; agents emit presence on every hook event. The monitor reads these metrics from the collector's Prometheus endpoint, falling back safely to the old registry when that source is unset, silent or empty, so no previously working counts regress while the automation VM and headless hives finally show up.
+
 ## v2.17.814 · 2026-11-12
 
 ### 2026-11-11 · 2c85ec91e3c6 · #10788 · @agenticore-app
