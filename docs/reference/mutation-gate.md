@@ -1932,7 +1932,7 @@ A Standards reader clears an exact survivor with one JSON file under `mutation-c
 }
 ```
 
-Write an independently reviewed ruling with `scripts.ci_mutation.clearances.write_clearance(root, key, ruling)`; `clearance_path(root, key)` returns its deterministic filename. Run `python -m scripts.ci_mutation.clearances` from the repository root to migrate legacy rulings without changing their reader or reason. The migration leaves an empty legacy object for compatible older readers. Trace plans and the build scope gate accept both clearance locations as supporting proof.
+Write an independently reviewed ruling with `scripts.ci_mutation.clearances.write_clearance(root, key, ruling)`; `clearance_path(root, key)` returns its deterministic filename. To record a Standards reader ruling for survivors in a downloaded `report.json`, run `python -m scripts.ci_mutation.clearances write <report.json> <mutant names> --reader "<reader>" --reason "<reason>"` from the repository root (or pass `--root`). It accepts the merged report and a per shard report, keys each named survivor with the report module's clearance key, writes one clearance file per survivor, prints each path, and refuses before writing when a name is missing from the report. The local test guard lets this command through; a direct import of the report module in a shell command is still refused. Run `python -m scripts.ci_mutation.clearances` with no arguments from the repository root to migrate legacy rulings without changing their reader or reason. The migration leaves an empty legacy object for compatible older readers. Trace plans and the build scope gate accept both clearance locations as supporting proof.
 
 ## Clean baseline failures
 

@@ -161,14 +161,16 @@ SURVIVOR_KEYS = {
         {"hooks/example.py": SURVIVORS},
     ],
 )
-def test_write_command_records_each_named_survivor_under_its_report_key(tmp_path, report, capsys):
+def test_write_command_records_each_named_survivor_under_its_report_key(tmp_path, report, capsys, monkeypatch):
     from scripts.ci_mutation.clearances import main
 
     source = tmp_path / "report.json"
     source.write_text(json.dumps(report))
     names = list(SURVIVOR_KEYS)
     argv = ["write", str(source), *names, "--reader", RULING["reader"], "--reason", RULING["reason"]]
-    assert main([*argv, "--root", str(tmp_path)]) == 0
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["clearances", *argv])
+    assert main() == 0
     assert load_clearances(tmp_path) == {key: RULING for key in SURVIVOR_KEYS.values()}
     printed = capsys.readouterr().out.splitlines()
     assert printed == [clearance_path(tmp_path, SURVIVOR_KEYS[name]).as_posix() for name in names]
@@ -182,6 +184,21 @@ def test_write_command_refuses_a_name_missing_from_the_report_and_writes_nothing
     argv = ["write", str(source), "hooks.example.x_f__mutmut_1", "hooks.example.absent__mutmut_9"]
     with pytest.raises(ValueError, match="^Mutants not in the report: hooks.example.absent__mutmut_9$"):
         main([*argv, "--reader", "Standards", "--reason", "Equivalent", "--root", str(tmp_path)])
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+@pytest.mark.parametrize("missing", ["--reader", "--reason"])
+def test_write_command_requires_a_reader_and_a_reason(tmp_path, missing):
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    options = {"--reader": "Standards", "--reason": "Equivalent"}
+    del options[missing]
+    argv = ["write", str(source), "hooks.example.x_f__mutmut_1", *[part for item in options.items() for part in item]]
+    with pytest.raises(SystemExit) as stopped:
+        main([*argv, "--root", str(tmp_path)])
+    assert stopped.value.code == 2
     assert not (tmp_path / "mutation-clearances").exists()
 
 
