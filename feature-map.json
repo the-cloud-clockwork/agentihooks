@@ -1572,6 +1572,15 @@
       ]
     },
     {
+      "id": "swarm-park-resume-branch",
+      "origin": "inventory",
+      "behaviour": "The spawn prompt of a resumed parked task whose kind is not code or ci names the branch recorded on the task and cuts its worktree from it.",
+      "seam": "The spawn prompt in scripts.swarm.prompt",
+      "tests": [
+        "tests/swarm/test_startup_prompts.py::test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch"
+      ]
+    },
+    {
       "id": "swarm-claim-lives",
       "origin": "inventory",
       "behaviour": "Every claim the tick makes spends one agent life; a fourth claim is refused and the task blocked for the master.",
