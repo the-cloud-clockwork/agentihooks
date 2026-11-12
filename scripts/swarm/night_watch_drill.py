@@ -52,7 +52,8 @@ class Running:
 
     def config(self, slug: str) -> Any:
         """The stored config, with the drilled swarm's state read as running."""
-        config: Any = super().config(slug)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        base: Any = super()
+        config: Any = base.config(slug)
         return replace(config, state="running") if slug == self.drilled else config
 
 
@@ -60,10 +61,12 @@ def running(store: Any, slug: str) -> Any:
     """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night
     watch's Redis budget rebinds the copy as it rebinds the store. Its updates go through ``store``, so a write never
     stores the running state the copy reads."""
-    kind: Any = type(f"Running{type(store).__name__}", (Running, type(store)), {})
+    kind: Any = type(f"Running{type(store).__name__}", (Running, type(store)), dict[str, Any]())
     view: Any = kind.__new__(kind)
-    vars(view).update(vars(store), drilled=slug, update=store.update)
-    for name, value in vars(store).items():
+    attributes: dict[str, Any] = store.__dict__
+    copied: dict[str, Any] = view.__dict__
+    copied.update(attributes, drilled=slug, update=store.update)
+    for name, value in attributes.items():
         if getattr(value, "store", None) is store:
             part: Any = copy.copy(value)
             part.store = view
