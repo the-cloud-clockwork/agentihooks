@@ -273,10 +273,12 @@ def take(
         _write(out, stored_ledger(slug), 1)
         out.write("}")
     partial.chmod(0o600)
-    refs = refs_path(target)
-    refs.write_text(json.dumps(sorted(_held(head))), encoding="utf-8")
-    refs.chmod(0o600)
+    refs, refs_partial = refs_path(target), refs_path(partial)
+    refs_partial.write_text(json.dumps(sorted(_held(head))), encoding="utf-8")
+    refs_partial.chmod(0o600)
+    refs.unlink(missing_ok=True)
     partial.replace(target)
+    refs_partial.replace(refs)
     return target
 
 

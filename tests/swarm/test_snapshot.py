@@ -539,6 +539,27 @@ def test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it(store
 
 
 @pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    target = snapshot.take(store, "sw", 1, run=_no_git, environ={})
+    held = {"sources": {"a": {"inventory": {"x": {"sha256": "kept-by-old"}}}}}
+    target.write_text(json.dumps(held))
+    real = Path.replace
+
+    def dies(self: Path, other: Path) -> Path:
+        if self.suffix == ".partial":
+            raise OSError("killed")
+        return real(self, other)
+
+    monkeypatch.setattr(Path, "replace", dies)
+    with pytest.raises(OSError):
+        snapshot.take(store, "sw", 2, run=_no_git, environ={})
+    assert snapshot.referenced("sw") == {"kept-by-old"}
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
 def test_each_entry_down_to_the_split_depth_is_written_as_its_own_string() -> None:
     chunks: list[str] = []
 
