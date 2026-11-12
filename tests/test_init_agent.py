@@ -986,6 +986,12 @@ def test_codex_defaults_to_sol_at_medium_effort(tmp_path):
     assert "-m gpt-6.1-sol" in line and 'model_reasoning_effort="medium"' in line
 
 
+def test_a_codex_launch_never_stops_at_the_update_prompt(tmp_path):
+    argv = shlex.split(_command_line(tmp_path, {}, "codex"))
+    assert argv[argv.index("check_for_update_on_startup=false") - 1] == "-c"
+    assert argv.index("check_for_update_on_startup=false") > argv.index("codex")
+
+
 def _resume_line(tmp_path, agent):
     launcher, _ = init_agent._write_launcher(
         tmp_path, "m", "", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, init_agent.AgentSpec(agent=agent, resume="c0ffee")
