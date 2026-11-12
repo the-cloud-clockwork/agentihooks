@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TextIO, cast
 
 import pytest
 
@@ -535,3 +536,30 @@ def test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it(store
         snapshot.auto(store, "sw", n * MINUTE, {}, run=_no_git)
     kept = sorted(p.name for p in snapshot.auto_dir("sw").glob("*.refs"))
     assert kept == sorted(f"auto-{n * MINUTE}.json.refs" for n in range(2, 12))
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_each_entry_down_to_the_split_depth_is_written_as_its_own_string() -> None:
+    chunks: list[str] = []
+
+    class Out:
+        def write(self, text: str) -> int:
+            chunks.append(text)
+            return len(text)
+
+    value = {"keys": {"a": {"type": "hash", "value": {"f": "1"}}, "b": [1]}, "names": None}
+    snapshot._write(cast("TextIO", Out()), value, 2)
+    assert chunks == [
+        "{",
+        '"keys": ',
+        "{",
+        '"a": ',
+        '{"type": "hash", "value": {"f": "1"}}',
+        ', "b": ',
+        "[1]",
+        "}",
+        ', "names": ',
+        "null",
+        "}",
+    ]
+    assert json.loads("".join(chunks)) == value
