@@ -1,7 +1,8 @@
 """Relay: the master posts a decision the operator gave it in its own pane, as the operator's entry.
 
-A question takes it as an answer, any other item as a comment, and the notes list as a new note. Only the ledger's orchestrator may relay,
-and only words the hooks recorded from the operator in a master or planner session of its swarm, at any time;
+A question takes it as an answer, any other item as a comment, and the notes list as a new note.
+Only the ledger's orchestrator may relay, and only words the hooks recorded from the operator in a master
+or planner session of its swarm, at any time;
 the entry carries those words, of any length and in any wording.
 """
 
