@@ -230,6 +230,7 @@ def test_no_script_a_step_runs_calls_the_api() -> None:
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_examples.py",
         "tests/chart_github_auth.py",
+        "tests/chart_hive_capabilities.py",
         "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
         "tests/chart_hive_only.py",
