@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from hooks.context.shell_commands import commands
@@ -190,6 +192,52 @@ def test_non_test_commands_pass(command, monkeypatch):
 
     monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
     check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+SONAR_SKILL = 'SKILL_DIR="$(dirname "$(readlink -f ~/.claude/skills/sonar-config/SKILL.md)" 2>/dev/null || echo "$HOME/.claude/skills/sonar-config")"'
+SONAR_PREFLIGHT = '"$SKILL_DIR"/scripts/01_preflight.sh'
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"{SONAR_SKILL}\n{SONAR_PREFLIGHT}",
+        f"{SONAR_SKILL} && {SONAR_PREFLIGHT}",
+        f"{SONAR_PREFLIGHT} 2>&1 | tee preflight.log",
+        "cd ~/.claude/skills/sonar-config && ./scripts/01_preflight.sh 2>&1",
+        "bash -c '\"$HOME\"/.claude/skills/sonar-config/scripts/01_preflight.sh'",
+        "bash <<'EOF'\n\"$HOME\"/.claude/skills/sonar-config/scripts/01_preflight.sh\nEOF",
+        '"$SKILL_DIR"/scripts/02_dispatch.sh hotspot-status AYabc',
+        'test -n "${SONAR_HOST_URL:-}" && echo set || echo unset',
+        'for v in SONAR_HOST_URL SONAR_ADMIN_TOKEN CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do [[ -n "${!v:-}" ]] && echo "$v set" || echo "$v unset"; done',
+        "awk 'BEGIN{for(k in ENVIRON) if(k ~ /^SONAR|^CF_ACCESS/) print k}'",
+        'python3 -c \'import os; print({k: bool(os.getenv(k)) for k in ["SONAR_HOST_URL", "SONAR_ADMIN_TOKEN"]})\'',
+        "env | grep -c SONAR",
+    ],
+)
+def test_sonar_configuration_preflight_passes(command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(tmp_path)})
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"{SONAR_PREFLIGHT} && pytest -q",
+        f"{SONAR_PREFLIGHT}; python -m scripts.ci_mutation",
+        f"SONAR_HOST_URL=x {SONAR_PREFLIGHT} | tee log && npm test",
+    ],
+)
+def test_sonar_preflight_beside_a_test_run_is_blocked(
+    command: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request.*CI"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(tmp_path)})
 
 
 @pytest.mark.parametrize(
