@@ -910,15 +910,15 @@ variable can lower the planned workers but never raise them above four.
 
 ### Shards past the batch runner pool
 
-The batch pool holds forty runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, eighty shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the fortieth queue on the pool and start as the first wave finishes, so a change whose work exceeds forty shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
+The batch pool holds twelve runners (`BATCH_RUNNERS` in `scripts.ci_mutation.plan`), and the planners may ask for twice that, twenty four shards (`SHARD_CEILING`, two `RUNNER_WAVES`). Shards past the twelfth queue on the pool and start as the first wave finishes, so a change whose work exceeds twelve shards is still graded whole; it takes about two shard budgets of wall time instead of one. The measured planner raises the shard count until the slowest shard fits its budget less setup, up to that ceiling.
 
-Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the eighty shards in two waves of forty runners and asks for at least the change's worker seconds divided by what those eighty shards hold, and never fewer than two, pull requests.
+Only a plan whose slowest shard still overruns at the ceiling fails at plan time with **Mutation plan over budget**. When one mutant, or one unit of a split mutant, alone needs more than a shard holds, the message names that mutant and asks for its covering tests to be shortened or split, since no shard count or pull request split can grade it. Otherwise the message names the twenty four shards in two waves of twelve runners and asks for at least the change's worker seconds divided by what those twenty four shards hold, and never fewer than two, pull requests.
 
 | Measured worker seconds at three workers | Shards | Result |
 |---|---|---|
-| up to 108000 | up to 40 | one wave |
-| 108001 to 216000 | 41 to 80 | two waves, every mutant graded |
-| over 216000, or one unit over 2700 | 80 | refused at plan time |
+| up to 32400 | up to 12 | one wave |
+| 32401 to 64800 | 13 to 24 | two waves, every mutant graded |
+| over 64800, or one unit over 2700 | 24 | refused at plan time |
 
 ### What the worker count sizes
 
@@ -1572,7 +1572,7 @@ These are implementation defaults, with no environment variable or workflow disp
 | `HEAD_SECONDS` | 20 traced seconds | Select the fastest covering tests up to this budget, always including at least one test when available |
 | `SLICE_SECONDS` | 120 traced seconds | Divide the remaining duration by this value, rounding up to choose the slice count |
 | Split limit | 10 slices | Cap a mutant's units; fewer than two slices leaves it unsplit |
-| Shard target and limit | 240 seconds, 10 shards wanted; up to 80 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
+| Shard target and limit | 240 seconds, 10 shards wanted; up to 24 shards when the budget needs them ([Shards past the batch runner pool](#shards-past-the-batch-runner-pool)) | Size the plan using estimated work and the [batch runner's planned workers](#shard-planning-from-the-batch-runner-cpu-quota), ensuring enough shards to place a mutant's units separately |
 
 For example, ten covering tests of one second each form a ten-second head. Thirty more tests of twenty seconds each make a 600-second tail, split into five 120-second slices. Each unit runs the ten head tests and six tail tests on its own shard. All forty distinct tests remain covered, although the head runs five times. Unit cost is estimated as `5.6 + 1.25 * (head_seconds + slice_seconds)`, or 168.1 worker seconds here. A split mutant's total estimated cost includes every repeated head.
 
@@ -1651,9 +1651,9 @@ A preflight plan with split mutants runs two stages. In the early stage (`probe`
 
 | Stage | Job count | Work priced |
 |---|---|---|
-| `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 40 (the batch runner pool) or the number of split mutants | One head run per split mutant |
+| `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 12 (the batch runner pool) or the number of split mutants | One head run per split mutant |
 | `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
-| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 40 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 12 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
 
 On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
 
