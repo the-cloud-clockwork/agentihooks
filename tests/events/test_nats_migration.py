@@ -1,8 +1,13 @@
+from typing import cast
+
 import pytest
 
 from scripts.events import nats
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
+from scripts.swarm import readiness
+from scripts.swarm_ledger.repository import hierarchy
 from tests.hive.test_nats_grant import _user_creds
 from tests.hive.test_nats_grant import signer as signer
 
@@ -138,3 +143,25 @@ def test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned(buses, c
         "hub: swarm 'stuck' skipped: legacy state requires explicit key ownership: swarm 'stuck' bucket 'spoke-work'"
         in capsys.readouterr().err
     )
+
+
+@pytest.mark.feature("hub-fan-in-unowned-state")
+def test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated(
+    buses: tuple[nats.NatsBus, nats.NatsBus],
+) -> None:
+    legacy, hub = buses
+    legacy.state("inbox").create("unknown-owner", b"retained")
+    work = {"id": "work", "title": "work", "phase": "p1", "state": "open", "lane": "eng"}
+    found = {"overview": "o", "tasks": [work], "phases": [{"id": "p1", "title": "build", "depends_on": []}]}
+    view = readiness.Snapshot(
+        "rig", {"work": work}, found, hierarchy.project(found)[0], "", lambda task_id: False, lambda task: True
+    )
+    bus = cast(Bus, hub)
+    with pytest.raises(RuntimeError, match="swarm 'rig' bucket 'inbox'"):
+        readiness.publish(bus, view, 0)
+    hub.migrate_state("rig", "inbox", [])
+    assert hub.for_swarm("rig").queue("eng", QueuePolicy()).take(20) is None
+    assert readiness.publish(bus, view, 0) == ["ready:rig:work:0"]
+    delivery = hub.for_swarm("rig").queue("eng", QueuePolicy()).take(1000)
+    assert delivery is not None
+    assert delivery.event.id == "ready:rig:work:0"
