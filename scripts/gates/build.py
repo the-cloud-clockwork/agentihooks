@@ -9,12 +9,16 @@ import os
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from scripts.gates import log
-from scripts.gates.base import Decision, Who
+from scripts.gates.base import Call, Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.swarm import naming, trace_plan
 from scripts.swarm_ledger import ledger_workspace
+
+if TYPE_CHECKING:
+    from scripts.gates.verdicts import Verdicts
 
 LANES = frozenset({"eng", "ci"})
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
@@ -44,8 +48,15 @@ def _area(entry):
     return str(entry).strip().removeprefix("./").rstrip("/")
 
 
-def within(path, areas):
-    return any(path == area or path.startswith(area + "/") for area in map(_area, areas) if area)
+def within(path: str, areas: list[str], repo: str = "") -> bool:
+    """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
+    forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
+    return any(path == form or path.startswith(form + "/") for form in forms)
+
+
+def _forms(area: str, repo: str) -> tuple[str, ...]:
+    """The area as written, and the area inside repo when its first part names repo."""
+    return (area, area.removeprefix(f"{repo}/")) if repo else (area,)
 
 
 def git_root(path):
@@ -157,13 +168,20 @@ class BuildGate:
             return call.tool[len(SERENA) :] in SERENA_EDITS
         return call.tool == "Bash" and "commit" in call.command and any(_git_commits(call.command, call.cwd))
 
-    def touched(self, call, folder):
+    def touched(self, call: Call, folder: Path) -> list[tuple[str, str]]:
+        """(repository, path inside it) for each file the call edits or commits; Serena paths carry no repository."""
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
-            return [] if call.tool_input.get("dry_run") else [_area(scope)]
+            return [] if call.tool_input.get("dry_run") else [("", _area(scope))]
         if call.tool == "Bash":
             commits = _git_commits(call.command, call.cwd)
-            return sorted({name for directory, everything in commits for name in _git_names(directory, everything)})
+            return sorted(
+                {
+                    (naming.repo_name(directory), name)
+                    for directory, everything in commits
+                    for name in _git_names(directory, everything)
+                }
+            )
         exempt = [folder.resolve(), (Path.home() / "scratchpad").resolve()]
         found = []
         for named in filter(None, _patch_targets(call, EDIT_TOOLS[call.tool])):
@@ -171,10 +189,10 @@ class BuildGate:
             root = git_root(path)
             if root is None or any(path.is_relative_to(ex) for ex in exempt):
                 continue
-            found.append(path.relative_to(root).as_posix())
+            found.append((naming.repo_name(root), path.relative_to(root).as_posix()))
         return found
 
-    def decide(self, call, who, state):
+    def decide(self, call: Call, who: Who, state: "Verdicts") -> Decision:
         if not (who.pinned and who.task) or naming.lane_of(who.name) not in LANES:
             return Decision()
         folder = ledger_workspace.folder(who.swarm, who.task)
@@ -187,16 +205,16 @@ class BuildGate:
         doc = read_ledger(ledger_dir, who.swarm, f"tasks/{who.task}") or {}
         status, value = plan_areas(folder, who, task_ids(ledger_dir, who.swarm), trace_plan.intent(doc, who.task))
         if status == trace_plan.UNCHECKED:
-            reason = f"unchecked plan, edit allowed: {', '.join(paths[:SHOWN])}"
+            reason = f"unchecked plan, edit allowed: {', '.join(path for _, path in paths[:SHOWN])}"
             log.append(state.slug, log.Row.of(self.name, "count", who, call.tool, reason), state.home)
             return Decision()
         if status != trace_plan.PASS:
             return Decision.deny(value)
-        outside = [path for path in paths if not within(path, [*value, *ALWAYS])]
+        outside = [(repo, path) for repo, path in paths if not within(path, [*value, *ALWAYS], repo)]
         if outside:
             territory = task_territory(ledger_dir, who.swarm, who.task)
             value = value + territory
-            outside = [path for path in outside if not within(path, territory)]
+            outside = [(repo, path) for repo, path in outside if not within(path, territory, repo)]
         if outside:
-            return Decision.deny(refusal(who, outside, value, folder / trace_plan.PLAN))
+            return Decision.deny(refusal(who, [path for _, path in outside], value, folder / trace_plan.PLAN))
         return Decision()

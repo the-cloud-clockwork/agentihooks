@@ -8,7 +8,7 @@ import pytest
 
 from scripts.gates import entry
 from scripts.gates.base import Call, Gate, Who
-from scripts.gates.build import BuildGate, refusal, task_territory
+from scripts.gates.build import BuildGate, refusal, task_territory, within
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import trace_plan
 from scripts.swarm_ledger import ledger_workspace
@@ -311,40 +311,52 @@ def antoncore(world):
     return world
 
 
-@pytest.mark.feature("build-gate-repository-named-areas")
 class TestRepositoryNamedAreas:
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_an_area_naming_the_repository_allows_an_edit_inside_it(self, antoncore):
         antoncore.plan(CHARTS, kept=(True,))
         assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
         assert not antoncore.decide(file_path=str(antoncore.antoncore / "k8s/other/smoke.sh")).allowed
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_an_area_naming_another_repository_does_not_match(self, antoncore):
         antoncore.plan(CHARTS, kept=(True,))
         denied = edit(antoncore, "k8s/charts/runners/smoke.sh")
         assert not denied.allowed
         assert "outside your traced plan: k8s/charts/runners/smoke.sh. " in denied.reason
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_a_worktree_of_the_repository_matches_by_the_repository_name(self, antoncore):
         antoncore.plan(CHARTS, kept=(True,))
         tree = antoncore.antoncore.parent / "wt-1"
         git(antoncore.antoncore, "worktree", "add", "-q", str(tree))
         assert antoncore.decide(file_path=str(tree / "k8s/charts/runners/smoke.sh")).allowed
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_a_commit_inside_the_repository_matches_its_named_area(self, antoncore):
         antoncore.plan(CHARTS, kept=(True,))
         (antoncore.antoncore / "k8s/charts/runners/smoke.sh").write_text("b\n")
         git(antoncore.antoncore, "add", ".")
         assert antoncore.decide(tool="Bash", command="git commit -m x", cwd=antoncore.antoncore).allowed
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_a_territory_naming_the_repository_widens_it(self, antoncore):
         antoncore.plan()
         antoncore.territory("antoncore/k8s/charts/")
         assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
         assert not edit(antoncore, "k8s/charts/runners/smoke.sh").allowed
 
+    @pytest.mark.feature("build-gate-repository-named-areas")
     def test_a_plain_area_still_matches_inside_the_repository(self, antoncore):
         antoncore.plan("- the chart | k8s/charts | the runners need it\n", kept=(True,))
         assert antoncore.decide(file_path=str(antoncore.antoncore / "k8s/charts/runners/smoke.sh")).allowed
+
+    @pytest.mark.feature("build-gate-repository-named-areas")
+    def test_within_strips_only_the_edited_repository_name(self):
+        assert within("k8s/charts/x", ["antoncore/k8s/charts"], "antoncore")
+        assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "other")
+        assert not within("k8s/charts/x", ["antoncore/k8s/charts"])
+        assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"])
 
 
 class TestTerritory:

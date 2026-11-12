@@ -313,7 +313,7 @@
   "scripts/gates/base.py": 32,
   "scripts/gates/brain.py": 83,
   "scripts/gates/budget.py": 37,
-  "scripts/gates/build.py": 210,
+  "scripts/gates/build.py": 147,
   "scripts/gates/catalog.py": 6,
   "scripts/gates/claim_stop.py": 302,
   "scripts/gates/claims.py": 26,

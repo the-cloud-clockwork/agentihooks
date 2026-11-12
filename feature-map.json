@@ -3609,7 +3609,7 @@
       "id": "build-gate-repository-named-areas",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2498",
-      "behaviour": "The build gate matches a kept plan area or task territory whose first part names the edited repository, such as antoncore/k8s/charts, against the path inside that repository, for an edit or a commit in its primary checkout or any worktree; a plain area matches as before and an area naming another repository does not match.",
+      "behaviour": "The build gate matches a kept plan area or task territory whose first part names the edited repository, such as antoncore/k8s/charts, against the path inside that repository, for an Edit, Write, MultiEdit or NotebookEdit call or a git commit in its primary checkout or any worktree; Serena edits carry no repository; a plain area matches as before and an area naming another repository does not match.",
       "seam": "scripts.gates.build.within with the edited repository, and BuildGate.touched pairing each path with its repository",
       "tests": [
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_an_area_naming_the_repository_allows_an_edit_inside_it",
@@ -3617,7 +3617,8 @@
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_worktree_of_the_repository_matches_by_the_repository_name",
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_commit_inside_the_repository_matches_its_named_area",
         "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_territory_naming_the_repository_widens_it",
-        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_plain_area_still_matches_inside_the_repository"
+        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_a_plain_area_still_matches_inside_the_repository",
+        "tests/gates/test_build.py::TestRepositoryNamedAreas::test_within_strips_only_the_edited_repository_name"
       ]
     },
     {
