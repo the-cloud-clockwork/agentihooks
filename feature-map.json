@@ -4535,6 +4535,18 @@
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
         "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
       ]
+    },
+    {
+      "id": "phase-pass-sliced-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-tick-sliced-tasks",
+      "behaviour": "The phase pass counts every task of a phase, the tasks a planner sliced included, when its pass document carries no slices, so a phase whose sliced tasks are open is never ticked done; a task whose slice the document holds still counts under that slice's phase.",
+      "seam": "scripts.swarm.phase_projection.projected_phase_tasks through scripts.swarm.phases.phase_changes",
+      "tests": [
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_pass_document_lacks_counts_under_the_phase_it_names",
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_document_holds_counts_under_the_slice_phase_not_its_own",
+        "tests/swarm/test_phase_projection.py::test_the_phase_pass_keeps_a_phase_open_while_its_sliced_tasks_are_open"
+      ]
     }
   ],
   "unmapped_rules": [
