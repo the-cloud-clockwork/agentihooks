@@ -254,6 +254,8 @@ The server lands a relay only when every check passes. A failed check refuses th
 The quote is searched in the entries of the relaying agent's own names and of every master and planner of its swarm
 that has recorded words. A Doctor master also searches the masters of the swarm it watches. Engineer and CI sessions
 never count, and neither do words from another swarm's sessions. A relay matches words of any age.
+`agentihooks doctor <slug> start` and `stop` run the same check for the watched master's `--quote` and accept only
+words recorded in the last thirty minutes; see [Master orders for its Doctor](../pillars/swarm.md#master-orders-for-its-doctor).
 
 The server reads its own store first, then the mirrored entries in Redis, newest first. A quote the hooks never
 recorded is refused on both. The stored entry carries `by: operator`, `relayed_by` (the master),
