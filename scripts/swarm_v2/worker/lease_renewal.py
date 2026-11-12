@@ -81,10 +81,20 @@ class Renewer:
         self.due = now
         self.credential_due = now + CREDENTIAL_SECONDS
         self.sequence = 0
+        self.archived = 0
+        self.delivered = 0
         self.lost: str | None = None
 
     def record(self) -> dict:
         return {**self.authority, DEADLINE: self.deadline_ms}
+
+    def acknowledge(self, watermark: int) -> bool:
+        """Reports the durably archived transcript end on an immediate heartbeat and on every later one; true once the controller accepted it."""
+        if watermark > self.archived:
+            self.archived = watermark
+            self.due = self.clock()
+        self.tick()
+        return self.delivered >= watermark
 
     def tick(self) -> None:
         now = self.clock()
@@ -109,6 +119,7 @@ class Renewer:
         self.authority["controller_epoch"] = answer["controller_epoch"]
         self.deadline_ms = answer[DEADLINE]
         self.deadline = self._until(self.deadline_ms)
+        self.delivered = self.archived
         self.due = now + INTERVAL_SECONDS
         self._log("renewed", renewal_sequence=self.sequence, lease_deadline_ms=self.deadline_ms)
 
@@ -146,6 +157,7 @@ class Renewer:
             "renewal_sequence": self.sequence,
             "state": "working",
             "observed_at": _timestamp(self.wall()),
+            "archive_watermark": self.archived,
         }
 
     def _until(self, deadline_ms: int) -> float:
@@ -163,11 +175,15 @@ class Renewer:
         print(json.dumps({"lease": event, **fields, **identity}), flush=True)
 
 
+@dataclass
 class Unleased:
     lost: str | None = None
 
     def tick(self) -> None:
         pass
+
+    def acknowledge(self, watermark: int) -> bool:
+        return True
 
 
 @contextmanager

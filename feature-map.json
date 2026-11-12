@@ -2614,6 +2614,22 @@
       ]
     },
     {
+      "id": "archive-acknowledged-on-heartbeat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t961",
+      "behaviour": "Once a worker's final checkpoint is published and validated in the artifact store, the supervisor acknowledges the exported transcript end on the lease, which sends it at once on a heartbeat and on every later one, and keeps acknowledging through failed heartbeats until the controller accepts it or the checkpoint budget ends, so the controller's archive watermark reaches the completed attempt's transcript end and the retention guard stops holding its cleanup at waiting_archive.",
+      "seam": "scripts.swarm_v2.worker.lease_renewal.Renewer.acknowledge and the heartbeat archive_watermark, driven by scripts.swarm_v2.supervision_runtime.Supervisor.drain and read by scripts.swarm_v2.retention.waiting",
+      "tests": [
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_acknowledged_archive_rides_an_immediate_heartbeat_and_every_later_one",
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_archive_acknowledgement_the_controller_missed_is_resent_after_the_retry_pause",
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_unleased_worker_has_no_archive_acknowledgement_to_wait_on",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_acknowledges_the_archived_transcript_end_once_the_final_checkpoint_validates",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_keeps_acknowledging_until_the_controller_accepts_the_archived_transcript_end",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_stops_acknowledging_when_the_checkpoint_budget_ends",
+        "tests/test_swarm_v2_executions_api.py::test_a_completed_pod_whose_archive_the_worker_acknowledged_passes_the_retention_guard"
+      ]
+    },
+    {
       "id": "ledger-answer",
       "origin": "inventory",
       "behaviour": "The master answers a ledger question as itself at delegate and full autonomy and its priority clears; a worker's answer is refused.",
