@@ -211,8 +211,7 @@ def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, mon
     ledger = SimpleNamespace(tasks=lambda slug: [], rename_agent=lambda slug, old, new: None)
     rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
     new = store.agents("sw")[0].name
-    assert new != old
-    assert pane["name"] == herdr_target(new)
+    assert pane["name"] == herdr_target(new) != old
     assert connector.call_args.args[0] == "/run/managed/server.sock"
     connection.request.assert_called_once_with("thread/name/set", {"threadId": "thread", "name": new})
     connection.close.assert_called_once()
