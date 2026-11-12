@@ -422,16 +422,16 @@ def test_only_the_ten_newest_automatic_snapshots_are_kept(store):
 
 
 @pytest.mark.feature("swarm-auto-snapshot-size-budget")
-def test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest(store):
+def test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest(store, monkeypatch):
+    monkeypatch.setattr(snapshot, "KEEP_BYTES", 1_000_000, raising=False)
     _running(store, snapshot_minutes=1)
     snapshot.auto_dir("sw").mkdir(parents=True)
     for n in range(1, 6):
-        with (snapshot.auto_dir("sw") / f"auto-{n * MINUTE}.json").open("wb") as planted:
-            planted.truncate(385_000_000)
+        (snapshot.auto_dir("sw") / f"auto-{n * MINUTE}.json").write_text(json.dumps({"taken_at": n}).ljust(400_000))
     snapshot.auto(store, "sw", 10 * MINUTE, {}, run=_no_git)
     kept = snapshot.automatic("sw")
     assert [p.name for p in kept] == [f"auto-{n * MINUTE}.json" for n in (4, 5, 10)]
-    assert sum(p.stat().st_size for p in kept) <= 1 << 30
+    assert sum(p.stat().st_size for p in kept) <= 1_000_000
 
 
 @pytest.mark.feature("swarm-auto-snapshot-size-budget")
