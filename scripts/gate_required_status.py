@@ -3,6 +3,7 @@
 import argparse
 import json
 import subprocess
+import time
 import urllib.parse
 from typing import Any
 
@@ -24,12 +25,29 @@ def _api(endpoint: str) -> dict[str, Any]:
     )
 
 
-def latest(repository: str, head: str, name: str) -> dict[str, Any] | None:
-    """Return the newest GitHub Actions check run called ``name`` on ``head``, or None when it does not exist yet."""
+def latest(repository: str, head: str, name: str, suite: int | None = None) -> dict[str, Any] | None:
+    """Return the newest GitHub Actions check run called ``name`` on ``head``, limited to ``suite`` when given."""
     query = urllib.parse.urlencode({"check_name": name, "app_id": ACTIONS_APP, "per_page": 100})
     runs = _api(f"repos/{repository}/commits/{head}/check-runs?{query}")["check_runs"]
-    named = [run for run in runs if run["name"] == name]
+    named = [run for run in runs if run["name"] == name and suite in (None, run["check_suite"]["id"])]
     return max(named, key=lambda run: run["id"]) if named else None
+
+
+def aggregator_run(repository: str, head: str) -> dict[str, Any] | None:
+    """Return the aggregator check run of the newest pull request Tests run on ``head``, or None before it exists."""
+    query = urllib.parse.urlencode({"head_sha": head, "event": "pull_request", "per_page": 1})
+    runs = _api(f"repos/{repository}/actions/workflows/test.yml/runs?{query}")["workflow_runs"]
+    return latest(repository, head, AGGREGATOR, runs[0]["check_suite_id"]) if runs else None
+
+
+def protected_result(repository: str, head: str, polls: int = 20, interval: float = 10) -> str:
+    """Return the protected grade's result, waiting up to ``polls`` reads while its check run is still running."""
+    for _ in range(polls - 1):
+        result = _result(latest(repository, head, PROTECTED))
+        if result != "pending":
+            return result
+        time.sleep(interval)
+    return _result(latest(repository, head, PROTECTED))
 
 
 def _result(run: dict[str, Any] | None) -> str:
@@ -54,8 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--protected", choices=("success", "failure"))
     parser.add_argument("--target-url", default="")
     args = parser.parse_args(argv)
-    protected = args.protected or _result(latest(args.repository, args.head, PROTECTED))
-    state = decide(protected, _result(latest(args.repository, args.head, AGGREGATOR)))
+    protected = args.protected or protected_result(args.repository, args.head)
+    state = decide(protected, _result(aggregator_run(args.repository, args.head)))
     subprocess.run(
         [
             "gh",

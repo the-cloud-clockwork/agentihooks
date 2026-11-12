@@ -12,8 +12,9 @@ jobs:
   report:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
+      actions: read
       checks: read
       contents: read
       statuses: write
