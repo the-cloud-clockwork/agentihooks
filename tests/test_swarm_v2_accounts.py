@@ -509,10 +509,17 @@ def _counting_scans(store: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[A
     return calls
 
 
+def _without_account_keys(store: Any) -> None:
+    """Drop every account hash and the account index, so a test starts from a Redis that never held one."""
+    stale = list(store.redis.scan_iter(match=accounts.account_key("*")))
+    store.redis.delete(accounts.INDEX, accounts.INDEX_BUILT, *stale)
+
+
 @pytest.mark.feature("account-keys-indexed-not-scanned")
 def test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _without_account_keys(world.store)
     world.store.redis.mset({f"{ROOT}:unrelated:{n}": "x" for n in range(INPUTS["unrelated_keys"])})
     assert accounts.stored_accounts(world.store) == []
     scans = _counting_scans(world.store, monkeypatch)
@@ -527,6 +534,7 @@ def test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_ex
 def test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _without_account_keys(world.store)
     legacy = Slot("legacy", f"{SLUG}/{HELD}", "exec-legacy", 1, RESERVED, world.clock[0] + TTL)
     world.store.redis.hset(accounts.account_key("legacy"), legacy.holder, accounts.encode(legacy))
     scans = _counting_scans(world.store, monkeypatch)
