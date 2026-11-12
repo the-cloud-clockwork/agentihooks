@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.832 · 2026-11-12
+
+### 2026-11-12 · 336e8a6e2c52 · #10862 · @agenticore-app
+
+**Cite scout sources in a checkout relative to the repository root**
+
+This change fixes scouts citing absolute worker checkout paths that the evidence schema rejects, which was causing hive-placed workflow runs to fail with scout retries and ultimately end in failure. Now `scripts.scout.loop` detects when a file source lies inside a git checkout and records it relative to that checkout's repository root, satisfying the schema, while sources outside any checkout remain absolute and are still refused. Guarded by two new CLI tests and a feature map entry, this unblocks hive-placed runs on swarm-hive-003 and similar environments.
+
+### 2026-11-12 · 68e2fbb1572f · #10864 · @agenticore-app
+
+**Log one line when each controller pass ends**
+
+This change makes the swarm controller emit one structured JSON line to standard output each time a pass completes, recording the pass number and its outcome (ok, ledger unreachable, or redis grace). It matters because the antoncore controller start check previously burned over four of its six minutes on two fixed two-minute sleeps waiting for passes to finish; it can now watch for two pass-end lines instead, cutting wasted wait time while still confirming the controller actually ran with the new settings before anything reaches Anton.
+
 ## v2.17.831 · 2026-11-12
 
 ### 2026-11-12 · 71157ae8f253 · #10860 · @agenticore-app
