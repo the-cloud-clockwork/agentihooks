@@ -717,3 +717,38 @@ def test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retir
     with pytest.raises(masters.MasterError) as refused:
         seats.own_hive(SLUG, "anton", third)
     assert str(refused.value) == f"{third} is retired, so it cannot own hive anton"
+
+
+@pytest.mark.feature("retired-master-seat-owns-no-hive")
+def test_a_seats_write_that_keeps_losing_its_race_names_what_was_not_saved(
+    swarm: tuple[RedisStore, InboxStore], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, _ = swarm
+    seats = masters.MasterSeats(store.redis)
+    seats.retire(SLUG, SECOND, 5)
+    check, number, writes = masters.check_hive_owner, masters._number, []
+
+    def touch() -> None:
+        writes.append(len(writes))
+        store.redis.hset(seats.key(SLUG), "touched", len(writes))
+
+    def checking(*args: str | int | list[str]) -> None:
+        touch()
+        check(*args)
+
+    def numbering(slug: str, address: str) -> int:
+        touch()
+        return number(slug, address)
+
+    monkeypatch.setattr(masters, "check_hive_owner", checking)
+    monkeypatch.setattr(masters, "_number", numbering)
+
+    with pytest.raises(masters.MasterError) as hive:
+        seats.own_hive(SLUG, "anton", LEAD)
+    assert str(hive.value) == f"master seats of {SLUG} kept changing; hive anton was not given to {LEAD}"
+    with pytest.raises(masters.MasterError) as count:
+        seats.set_count(SLUG, 3)
+    assert str(count.value) == f"master seats of {SLUG} kept changing; the retired seats were not saved"
+    assert len(writes) == 2 * masters.SAVE_ATTEMPTS
+    assert store.redis.hget(seats.key(SLUG), "hives") == "{}"
+    assert seats.count(SLUG) == 2

@@ -4102,7 +4102,8 @@
       "seam": "scripts.swarm_v2.masters.MasterSeats own_hive, check_hives, set_count and keep_retired",
       "tests": [
         "tests/test_swarm_v2_master_seats.py::test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written",
-        "tests/test_swarm_v2_master_seats.py::test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired"
+        "tests/test_swarm_v2_master_seats.py::test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired",
+        "tests/test_swarm_v2_master_seats.py::test_a_seats_write_that_keeps_losing_its_race_names_what_was_not_saved"
       ]
     }
   ],
