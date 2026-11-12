@@ -53,7 +53,10 @@ def test_a_claude_failure_payload_is_counted_by_the_retry_breaker(memory_breaker
 
 
 @pytest.mark.feature("claude-tool-failure-breaker")
-def test_a_claude_failure_trips_the_breaker_at_its_threshold(memory_breaker: None) -> None:
+def test_a_claude_failure_trips_the_breaker_at_its_threshold(
+    memory_breaker: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("hooks.config.RETRY_BREAKER_MAX", 5)
     with (
         patch("scripts.swarm.health.activity.finish"),
         patch.object(breaker, "_inject_breaker_message") as inject,
