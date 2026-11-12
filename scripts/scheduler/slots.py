@@ -3,6 +3,7 @@ import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
+from pathlib import Path
 from types import FunctionType
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -145,7 +146,9 @@ class WorkflowSlot:
 
             owner = str(event["owner"])
             redis = cast("object", swarm_store(state).redis)  # pragma: no mutate
-            run = run_placement.Run(delivery_id, self.name, self.case, self.project, owner, self.needs)
+            run = run_placement.Run(
+                delivery_id, self.name, Path(self.case).read_text(), self.project, owner, self.needs
+            )
             placed = run_placement.dispatch(run, redis)
             if isinstance(placed, str):
                 run_collect.remember(redis, Scheduler().key(run_collect.SENT), placed, delivery_id, owner)
