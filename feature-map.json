@@ -940,7 +940,7 @@
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
-      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record; a live swarm, a stopped one or a held seat is refused untouched.",
+      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running or paused scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record, leaving a paused swarm paused; a live swarm, a stopped one or a held seat is refused untouched.",
       "seam": "scripts.swarm.night_watch_drill.command through the swarm command parser",
       "tests": [
         "tests/swarm/test_night_watch_drill.py::test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_records_it",
@@ -955,6 +955,8 @@
         "tests/swarm/test_night_watch_drill.py::test_the_drill_needs_both_the_scratch_flag_and_a_proof_swarm_name",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_night_watch_drill.py::test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
       ]
     },

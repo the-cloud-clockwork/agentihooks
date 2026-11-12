@@ -142,12 +142,47 @@ def test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched(rig: dict[str, A
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
-def test_the_drill_refuses_a_scratch_swarm_that_is_not_running(rig: dict[str, Any]) -> None:
+@pytest.mark.parametrize("state", ["stopped", "stopping"])
+def test_the_drill_refuses_a_scratch_swarm_that_is_not_running(rig: dict[str, Any], state: str) -> None:
     store = rig["store"]
-    store.update(SCRATCH, state="paused")
-    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_RUNNING.format(slug=SCRATCH, state='paused')}$"):
+    store.update(SCRATCH, state=state)
+    with pytest.raises(SwarmError, match=f"^{night_watch_drill.NOT_RUNNING.format(slug=SCRATCH, state=state)}$"):
         drill(store, SCRATCH)
     assert store.config(SCRATCH).gates == {} and rig["started"] == []
+    assert store.config(SCRATCH).state == state
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert stored["recovered"] is True and stored["respawned"] == NOW
+    assert rig["started"] == [(SCRATCH, NOW)]
+    assert store.config(SCRATCH).state == "paused"
+    assert store.config(SCRATCH).gates["nightwatch"] == "enforce"
+    assert [source for _, source, _ in rig["ledger"].alerts] == ["seat"]
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
+def test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running(rig: dict[str, Any]) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    seen: list[str] = []
+
+    def watch_pass(*args: Any) -> list[str]:
+        seen.append(args[1].config(SCRATCH).state)
+        args[1].redis.set(args[1].key(SCRATCH, "probe"), "1")
+        return []
+
+    found = night_watch_drill.Drill(store, SCRATCH, rig["ledger"], rig["runtime"], {"tasks": []}, NOW, watch_pass)
+    night_watch_drill.run(found)
+    assert seen == ["running", "running", "running"]
+    assert store.redis.get(store.key(SCRATCH, "probe")) == "1"
+    assert store.config(SCRATCH).state == "paused"
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
