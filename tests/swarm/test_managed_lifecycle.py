@@ -507,3 +507,40 @@ def test_managed_retirement_after_a_reopen_closes_the_earlier_launch_pane(rig, m
     assert rig.runner.retire(reopened)
     closed = [call.args[0][2] for call in rig.herdr.call_args_list if call.args[0][:2] == ["pane", "close"]]
     assert sorted(closed) == ["viewer", "w2:p7"]
+
+
+@pytest.mark.feature("managed-dead-server-releases-slot")
+def test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    from hooks.context import account_sessions
+
+    rig.bindings.put(SLUG, replace(rig.record, state=CONNECTED, host_id=socket.gethostname(), account="alpha"))
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: rig.store.redis)
+    assert account_sessions.managed_held() == {(rig.agent.execution_id, "alpha")}
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: 999)
+
+    assert rig.runner.bindings([rig.agent]) == {rig.agent.name: {"process": False}}
+
+    ended = rig.bindings.get(SLUG, rig.agent.execution_id)
+    assert (ended.state, ended.last_error_class) == ("failed", "server_died")
+    assert not rig.store.redis.hget(rig.store.key(SLUG, "codex-endpoints"), rig.record.endpoint_ref)
+    assert account_sessions.managed_held() == set()
+
+
+@pytest.mark.feature("managed-dead-server-releases-slot")
+def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness(
+    rig: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    monkeypatch.setattr(supervisor, "start_time", lambda pid: 999)
+    rig.bindings.put(SLUG, replace(rig.record, state=CONNECTED, host_id="another-host"))
+    rig.runner.bindings([rig.agent])
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+    rig.bindings.put(SLUG, replace(rig.record, state=CONNECTED, host_id=socket.gethostname(), server_start_identity=0))
+    rig.runner.bindings([rig.agent])
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED

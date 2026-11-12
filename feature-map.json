@@ -4905,6 +4905,28 @@
         "tests/deployment/test_worker_hive.py::test_an_empty_charted_capability_list_clears_the_stored_ones",
         "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities"
       ]
+    },
+    {
+      "id": "managed-dead-server-releases-slot",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The runtime binding pass moves a managed Codex transport record on this host whose app server is proven dead to failed with the server died error class and frees its endpoint, so the account session count stops holding its slot; a record from another host or with unknown liveness is left as it is.",
+      "seam": "scripts.swarm.runtime.HerdrRuntime.bindings through scripts.swarm.live_binding.settle and hooks.context.account_sessions.managed_held",
+      "tests": [
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_its_slot",
+        "tests/swarm/test_managed_lifecycle.py::test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liveness"
+      ]
+    },
+    {
+      "id": "host-room-counts-reserved-executions",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t561",
+      "behaviour": "The host budget sample counts managed Codex executions reserved on this host whose server has not started, and memory and load spawn room subtract them, so reserved launches are not invisible to host room.",
+      "seam": "scripts.swarm.host_budget.read_host, memory_room and load_room with hooks.context.account_sessions.reserved_executions",
+      "tests": [
+        "tests/swarm/test_host_budget.py::test_read_host_counts_reserved_managed_executions",
+        "tests/swarm/test_host_budget.py::test_reserved_executions_reduce_memory_and_load_room"
+      ]
     }
   ],
   "unmapped_rules": [
