@@ -5071,6 +5071,22 @@
         "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
         "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
       ]
+    },
+    {
+      "id": "gate-required-waits-for-aggregator",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2504",
+      "behaviour": "The Gate Required commit status on a pull request head reads success only once the protected grade passed and the Tests aggregator check run, which needs the type gate, concluded success. It stays pending while the aggregator has no check run and fails when either half fails.",
+      "seam": "gate_required_status.decide and main; Gate Required status workflow on Tests completion; Gate Protected report step",
+      "tests": [
+        "tests/test_gate_required_status.py::test_gate_required_succeeds_only_when_both_halves_succeeded",
+        "tests/test_gate_required_status.py::test_a_passed_protected_grade_stays_pending_while_the_aggregator_has_no_check_run",
+        "tests/test_gate_required_status.py::test_a_queued_type_gate_holds_gate_required_pending",
+        "tests/test_gate_required_status.py::test_the_aggregator_failing_on_the_type_gate_fails_gate_required",
+        "tests/test_gate_required_status.py::test_the_newest_aggregator_run_decides_after_a_rerun",
+        "tests/test_gate_required_status.py::test_a_green_aggregator_never_overrides_a_refused_protected_grade",
+        "tests/test_gate_required_status.py::test_the_status_workflow_reports_after_every_pull_request_tests_run_from_trusted_code"
+      ]
     }
   ],
   "unmapped_rules": [

@@ -156,6 +156,7 @@ CLASSED = {
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
     ("queue-retry.yml", "retry"),
+    ("gate-required.yml", "report"),
     ("lost-runner.yml", "watch"),
 }
 
