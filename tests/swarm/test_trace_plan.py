@@ -316,8 +316,9 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
     assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
-        "How much source work is the plan? Judge only pieces with nonempty areas; "
-        "test only pieces and the shared mutation clearance file are supporting proof, not additional scope."
+        "How much source work is the plan's slice in the task's own repository? Judge only that repository's "
+        "pieces with nonempty areas; a piece without a repo field belongs to the task's own repository. Test only "
+        "pieces and the shared mutation clearance file are supporting proof, not additional scope."
     )
     assert questions["size"].levels == ["trivial", "one pull request", "several pull requests", "a whole phase"]
     assert record == {
@@ -399,8 +400,9 @@ def test_scope_input_excludes_only_shared_proof_areas(ask, areas, expected):
     [(state, questions, _)] = fake.calls
     assert state["pieces"][0]["areas"] == expected
     assert questions["size"].instructions == (
-        "How much source work is the plan? Judge only pieces with nonempty areas; "
-        "test only pieces and the shared mutation clearance file are supporting proof, not additional scope."
+        "How much source work is the plan's slice in the task's own repository? Judge only that repository's "
+        "pieces with nonempty areas; a piece without a repo field belongs to the task's own repository. Test only "
+        "pieces and the shared mutation clearance file are supporting proof, not additional scope."
     )
     assert record["pieces"][0]["areas"] == list(areas)
     assert record["pieces"][0]["kept"] is True
