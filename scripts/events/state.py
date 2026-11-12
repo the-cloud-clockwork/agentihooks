@@ -48,3 +48,16 @@ def unavailable(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseExcep
     from redis.exceptions import RedisError
 
     return (RedisError, OSError, StateConflict)
+
+
+def unanswered(environ: Mapping[str, str] = os.environ) -> tuple[type[BaseException], ...]:
+    """The errors that mean the state store refused the call or never answered it."""
+    if backend(environ) == "bus":
+        from nats.errors import ConnectionClosedError, NoServersError
+        from nats.errors import TimeoutError as BusTimeout
+
+        return (ConnectionClosedError, NoServersError, BusTimeout, OSError)
+    from redis.exceptions import ConnectionError as Refused
+    from redis.exceptions import TimeoutError as RedisTimeout
+
+    return (Refused, RedisTimeout, OSError)
