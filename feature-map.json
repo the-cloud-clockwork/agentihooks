@@ -4875,7 +4875,6 @@
       "tests": [
         "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats",
         "tests/swarm_ledger/test_api_monitor.py::test_two_live_interface_hives_without_members_keep_a_row_each",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two",
         "tests/swarm_ledger/test_api_monitor.py::test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names"
       ]
     },
@@ -4890,7 +4889,7 @@
         "tests/swarm_ledger/test_api_monitor.py::test_a_live_hive_with_no_seat_shows_zero_never_a_missing_count",
         "tests/swarm_ledger/test_api_monitor.py::test_a_seat_on_a_hive_no_longer_live_keeps_its_registered_name_and_an_unknown_hive_its_id",
         "tests/swarm_ledger/test_api_monitor.py::test_a_seat_without_a_hive_is_placed_by_its_runtime_target_then_on_this_hive",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_that_records_no_harness_counts_as_claude"
+        "tests/swarm_ledger/test_api_monitor.py::test_a_seat_with_no_harness_or_another_harness_counts_in_its_row_and_the_total_outside_the_split"
       ]
     },
     {

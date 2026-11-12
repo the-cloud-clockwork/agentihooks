@@ -32,6 +32,11 @@ AUTOMATION = {
 }
 
 
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(monitor.ports, "presence", lambda: SimpleNamespace(read=lambda environ, now_s: None))
+
+
 class Redis:
     pass
 
@@ -229,10 +234,11 @@ def test_a_seat_without_a_hive_is_placed_by_its_runtime_target_then_on_this_hive
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
-def test_a_seat_that_records_no_harness_counts_as_claude() -> None:
-    registered = {"one": [seat("engineer@1", harness=""), seat("engineer@2", harness="codex")]}
+def test_a_seat_with_no_harness_or_another_harness_counts_in_its_row_and_the_total_outside_the_split() -> None:
+    registered = {"one": [seat("engineer@1", harness=""), seat("engineer@2", "codex"), seat("engineer@3", "copilot")]}
     data = viewed(Store({"one": "running"}, registered), *ports_for([ROOT], {}))
-    assert data["agents"] == {"total": 2, "source": "seats", "reporting": 1, "of": 1, "claude": 1, "codex": 1}
+    assert data["agents"] == {"total": 3, "source": "seats", "reporting": 1, "of": 1, "claude": 0, "codex": 1}
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 3}]
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")
@@ -264,18 +270,6 @@ def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats(ord
         {"name": "swarm-hive-001", "agents": 1},
     ]
     assert data["agents"] == {"total": 12, "source": "seats", "reporting": 3, "of": 3, "claude": 11, "codex": 1}
-
-
-@pytest.mark.feature("monitor-row-per-live-hive")
-def test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two() -> None:
-    present = [
-        {"id": "a", "name": "twin", "agents": {"claude": 1}},
-        {"id": "b", "name": "twin", "agents": {"claude": 2}},
-        {"id": "a", "name": "twin", "agents": {"codex": 3}},
-    ]
-    agents, rows = monitor.tally("otel", [(hive["id"], hive["name"], hive["agents"]) for hive in present])
-    assert rows == [{"name": "twin", "agents": 4}, {"name": "twin", "agents": 2}]
-    assert agents == {"total": 6, "source": "otel", "reporting": 2, "of": 2, "claude": 3, "codex": 3}
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")

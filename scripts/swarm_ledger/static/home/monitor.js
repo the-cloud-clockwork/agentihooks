@@ -38,7 +38,6 @@ function paint(box, d) {
   set("codex", String(d.agents.codex));
   set("hives", String(d.hives.live));
   hiveRows(cell("hives"), d.hives.rows);
-  cell("agents").dataset.silent = d.agents.of > d.agents.reporting ? "yes" : "no";
   cell("agents").title = `Swarm seats on ${d.agents.of} hive${d.agents.of === 1 ? "" : "s"}`;
   set("swarms", `${d.swarms.running} running`);
   cell("swarms").dataset.on = d.swarms.running ? "yes" : "no";

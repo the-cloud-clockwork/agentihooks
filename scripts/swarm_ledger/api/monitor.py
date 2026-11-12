@@ -43,40 +43,34 @@ def seats(
     store: object, hives: list[dict[str, Any]], live: list[dict[str, Any]]
 ) -> list[tuple[str, str, dict[str, int]]]:
     """Registered seats of every swarm, masters included and finished ones left out, by the hive each runs on and the
-    harness it records, claude when it records none: one entry per live hive, empty where no seat runs, then one per
-    other hive a seat names, under its registered name or, when the registry does not know it, its id."""
+    harness it records, an empty name for none: one entry per live hive, empty where no seat runs, then one per other
+    hive a seat names, under its registered name or, when the registry does not know it, its id."""
     here, host = ports.swarm().commands.hive_id(), ports.hive().reports.host
     names = {hive["id"]: hive["name"] for hive in hives} | labels(live)
-    counted = {hive["id"]: dict.fromkeys(HARNESSES, 0) for hive in live}
+    counted: dict[str, dict[str, int]] = {hive["id"]: {} for hive in live}
     for slug in store.slugs():
         for agent in store.agents(slug):
             if agent.state == "finished":
                 continue
-            counts = counted.setdefault(agent.hive or host(agent) or here, dict.fromkeys(HARNESSES, 0))
-            harness = agent.harness or HARNESSES[0]
-            counts[harness] = counts.get(harness, 0) + 1
+            counts = counted.setdefault(agent.hive or host(agent) or here, {})
+            counts[agent.harness] = counts.get(agent.harness, 0) + 1
     return [(hive, names.get(hive, hive), counts) for hive, counts in counted.items()]
 
 
-def tally(source: str, machines: list[tuple[str, str, dict | None]]) -> tuple[dict, list[dict]]:
-    """Agent totals by harness and one row per distinct machine key, under its name, with its agents summed across
-    every entry sharing that key, None where none of them answered."""
+def tally(source: str, machines: list[tuple[str, str, dict[str, int]]]) -> tuple[dict, list[dict]]:
+    """Agent totals and one row per distinct machine key, under its name, with its agents summed across every entry
+    sharing that key. Totals and rows count every harness; the split names claude and codex only."""
     names = {key: name for key, name, _ in machines}
-    merged: dict[str, dict | None] = {}
+    merged: dict[str, dict[str, int]] = {}
     for key, _, counts in machines:
-        if counts is None:
-            merged.setdefault(key, None)
-            continue
-        current = merged.get(key) or {}
-        merged[key] = {harness: current.get(harness, 0) + counts.get(harness, 0) for harness in HARNESSES}
-    found = [counts for counts in merged.values() if counts is not None]
-    totals = {harness: sum(counts.get(harness, 0) for counts in found) for harness in HARNESSES}
-    agents = {"total": sum(totals.values()), "source": source, "reporting": len(found), "of": len(merged), **totals}
+        current = merged.setdefault(key, {})
+        for harness, count in counts.items():
+            current[harness] = current.get(harness, 0) + count
+    totals = {harness: sum(counts.get(harness, 0) for counts in merged.values()) for harness in HARNESSES}
+    total = sum(sum(counts.values()) for counts in merged.values())
+    agents = {"total": total, "source": source, "reporting": len(merged), "of": len(merged), **totals}
     ordered = sorted(merged.items(), key=lambda item: (names[item[0]] != LOCAL, names[item[0]], item[0]))
-    rows = [
-        {"name": names[key], "agents": None if counts is None else sum(counts.get(harness, 0) for harness in HARNESSES)}
-        for key, counts in ordered
-    ]
+    rows = [{"name": names[key], "agents": sum(counts.values())} for key, counts in ordered]
     return agents, rows
 
 
