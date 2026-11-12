@@ -128,12 +128,12 @@ def collect(redis: Receipts, hive: str, run_id: str, owner: str, inbox: "InboxSt
     result = json.loads(str(raw))
     folder = cli.run_folder(run_id)
     store.restore(folder, result["files"])
-    if not redis.hsetnx(receipt(hive, run_id), NOTICED, "1"):
+    if redis.hget(receipt(hive, run_id), NOTICED):
         return False
     text = f"workflow run {run_id} {result['status']} on hive {hive}, run folder {folder}"
     notice = outbox.Post(SENDER, owner, text, item=f"{run_id}:done")
     outbox.post(inbox or connect_inbox(), notice)  # pyright: ignore[reportUnknownMemberType]
-    return True
+    return bool(redis.hsetnx(receipt(hive, run_id), NOTICED, "1"))
 
 
 def main(argv: list[str]) -> int:

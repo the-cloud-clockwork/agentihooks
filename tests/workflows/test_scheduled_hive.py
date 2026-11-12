@@ -1,5 +1,6 @@
 """A hive run reports its result through the run receipt and the sending host posts the owner's notice."""
 
+import base64
 import fnmatch
 import json
 import sys
@@ -15,6 +16,11 @@ pytestmark = pytest.mark.unit
 
 RUN = "run-1"
 HIVE = "hive-a"
+CHART = b"\x89PNG\r\n\x1a\n\xff\xfe"
+
+
+def saved_text(saved: dict[str, str], name: str) -> bytes:
+    return base64.b64decode(saved[name])
 
 
 class Spawn:
@@ -56,6 +62,7 @@ def finished_run(home: Path, state: dict[str, str]) -> Path:
     (folder / store.OUTPUTS_DIR).mkdir(parents=True)
     store.save(folder, state)
     (folder / store.OUTPUTS_DIR / "build.md").write_text("built")
+    (folder / store.OUTPUTS_DIR / "chart.png").write_bytes(CHART)
     return folder
 
 
@@ -101,8 +108,9 @@ def test_report_writes_the_final_status_and_run_folder_files_into_the_receipt(ho
     result = json.loads(redis.hget(receipt, scheduled.RESULT))
     assert result["status"] == "passed"
     assert result["hive"] == HIVE
-    assert result["files"]["outputs/build.md"] == "built"
-    assert json.loads(result["files"][store.STATE_FILE]) == {"status": "passed"}
+    assert saved_text(result["files"], "outputs/build.md") == b"built"
+    assert saved_text(result["files"], "outputs/chart.png") == CHART
+    assert json.loads(saved_text(result["files"], store.STATE_FILE)) == {"status": "passed"}
 
 
 @pytest.mark.feature("hive-run-result")
@@ -127,7 +135,7 @@ def test_report_leaves_out_a_symlink_to_a_file_outside_the_run_folder(home: Path
     scheduled.report(HIVE, RUN, redis)
 
     saved = json.loads(redis.hget(scheduled.receipt(HIVE, RUN), scheduled.RESULT))["files"]
-    assert sorted(saved) == sorted(["outputs/build.md", store.STATE_FILE])
+    assert sorted(saved) == sorted(["outputs/build.md", "outputs/chart.png", store.STATE_FILE])
 
 
 @pytest.mark.feature("hive-run-result")
@@ -144,6 +152,7 @@ def test_collect_restores_the_run_so_workflow_status_reads_the_same_result(
     folder = tmp_path / "scheduler" / "workflows" / "runs" / RUN
     assert scheduled.cli.status(scheduled.cli.parser().parse_args(["status", RUN])) == {"status": "blocked"}
     assert (folder / store.OUTPUTS_DIR / "build.md").read_text() == "built"
+    assert (folder / store.OUTPUTS_DIR / "chart.png").read_bytes() == CHART
     assert inbox.sent == [
         (
             ("scheduler", "me", f"workflow run {RUN} blocked on hive {HIVE}, run folder {folder}"),
@@ -161,6 +170,29 @@ def test_collect_posts_one_notice_per_run_id(home: Path, redis: Any) -> None:
     assert scheduled.collect(redis, HIVE, RUN, "me", inbox=cast(Any, inbox)) is True
     assert scheduled.collect(redis, HIVE, RUN, "me", inbox=cast(Any, inbox)) is False
 
+    assert len(inbox.sent) == 1
+
+
+@pytest.mark.feature("hive-run-result")
+def test_a_notice_that_fails_to_post_is_posted_by_the_next_collect(
+    home: Path, redis: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.inbox import outbox
+
+    finished_run(home, {"status": "passed"})
+    scheduled.report(HIVE, RUN, redis)
+    inbox = Inbox()
+    real_post = outbox.post
+
+    def failing(store: Any, message: Any) -> None:
+        raise OSError("outbox full")
+
+    monkeypatch.setattr(outbox, "post", failing)
+    with pytest.raises(OSError):
+        scheduled.collect(redis, HIVE, RUN, "me", inbox=cast(Any, inbox))
+    monkeypatch.setattr(outbox, "post", real_post)
+
+    assert scheduled.collect(redis, HIVE, RUN, "me", inbox=cast(Any, inbox)) is True
     assert len(inbox.sent) == 1
 
 
@@ -187,9 +219,10 @@ def test_restore_refuses_a_file_outside_the_run_folder(tmp_path: Path, name: str
 @pytest.mark.feature("hive-run-result")
 def test_a_hive_member_may_write_its_run_receipt_but_not_the_owners_inbox() -> None:
     from scripts.hive import auth
+    from scripts.inbox import store as inbox_store
 
     grants = [pattern[1:] for pattern in auth._acl_keys(HIVE) if pattern.startswith("~")]
-    inbox = f"{auth.ROOT}:inbox:owner:me"
+    inbox = inbox_store.owner_key("me", world="")
 
     assert any(fnmatch.fnmatchcase(scheduled.receipt(HIVE, RUN), grant) for grant in grants)
     assert not any(fnmatch.fnmatchcase(inbox, grant) for grant in grants)
