@@ -271,11 +271,11 @@ class PushStop:
     def checks(self, task: Any) -> str:
         """The task pull request's link while its checks run and none is red, when the one push gate refuses a push,
         else ''."""
-        from scripts.gates.one_push import never_started
+        from scripts.gates.one_push import finished, never_started
 
         url = str(task["pr_url"])
         pull = self.github()(url)
-        if pull is None or pull.state != "OPEN" or pull.red or pull.queued or not pull.running:
+        if pull is None or finished(pull) or pull.queued or not pull.running:
             return ""
         return "" if never_started(pull) else url
 

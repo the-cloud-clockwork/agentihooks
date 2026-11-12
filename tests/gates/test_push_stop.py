@@ -1263,6 +1263,8 @@ def test_running_checks_still_demand_a_commit_of_uncommitted_work_without_a_push
         {"state": "MERGED"},
         {"queued": True},
         {"started": False},
+        {"head_red": True},
+        {"mergeable": "CONFLICTING"},
     ],
 )
 def test_resolved_red_closed_queued_or_unstarted_checks_still_demand_the_push(
