@@ -150,7 +150,14 @@
         "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
         "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
         "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending",
-        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch"
+        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch",
+        "tests/events/test_migrate_state.py::test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply",
+        "tests/events/test_migrate_state.py::test_purge_dry_run_names_the_keys_and_deletes_nothing",
+        "tests/events/test_migrate_state.py::test_purge_dry_run_of_a_missing_bucket_names_no_keys",
+        "tests/events/test_migrate_state.py::test_purge_is_skipped_when_the_apply_fails",
+        "tests/events/test_migrate_state.py::test_a_refused_purge_is_reported_as_a_failure",
+        "tests/events/test_migrate_state.py::test_purge_requires_the_no_keys_claim",
+        "tests/events/test_migrate_state.py::test_report_carries_no_purge_fields_without_the_option"
       ]
     },
     {
@@ -4748,12 +4755,53 @@
       ]
     },
     {
+      "id": "hive-run-collect",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-run-collect-caller",
+      "behaviour": "A scheduler that sends a hive run order records the hive and owner in its own machine's sent run order index, and every runner pass collects each sent run the hive reported, restoring its folder and posting its owner one notice, then forgets the order once collected, noticed elsewhere, expired or refused.",
+      "seam": "scripts.hive.run_collect.remember and poll, scripts.scheduler.slots.WorkflowSlot.deliver, scripts.scheduler.core.Scheduler.collect_runs and scripts.scheduler.service.run",
+      "tests": [
+        "tests/hive/test_run_collect.py::test_remember_records_the_hive_and_owner_of_a_sent_run",
+        "tests/hive/test_run_collect.py::test_a_collected_run_is_returned_and_forgotten",
+        "tests/hive/test_run_collect.py::test_a_run_the_hive_has_not_reported_stays_for_the_next_pass",
+        "tests/hive/test_run_collect.py::test_an_expired_receipt_drops_its_run",
+        "tests/hive/test_run_collect.py::test_a_run_another_pass_already_noticed_is_dropped",
+        "tests/hive/test_run_collect.py::test_a_refused_run_folder_drops_only_that_run",
+        "tests/hive/test_run_collect.py::test_poll_defaults_to_the_scheduled_collect",
+        "tests/hive/test_run_collect.py::test_a_reported_hive_run_reaches_its_owner_from_the_sending_host",
+        "tests/hive/test_run_collect.py::test_a_hive_slot_remembers_the_run_order_it_sent",
+        "tests/hive/test_run_collect.py::test_a_hive_slot_with_no_fitting_hive_remembers_nothing",
+        "tests/hive/test_run_collect.py::test_collect_runs_polls_the_index_of_its_own_machine",
+        "tests/hive/test_run_collect.py::test_every_runner_pass_collects_after_dispatching"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
       "seam": "scripts.hive.orders.Consumer.poll through apply and resumed, against the expiry carried by the launch receipt, which today has none",
       "tests": [
         "tests/hive/test_orders.py::test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt"
+      ]
+    },
+    {
+      "id": "hive-run-result",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr3",
+      "behaviour": "A workflow run a hive starts from a run order records its final status and run folder files as bytes, symlinks left out, once on its run receipt, and the sending host restores that folder so workflow status reads the same result and posts the owner one notice per run id naming the hive, marked sent only after it posts, because a hive member's Redis user cannot write the owner's inbox.",
+      "seam": "scripts.workflows.scheduled.report and scripts.workflows.scheduled.collect with scripts.workflows.store.files and restore",
+      "tests": [
+        "tests/workflows/test_scheduled_hive.py::test_a_hive_start_passes_the_hive_to_the_detached_run",
+        "tests/workflows/test_scheduled_hive.py::test_main_on_a_hive_reports_to_the_receipt_and_posts_no_notice",
+        "tests/workflows/test_scheduled_hive.py::test_report_writes_the_final_status_and_run_folder_files_into_the_receipt",
+        "tests/workflows/test_scheduled_hive.py::test_report_keeps_the_first_result_for_a_run_id",
+        "tests/workflows/test_scheduled_hive.py::test_report_leaves_out_a_symlink_to_a_file_outside_the_run_folder",
+        "tests/workflows/test_scheduled_hive.py::test_collect_restores_the_run_so_workflow_status_reads_the_same_result",
+        "tests/workflows/test_scheduled_hive.py::test_collect_posts_one_notice_per_run_id",
+        "tests/workflows/test_scheduled_hive.py::test_a_notice_that_fails_to_post_is_posted_by_the_next_collect",
+        "tests/workflows/test_scheduled_hive.py::test_collect_waits_while_the_hive_has_reported_nothing",
+        "tests/workflows/test_scheduled_hive.py::test_restore_refuses_a_file_outside_the_run_folder",
+        "tests/workflows/test_scheduled_hive.py::test_a_hive_member_may_write_its_run_receipt_but_not_the_owners_inbox"
       ]
     }
   ],

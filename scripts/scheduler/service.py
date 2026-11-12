@@ -87,6 +87,7 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
         while not stopped.is_set():
             try:
                 await asyncio.to_thread(scheduler.run_due)
+                await asyncio.to_thread(scheduler.collect_runs)
             except (LostLock, Busy) as exc:
                 print(f"scheduler pass ended: {exc}", file=sys.stderr)
             except transient:

@@ -286,6 +286,17 @@ scoped stream), `moved` and `failures`. A rerun after a completed move reports `
 nothing. `--apply` requires `--quiescent`, an ownership claim and a provisioning credential; a failed move exits 1
 and leaves the import pending, and the same command resumes it.
 
+`--purge-envelopes` clears one swarm's share of a shared legacy bucket such as `inbox`. The report adds
+`envelope_keys`, the live keys whose current value decodes as an event envelope of `--swarm`, and `purged`. With
+`--apply` and a clean move it purges every revision of those keys from `KV_<bucket>`; keys of other swarms and
+values that are not envelopes stay. A failed move or a refused purge purges nothing further and is reported under
+`failures`. It requires `--no-keys`, because it drops those keys instead of importing them:
+
+```bash
+python -m scripts.events.migrate_state --swarm rig --bucket inbox --no-keys --purge-envelopes
+python -m scripts.events.migrate_state --swarm rig --bucket inbox --no-keys --purge-envelopes --apply --quiescent
+```
+
 ## Check a member's scope
 
 From the member, with the credential `hive join` saved, a foreign subject is refused by the server:
