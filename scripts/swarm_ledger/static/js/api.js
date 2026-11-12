@@ -79,8 +79,8 @@ export function readLayout() {
   return fetch(LAYOUT_API, { cache: "no-store" });
 }
 
-export function writeLayout(layout) {
-  return fetch(LAYOUT_API, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) });
+export function writeLayout(layout, unloading = false) {
+  return fetch(LAYOUT_API, { method: "PUT", keepalive: unloading, headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) });
 }
 
 export function readTips() {

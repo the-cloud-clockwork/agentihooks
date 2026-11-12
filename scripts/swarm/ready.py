@@ -221,8 +221,35 @@ def merge_pass(run: Pass, rows: Mapping[str, dict[str, Any]]) -> list[str]:
         if not awaiting(row) or found is None or found["agent"] != row.get("claimed_by"):
             actions += _leave(run, task_id, row)
             continue
-        actions += _advance(run, rows, row, found)
+        actions += _advance(run, rows, row, found, closed)
+    return actions + _dependents(run, rows, closed)
+
+
+def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str]) -> list[str]:
+    """Read each open dependent pull request of a task this pass closed fresh and tell the live owners of one that
+    no longer merges, so its restack starts before its queue turn."""
+    actions: list[str] = []
+    for task_id, row in rows.items():
+        merged = sorted(closed.intersection([*(row.get("depends_on") or []), *(row.get("parked_on") or [])]))
+        if not merged or task_id in closed or row.get("state") not in ("claimed", "pr") or not row.get("pr_url"):
+            continue
+        pull = _dependent_read(run, row["pr_url"])
+        if pull is None or pull.state != "OPEN" or not pull.merge_problem:
+            continue
+        if _working_owner(run, dict(row), pull):
+            actions.append(
+                f"task {task_id} {row['pr_url']} {pull.merge_problem} after task {merged[0]} merged, its owner was told"
+            )
     return actions
+
+
+def _dependent_read(run: Pass, url: str) -> Any:
+    """The cached read when it already shows an open pull request with a merge problem, so a notice the per task
+    branch sent this pass carries the same inbox identity and is not sent twice; otherwise a fresh read."""
+    cached = run.github(url)
+    if cached is not None and cached.state == "OPEN" and cached.merge_problem:
+        return cached
+    return run.reread(url)
 
 
 def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
@@ -263,13 +290,15 @@ def _leave(run, task_id, row):
     return [f"task {task_id} left the merge pass" + (f": {who} works it" if who else "")]
 
 
-def _advance(run, rows, row, found):
+def _advance(
+    run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], found: dict[str, Any], closed: set[str]
+) -> list[str]:
     url, held = found["url"], found["on"]
     pull = run.github(url)
     if pull is None:
         return []
     if pull.state == "MERGED":
-        return _finish(run, rows, row, found)
+        return _finish(run, rows, row, found, closed)
     if pull.state != "OPEN":
         return _reopen(run, row, found, "was closed without merging")
     if waits.dependency(found.get("dependency", {}), row, rows, run.github):
@@ -287,7 +316,7 @@ def _advance(run, rows, row, found):
         save(run.store, run.slug, row["id"], found)
         return []
     if outcome == f"pull request {url}, now merged":
-        return _finish(run, rows, row, found)
+        return _finish(run, rows, row, found, closed)
     if outcome.startswith(f"pull request {url}, now green"):
         return _requeue(run, row, found)
     red = outcome.startswith(f"pull request {url}, now red")
@@ -348,7 +377,9 @@ def _queue(run, row, found):
     return [f"queued {url} for task {task_id}"]
 
 
-def _finish(run, rows, row, found):
+def _finish(
+    run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], found: dict[str, Any], closed: set[str]
+) -> list[str]:
     task_id, url = row["id"], found["url"]
     kind = ledger_kinds.kind(row)
     verify = ledger_kinds.after(row) and ledger_kinds.unmet(row)
@@ -366,6 +397,7 @@ def _finish(run, rows, row, found):
         if member in rows and rows[member].get("state") != "done":
             run.ledger.update_task(run.slug, member, fields)
             finished.append(member)
+    closed.update(finished)
     run.store.clear_handoff(run.slug, task_id)
     forget(run.store, run.slug, task_id)
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]

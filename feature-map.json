@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "codex-expired-routing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
+      "behaviour": "Forced Codex routes refuse an expired latest quota reading. Hives publish their own expired observation and retain it instead of adopting a live remote report. Global capacity keeps expired Codex accounts closed.",
+      "seam": "codex_router.select; hive.daemon._subscriptions and adopt_caps; swarm.capacity.accounts",
+      "tests": [
+        "tests/test_codex_router.py::test_a_forced_route_refuses_an_expired_reading",
+        "tests/hive/test_daemon.py::test_an_expired_codex_reading_publishes_its_timestamp_and_no_cap",
+        "tests/hive/test_daemon.py::test_a_hive_keeps_its_own_expired_codex_reading",
+        "tests/swarm/test_capacity.py::test_aggregate_capacity_closes_an_expired_codex_account"
+      ],
+      "rules": [
+        "codex-expired-reading-discarded"
+      ]
+    },
+    {
       "id": "account-keys-indexed-not-scanned",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
@@ -258,6 +274,17 @@
         "tests/tick/steps/test_merge_pass.py::test_merge_pass",
         "tests/tick/steps/test_tick_view.py::test_tick_view",
         "tests/tick/steps/test_waits_end.py::test_waits_end"
+      ]
+    },
+    {
+      "id": "merge-pass-dependent-conflict-on-prerequisite-merge",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t928",
+      "behaviour": "On the merge pass that closes a merged prerequisite, each dependent task with an open pull request is read fresh and the live owner of one that no longer merges is told at once; a clean dependent is left alone.",
+      "seam": "ready merge pass closing a merged task, then a fresh pull request read of its dependents and the owner inbox notice",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_clean_one",
+        "tests/swarm/test_ready.py::test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_already_failed"
       ]
     },
     {
@@ -2278,6 +2305,20 @@
       ]
     },
     {
+      "id": "inbox-refused-answer-resend",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t917",
+      "behaviour": "After the ledger page refuses an agent answer to an operator message, a fresh reply sends the new answer, or says the answer was refused when the item cannot take one; the wake pass reports a refused message it must hold for a retry as held, never closed.",
+      "seam": "InboxStore.reply in scripts.inbox.store and the wake pass operator step in scripts.inbox.wake",
+      "tests": [
+        "tests/inbox/test_store.py::test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer",
+        "tests/inbox/test_store.py::test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text",
+        "tests/inbox/test_store.py::test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused",
+        "tests/inbox/test_store.py::test_a_fresh_reply_on_an_answer_its_recipient_cancelled_reopens_nothing",
+        "tests/inbox/test_wake.py::test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held"
+      ]
+    },
+    {
       "id": "swarm-launch-bounded-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",
@@ -2717,6 +2758,18 @@
       ]
     },
     {
+      "id": "ledger-layout-unload-save",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t230",
+      "behaviour": "A layout save still pending when the ledger page hides or closes is sent at once as a keepalive request, so the server keeps the newest layout.",
+      "seam": "The layout save of the ledger page on pagehide and on a hidden visibilitychange",
+      "tests": [
+        "tests/swarm_ledger/test_layout_unload.py::test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layout",
+        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request",
+        "tests/swarm_ledger/test_layout_unload.py::test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
+      ]
+    },
+    {
       "id": "ledger-tabs",
       "origin": "inventory",
       "behaviour": "The ledger page tabs keep the shell fixed, scroll only the active body, and keep the tab choice and scroll positions across switches.",
@@ -2946,6 +2999,20 @@
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon",
         "tests/tick/test_live_rows_replay.py::test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick"
+      ]
+    },
+    {
+      "id": "claude-tool-failure-breaker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t598",
+      "behaviour": "A failed Claude tool call, delivered as PostToolUseFailure with an error field and no tool response, is counted by the retry breaker and trips it at its threshold while still closing the stall clock, and the installed Claude settings keep that event registered.",
+      "seam": "hooks.hook_manager.EVENT_HANDLERS PostToolUseFailure through hooks.context.retry_breaker.on_post_tool_result, and scripts.targets.claude_target.ClaudeAdapter.write_settings",
+      "tests": [
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_payload_is_counted_by_the_retry_breaker",
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_trips_the_breaker_at_its_threshold",
+        "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
+        "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
+        "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
       ]
     },
     {
@@ -4662,6 +4729,16 @@
       ]
     },
     {
+      "id": "metrics-gate-rows-span-the-window",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t617",
+      "behaviour": "The swarm metrics pass reads gate denies and reruns from the whole one day metrics window of the gate log, so rows older than its last 64 KB still reach the agent and delivery tables.",
+      "seam": "scripts.swarm.metrics_swarm.record_pass through scripts.gates.log.since",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail"
+      ]
+    },
+    {
       "id": "tick-step-profiler",
       "origin": "inventory",
       "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
@@ -4879,6 +4956,19 @@
       ]
     },
     {
+      "id": "done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t913",
+      "behaviour": "Every task done writer clears the task's awaiting field, so a done task that reopens shows no stale approval, verify or fix wait.",
+      "seam": "scripts.swarm.cli.cmd_done with its group members and scripts.swarm.promotion_watch green closing, against the ledger task update that merges fields",
+      "tests": [
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members",
+        "tests/swarm/test_done_awaiting.py::test_the_tick_reopens_a_done_task_without_a_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_a_green_promotion_run_clears_awaiting_and_a_reopened_task_shows_no_stale_wait"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
@@ -4938,6 +5028,62 @@
       "seam": "WriterLease.acquire in the swarm v2 ledger writer",
       "tests": [
         "tests/test_swarm_v2_ledger_writer.py::test_a_failed_holder_record_write_releases_the_lock"
+      ]
+    },
+    {
+      "id": "swarm-park-foreign-dependency-no-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
+      "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
+        "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
+      ]
+    },
+    {
+      "id": "successor-upstream-branch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t549",
+      "behaviour": "A successor's worktree whose local branch tracks the earlier remote branch it continues is recorded under that remote branch, and wt.sh done reads its pull request and remote branch by that upstream name, so merged cleanup drops the local and remote branch and parking drops a worktree whose merged upstream left origin.",
+      "seam": "scripts.swarm.cli.worktree_branch and the wt.sh done command against a real origin",
+      "tests": [
+        "tests/swarm/test_cli.py::test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks",
+        "tests/swarm/test_cli.py::test_an_unpushed_checkout_tracking_a_base_branch_is_refused",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_branch_whose_own_merged_head_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_drops_a_successor_whose_upstream_branch_merged",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
+      ]
+    },
+    {
+      "id": "tick-progress-heads",
+      "origin": "inventory",
+      "behaviour": "The tick step progress heads reads each claimed or in review task's pull request head, or its branch head and open pull request on GitHub at most every five minutes, and records a changed head as a pushed outcome and a newly opened pull request as a pull request opened outcome for the claimant, whatever harness or command made it; the first sight of a task is a baseline and a failed read records nothing.",
+      "seam": "scripts.gates.progress.heads_pass, branch_head and origin, called by scripts.tick.steps.report._progress_heads registered as tick step progress heads",
+      "tests": [
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads",
+        "tests/gates/test_progress.py::test_a_push_the_command_pattern_misses_is_still_an_outcome",
+        "tests/gates/test_progress.py::test_a_first_push_of_a_new_branch_is_an_outcome",
+        "tests/gates/test_progress.py::test_a_deleted_branch_is_no_outcome",
+        "tests/gates/test_progress.py::test_each_task_keeps_its_own_lookup_window",
+        "tests/gates/test_progress.py::test_each_task_keeps_its_own_head",
+        "tests/gates/test_progress.py::test_an_opened_pull_request_is_an_outcome",
+        "tests/gates/test_progress.py::test_a_push_and_an_opened_pull_request_in_one_pass_end_on_the_push",
+        "tests/gates/test_progress.py::test_a_new_head_on_a_recorded_pull_request_is_a_push_once",
+        "tests/gates/test_progress.py::test_a_recorded_pull_request_after_a_branch_read_is_an_opened_pull_request",
+        "tests/gates/test_progress.py::test_an_unread_pull_request_records_nothing",
+        "tests/gates/test_progress.py::test_a_failed_branch_read_keeps_no_baseline",
+        "tests/gates/test_progress.py::test_a_branch_is_read_at_most_once_per_lookup_window",
+        "tests/gates/test_progress.py::test_the_claimant_worktree_branch_on_the_swarm_repository_is_read_when_none_is_recorded",
+        "tests/gates/test_progress.py::test_only_held_tasks_with_a_claimant_and_a_repository_are_read",
+        "tests/gates/test_progress.py::test_a_new_claimant_starts_from_a_baseline",
+        "tests/gates/test_progress.py::test_branch_head_reads_the_branch_commit_and_its_open_pull_request",
+        "tests/gates/test_progress.py::test_branch_head_reads_a_missing_branch_as_empty",
+        "tests/gates/test_progress.py::test_branch_head_is_unread_when_github_fails_or_the_repository_is_elsewhere",
+        "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
       ]
     }
   ],
