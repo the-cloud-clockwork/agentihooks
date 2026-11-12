@@ -842,7 +842,7 @@ def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monke
         "generation": 0,
         "lease_deadline_ms": 20 * MINUTE,
     }
-    store.redis.set(store.key("sw", "task-authority", agent.task), json.dumps(authority))
+    fencing.write(store, "sw", lambda doc: doc["claims"].update({agent.task: authority}))
     resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert agent.name in runtime.nudged
     assert recovery_state(store, agent.name) == "done"

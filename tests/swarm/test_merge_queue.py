@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
+from scripts.swarm import cli, fencing, ledger_events, merge_queue, queue_exit, waits
 from scripts.swarm.store import MASTER, SwarmError
 from tests.swarm.graph_port import view as port_view
 
@@ -891,7 +891,7 @@ def test_cli_refuses_distributed_final_mutations_before_provider_calls(monkeypat
 
     metadata = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     state.redis, state.key = metadata.redis, metadata.key
-    state.redis.set(state.key("sw", "task-authority", "t1"), "{}")
+    fencing.write(state, "sw", lambda doc: doc["claims"].update({"t1": {}}))
     assert cli.main(["sw", "merge", action, URL]) == 1
 
 
@@ -906,7 +906,7 @@ def test_cli_refuses_another_distributed_tasks_pull_request(monkeypatch, same_li
     monkeypatch.setattr(cli, "LedgerClient", lambda: scoped_ledger(rows))
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("foreign provider mutation"))
-    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    fencing.write(state, "sw", lambda doc: doc["claims"].update({"t2": {}}))
     assert cli.main(["sw", "merge", "queue", URL]) == 1
 
 

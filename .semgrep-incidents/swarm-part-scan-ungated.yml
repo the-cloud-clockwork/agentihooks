@@ -1,0 +1,22 @@
+rules:
+  - id: swarm-part-scan-ungated
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A per swarm part read walks the whole shared Redis keyspace with SCAN. The hive join agent read for a swarm with
+      no fencing document ran three such scans over about 970 thousand keys, 349 seconds in all, past the master
+      launch deadline. Return early unless a point read such as EXISTS on a key the part implies proves the keys can
+      exist, or read an index.
+    paths:
+      include:
+        - /scripts/
+        - swarm-part-scan-ungated.py
+    patterns:
+      - pattern-either:
+          - pattern: $R.scan_iter(..., match=$S.key($SLUG, $PART, "*"), ...)
+          - pattern: $R.scan(..., match=$S.key($SLUG, $PART, "*"), ...)
+          - pattern: $R.keys($S.key($SLUG, $PART, "*"))
+      - pattern-not-inside: |
+          if not $G.exists(...):
+              return ...
+          ...

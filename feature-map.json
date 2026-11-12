@@ -3601,6 +3601,9 @@
       "tests": [
         "tests/hive/test_join_report_scan.py::test_the_hive_join_agent_read_for_a_swarm_with_no_fencing_entry_walks_no_keyspace",
         "tests/hive/test_join_report_scan.py::test_a_swarm_that_predates_the_fencing_document_still_imports_its_legacy_claims"
+      ],
+      "rules": [
+        "swarm-part-scan-ungated"
       ]
     },
     {
