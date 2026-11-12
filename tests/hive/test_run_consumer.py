@@ -236,3 +236,20 @@ def test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_
     run_consumer.RunConsumer(redis, "host").poll()
     assert len(start.calls) == 1
     assert redis.xlen(store.stream("host")) == 1
+
+
+@pytest.mark.feature("hive-run-order-receipt-outlives-order")
+def test_a_run_order_claimed_past_its_expiry_keeps_its_receipt_one_receipt_lifetime(
+    setup: tuple[Any, Any, Any, Start, Path],
+) -> None:
+    from scripts.hive.orders import RECEIPT_SECONDS, Ack
+
+    redis, run_consumer, run_orders, start, _ = setup
+    store = run_orders.RunOrders(redis)
+    sent = order(run_orders, expires_at=500_000)
+    store.send("host", sent)
+    redis.persist(store.receipt(sent))
+    run_consumer.RunConsumer(redis, "host").poll()
+    assert start.calls == []
+    assert store.ack(sent) == Ack("failed", {}, "expired")
+    assert RECEIPT_SECONDS * 1000 - 1000 < redis.pttl(store.receipt(sent)) <= RECEIPT_SECONDS * 1000
