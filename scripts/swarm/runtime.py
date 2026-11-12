@@ -247,7 +247,7 @@ def _decided(placed: Placed, route: list[str], picked: model_pick.ModelPick, pro
     """Carry the launch decision onto a detached placement so its agent record shows it before the pane starts."""
     if not placed.launch_job:
         return placed
-    account = route[1] if route[:1] == ["--route"] else ""
+    account = route[1] if route[:1] == ["--route"] else placed.account
     return replace(placed, account=account, model=picked.model or "", effort=picked.effort or "", profile=profile)
 
 
@@ -879,9 +879,8 @@ class HerdrRuntime:
                 ],
             )
         placed = placed if placed.launch_job else codex.complete(config, name, placed, self._terminate)
-        placed = _decided(placed, route, picked, profile)
         placed_kind = "api" if placed.account == "api" else route_kind
-        return replace(
+        placed = replace(
             placed,
             model_source=picked.source,
             model_confidence=picked.confidence,
@@ -903,6 +902,7 @@ class HerdrRuntime:
             if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
+        return _decided(placed, route, picked, profile)
 
     def resume(self, config, agent, text):
         """Reopen the agent's own conversation in a new pane of the same name; SpawnError unless herdr shows it there."""

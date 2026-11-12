@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.swarm import hash_pages, successor_retry
-from scripts.swarm.store import SwarmConfig
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 
 KEY = "launch-jobs"
@@ -95,20 +95,24 @@ def read(job: dict, now_ms: int) -> Placed | None:
     return Placed(**outcome["placed"])
 
 
-def pending(store: Any, slug: str, launch: Any, placed: Placed) -> None:
-    entry = {"task": launch.task, "placed": asdict(placed)}
-    if launch.task.get("handoff"):
-        entry["primed"] = launch.primed
-    store.redis.hset(store.key(slug, KEY), launch.record.name, json.dumps(entry))
-    decided = replace(
-        launch.record,
+def decided(record: AgentRecord, placed: Placed) -> AgentRecord:
+    """The agent record carrying the harness, account, model, effort and profile its launch decided."""
+    return replace(
+        record,
         harness=placed.harness,
         account=placed.account,
         model=placed.model,
         effort=placed.effort,
         profile=placed.profile,
     )
-    store.put_agent(slug, decided)
+
+
+def pending(store: Any, slug: str, launch: Any, placed: Placed) -> None:
+    entry = {"task": launch.task, "placed": asdict(placed)}
+    if launch.task.get("handoff"):
+        entry["primed"] = launch.primed
+    store.redis.hset(store.key(slug, KEY), launch.record.name, json.dumps(entry))
+    store.put_agent(slug, decided(launch.record, placed))
     store.record_launch(slug, launch.record, STATE)
 
 

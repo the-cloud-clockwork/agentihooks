@@ -9,7 +9,7 @@ import pytest
 
 from scripts.swarm import launch_job
 from scripts.swarm.runtime import SPAWN_TIMEOUT_S, HerdrRuntime
-from scripts.swarm.store import SwarmConfig
+from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm.test_tick import store as store
@@ -283,15 +283,15 @@ def test_pending_launch_keeps_claim_and_is_not_launched_twice(store, tmp_path, m
 
 
 class DecidedRuntime(DetachedRuntime):
-    def spawn(self, config, lane, name, task):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> Placed:
         placed = super().spawn(config, lane, name, task)
         return replace(placed, account="acct-a", model="opus", effort="high", profile="engineer")
 
 
 @pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
 def test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_and_account(
-    store, tmp_path, monkeypatch
-):
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(launch_job, "spawn", lambda job: None)
     ledger, runtime = tasks(("t1", "eng")), DecidedRuntime(tmp_path)
     tick("sw", store, ledger, runtime, now_ms=1000)
@@ -307,21 +307,34 @@ def test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_a
 
 
 @pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
-def test_a_detached_placement_carries_the_routed_account_model_and_profile():
-    from scripts.swarm.model_pick import ModelPick
-    from scripts.swarm.runtime import _decided
+def test_a_detached_spawn_returns_its_routed_account_model_and_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
 
-    job = {"path": "/jobs/e.json", "started_at": 1000, "timeout": 300}
-    placed = _decided(Placed("", "codex", launch_job=job), ["--route", "acct-b"], ModelPick("gpt", "xhigh"), "eng")
-    assert (placed.harness, placed.account, placed.model, placed.effort, placed.profile) == (
-        "codex",
-        "acct-b",
-        "gpt",
-        "xhigh",
-        "eng",
+    popen = Mock()
+    monkeypatch.setattr(launch_job.subprocess, "Popen", popen)
+
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    runtime._quota_accounts = []
+    monkeypatch.setattr(runtime, "_quota_eligible", lambda harness, lane: True)
+    monkeypatch.setattr(runtime, "_route_account", lambda *_: (None, SimpleNamespace(name="acct-a")))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": "claude"}},
+        autonomy="delegate",
     )
-    synchronous = Placed("w:p1", "claude", account="acct-c")
-    assert _decided(synchronous, ["--route", "acct-d"], ModelPick("opus", "high"), "eng") is synchronous
+    placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "detached_launch": True})
+    assert placed.launch_job and placed.pane_id == ""
+    assert (placed.harness, placed.account) == ("claude", "acct-a")
+    assert placed.model and placed.profile
+    popen.assert_not_called()
 
 
 def _job_entry(store, name, task, state="working", harness="claude"):
