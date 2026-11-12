@@ -119,21 +119,21 @@ def test_a_large_remainder_spreads_until_no_shard_plans_past_six_minutes_with_it
 
 def test_a_remainder_past_one_wave_of_six_minute_jobs_takes_the_lowest_stage_wall_not_the_shard_ceiling() -> None:
     plan = _plan()
-    whole = {f"scripts.a.x_w{index}__mutmut_1": 600.0 for index in range(120)}
+    whole = {f"scripts.a.x_w{index}__mutmut_1": 600.0 for index in range(36)}
     plan["assignments"].update(dict.fromkeys(whole, 0))
     plan["costs"].update(whole)
     merged = probe.merge_probes(plan, _records(plan))
     replanned = probed.probed_plan(merged, 1080)
-    assert replanned["shards"] == measured.BATCH_RUNNERS == 40
+    assert replanned["shards"] == measured.BATCH_RUNNERS == 12
     assert max(replanned["shard_worker_seconds"]) == pytest.approx(1945.6)
-    assert measured.stage_wall(40, replanned["shard_worker_seconds"]) == pytest.approx(180 + 1945.6 / 3)
+    assert measured.stage_wall(12, replanned["shard_worker_seconds"]) == pytest.approx(180 + 1945.6 / 3)
 
 
 def test_the_stage_wall_pays_a_job_setup_once_per_wave_of_the_batch_runner_pool() -> None:
     assert measured.stage_wall(1, [0.0]) == 180
-    assert measured.stage_wall(40, [900.0, 30.0]) == 480
-    assert measured.stage_wall(41, [900.0, 30.0]) == 960
-    assert measured.stage_wall(81, [900.0]) == 1440
+    assert measured.stage_wall(12, [900.0, 30.0]) == 480
+    assert measured.stage_wall(13, [900.0, 30.0]) == 960
+    assert measured.stage_wall(25, [900.0]) == 1440
 
 
 def test_the_quickest_count_is_the_fewest_shards_within_the_wall_else_the_lowest_stage_wall() -> None:
