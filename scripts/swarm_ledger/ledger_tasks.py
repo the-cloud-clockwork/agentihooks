@@ -748,7 +748,7 @@ def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str
         or op["op"] != "task_update"
         or op["item"] != f"tasks/{task_id}"
         or op["by"] != actor
-        or op["fields"] != {"state": "done", "pr_url": proposal["pr_url"], "proof": proposal["proof"]}
+        or op["fields"] != {"state": "done", "awaiting": "", "pr_url": proposal["pr_url"], "proof": proposal["proof"]}
     ):
         ctx.refused.append("outcome identity conflict")
         return False

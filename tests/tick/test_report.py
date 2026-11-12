@@ -162,8 +162,9 @@ def test_a_call_step_keeps_the_lane_it_is_given() -> None:
 def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, ...]] = []
     box: dict[str, Any] = {}
+    monkeypatch.setattr(progress, "origin", lambda path: ("origin", path))
     found = _run("wrapper events", calls, _pass(box), monkeypatch)
-    assert found == [f"ran {n}" for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12)]
+    assert found == [f"ran {n}" for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13)]
     assert calls[:5] == [
         ("skip", ledger_events.event_pass, "inbox", STORE, "sw", DOC, "ledger", 7, "view"),
         ("skip", done_gate.recheck_pass, STORE, "sw", DOC, "ledger", 7, "view"),
@@ -177,6 +178,7 @@ def test_the_event_steps_run_their_passes_with_the_pass_state(monkeypatch: pytes
         ("skip", dispatcher.priorities, STORE, "sw", DOC, "ledger", "view", 7),
         ("call", findings, STORE, "sw", CONFIG, ["t"], ["e"], "view"),
         ("skip", ledger_events.findings_pass, "inbox", STORE, "sw", ["ran 11"], DOC),
+        ("skip", progress.heads_pass, "redis", "sw", ["t"], "view", 7, ("origin", "/repo")),
     ]
     assert box == {"live": {"a", "b"}, "found": ["ran 11"]}
 
