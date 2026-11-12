@@ -122,6 +122,7 @@ def test_a_heartbeat_seeded_interface_hive_reads_as_swarm_master(redis):
     assert registry.show(redis, "root")["name"] == "swarm-master"
 
 
+@pytest.mark.feature("hive-registry-unique-name-suffix")
 def test_two_headed_hives_joining_take_unique_names(redis):
     registry.update(redis, "root", ["ui=yes"])
     joined = registry.update(redis, "vm", ["ui=yes", "name=swarm-master"])
@@ -131,6 +132,7 @@ def test_two_headed_hives_joining_take_unique_names(redis):
     assert registry.update(redis, "root", ["max-agents=3"])["name"] == "swarm-master"
 
 
+@pytest.mark.feature("hive-registry-unique-name-suffix")
 def test_a_restarted_headed_hive_keeps_its_derived_name(redis):
     registry.update(redis, "root", ["ui=yes"])
     assert registry.update(redis, "vm", ["ui=yes"])["name"] == "swarm-master-2"
@@ -138,6 +140,7 @@ def test_a_restarted_headed_hive_keeps_its_derived_name(redis):
     assert registry.update(redis, "vm", ["name=Desk"])["name"] == "swarm-master-2"
 
 
+@pytest.mark.feature("hive-registry-unique-name-suffix")
 def test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix(redis):
     registry.update(redis, "a", ["name=box"])
     registry.update(redis, "b", ["name=box-2"])
@@ -146,6 +149,7 @@ def test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix(redis
     assert sorted(hive["name"] for hive in registry.hives(redis)) == ["box", "box-2", "box-3"]
 
 
+@pytest.mark.feature("hive-registry-unique-name-suffix")
 def test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set(redis):
     registry.update(redis, "root", ["ui=yes"])
     registry.beat(redis, "vm", {"ui": "yes", "heartbeat_at": 1})

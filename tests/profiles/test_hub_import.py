@@ -492,6 +492,8 @@ def test_manifests_without_installs_add_no_entry(hub: Path, tmp_path: Path) -> N
     report = import_hub(hub, out, False, tmp_path / "data")
     assert report["deps"] == []
     assert not (out / "deps.json").exists()
+    assert not (out / "profiles/diagram/package.json").exists()
+    assert not (out / "profiles/diagram/requirements.txt").exists()
 
 
 @pytest.mark.feature("hub-import-deps")
@@ -668,3 +670,236 @@ def test_an_eval_case_holding_a_credential_refuses_the_import(hub: Path, tmp_pat
     _case(hub, "leak.yaml", {"name": "leak", "expected": {"token": ["xoxb-" + "1" * 12]}})
     with pytest.raises(ValueError, match=r"literal credential refused: .*leak\.yaml"):
         import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+ASSETS = (
+    ".mcp.json",
+    ".claude/hooks/limit_inline_images.py",
+    ".claude/scripts/render.sh",
+    "scripts/run.py",
+    "runners/daily.py",
+    "docs/guide.md",
+    "knowledge/facts.md",
+    "src/pipeline/render.ts",
+    ".gitignore",
+)
+SKIPPED = (
+    "command.yml",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    "node_modules/left/index.js",
+    ".git/HEAD",
+    "package.json",
+)
+
+
+def _assets(hub: Path) -> None:
+    package = _package(hub)
+    for relative in (*ASSETS, *SKIPPED[2:]):
+        (package / relative).parent.mkdir(parents=True, exist_ok=True)
+        (package / relative).write_text(f"{relative}\n")
+    (package / ".mcp.json").write_text(json.dumps({"mcpServers": {"tools": {"url": "https://tools", "env": {}}}}))
+    (package / "package.json").write_text(json.dumps({"name": "pipeline"}))
+    (hub / "agents/diagram/hooks").mkdir()
+    (hub / "agents/diagram/hooks/render_diagram.py").write_text("print('render')\n")
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_an_import_carries_every_package_asset_and_agent_hooks(hub: Path, tmp_path: Path) -> None:
+    _assets(hub)
+    (_package(hub) / "docs/logo.png").write_bytes(b"\x89PNG\xff\xfe")
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    profile, package, files = out / "profiles/diagram", _package(hub), report["files"]
+    assert isinstance(files, list)
+    for relative in ASSETS:
+        assert (profile / relative).read_bytes() == (package / relative).read_bytes()
+        assert f"profiles/diagram/{relative}" in files
+    assert (profile / "docs/logo.png").read_bytes() == b"\x89PNG\xff\xfe"
+    assert (profile / "hooks/render_diagram.py").read_text() == "print('render')\n"
+    assert "profiles/diagram/hooks/render_diagram.py" in files
+    for relative in SKIPPED:
+        assert not (profile / relative).exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_a_package_mcp_file_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    servers = {"mcpServers": {"tools": {"env": {"TOOLS_TOKEN": "xoxb-" + "1" * 12}}}}
+    (_package(hub) / ".mcp.json").write_text(json.dumps(servers))
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=r"literal credential refused: \.mcp\.json"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize("name", ["link.py", ".env"])
+def test_an_unsafe_file_in_agent_hooks_refuses_the_import(hub: Path, tmp_path: Path, name: str) -> None:
+    hooks = hub / "agents/diagram/hooks"
+    hooks.mkdir()
+    (hooks / "real.py").write_text("")
+    if name == ".env":
+        (hooks / name).write_text("")
+    else:
+        (hooks / name).symlink_to(hooks / "real.py")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"refused: .*hooks/{name}"):
+        import_hub(hub, out, True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_a_dangling_agent_hooks_symlink_refuses_the_import(hub: Path, tmp_path: Path) -> None:
+    (hub / "agents/diagram/hooks").symlink_to(tmp_path / "missing")
+    with pytest.raises(ValueError, match=r"symlink refused: .*hooks"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize("relative", ["scripts/run.py", "hooks/render.py"])
+def test_an_asset_holding_a_literal_credential_refuses_the_import(hub: Path, tmp_path: Path, relative: str) -> None:
+    root = hub / "agents/diagram" if relative.startswith("hooks/") else _package(hub)
+    (root / relative).parent.mkdir(parents=True, exist_ok=True)
+    (root / relative).write_text(f"TOKEN = 'xoxb-{'1' * 12}'\n")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError, match=rf"literal credential refused: {relative}"):
+        import_hub(hub, out, False, tmp_path / "data")
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize(
+    "relative", ["profile.yml", "hooks/render.py", ".claude/settings.overrides.json", "cases/check.json"]
+)
+def test_a_profile_file_taken_twice_refuses_the_import(hub: Path, tmp_path: Path, relative: str) -> None:
+    (hub / "agents/diagram/hooks").mkdir()
+    (hub / "agents/diagram/hooks/render.py").write_text("")
+    (_package(hub) / ".claude/settings.json").write_text(json.dumps({"env": {"MODE": "fast"}}))
+    _case(hub, "check.yaml", {"name": "check", "expected": {"output": ["a diagram"]}})
+    (_package(hub) / relative).parent.mkdir(parents=True, exist_ok=True)
+    (_package(hub) / relative).write_text("")
+    with pytest.raises(ValueError, match=f"profile file taken twice: {relative}"):
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+
+
+WORKSTATION_TEXT = (
+    "Run from /home/iamroot/dev/tcc-ecosystem/agentihub/agents/diagram/package and read\n"
+    "`/home/iamroot/dev/agentihub/agents/diagram/package/token.json`, the agent folder\n"
+    "/Users/op/hub/agents/diagram/ and its hook /home/op/hub/agents/diagram/hooks/render.py.\n"
+    "Config sits in /home/iamroot/.config/gws/, /root/.cache and /home/op.\n"
+    "Agents sit in /home/op/.claude/agents/other/notes.md.\n"
+    "Bare /home/op/hub/agents/diagram: done, /rootfs/x and cache/home/op/x stay.\n"
+    "Placeholders such as /home/.../foo.mp4 and ~/notes stay.\n"
+)
+PORTABLE_TEXT = (
+    "Run from profiles/diagram and read\n"
+    "`profiles/diagram/token.json`, the agent folder\n"
+    "profiles/diagram/ and its hook profiles/diagram/hooks/render.py.\n"
+    "Config sits in $HOME/.config/gws/, $HOME/.cache and $HOME.\n"
+    "Agents sit in $HOME/.claude/agents/other/notes.md.\n"
+    "Bare profiles/diagram: done, /rootfs/x and cache/home/op/x stay.\n"
+    "Placeholders such as /home/.../foo.mp4 and ~/notes stay.\n"
+)
+
+
+@pytest.mark.feature("hub-import-paths")
+@pytest.mark.parametrize("relative", ["CLAUDE.md", ".claude/rules/render.md", ".claude/skills/render/SKILL.md"])
+def test_workstation_paths_in_instructions_become_bundle_or_environment_forms(
+    hub: Path, tmp_path: Path, relative: str
+) -> None:
+    (_package(hub) / relative).write_text(WORKSTATION_TEXT)
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "profiles/diagram" / relative).read_text() == PORTABLE_TEXT
+
+
+@pytest.mark.feature("hub-import-paths")
+@pytest.mark.parametrize(
+    "path",
+    [
+        "C:\\Users\\nesto\\.chrome-debug-profile",
+        "C:/Users/nesto/Videos/clip.mp4",
+        "/mnt/c/Users/nesto/Desktop/thumb.png",
+        "/home/iamroot/dev/agentihub/agents/diagram/bootstrap.sh",
+        "/home/iamroot/dev/agentihub/agents/other/package/run.sh",
+        "/home/iamroot/dev/agentihub/agents/other/bootstrap.sh",
+        "C:\\Users\\nesto\\BOX",
+    ],
+)
+def test_a_workstation_path_with_no_portable_form_refuses_the_import(hub: Path, tmp_path: Path, path: str) -> None:
+    (_package(hub) / ".claude/rules/render.md").write_text(f"Open {path}.\n")
+    out = tmp_path / "bundle"
+    with pytest.raises(ValueError) as refused:
+        import_hub(hub, out, False, tmp_path / "data")
+    assert str(refused.value) == f"absolute path refused, no portable form: {path} in .claude/rules/render.md"
+    assert not out.exists()
+
+
+@pytest.mark.feature("hub-import-paths")
+def test_undecodable_instruction_bytes_survive_a_path_rewrite(hub: Path, tmp_path: Path) -> None:
+    (_package(hub) / "CLAUDE.md").write_bytes(b"\xff\xfe Read /home/op/.config/x.\n")
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "profiles/diagram/CLAUDE.md").read_bytes() == b"\xff\xfe Read $HOME/.config/x.\n"
+
+
+@pytest.mark.feature("hub-import-paths")
+@pytest.mark.parametrize("relative", ["scripts/run.py", ".claude/skills/render/run.sh", "CLAUDE.md-notes.md"])
+def test_workstation_paths_outside_instructions_are_left_alone(hub: Path, tmp_path: Path, relative: str) -> None:
+    (_package(hub) / relative).parent.mkdir(parents=True, exist_ok=True)
+    (_package(hub) / relative).write_text("ROOT = 'C:/Users/nesto'\n")
+    out = tmp_path / "bundle"
+    import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "profiles/diagram" / relative).read_text() == "ROOT = 'C:/Users/nesto'\n"
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize(
+    ("relative", "content"),
+    [
+        ("tools/package.json", json.dumps({"name": "tools", "scripts": {"build": "tsc"}})),
+        ("runners/requirements.txt", "# nothing to install\n"),
+    ],
+)
+def test_a_nested_manifest_that_installs_nothing_is_copied(
+    hub: Path, tmp_path: Path, relative: str, content: str
+) -> None:
+    (_package(hub) / relative).parent.mkdir(parents=True)
+    (_package(hub) / relative).write_text(content)
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert (out / "profiles/diagram" / relative).read_text() == content
+    assert report["deps"] == []
+
+
+@pytest.mark.feature("hub-import-assets")
+@pytest.mark.parametrize(
+    ("relative", "content", "dep"),
+    [
+        ("tools/package.json", json.dumps({"dependencies": {"zod": "3"}}), "diagram-npm-tools"),
+        ("runners/requirements.txt", "rich\n", "diagram-pip-runners"),
+    ],
+)
+def test_a_nested_manifest_that_installs_is_not_copied(
+    hub: Path, tmp_path: Path, relative: str, content: str, dep: str
+) -> None:
+    (_package(hub) / relative).parent.mkdir(parents=True)
+    (_package(hub) / relative).write_text(content)
+    out = tmp_path / "bundle"
+    report = import_hub(hub, out, False, tmp_path / "data")
+    assert not (out / "profiles/diagram" / relative).exists()
+    assert report["deps"] == [dep]
+
+
+@pytest.mark.feature("hub-import-assets")
+def test_an_agent_hooks_file_colliding_with_a_package_file_names_both(hub: Path, tmp_path: Path) -> None:
+    package = _package(hub)
+    (hub / "agents/diagram/hooks").mkdir()
+    (hub / "agents/diagram/hooks/render.py").write_text("print('agent')\n")
+    (package / "hooks").mkdir()
+    (package / "hooks/render.py").write_text("print('package')\n")
+    with pytest.raises(ValueError) as refused:
+        import_hub(hub, tmp_path / "bundle", True, tmp_path / "data")
+    assert str(refused.value) == (
+        f"profile file taken twice: hooks/render.py in {package}, "
+        f"by {package / 'hooks/render.py'} and {hub / 'agents/diagram/hooks/render.py'}"
+    )

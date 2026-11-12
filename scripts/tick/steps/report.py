@@ -358,7 +358,7 @@ registry.register(
         "doc items map",
         "wrapper events",
         _doc_items_map,
-        needs=frozenset({"ledger state", "drained resume"}),
+        needs=frozenset({"ledger state", "drained resume"}) | VIEWED,
         reads=pass_domains("doc"),
         writes=frozenset(),
         lane=Lane("slow"),

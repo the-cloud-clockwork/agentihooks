@@ -267,6 +267,25 @@ Each call is safe to repeat: a copy already present is skipped, and the pending 
 completes. All three calls refuse a bus without provisioning (`migration requires privileged provisioning`) or without
 scoping (`scoped migration is not enabled`).
 
+### State migration command
+
+`python -m scripts.events.migrate_state` runs `migrate_state` for one swarm and bucket from the hub's environment,
+the same way `python -m scripts.events.migrate_ready` moves ready offers. Ownership is always explicit: name each
+owned key with `--key`, or claim none with `--no-keys`, which creates the scoped stream empty and clears the hub's
+`legacy state requires explicit key ownership` skip for that swarm.
+
+```bash
+python -m scripts.events.migrate_state --swarm rig --bucket spoke-work --key claim-1 --key claim-2
+python -m scripts.events.migrate_state --swarm rig --bucket spoke-work --key claim-1 --key claim-2 --apply --quiescent
+```
+
+The default dry run is read only; without a claim it only inventories the bucket's keys. Each run prints one JSON
+report: `keys` claimed, `unowned` legacy keys left in the bucket, `retained` revisions of the claimed keys,
+`imported` when the scoped stream already holds a completed import, `would_move` (claimed revisions not yet in the
+scoped stream), `moved` and `failures`. A rerun after a completed move reports `imported` true and moves
+nothing. `--apply` requires `--quiescent`, an ownership claim and a provisioning credential; a failed move exits 1
+and leaves the import pending, and the same command resumes it.
+
 ## Check a member's scope
 
 From the member, with the credential `hive join` saved, a foreign subject is refused by the server:

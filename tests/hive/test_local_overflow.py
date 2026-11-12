@@ -96,6 +96,7 @@ def test_a_spawn_goes_to_a_headless_hive_with_room_first(setup, monkeypatch):
     setup.herdr.spawn.assert_not_called()
 
 
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatch):
     from scripts.hive import placement_waits
 
@@ -114,6 +115,7 @@ def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatc
     assert (totals["placement"], totals[placement_waits.ADMITTED]) == ("1", "1")
 
 
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.hive import placement_waits
 
@@ -126,6 +128,7 @@ def test_a_failed_local_spawn_counts_no_admission(setup: SimpleNamespace, monkey
     assert totals.get(placement_waits.ADMITTED, "0") == "0"
 
 
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_failed_hive_runtime_spawn_takes_back_no_admission(
     setup: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
