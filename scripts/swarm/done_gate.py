@@ -5,11 +5,13 @@ unless the proof files the fix instead.
 done in the last day and reopens one whose pull request is not merged; a done from the master or operator stands.
 """
 
+from types import MappingProxyType
+
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
 
 GATED = ("code", "ci")
-DONE = {"state": "done", "awaiting": ""}
+DONE = MappingProxyType({"state": "done", "awaiting": ""})
 WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 MERGE = "merge it, then run swarm done again"

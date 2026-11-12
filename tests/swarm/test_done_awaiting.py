@@ -1,7 +1,9 @@
+# ruff: noqa: F811
 import pytest
 
 from scripts.swarm import cli
 from scripts.swarm.ledger_events import PullRequest
+from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_promotion_watch import GREEN, SLUG, Ledger, gh, refresh, store  # noqa: F401
 
@@ -9,7 +11,9 @@ REOPEN = {"state": "open", "claimed_by": ""}
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(env, monkeypatch):  # noqa: F811
+def test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(
+    env: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -23,7 +27,7 @@ def test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(env,
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(env, monkeypatch):  # noqa: F811
+def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     _, ledger, _ = env
     ledger.rows["t1"]["group_members"] = ["t3"]
     member = {"lane": "eng", "title": "member", "description": "spec", "claimed_by": "", "merged_into": "t1"}
@@ -37,7 +41,7 @@ def test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members(env, monkeypa
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_the_tick_reopens_a_done_task_without_a_stale_wait(env, monkeypatch):  # noqa: F811
+def test_the_tick_reopens_a_done_task_without_a_stale_wait(env: tuple, monkeypatch: pytest.MonkeyPatch) -> None:
     swarm, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
@@ -55,7 +59,7 @@ def test_the_tick_reopens_a_done_task_without_a_stale_wait(env, monkeypatch):  #
 
 
 @pytest.mark.feature("done-clears-awaiting")
-def test_a_green_promotion_run_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(store):  # noqa: F811
+def test_a_green_promotion_run_clears_awaiting_and_a_reopened_task_shows_no_stale_wait(store: RedisStore) -> None:
     tasks = [{"id": "promo-900-0", "title": "Promotion red: helm-kind", "state": "blocked", "awaiting": "fix"}]
     ledger = Ledger(tasks)
     refresh(store, ledger, gh([GREEN]))

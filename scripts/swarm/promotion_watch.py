@@ -349,7 +349,7 @@ def _lane(store, slug: str) -> str:
 def _green(slug, ledger, doc, last):
     run_id, actions = last["id"], []
     for task in [t for t in _promotion_tasks(doc) if t.get("state") in CLOSABLE]:
-        live = ledger.update_task(slug, task["id"], done_gate.DONE, by=SENDER, if_state=CLOSABLE)
+        live = ledger.update_task(slug, task["id"], dict(done_gate.DONE), by=SENDER, if_state=CLOSABLE)
         if live.get("state") == "done":
             ledger.comment(slug, task["id"], CLEARED, by=SENDER)
             actions.append(f"closed {task['id']}, dev push run {run_id} passed")
