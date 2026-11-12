@@ -12,7 +12,7 @@ import redis
 from scripts.gates import intent
 from scripts.swarm import commands, controller, ledger_client, redis_grace
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV
-from scripts.swarm.ledger_client import LedgerClient, LedgerUnreachable
+from scripts.swarm.ledger_client import LedgerClient, LedgerOffline, LedgerUnreachable
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
@@ -132,9 +132,10 @@ def test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once(
 
 
 class RefusedLedger:
-    """A ledger that refuses the connection on the first closed check and stops the loop on the second."""
+    """A ledger that fails the first closed check with the given error and stops the loop on the second."""
 
-    def __init__(self) -> None:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
         self.reads: list[str] = []
 
     def binned(self, slug: str) -> bool:
@@ -145,14 +146,21 @@ class RefusedLedger:
         self.reads.append(slug)
         if len(self.reads) > 1:
             raise StopLoop()
-        raise ConnectionRefusedError(f"connection refused reading {slug}")
+        raise self.error
 
 
 @pytest.mark.feature("controller-survives-ledger-connection-failure")
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionRefusedError("connection refused reading proof"),
+        LedgerOffline("ledger proof: connection refused reading proof"),
+    ],
+)
 def test_a_refused_closed_check_ends_the_pass_and_the_controller_runs_the_next_pass(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], error: Exception
 ) -> None:
-    ledger = RefusedLedger()
+    ledger = RefusedLedger(error)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.delenv(HOST_SWARMS_ENV, raising=False)
     monkeypatch.setattr(intent, "keep_judging", lambda: None)
