@@ -555,6 +555,20 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
         _link(out / item, cast(Path, rollouts) / item)
 
 
+def _codex_agents(claude_agents: Path, out: Path) -> None:
+    """Write each Claude home agent with a description and body as a Codex custom agent file in ``out``."""
+    import tomlkit
+
+    from scripts.targets.copilot_target import _split_frontmatter
+
+    out.mkdir()
+    for src in sorted(claude_agents.iterdir()):
+        front, body = _split_frontmatter(src.read_text())
+        if front.get("description") and body.strip():
+            doc = {"name": front.get("name", src.stem), "description": front["description"]}
+            _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps({**doc, "developer_instructions": body.strip()}))
+
+
 def render_codex(
     name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False, push: bool = False
 ) -> Path | None:
@@ -613,6 +627,7 @@ def render_codex(
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
     _link_commands(out / "skills", claude / "commands")
+    _codex_agents(claude / "agents", out / "agents")
     _link_codex_state(
         out, operator, current["login"], homes.rollouts(rendered_root(), home_key(name, overlays)) if isolate else None
     )
