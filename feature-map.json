@@ -307,6 +307,16 @@
       ]
     },
     {
+      "id": "master-login-launch-folder-trust",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-folder-trust",
+      "behaviour": "A master launched on the master login route into a new folder finds that folder trusted in the master login config home it runs with, even when another master already holds that home, so it never stops at the Claude folder trust question before its opening prompt.",
+      "seam": "master_claude_login.launch_claude and the Claude config of the master login home",
+      "tests": [
+        "tests/test_master_claude_login.py::test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home"
+      ]
+    },
+    {
       "id": "inbox-alias-store-revision",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2225",
