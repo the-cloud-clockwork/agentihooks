@@ -40,6 +40,23 @@ if ARGV[3] ~= '' then redis.call('RPUSH', KEYS[#KEYS], ARGV[3]) end
 for index = 1, #KEYS - 1 do redis.call('HDEL', KEYS[index], ARGV[1]) end
 return 1
 """
+DUMP_KEYS = """
+local read = {
+  string = function(key) return redis.call('GET', key) end,
+  hash = function(key) return redis.call('HGETALL', key) end,
+  list = function(key) return redis.call('LRANGE', key, 0, -1) end,
+  set = function(key) return redis.call('SMEMBERS', key) end,
+  zset = function(key) return redis.call('ZRANGE', key, 0, -1, 'WITHSCORES') end,
+}
+local out = {}
+for index, key in ipairs(KEYS) do
+  local kind = redis.call('TYPE', key)['ok']
+  local value = false
+  if read[kind] then value = read[kind](key) end
+  out[index] = {kind, value, redis.call('PTTL', key)}
+end
+return out
+"""
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
@@ -901,12 +918,12 @@ def _whole(raw):
     return int(raw) if raw else None
 
 
-_READ = {
-    "string": lambda redis, key: redis.get(key),
-    "hash": lambda redis, key: redis.hgetall(key),
-    "list": lambda redis, key: redis.lrange(key, 0, -1),
-    "set": lambda redis, key: sorted(redis.smembers(key)),
-    "zset": lambda redis, key: redis.zrange(key, 0, -1, withscores=True),
+_DECODE = {
+    "string": lambda raw: raw,
+    "hash": lambda raw: dict(zip(raw[::2], raw[1::2])),
+    "list": lambda raw: raw,
+    "set": sorted,
+    "zset": lambda raw: [(member, float(score)) for member, score in zip(raw[::2], raw[1::2])],
 }
 _WRITE = {
     "string": lambda pipe, key, value: pipe.set(key, value),
@@ -917,12 +934,12 @@ _WRITE = {
 }
 
 
-def _dump(redis, keys):
+def _dump(redis: Any, keys: list[str]) -> dict[str, dict[str, Any]]:
+    """Every key's type, value and time to live, read in one atomic script so no write lands between two keys."""
     dumped = {}
-    for key in keys:
-        kind = redis.type(key)
-        if kind in _READ:
-            dumped[key] = {"type": kind, "value": _READ[kind](redis, key), "ttl_ms": max(redis.pttl(key), 0)}
+    for key, (kind, raw, ttl_ms) in zip(keys, redis.eval(DUMP_KEYS, len(keys), *keys)):
+        if kind in _DECODE:
+            dumped[key] = {"type": kind, "value": _DECODE[kind](raw), "ttl_ms": max(int(ttl_ms), 0)}
     return dumped
 
 
