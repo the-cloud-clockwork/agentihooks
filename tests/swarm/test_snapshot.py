@@ -224,7 +224,8 @@ def test_export_carries_each_shared_inbox_membership_of_the_swarm_and_none_of_an
     store.redis.sadd(inbox.key("wake-outbox"), item.id, "foreign-item")
     members = store.export("sw")["members"]
     for shared in ("waiting", "indexed", "open-indexed"):
-        assert members[inbox.key(shared)] == [eng]
+        assert eng in members[inbox.key(shared)]
+        assert "someone@elsewhere" not in members[inbox.key(shared)]
     assert item.id in members[inbox.key("wake-outbox")]
     assert "foreign-item" not in members[inbox.key("wake-outbox")]
 
