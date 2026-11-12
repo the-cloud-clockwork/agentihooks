@@ -61,7 +61,8 @@ def running(store: Any, slug: str) -> Any:
     """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night
     watch's Redis budget rebinds the copy as it rebinds the store. Its updates go through ``store``, so a write never
     stores the running state the copy reads."""
-    kind: Any = type(f"Running{type(store).__name__}", (Running, type(store)), dict[str, Any]())
+    base: Any = store.__class__
+    kind: Any = type(f"Running{base.__name__}", (Running, base), dict[str, Any]())
     view: Any = kind.__new__(kind)
     attributes: dict[str, Any] = store.__dict__
     copied: dict[str, Any] = view.__dict__
