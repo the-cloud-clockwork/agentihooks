@@ -64,8 +64,8 @@ export function drawFailures(force = false) {
   note.className = "sw-note bad";
   note.title = [...failures.values()].map((failure) => failure.text).join("\n");
   note.replaceChildren(...[...failures].map(([action, { text }]) => h("span", { class: "sw-fail" },
-    h("span", { class: "sw-fail-text", text }),
-    h("button", { class: "sw-btn sw-dismiss", type: "button", "data-dismiss": action, "aria-label": `Dismiss: ${text}` }))));
+    h("span", { class: "sw-fail-text", id: `sw-fail-${action}`, text }),
+    h("button", { class: "sw-btn sw-dismiss", type: "button", "data-dismiss": action, "aria-label": "Dismiss", "aria-describedby": `sw-fail-${action}` }))));
 }
 
 export function wireFailures() {

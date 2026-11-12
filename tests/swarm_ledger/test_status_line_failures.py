@@ -1,6 +1,9 @@
 """Browser proof that the swarm status line keeps each failure until it is dismissed or its control succeeds."""
 
+import re
 from collections.abc import Callable
+
+from playwright.sync_api import expect
 
 from tests.swarm_ledger.test_swarm_layout import Page, browser, open_page, status
 
@@ -36,6 +39,15 @@ def click_and_settle(page: Page, action: str) -> None:
     )
 
 
+def dismiss(page: Page, what: str) -> None:
+    """Click the dismiss button described by the failure that names the given control."""
+    button = page.tab.locator("#swarm-note .sw-fail", has_text=f"Could not {what}").get_by_role(
+        "button", name="Dismiss", exact=True
+    )
+    expect(button).to_have_accessible_description(re.compile(f"^Could not {what}"))
+    button.click()
+
+
 def test_a_failed_command_row_survives_a_later_accepted_command(open_page: OpenPage) -> None:
     rows = [QUOTA_FAILED, {"id": "b", "command": "swarm", "argv": ["pause"], "state": "accepted", "error": ""}]
     page = open_page(status(commands=rows), width=1920)
@@ -51,7 +63,7 @@ def test_a_failed_control_survives_another_accepted_control_and_clears_on_dismis
     click_and_settle(page, "pause")
     assert page.puts == [{"action": "pause"}]
     assert note(page) == "Could not stop the swarm: queue unavailable. Try again or ask the master."
-    page.tab.get_by_role("button", name="Dismiss: Could not stop the swarm").click()
+    dismiss(page, "stop the swarm")
     assert note(page) == ""
     assert not page.tab.locator("#swarm-note").is_visible()
 
@@ -84,13 +96,13 @@ def test_two_failures_show_together_until_each_is_dismissed(open_page: OpenPage)
     ]
     page = open_page(status(commands=rows), width=1920)
     assert page.tab.locator("#swarm-note [data-dismiss]").count() == 2
-    page.tab.get_by_role("button", name="Dismiss: Could not pause the swarm").click()
+    dismiss(page, "pause the swarm")
     assert note(page) == QUOTA_TEXT
 
 
 def test_a_dismissed_command_row_stays_dismissed_when_the_line_redraws(open_page: OpenPage) -> None:
     page = open_page(status(commands=[QUOTA_FAILED]), width=1920)
-    page.tab.get_by_role("button", name="Dismiss: Could not refresh quota").click()
+    dismiss(page, "refresh quota")
     click_and_settle(page, "pause")
     assert page.puts == [{"action": "pause"}]
     assert note(page) == ""
@@ -98,7 +110,7 @@ def test_a_dismissed_command_row_stays_dismissed_when_the_line_redraws(open_page
 
 def test_a_dismissed_command_row_stays_dismissed_after_a_reload(open_page: OpenPage) -> None:
     page = open_page(status(commands=[QUOTA_FAILED]), width=1920)
-    page.tab.get_by_role("button", name="Dismiss: Could not refresh quota").click()
+    dismiss(page, "refresh quota")
     page.tab.reload()
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert note(page) == ""
