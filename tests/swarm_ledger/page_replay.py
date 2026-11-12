@@ -14,6 +14,8 @@ INPUTS = json.loads(Path(__file__).with_name("page_replay.json").read_text())
 SLUG = "replay"
 VIEWPORT = {"width": 1920, "height": 1080}
 START = datetime.datetime(2026, 10, 6, 15, 30, tzinfo=datetime.UTC)
+CLOCK_FROM_MS = int((START - datetime.timedelta(seconds=10)).timestamp() * 1000)
+CLOCK_STAMP = "<page clock>"
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
     "1f15c4890000000d49444154789c6360f8cfc0f01f0005000201e22f7c2a0000000049454e44ae426082"
@@ -173,6 +175,30 @@ def settle(page, ms=0):
             return
         before = now
     raise TimeoutError("the page kept changing on each clock tick")
+
+
+def unclock(value: object) -> object:
+    """Replace every number the page's fake clock produced with one marker, keeping everything else."""
+    if isinstance(value, dict):
+        return {key: unclock(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [unclock(item) for item in value]
+    if isinstance(value, int) and not isinstance(value, bool) and value >= CLOCK_FROM_MS:
+        return CLOCK_STAMP
+    return value
+
+
+def unclocked(results: list) -> list:
+    """Normalise storage stamps in recorded steps, since settle ticks make them differ between equivalent replays."""
+    for result in results:
+        storage = result["page"]["storage"]
+        for key, raw in storage.items():
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            storage[key] = json.dumps(unclock(parsed), ensure_ascii=False, separators=(",", ":"))
+    return results
 
 
 def load_contract(path: Path) -> dict[str, int]:
@@ -407,7 +433,7 @@ def main() -> None:
     parser.add_argument("--remove", type=Path)
     args = parser.parse_args()
     removed = load_contract(args.remove) if args.remove else {}
-    results = record(args.root.resolve(), args.folder, removed)
+    results = unclocked(record(args.root.resolve(), args.folder, removed))
     args.output.write_text(json.dumps(results, indent=1, ensure_ascii=False) + "\n")
 
 
