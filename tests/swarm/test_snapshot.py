@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -334,7 +335,11 @@ def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: 
     }
     alias_keys, _ = inbox.keys_at(["sw-eng-old"])
     assert not journal & set(alias_keys)
-    assert journal <= set(store.export("sw")["keys"])
+    assert journal <= set(inbox.keys_at([eng])[0])
+    with patch.object(InboxStore, "keys_at", autospec=True, side_effect=InboxStore.keys_at) as listed:
+        exported = store.export("sw")
+    assert {"sw-eng-old", eng} <= set(listed.call_args.args[1])
+    assert journal <= set(exported["keys"])
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
