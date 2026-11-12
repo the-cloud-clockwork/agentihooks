@@ -477,6 +477,37 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
         box.close()
 
 
+@pytest.mark.feature("metrics-gate-rows-span-the-window")
+def test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail(tmp_path, monkeypatch):
+    import fakeredis
+
+    from scripts.gates import log as gate_log
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.gate_log, "swarm_home", lambda: tmp_path)
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    who = SimpleNamespace(name="worker", task="t")
+    stale = NOW - metrics_outbox.DAY_MS - 1
+    gate_log.append(SLUG, gate_log.Row.of("scope", "deny", who, reason="stale", now_ms=stale))
+    gate_log.append(SLUG, gate_log.Row.of("scope", "deny", who, reason="outside scope", now_ms=NOW - 3_000))
+    gate_log.append(SLUG, gate_log.Row.of("reruns", "count", who, reason="CI reruns 1 of 2", now_ms=NOW - 2_000))
+    for index in range(600):
+        gate_log.append(SLUG, gate_log.Row.of("talk", "observe", who, reason="x" * 100, now_ms=NOW - 1_000 + index))
+    assert gate_log.gate_log_path(SLUG).stat().st_size > gate_log.TAIL_BYTES
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], {})
+        denies = [row for row in box.recent("agent_events", NOW) if row["kind"] == "gate_deny"]
+        assert [(row["ts_ms"], row["reason"]) for row in denies] == [(NOW - 3_000, "outside scope")]
+        reruns = [row for row in box.recent("delivery_events", NOW) if row["kind"] == "rerun"]
+        assert [(row["ts_ms"], row["reason"]) for row in reruns] == [(NOW - 2_000, "CI reruns 1 of 2")]
+    finally:
+        box.close()
+
+
 def test_review_round_uses_stored_review_event():
     state = doc([event("review round", NOW + 2_000)])
     rows = metrics_swarm.delivery_rows(SLUG, state, [AGENT], {})
