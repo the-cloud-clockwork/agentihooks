@@ -81,10 +81,17 @@ class Renewer:
         self.due = now
         self.credential_due = now + CREDENTIAL_SECONDS
         self.sequence = 0
+        self.archived = 0
         self.lost: str | None = None
 
     def record(self) -> dict:
         return {**self.authority, DEADLINE: self.deadline_ms}
+
+    def acknowledge(self, watermark: int) -> None:
+        """Reports the durably archived transcript end on an immediate heartbeat and on every later one."""
+        self.archived = max(self.archived, watermark)
+        self.due = self.clock()
+        self.tick()
 
     def tick(self) -> None:
         now = self.clock()
@@ -146,6 +153,7 @@ class Renewer:
             "renewal_sequence": self.sequence,
             "state": "working",
             "observed_at": _timestamp(self.wall()),
+            "archive_watermark": self.archived,
         }
 
     def _until(self, deadline_ms: int) -> float:
@@ -167,6 +175,9 @@ class Unleased:
     lost: str | None = None
 
     def tick(self) -> None:
+        pass
+
+    def acknowledge(self, watermark: int) -> None:
         pass
 
 

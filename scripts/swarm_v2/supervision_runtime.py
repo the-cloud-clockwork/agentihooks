@@ -223,6 +223,8 @@ class Supervisor:
                 )
                 if portable and not self.validated(identifier, deadline):
                     identifier = None
+                elif portable:
+                    self.lease.acknowledge(read(self.root / "exporter.checkpoint.json")["transcript_end"])
                 break
             if "exporter" in self.exits:
                 break
