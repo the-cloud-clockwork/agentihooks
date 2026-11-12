@@ -183,6 +183,15 @@ def test_a_forced_route_ignores_quota_and_cap():
         router.select(_accounts(), quotas, {}, NOW, route="gamma")
 
 
+@pytest.mark.feature("codex-expired-routing")
+@pytest.mark.parametrize("account_index", [0, 1])
+def test_a_forced_route_refuses_an_expired_reading(account_index: int) -> None:
+    account = _accounts()[account_index]
+    quotas = {account.name: replace(_quota(15), expired=True)}
+    with pytest.raises(router.RoutingError, match=f"Codex account '{account.name}'.*expired"):
+        router.select(_accounts(), quotas, {}, NOW, route=account.name)
+
+
 def test_no_seat_names_why_and_seats_are_codex():
     with pytest.raises(
         router.RoutingError,

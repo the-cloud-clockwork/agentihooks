@@ -259,30 +259,12 @@ def _origin_url(git: list[str]) -> str:
     return shell([*git, "remote", "get-url", "origin"]).stdout.strip()
 
 
-def _fetch_url(url: str, branch: str, refused: str) -> None:
-    first = shell(["git", "fetch", "--", url, branch])
-    if first.returncode != 0:
-        _over_https(["git"], first.stderr.strip(), lambda: url, branch, refused)
-
-
-def _fetch_foreign(dep, branch):
-    wanted = repo_key(dep["branch_repo"])
-    checkouts = [path for path in dep.get("repository_branches") or {} if origin_key(path) == wanted]
-    if checkouts:
-        _fetch_origin(["git", "-C", checkouts[0]], branch, f"cannot fetch {branch} in {checkouts[0]}")
-    else:
-        _fetch_url(dep["branch_repo"], branch, f"cannot fetch {branch} from {dep['branch_repo']}")
-
-
-def _base_of(dep, foreign):
-    branch = dep["branch"]
-    merged = _merged_into_dev(dep)
-    if dep not in foreign and not merged:
-        _fetch_origin(["git"], branch, f"cannot fetch {branch}")
-        return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
-    if not merged:
-        _fetch_foreign(dep, branch)
-    return _dev_base()
+def _base_of(dep: dict[str, object], foreign: list[dict[str, object]]) -> str:
+    branch = str(dep["branch"])
+    if _merged_into_dev(dep) or dep in foreign:
+        return _dev_base()
+    _fetch_origin(["git"], branch, f"cannot fetch {branch}")
+    return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
 
 
 def _dev_base():

@@ -55,6 +55,7 @@ TODAY = {
         "health findings",
         "findings pass",
         "doc items map",
+        "progress heads",
     ],
     "wrapper metrics": ["metrics record", "bottleneck status", "inbox wake", "snapshot job", "knowledge warm"],
     "closing": ["last tick", "heartbeat", "status publish", "step starvation"],

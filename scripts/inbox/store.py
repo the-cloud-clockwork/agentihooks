@@ -32,6 +32,8 @@ DEFAULT_OWNER_TTL_S = 30
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 RECLAIMED = "returned to the master pool: its master is gone"
+ANSWER_REFUSED = "reopened: its answer was refused by the ledger page"
+LEDGER_REFUSAL = "cancelled: refused by the ledger page"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 OPEN = tuple(state for state in STATES if state not in CLOSED)
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
@@ -140,7 +142,14 @@ def ramped(item_ids: list[str]) -> list[list[str]]:
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id="", world=None):
+    def __init__(
+        self,
+        redis: Any,
+        *,
+        persist: Any = None,
+        session_id: str = "",
+        world: str | None = None,
+    ) -> None:
         """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
         own member."""
         from scripts.hive import scope
@@ -849,10 +858,7 @@ class InboxStore:
         legacy = answer_id and (item.state, item.reason) == close_reason("done", replied(answer_id))
         if item.state in CLOSED and not self.redis.hexists(key, field) and not legacy:
             raise InboxError(f"message {item_id} is closed: {item.reason}")
-        self.redis.hsetnx(key, field, answer_id or new_item_id())
-        reply_id = self.redis.hget(key, field)
-        if answer_id == reply_id and self.redis.hget(self.key("item", reply_id), "state") == "cancelled":
-            raise InboxError(f"answer {reply_id} to message {item_id} was refused")
+        reply_id = self._reply_slot(item_id, replier, answer_id)
         if entry := self.entry_of(item_id):
             self.about(reply_id, entry)
         try:
@@ -868,6 +874,26 @@ class InboxStore:
                 raise InboxError("a reply retry must keep its sender, recipient, text and informational flag") from None
         self._close_reply(item_id, replier, answer.id, answer_id)
         return answer
+
+    def _reply_slot(self, item_id: str, replier: str, answer_id: str) -> str:
+        """The answer id a reply sends under: a slot holding a refused answer is reopened for a fresh reply, and a
+        replay of the refused answer, or a slot its item no longer closes with, is refused."""
+        key = self.key("item", item_id)
+        field = f"reply:{replier}"
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        reply_id = self.redis.hget(key, field)
+        state, reason = self.redis.hmget(self.key("item", reply_id), "state", "reason")
+        if state != "cancelled":
+            return reply_id
+        ledger_refused = str(reason).startswith(LEDGER_REFUSAL)
+        if (
+            answer_id == reply_id
+            or not ledger_refused
+            or self.reopen(self.get(reply_id), replier, ANSWER_REFUSED) is None
+        ):
+            raise InboxError(f"answer {reply_id} to message {item_id} was refused")
+        self.redis.hsetnx(key, field, answer_id or new_item_id())
+        return self.redis.hget(key, field)
 
     def _close_reply(self, item_id, replier, reply_id, operation_id):
         item = self.get(item_id)

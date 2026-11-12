@@ -358,12 +358,37 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
     herdr, ledger = FakeHerdr({"p1": "idle"}), StrictLedger()
     t = sent_at(second)
-    for n in range(10):
-        run(inbox, herdr, ledger, t + n * W)
+    actions = [a for n in range(10) for a in run(inbox, herdr, ledger, t + n * W)]
+    assert f"the ledger page refused message {first.id}, closed it" in actions
     assert [text for _, text in ledger.alerts if "second message" in text]
     closed = inbox.get(first.id)
     assert closed.state == "cancelled" and "refused" in closed.reason and "date" in closed.reason
     assert any(first.id in i.text and "date" in i.text for i in inbox.pending_items("sw-eng-2"))
+
+
+@pytest.mark.feature("inbox-refused-answer-resend")
+def test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.inbox.store import Contended
+    from scripts.swarm.store import SwarmError
+
+    class RefusingLedger(FakeLedger):
+        def raise_alert(self, slug: str, source: str, text: str, item: str | None = None) -> None:
+            raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
+
+    def busy(answer: object, by: str, reason: str) -> None:
+        raise Contended("message changed meanwhile; run the command again")
+
+    asked = inbox.send("operator", "sw-eng-2", "how far along are we")
+    item = inbox.send("sw-eng-2", "sw-eng-1", "two tasks left", ref=asked.id)
+    inbox.about(item.id, "phases/p1")
+    monkeypatch.setattr(inbox, "reopen", busy)
+    herdr, ledger = FakeHerdr({"p1": "idle"}), RefusingLedger()
+    actions = [a for n in range(10) for a in run(inbox, herdr, ledger, sent_at(item) + n * W)]
+    refused = [a for a in actions if "refused" in a]
+    assert refused and set(refused) == {f"the ledger page refused message {item.id}, held it until it can be closed"}
+    assert inbox.get(item.id).state not in ("cancelled", "done")
 
 
 def test_counts_survive_a_fresh_store_connection(server, inbox):

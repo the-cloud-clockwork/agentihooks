@@ -16,6 +16,8 @@ See [proof loop health findings](swarm.md#proof-loop-health-findings) for rerun 
 
 See [stalled activity findings](swarm.md#stalled-activity-findings) for threshold configuration, wrapper loss recovery and investigation of active agents reported as stalled.
 
+See [overrun report](swarm.md#overrun-report) for the 90 minute master report on an agent that holds one task too long, what counts toward its age, the agents it skips and how to check a report.
+
 See [stall watchdog refreshed checks](swarm.md#requeued-pull-requests-and-refreshed-checks) for requeue waits, stale failure handling, fresh GitHub reads and [watchdog configuration](swarm.md#configure-watchdog-enforcement-and-limits).
 
 For publication retries, see [publishing unchanged files](swarm.md#publishing-unchanged-files): automatic remote comparison, skipped gates and pushes, output and missing branch handling.
@@ -25,6 +27,8 @@ For resumed work, see [publishing after a successor prepares a branch](swarm.md#
 For an existing pull request, see [continuing with one push](swarm.md#continue-an-existing-pull-request-with-one-push): retained branch selection, Stop behavior and lease failures.
 
 See [Doctor timer pass](swarm.md#doctor-timer-pass) for what one Doctor timer step reads, its interval setting and how to measure its wall time per pass.
+
+See [Master orders for its Doctor](swarm.md#master-orders-for-its-doctor) for how the watched master starts, resizes or stops its Doctor on the operator's quoted words, the thirty minute window, the relay notices on both ledgers and the refusals.
 
 See [Inbox escalation sender exclusion](swarm.md#inbox-escalation-sender-exclusion) for master handoffs, escalation timing, configuration, message history and delivery evidence.
 
