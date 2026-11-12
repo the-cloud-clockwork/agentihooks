@@ -176,6 +176,32 @@ def test_crashed_launch_is_ambiguous_and_never_relaunched(setup):
     setup.runtime.spawn.assert_called_once()
 
 
+def test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt(
+    setup, monkeypatch
+):
+    from scripts.hive.orders import RECEIPT_SECONDS
+    from scripts.swarm import lease
+
+    sent = lease.now_ms(setup.store)
+    now = [sent]
+    monkeypatch.setattr(lease, "now_ms", lambda store: now[0])
+    monkeypatch.setattr(lease, "require_epoch", lambda store, slug, epoch: None)
+    order = replace(setup.order, expires_at=sent + 2 * RECEIPT_SECONDS * 1000)
+    setup.orders.send("host", order)
+    finish = setup.consumer.orders.finish
+    monkeypatch.setattr(setup.consumer.orders, "finish", Mock(side_effect=KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        setup.consumer.poll()
+    monkeypatch.setattr(setup.consumer.orders, "finish", finish)
+    receipt = setup.orders.receipt(order)
+    if 0 <= setup.redis.ttl(receipt) <= RECEIPT_SECONDS:
+        setup.redis.delete(receipt)
+    now[0] = sent + RECEIPT_SECONDS * 1000 + 1000
+    setup.consumer.poll()
+    setup.runtime.spawn.assert_called_once()
+    assert setup.redis.hexists(receipt, "started")
+
+
 def test_wrong_host_cannot_admit_execution(setup):
     from scripts.hive.orders import Consumer
 
