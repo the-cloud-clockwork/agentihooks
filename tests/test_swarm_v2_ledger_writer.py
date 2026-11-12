@@ -113,6 +113,37 @@ def test_a_released_lease_lets_the_next_writer_in(tmp_path, lease):
     assert ledger_writer.conflicts_total(tmp_path) == 0
 
 
+@pytest.mark.feature("ledger-writer-lease-failed-record-releases")
+@pytest.mark.parametrize("step", ["pwrite", "ftruncate", "fsync"])
+def test_a_failed_holder_record_write_releases_the_lock(tmp_path, monkeypatch, step):
+    real = getattr(ledger_writer.os, step)
+    closed = []
+    real_close = ledger_writer.os.close
+
+    def fail_once(*args: object) -> object:
+        monkeypatch.setattr(ledger_writer.os, step, real)
+        raise OSError(28, "no space left")
+
+    def spy_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(ledger_writer.os, step, fail_once)
+    monkeypatch.setattr(ledger_writer.os, "close", spy_close)
+    failed = ledger_writer.WriterLease(tmp_path)
+    with pytest.raises(OSError, match="no space left"):
+        failed.acquire(CLAIMANT)
+    assert failed.held is False
+    assert len(closed) == 1
+    successor = ledger_writer.WriterLease(tmp_path).acquire(OTHER)
+    try:
+        assert successor.held is True
+        assert ledger_writer.holder(tmp_path) == OTHER
+    finally:
+        successor.release()
+    assert ledger_writer.conflicts_total(tmp_path) == 0
+
+
 def test_a_new_holder_replaces_a_longer_record(tmp_path):
     (tmp_path / ledger_writer.LOCK).write_text(json.dumps({**CLAIMANT, "host": "a much longer host name " * 4}))
     held = ledger_writer.WriterLease(tmp_path).acquire({"pid": 1})
