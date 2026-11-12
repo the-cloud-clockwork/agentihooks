@@ -13,6 +13,11 @@
 {{- fail "each workers.masterSwarms entry must be a swarm slug: letters, digits, dots, dashes or underscores" }}
 {{- end }}
 {{- end }}
+{{- range $capability := ($workers.capabilities | default list) }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" (toString $capability)) }}
+{{- fail "each workers.capabilities entry must be a capability name: letters, digits, dots, dashes or underscores" }}
+{{- end }}
+{{- end }}
 {{- $suffix := .suffix }}
 {{- $github := $workers.githubAuth }}
 {{- $brain := $workers.brainBinding | default dict }}
@@ -186,6 +191,8 @@ spec:
               value: {{ $workers.maxAgents | quote }}
             - name: HIVE_PREFER
               value: {{ $workers.prefer | default "" | quote }}
+            - name: HIVE_CAPABILITIES
+              value: {{ join "," ($workers.capabilities | default list) | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE
