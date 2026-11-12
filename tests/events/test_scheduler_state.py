@@ -53,7 +53,9 @@ def test_scheduler_selects_its_swarm_on_a_scoped_bus(monkeypatch):
 
 
 @pytest.mark.feature("controller-scoped-scheduler-state")
-def test_a_scoped_bus_without_a_swarm_setting_opens_the_unscoped_scheduler_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_scoped_bus_without_a_swarm_setting_opens_the_unscoped_scheduler_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from dataclasses import replace
 
     from scripts.events import factory
