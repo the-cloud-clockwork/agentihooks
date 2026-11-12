@@ -33,6 +33,7 @@ def home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return root
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_start_spawns_one_detached_run_named_by_the_delivery_id(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -103,6 +104,7 @@ def test_a_delivery_id_that_is_not_one_name_is_refused(home: Path, delivery_id: 
     assert not (home / "workflows" / "deliveries").exists()
 
 
+@pytest.mark.feature("scheduled-workflow-run-in-scheduling-project")
 def test_the_workflow_kind_round_trips_its_record() -> None:
     slot = slots.WorkflowSlot("tiny", "/case.md", "/project")
 
@@ -118,6 +120,7 @@ def test_the_workflow_kind_round_trips_its_record() -> None:
     assert slots.restore(slot.record()) == slot
 
 
+@pytest.mark.feature("scheduled-workflow-run-in-scheduling-project")
 def test_a_workflow_record_stored_without_a_project_runs_in_the_scheduler_folder(home: Path) -> None:
     slot = slots.restore({"kind": "workflow", "name": "tiny", "case": "/case.md"})
     spawn = Spawn()
@@ -128,6 +131,7 @@ def test_a_workflow_record_stored_without_a_project_runs_in_the_scheduler_folder
     assert spawn.calls[0][1]["cwd"] is None
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_the_workflow_slot_delivers_through_start(monkeypatch: pytest.MonkeyPatch) -> None:
     started = []
     monkeypatch.setattr(scheduled, "start", lambda *args: started.append(args) or True)
@@ -152,6 +156,7 @@ PROJECT_ONLY = (
 )
 
 
+@pytest.mark.feature("scheduled-workflow-run-in-scheduling-project")
 def test_a_fired_schedule_starts_a_workflow_defined_only_in_its_scheduling_project(
     home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -206,6 +211,7 @@ def finished_run(home: Path, run_id: str, state: dict[str, str]) -> Path:
     return folder
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_finished_run_sends_its_status_and_folder_to_the_owner(home: Path) -> None:
     folder = finished_run(home, "entry-1:slot-1", {"status": "passed"})
     inbox = Inbox()
@@ -220,6 +226,7 @@ def test_a_finished_run_sends_its_status_and_folder_to_the_owner(home: Path) -> 
     ]
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_run_that_saved_no_state_reports_failed(home: Path) -> None:
     inbox = Inbox()
 
@@ -230,12 +237,14 @@ def test_a_run_that_saved_no_state_reports_failed(home: Path) -> None:
 
 
 @pytest.mark.parametrize("state", [{"status": "running"}, {"stage": "answer"}], ids=["stopped-mid-run", "no-status"])
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_run_that_did_not_finish_reads_failed(home: Path, state: dict[str, str]) -> None:
     finished_run(home, "entry-1:slot-1", state)
 
     assert scheduled.run_status("entry-1:slot-1") == "failed"
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_an_unreadable_run_state_reads_failed(home: Path) -> None:
     folder = finished_run(home, "entry-1:slot-1", {"status": "passed"})
     (folder / store.STATE_FILE).write_text("{not json")
@@ -243,12 +252,14 @@ def test_an_unreadable_run_state_reads_failed(home: Path) -> None:
     assert scheduled.run_status("entry-1:slot-1") == "failed"
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_finished_status_reads_as_saved(home: Path) -> None:
     finished_run(home, "entry-1:slot-1", {"status": "blocked"})
 
     assert scheduled.run_status("entry-1:slot-1") == "blocked"
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_second_notice_for_the_same_run_is_dropped(home: Path) -> None:
     finished_run(home, "entry-1:slot-1", {"status": "failed"})
     inbox = Inbox(duplicate=True)
@@ -258,6 +269,7 @@ def test_a_second_notice_for_the_same_run_is_dropped(home: Path) -> None:
     assert len(inbox.sent) == 1
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_notify_connects_to_the_inbox_by_default(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     inbox = Inbox()
     monkeypatch.setattr(inbox_store, "connect", lambda: inbox)
@@ -267,6 +279,7 @@ def test_notify_connects_to_the_inbox_by_default(home: Path, monkeypatch: pytest
     assert inbox.sent[0][1]["item_id"] == "entry-1:slot-1:done"
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_a_notice_waits_in_the_outbox_while_redis_is_unreachable(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def unreachable() -> None:
         raise inbox_store.Unreachable("redis down")
@@ -283,6 +296,7 @@ def test_a_notice_waits_in_the_outbox_while_redis_is_unreachable(home: Path, mon
     assert queued["args"]["text"].startswith("workflow run entry-1:slot-1 failed, run folder ")
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_main_runs_the_workflow_then_notifies_the_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, list[str]]] = []
     monkeypatch.setattr(scheduled.cli, "main", lambda argv: calls.append(("run", argv)) or 1)
@@ -296,6 +310,7 @@ def test_main_runs_the_workflow_then_notifies_the_owner(monkeypatch: pytest.Monk
     ]
 
 
+@pytest.mark.feature("scheduled-run-notifies-owner")
 def test_main_notifies_the_owner_when_the_run_crashes(monkeypatch: pytest.MonkeyPatch) -> None:
     notified: list[tuple[str, str]] = []
 

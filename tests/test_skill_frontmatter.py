@@ -102,6 +102,7 @@ def test_tick_pattern_rule_carries_package_rule_frontmatter() -> None:
     assert not re.search(r"manifesto|§|~/\.claude/skills", RULE.read_text(), re.IGNORECASE)
 
 
+@pytest.mark.feature("tick-pattern-rule-role-list-from-roles-folder")
 def test_role_list_covers_every_package_role_folder() -> None:
     folders = [path for path in (PACKAGE / "roles").iterdir() if path.is_dir() and not path.name.startswith("_")]
 

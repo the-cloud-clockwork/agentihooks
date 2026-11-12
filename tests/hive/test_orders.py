@@ -123,6 +123,7 @@ def test_order_ack_and_live_execution(setup):
     assert not setup.redis.xrange(setup.orders.stream("host"))
 
 
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_a_hive_ack_carries_the_remote_control_its_launch_recorded(setup):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 

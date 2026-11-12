@@ -290,6 +290,7 @@ def _traced_sort(items: list[int]) -> list[int]:
     return sorted(items)
 
 
+@pytest.mark.feature("tick-step-profiler")
 def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     output = Output()
     monkeypatch.setattr(timing.sys, "stderr", output)
@@ -307,6 +308,7 @@ def test_within_profiles_a_step_named_in_the_env_var(monkeypatch: pytest.MonkeyP
     assert any("_traced_sort" in line for line in profile["top_own"])
 
 
+@pytest.mark.feature("tick-step-profiler")
 def test_within_without_the_env_var_never_calls_the_profiler(monkeypatch: pytest.MonkeyPatch) -> None:
     output = Output()
     monkeypatch.setattr(timing.sys, "stderr", output)
@@ -322,16 +324,19 @@ def test_within_without_the_env_var_never_calls_the_profiler(monkeypatch: pytest
     assert all(row["event"] != "swarm_tick_step_profile" for row in rows)
 
 
+@pytest.mark.feature("tick-step-profiler")
 def test_profiled_steps_is_empty_when_the_env_var_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AGENTIHOOKS_TICK_PROFILE_STEPS", raising=False)
     assert timing._profiled_steps() == frozenset()
 
 
+@pytest.mark.feature("tick-step-profiler")
 def test_profiled_steps_splits_several_names_on_commas(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTIHOOKS_TICK_PROFILE_STEPS", "collect acks, send ready,gather status")
     assert timing._profiled_steps() == frozenset({"collect acks", "send ready", "gather status"})
 
 
+@pytest.mark.feature("tick-step-profiler")
 def test_within_profiles_carry_the_running_pass_id(monkeypatch: pytest.MonkeyPatch) -> None:
     output = Output()
     monkeypatch.setattr(timing.sys, "stderr", output)

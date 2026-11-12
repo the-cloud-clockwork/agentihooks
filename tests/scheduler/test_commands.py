@@ -76,11 +76,13 @@ def case(tmp_path):
     return path
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_the_workflow_target_names_its_slot_with_the_case(case, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert commands.target_slot("workflow", "nightly", str(case)) == WorkflowSlot("nightly", str(case), str(tmp_path))
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
     monkeypatch.chdir(case.parent)
     slot = commands.target_slot("workflow", "nightly", "case.json")
@@ -105,6 +107,7 @@ def test_a_relative_case_is_kept_as_its_absolute_path(case, monkeypatch):
         ("session", OWNER, "only the workflow target takes a case"),
     ],
 )
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_a_case_fits_only_a_named_workflow_target(case, target, name, message):
     with refused(message):
         commands.target_slot(target, name, str(case))
@@ -168,11 +171,13 @@ def test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally(
     assert placed == [(run_placement.Run("delivery-1", "nightly", str(case), "/repo", OWNER, ("build",)), redis)]
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_the_workflow_target_needs_a_case():
     with refused("the workflow target needs a case"):
         commands.target_slot("workflow", "nightly")
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_a_case_that_is_not_a_file_is_refused(tmp_path):
     for case in (tmp_path / "missing.json", tmp_path):
         with refused(f"{case} is not a case file"):

@@ -208,6 +208,7 @@ def test_help_names_the_command_and_every_target(capsys, command, prog):
     )
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     case = tmp_path / "case.json"
@@ -243,6 +244,7 @@ def test_cron_add_places_a_workflow_on_a_hive_with_its_needs(
     assert (view["targets"][0]["placement"], view["targets"][0]["needs"]) == ("hive", ["build", "lint"])
 
 
+@pytest.mark.feature("scheduler-workflow-target-case")
 def test_a_case_on_another_target_is_refused(capsys, scheduler, tmp_path):
     case = tmp_path / "case.json"
     case.write_text("{}")
