@@ -168,9 +168,9 @@ def test_rename_names_a_running_codex_session_after_its_new_name(store, harness,
 def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import Mock
 
-    from scripts.codex_session import protocol
+    from scripts.codex_session import protocol, supervisor
     from scripts.codex_session.binding import CONNECTED, BindingStore, TransportRecord
-    from scripts.swarm.rename import rename_swarm
+    from scripts.swarm.rename import CONNECT_S, rename_swarm
     from scripts.swarm.runtime import HerdrRuntime, herdr_target
 
     old = store.next_name("sw", "eng")
@@ -197,6 +197,14 @@ def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, mon
     connection = Mock()
     connector = Mock(return_value=(connection, {}))
     monkeypatch.setattr(protocol, "connect", connector)
+    titled: list[str] = []
+    title = supervisor.thread_title
+
+    def spy(slug: str, row: AgentRecord) -> str:
+        titled.append(slug)
+        return title(slug, row)
+
+    monkeypatch.setattr(supervisor, "thread_title", spy)
     pane = {"pane_id": "w1:p1", "name": old, "workspace_id": "w1"}
 
     def herdr(args: list[str]) -> dict:
@@ -218,9 +226,11 @@ def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, mon
     rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
     new = store.agents("sw")[0].name
     assert pane["name"] == herdr_target(new) != old
-    assert connector.call_args.args[0] == "/run/managed/server.sock"
+    assert connector.call_args.args == ("/run/managed/server.sock", CONNECT_S)
     connection.request.assert_called_once_with("thread/name/set", {"threadId": "thread", "name": new})
     connection.close.assert_called_once()
+    assert store.redis.get(store.key("sw", "session-name", "w1:p1")) == new
+    assert set(titled) == {"sw"}
     rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 20)
     connection.request.assert_called_once()
 
