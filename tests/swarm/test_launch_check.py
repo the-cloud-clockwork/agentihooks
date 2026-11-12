@@ -907,8 +907,11 @@ def test_verify_binds_a_managed_agent_whose_launch_check_is_held(
 ) -> None:
     from scripts.tick.steps import observe
 
-    agent = AgentRecord("engineer@sw-0001", "eng", "t1", harness="codex", transport=transport, started_at=LAUNCH)
-    store.put_agent("sw", agent)
+    name = store.next_name("sw", "eng")
+    agent = store.start_execution(
+        "sw",
+        AgentRecord(name, "eng", "t1", seat="eng-1@sw", harness="codex", transport=transport, started_at=LAUNCH),
+    )
     launch_check.record(store, "sw", agent, {"joined": {"expected": "a", "actual": "b"}}, LAUNCH, 0, held=True)
     seen: list[str] = []
 
@@ -923,7 +926,9 @@ def test_verify_binds_a_managed_agent_whose_launch_check_is_held(
     assert seen == ([agent.name] if bound else [])
     assert actions == []
     runtime.retire.assert_not_called()
-    assert store.agents("sw") == [agent]
+    assert [(found.name, found.state, found.transport) for found in store.agents("sw")] == [
+        (agent.name, agent.state, transport)
+    ]
 
 
 def test_relaunch_mark_is_set_and_cleared_per_task(store):
