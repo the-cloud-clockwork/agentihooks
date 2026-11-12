@@ -63,9 +63,9 @@ def flush(folder: Path, pages: Iterable[Any]) -> None:
             if entry["url"].startswith("http")
         }
         result = [
-            {"source": store(folder, sources[entry["scriptId"]]), "functions": entry["functions"]}
+            {"source": store(folder, source), "functions": entry["functions"]}
             for entry in coverage
-            if sources.get(entry["scriptId"]) is not None
+            if (source := sources.get(entry["scriptId"])) is not None
         ]
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"capture-browser-{uuid.uuid4().hex}.json").write_text(json.dumps({"result": result, "test": test}))
