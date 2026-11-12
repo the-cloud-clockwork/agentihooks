@@ -4775,6 +4775,16 @@
         "tests/workflows/test_scheduled_hive.py::test_restore_refuses_a_file_outside_the_run_folder",
         "tests/workflows/test_scheduled_hive.py::test_a_hive_member_may_write_its_run_receipt_but_not_the_owners_inbox"
       ]
+    },
+    {
+      "id": "proof-master-launch-scratch-redis",
+      "origin": "regression",
+      "behaviour": "A pane launched for a scratch proof swarm, its master included, exports that swarm's AGENTIHOOKS_SWARM_REDIS_URL after the operator env, so its hooks read the scratch Redis rather than the shared one; a pane of a live swarm keeps the operator env setting.",
+      "seam": "scripts.init_agent._swarm_exports in the launcher script init-agent writes for a swarm pane",
+      "tests": [
+        "tests/test_proof_master_redis.py::test_a_proof_swarm_master_pane_reads_the_scratch_redis",
+        "tests/test_proof_master_redis.py::test_a_live_swarm_pane_keeps_the_operator_redis"
+      ]
     }
   ],
   "unmapped_rules": [
