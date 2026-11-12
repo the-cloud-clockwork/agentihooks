@@ -81,14 +81,16 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
     """Dispatch due work every second until stopped; a pass that loses or cannot take the dispatch lock ends alone.
 
-    Returns True when the runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
+    Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
     """
     from scripts.events import state
     from scripts.scheduler.lease import Busy, LostLock
+    from scripts.swarm.naming import PROOF_RE
 
     transient = state.unavailable()
     stopped = stop if stop is not None else _on_signals()
     silent_since: float | None = None
+    scratch = PROOF_RE.fullmatch(os.environ.get("AGENTIHOOKS_SWARM") or "") is not None
     with machine_lock("runner"):
         while not stopped.is_set():
             try:
@@ -96,11 +98,12 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
                 await asyncio.to_thread(scheduler.collect_runs)
                 silent_since = None
             except (LostLock, Busy) as exc:
+                silent_since = None
                 print(f"scheduler pass ended: {exc}", file=sys.stderr)
             except transient:
                 now = time.monotonic()
                 silent_since = now if silent_since is None else silent_since
-                if now - silent_since >= UNREACHABLE_S:
+                if scratch and now - silent_since >= UNREACHABLE_S:
                     print(
                         f"scheduler stops: the state store did not answer for {UNREACHABLE_S} seconds", file=sys.stderr
                     )

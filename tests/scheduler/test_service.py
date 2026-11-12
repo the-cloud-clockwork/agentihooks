@@ -906,6 +906,7 @@ async def test_a_runner_stops_once_its_state_store_stays_silent_past_the_bound(
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
     _clock(service, monkeypatch, [0, 100, 300, 400])
     stop, passes = asyncio.Event(), []
 
@@ -931,6 +932,7 @@ async def test_an_answer_restarts_the_silence_bound(monkeypatch: pytest.MonkeyPa
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
     _clock(service, monkeypatch, [0, 299, 598])
     stop, passes = asyncio.Event(), []
 
@@ -940,6 +942,55 @@ async def test_an_answer_restarts_the_silence_bound(monkeypatch: pytest.MonkeyPa
             stop.set()
         if len(passes) != 2:
             raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1, 1, 1]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+async def test_a_held_dispatch_lock_counts_as_an_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+    from scripts.scheduler.lease import Busy
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
+    _clock(service, monkeypatch, [0, 300])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 2:
+            raise Busy("held")
+        if len(passes) == 4:
+            stop.set()
+            return
+        raise exceptions.ConnectionError("Connection refused")
+
+    assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
+    assert passes == [1, 1, 1, 1]
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+@pytest.mark.parametrize("swarm", ["rig-grade-swarm", ""])
+async def test_a_runner_outside_a_proof_swarm_keeps_waiting_for_its_state_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, swarm: str
+) -> None:
+    from redis import exceptions
+
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    _clock(service, monkeypatch, [0, 300, 600, 900])
+    stop, passes = asyncio.Event(), []
+
+    def drain() -> None:
+        passes.append(1)
+        if len(passes) == 4:
+            stop.set()
+        raise exceptions.ConnectionError("Connection refused")
 
     assert await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop) is False
     assert passes == [1, 1, 1, 1]
