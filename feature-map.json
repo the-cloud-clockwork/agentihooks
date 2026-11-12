@@ -4715,6 +4715,16 @@
       ]
     },
     {
+      "id": "metrics-gate-rows-span-the-window",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t617",
+      "behaviour": "The swarm metrics pass reads gate denies and reruns from the whole one day metrics window of the gate log, so rows older than its last 64 KB still reach the agent and delivery tables.",
+      "seam": "scripts.swarm.metrics_swarm.record_pass through scripts.gates.log.since",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail"
+      ]
+    },
+    {
       "id": "tick-step-profiler",
       "origin": "inventory",
       "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
