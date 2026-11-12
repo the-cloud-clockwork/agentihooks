@@ -275,7 +275,7 @@ class PushStop:
 
         url = str(task["pr_url"])
         pull = self.github()(url)
-        if finished(pull) or pull.queued or not pull.running:
+        if pull is None or finished(pull) or pull.queued or not pull.running:
             return ""
         return "" if never_started(pull) else url
 

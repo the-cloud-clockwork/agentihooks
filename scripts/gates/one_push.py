@@ -142,10 +142,10 @@ def never_started(pull: "PullRequest") -> bool:
     return not pull.started and not pull.required_pending and not pull.checks_pending
 
 
-def finished(pull: "PullRequest | None") -> bool:
-    """Whether a push no longer cancels checks worth waiting for: no open pull request, a red or failed check on its
+def finished(pull: "PullRequest") -> bool:
+    """Whether a push no longer cancels checks worth waiting for: a closed pull request, a red or failed check on its
     head, or a head that conflicts with its base."""
-    return pull is None or pull.state != "OPEN" or pull.red or pull.head_red or pull.mergeable == "CONFLICTING"
+    return pull.state != "OPEN" or pull.red or pull.head_red or pull.mergeable == "CONFLICTING"
 
 
 class OnePush:
@@ -189,7 +189,7 @@ class OnePush:
         if task.get("branch") and task["branch"] not in destinations(where, args):
             return ""
         pull = self.github()(task["pr_url"])
-        if finished(pull):
+        if pull is None or finished(pull):
             return ""
         if pull.queued:
             return queue_refusal(who.swarm, task["pr_url"])
