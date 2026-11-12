@@ -148,6 +148,7 @@ def test_health_rows_carry_the_recorded_failure(store, monkeypatch):
     assert [row["remote_control_failure"] for row in rows] == [{"message": "Remote Control failed", "at": 7}, None]
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_status_text_and_json_show_the_master_remote_control_line(env, capsys):
     from types import SimpleNamespace
 

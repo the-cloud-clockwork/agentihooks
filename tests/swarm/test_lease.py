@@ -551,6 +551,7 @@ def test_the_lease_holds_through_the_shared_database_with_the_ledger_server_unre
 
 
 @pytest.mark.parametrize(("folder", "address"), [("scratchpad/proof/ledger", "https://ledger.example"), ("ledger", "")])
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited(
     monkeypatch: pytest.MonkeyPatch, tmp_path, folder: str, address: str
 ) -> None:

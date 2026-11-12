@@ -134,6 +134,7 @@ def test_source_control_rule_covers_swarm_calls_and_uses_explicit_exceptions() -
     assert allowed == ["/scripts/swarm/github_reads.py", "/scripts/tick/adapters/github.py"]
 
 
+@pytest.mark.feature("tick-unbounded-read-rule")
 def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
     steps = _jobs()["scan"]["steps"]
     step = next(step for step in steps if step.get("name") == "Rule exceptions only shrink")
@@ -145,6 +146,7 @@ def test_source_control_allowlist_is_graded_against_the_caller_base() -> None:
     assert lists == ["source-control-allowlist.json", "tick-unbounded-read-allowlist.json"]
 
 
+@pytest.mark.feature("tick-unbounded-read-rule")
 def test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_task() -> None:
     rule = yaml.safe_load((_ROOT / ".semgrep/tick-unbounded-read.yml").read_text())["rules"][0]
     assert rule["id"] == "tick-unbounded-store-read"

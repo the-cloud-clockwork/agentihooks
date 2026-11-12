@@ -325,6 +325,7 @@ def test_the_primary_login_is_refused_admission_and_capped_at_its_reserve(world,
     assert world.quota.admit(ACCOUNT, HARNESS).action != quota.ADMIT
 
 
+@pytest.mark.feature("swarm-quota-room-primary-reserve-above-floor")
 def test_the_primary_login_is_refused_above_the_routing_floor_by_its_reserve(world, monkeypatch):
     from scripts import master_claude_login as login
     from scripts.routing import reservation

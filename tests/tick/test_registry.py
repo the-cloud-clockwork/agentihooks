@@ -319,6 +319,7 @@ assert {step.name for step in registry.steps()} == first
 """
 
 
+@pytest.mark.feature("tick-registry-loads-steps-on-module-import")
 def test_a_first_read_keeps_every_step_when_the_step_modules_load_under_a_swapped_registry() -> None:
     """A process whose first registry read precedes any step module import, then imports every step module under a
     swapped registry as the catalogue check does, still holds every step in the module registry."""
