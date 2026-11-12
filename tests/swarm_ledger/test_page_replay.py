@@ -104,3 +104,44 @@ def test_quiet_times_out_instead_of_capturing_while_a_delivery_stays_pending(mon
     with pytest.raises(TimeoutError):
         page_replay.quiet(page)
     assert page.captures == 0
+
+
+def _step(stamp: int, text: str = "Started t1", fixture: int = 1791294000000, html: str = "<main></main>") -> dict:
+    """One recorded replay step whose storage holds page clock stamps written at stamp."""
+    doc = {"chat": [{"at": fixture, "text": "Will do"}, {"at": stamp, "text": text}]}
+    return {
+        "step": "chat",
+        "page": {
+            "html": html,
+            "storage": {
+                "plan-ledger:replay:v2": json.dumps({"doc": doc, "at": stamp}),
+                "plan-ledger:replay:v2:pending": json.dumps({"ops": [], "checks": {}, "at": stamp}),
+                "plan-ledger:replay:chat-seen": str(stamp),
+                "plan-ledger:replay:fold": '{"notes-box":true}',
+            },
+        },
+        "requests": [],
+    }
+
+
+def test_unclocked_equates_replays_that_differ_only_in_page_clock_stamps() -> None:
+    base = page_replay.unclocked([_step(1791300604360)])
+    head = page_replay.unclocked([_step(1791300604340)])
+    assert json.dumps(base) == json.dumps(head)
+    storage = base[0]["page"]["storage"]
+    assert page_replay.CLOCK_STAMP in storage["plan-ledger:replay:chat-seen"]
+    assert '"at":1791294000000' in storage["plan-ledger:replay:v2"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _step(1791300604340, text="Started t2"),
+        _step(1791300604340, fixture=1791294000001),
+        _step(1791300604340, html="<main>changed</main>"),
+    ],
+)
+def test_unclocked_still_reports_a_real_page_difference(fault: dict[str, object]) -> None:
+    base = page_replay.unclocked([_step(1791300604360)])
+    head = page_replay.unclocked([fault])
+    assert json.dumps(base) != json.dumps(head)

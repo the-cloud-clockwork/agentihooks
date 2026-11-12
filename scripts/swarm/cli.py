@@ -1981,24 +1981,24 @@ def _git(run, *args):
         raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
 
 
-def worktree_branch(recorded, run=subprocess.run):
+def worktree_branch(recorded: str | None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> str:
     current = _git(run, "branch", "--show-current")
     branch = current.stdout.strip() if current.returncode == 0 else ""
     if not branch:
         raise SwarmError("swarm branch runs in a worktree on a branch; this checkout is on none")
-    target = branch
-    if recorded and recorded != branch:
-        target = f"HEAD:{recorded}"
-        if _tracks(run, recorded):
-            branch = recorded
-    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
+    target = f"HEAD:{recorded}" if recorded and recorded != branch else branch
+    branch = recorded if recorded and recorded != branch and _upstream(run) == recorded else branch
+    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode == 0:
+        return branch
+    upstream = "" if recorded or (found := _upstream(run)) in ("dev", "main", "master", "v1") else found
+    if not upstream or _git(run, "ls-remote", "--exit-code", "--heads", "origin", upstream).returncode != 0:
         raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
-    return branch
+    return upstream
 
 
-def _tracks(run, recorded):
+def _upstream(run: Callable[..., subprocess.CompletedProcess[str]]) -> str:
     done = _git(run, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-    return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
+    return done.stdout.strip().partition("/")[2] if not done.returncode and done.stdout.startswith("origin/") else ""
 
 
 PULL_SECONDS = 20
@@ -2232,7 +2232,7 @@ def cmd_done(store: RedisStore, args: argparse.Namespace) -> None:
     if refused:
         raise SwarmError(refused)
     _feature_gate(store, args.slug, agent, proven, pull)
-    fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
+    fields = {**done_gate.DONE, **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
     closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
