@@ -563,7 +563,7 @@ def _codex_agents(claude_agents: Path, out: Path) -> None:
 
     out.mkdir()
     for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
-        parts = re.split(r"^---[ \t]*$", src.read_text(), maxsplit=2, flags=re.M)
+        parts = re.split(r"^---[ \t\r]*$", src.read_text(), maxsplit=2, flags=re.M)
         if len(parts) != 3 or parts[0]:
             continue
         try:

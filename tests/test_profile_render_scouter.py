@@ -70,6 +70,15 @@ def test_a_codex_agent_keeps_a_dash_rule_inside_its_frontmatter_and_body(world: 
     assert agent["developer_instructions"] == "Step one.\n---\nStep two."
 
 
+def test_a_codex_agent_reads_frontmatter_with_windows_line_endings(world: dict[str, Any]) -> None:
+    _seat(world, "engineer")
+    path = world["bundle"] / ".claude" / "agents" / "crlf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"---\r\ndescription: Windows helper.\r\n---\r\nHelp.\r\n")
+    agent = tomllib.loads((_home("codex", "engineer") / "agents" / "crlf.toml").read_text())
+    assert agent == {"name": "crlf", "description": "Windows helper.", "developer_instructions": "Help."}
+
+
 def test_a_codex_home_skips_an_agent_without_frontmatter(world: dict[str, Any]) -> None:
     _seat(world, "engineer")
     _write(world["bundle"] / ".claude" / "agents" / "plain.md", "Intro.\n---\ndescription: Not a header.\n---\nBody.\n")
