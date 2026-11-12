@@ -20,7 +20,7 @@ CONFIG = {
     "strict": ["hooks", "scripts"],
 }
 _BASEDPYRIGHT = (sys.executable, "-I", "-m", "basedpyright")
-_NODE_OPTIONS = "--max-old-space-size=6656"
+_NODE_OPTIONS = "--max-old-space-size=5120"
 
 
 class GradeError(Exception):
@@ -59,8 +59,8 @@ def sources(head: Path) -> list[str]:
 def measure(head: Path, files: list[str] | None = None) -> dict[str, int]:
     """Run basedpyright over the given sources, every source when None, in sorted order and count its errors per file.
 
-    An empty list measures nothing. The checker empties its type cache once the Node heap passes ninety percent of
-    its limit, and when that happens varies between runs, so the heap limit is raised well above what the check uses.
+    An empty list measures nothing. The Node heap limit keeps the checker inside the 6 GiB memory limit of the anton-oss
+    runner container; past ninety percent of it the checker empties its type cache, which slows the check.
     """
     files = sources(head) if files is None else sorted(files)
     if not files:
