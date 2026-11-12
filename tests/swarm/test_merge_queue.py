@@ -1276,3 +1276,15 @@ def test_the_stall_route_never_opens_a_dequeue_for_the_master(monkeypatch: pytes
     seen = stalled_master(monkeypatch, tmp_path, [STALL_TASK])
     assert cli.main(["sw", "merge", "dequeue", URL]) == 1
     assert seen == []
+
+
+@pytest.mark.feature("stall-route-first-focused-urgent-task")
+def test_the_stall_route_skips_an_earlier_urgent_task_outside_the_focus(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.swarm import stall_queue
+
+    rows = [{**STALL_TASK, "id": "t0", "phase": "p2"}, {**STALL_TASK, "id": "t1", "phase": "p1"}]
+    seen = stalled_master(monkeypatch, tmp_path, rows, focus=("phases/p1",))
+    assert cli.main(["sw", "merge", "queue", URL]) == 0
+    assert seen[0]["journal"].context == {"route": stall_queue.ROUTE, "task": "t1"}

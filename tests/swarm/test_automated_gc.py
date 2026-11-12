@@ -581,6 +581,7 @@ def test_an_answer_already_cancelled_is_recorded_without_failing_the_sweep(world
     assert inbox.get(reply.id).reason == reason
 
 
+@pytest.mark.feature("automated-gc-resolves-inbox-store-at-call-time")
 def test_a_first_import_under_a_patched_inbox_store_sweeps_with_the_real_store(
     world: tuple[RedisStore, InboxStore, AgentRecord, Mock, Mock], monkeypatch: pytest.MonkeyPatch
 ) -> None:

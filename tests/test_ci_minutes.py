@@ -339,6 +339,7 @@ def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
     assert {key for _, key in calls} == {"jobs"}
 
 
+@pytest.mark.feature("ci-minutes-small-job-page-fallback")
 def test_a_run_whose_full_job_page_fails_is_read_in_small_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
