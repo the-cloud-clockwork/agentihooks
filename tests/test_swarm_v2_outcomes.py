@@ -374,6 +374,39 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     assert len(provider.calls) == 1
 
 
+def test_controller_completion_clears_awaiting_and_replays(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from scripts.swarm_ledger.api.resources import revision
+    from tests import sv2_ctl05_cases
+
+    outcomes, repository, token, proposal, _, _, agent = sv2_ctl05_cases.build(monkeypatch, tmp_path)
+    _, rejected = repository.apply_ops(
+        outcomes.authority.slug,
+        ops=[
+            {
+                "id": "await-merge",
+                "op": "task_update",
+                "item": f"tasks/{proposal.task_id}",
+                "by": agent.name,
+                "fields": {"awaiting": "merge"},
+            }
+        ],
+    )
+    assert rejected == []
+    task = repository.get_document(outcomes.authority.slug)["tasks"][0]
+    assert task["awaiting"] == "merge"
+    proposal = replace(proposal, task_revision=revision(task))
+    outcomes.propose(token, proposal)
+
+    result = outcomes.complete(token, proposal.generation, repository)
+    completed = repository.get_document(outcomes.authority.slug)
+    assert completed["tasks"][0]["state"] == "done"
+    assert completed["tasks"][0]["done"] is True
+    assert completed["tasks"][0]["awaiting"] == ""
+    assert outcomes.authority.current(proposal.task_id).state == "completed"
+    assert outcomes.complete(token, proposal.generation, repository) == result
+    assert repository.get_document(outcomes.authority.slug) == completed
+
+
 def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture):
     outcomes, authority, token, proposal, provider, task, *_ = fixture
     outcomes.propose(token, proposal)
