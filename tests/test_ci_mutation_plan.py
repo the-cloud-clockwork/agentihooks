@@ -820,7 +820,7 @@ def test_a_split_mutant_overruns_alone_only_when_one_of_its_units_outgrows_a_sha
     }
     split = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2000.0, 1000.0]}}, 1080)
     assert split.startswith("The slowest mutation shard needs 2800 worker seconds")
-    assert split.endswith("hold at most 216000, so split it into at least 2 pull requests.")
+    assert split.endswith("hold at most 64800, so split it into at least 2 pull requests.")
     fits = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2700.0, 300.0]}}, 1080)
     assert fits.startswith("The slowest mutation shard needs 2800 worker seconds")
     whole = budget_overrun({**planned, "unit_costs": {"scripts.sample.x__mutmut_1": [2701.0, 299.0]}}, 1080)

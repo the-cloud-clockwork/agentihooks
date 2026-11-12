@@ -916,9 +916,9 @@ Only a plan whose slowest shard still overruns at the ceiling fails at plan time
 
 | Measured worker seconds at three workers | Shards | Result |
 |---|---|---|
-| up to 108000 | up to 40 | one wave |
-| 108001 to 216000 | 41 to 80 | two waves, every mutant graded |
-| over 216000, or one unit over 2700 | 80 | refused at plan time |
+| up to 32400 | up to 12 | one wave |
+| 32401 to 64800 | 13 to 24 | two waves, every mutant graded |
+| over 64800, or one unit over 2700 | 24 | refused at plan time |
 
 ### What the worker count sizes
 
@@ -1653,7 +1653,7 @@ A preflight plan with split mutants runs two stages. In the early stage (`probe`
 |---|---|---|
 | `probe` | `probe_shards` in `plan.json`: the split mutants' head cost, `5.6 + 1.25 * head_seconds` each, divided by the planned workers times 120 seconds, rounded up. It is at least 1 and at most 40 (the batch runner pool) or the number of split mutants | One head run per split mutant |
 | `replan` | One job on the light pool, after every `probe` job succeeds | Merges the early results into the plan, replans the shards and uploads `mutation-plan-probed` |
-| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 40 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
+| `mutation-shard` | `shards` in the probed plan, sized for the lowest planned stage wall. A stage costs one job setup of 180 seconds plus its slowest shard's work per worker for each wave of 12 batch runners. The planner takes the fewest shards whose stage plans within six minutes (360 seconds, or the shard budget less the longest early job when that is smaller); when no count does, it takes the count with the lowest planned stage wall whose slowest shard fits the remaining budget, so a large remainder runs one wave of longer shards before two waves of short ones. A shard is graded against the remaining budget | Whole mutants at their measured cost. Each surviving split mutant's units at their slice cost without the head (`unit cost - 1.25 * head_seconds`), or at the cost the same mutant and slice took on the branch's last run. A split mutant the early stage killed is assigned to one shard at zero cost and graded as killed without running |
 
 On the e2 proof, [run 41605474823](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/41605474823) sized both stages at 49 jobs from 130220 estimated worker seconds. Its early stage killed 451 of 493 split mutants. The 356 surviving units then took 16849 observed worker seconds; their head plus slice estimate was 69876.
 
