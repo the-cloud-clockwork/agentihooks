@@ -86,3 +86,7 @@ def hive() -> Hive:
 
 def hooks() -> Hooks:
     return _port("hooks")
+
+
+def presence() -> Any:
+    return _port("presence")
