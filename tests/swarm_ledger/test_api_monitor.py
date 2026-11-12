@@ -264,8 +264,11 @@ def test_a_seat_counts_in_its_row_and_the_total_and_in_the_split_only_for_claude
     ("state", "counted"), [("working", 1), ("launching", 1), ("suspect", 1), ("idle", 1), ("finished", 0)]
 )
 def test_every_seat_state_counts_except_finished(state: str, counted: int) -> None:
-    data = viewed(Store({"one": "running"}, {"one": [seat("engineer@1", state=state)]}), *ports_for([ROOT], {}))
-    assert data["agents"]["total"] == counted
+    data = viewed(
+        Store({"one": "running"}, {"one": [seat("engineer@1", state=state), seat("engineer@2")]}),
+        *ports_for([ROOT], {}),
+    )
+    assert data["agents"]["total"] == counted + 1
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
