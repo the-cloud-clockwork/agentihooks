@@ -97,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.apply and (not args.quiescent or not (args.key or args.no_keys)):
         parser.error("--apply requires explicit --key or --no-keys ownership and --quiescent")
+    if args.purge_envelopes and not args.no_keys:
+        parser.error("--purge-envelopes requires --no-keys: it drops envelope keys instead of importing them")
     config = BusConfig.from_environ()
     if config.backend != "nats" or args.apply and not config.provision:
         parser.error("migration requires the NATS backend and privileged provisioning for --apply")
@@ -116,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
                 failures.append(str(error))
             moved = _target(bus, args.swarm, args.bucket, keys)[0] - before
             if args.purge_envelopes and not failures:
-                purged = _purge(bus, args.bucket, envelope_keys)
+                try:
+                    purged = _purge(bus, args.bucket, envelope_keys)
+                except (APIError, NatsError) as error:
+                    failures.append(str(error))
         report: dict[str, Any] = {
             "applied": args.apply,
             "swarm": args.swarm,

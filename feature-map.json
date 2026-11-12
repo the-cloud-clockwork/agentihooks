@@ -139,6 +139,8 @@
         "tests/events/test_migrate_state.py::test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply",
         "tests/events/test_migrate_state.py::test_purge_dry_run_names_the_keys_and_deletes_nothing",
         "tests/events/test_migrate_state.py::test_purge_is_skipped_when_the_apply_fails",
+        "tests/events/test_migrate_state.py::test_a_refused_purge_is_reported_as_a_failure",
+        "tests/events/test_migrate_state.py::test_purge_requires_the_no_keys_claim",
         "tests/events/test_migrate_state.py::test_report_carries_no_purge_fields_without_the_option"
       ]
     },

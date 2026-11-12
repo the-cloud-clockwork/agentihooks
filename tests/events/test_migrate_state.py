@@ -1,5 +1,6 @@
 import importlib
 import json
+from typing import Any
 
 import pytest
 
@@ -269,7 +270,8 @@ def test_help_explains_ownership_and_quiet_window(command, monkeypatch, capsys):
         command.main(["--help"])
     assert error.value.code == 0
     assert " ".join(capsys.readouterr().out.split()) == (
-        "usage: migrate-state [-h] --swarm SWARM --bucket BUCKET [--key KEY | --no-keys] [--apply] [--quiescent] [--purge-envelopes] "
+        "usage: migrate-state [-h] --swarm SWARM --bucket BUCKET [--key KEY | --no-keys] [--apply] [--quiescent] "
+        "[--purge-envelopes] "
         "Inventory or migrate one swarm's legacy state bucket to its scoped state stream options: "
         "-h, --help show this help message and exit "
         "--swarm SWARM The swarm that owns the migrated keys "
@@ -288,7 +290,7 @@ def _envelope(swarm: str, key: str) -> bytes:
     return Envelope(f"id-{swarm}-{key}", "inbox.send", swarm, "inbox", key, 1, 0, "swarm", {}).encode()
 
 
-def _seed_inbox(legacy) -> None:
+def _seed_inbox(legacy: Any) -> None:
     old = legacy.state("inbox")
     first = old.create("send.one", _envelope("rig", "one"))
     old.update("send.one", _envelope("rig", "one-again"), first)
@@ -301,7 +303,9 @@ PURGE = ["--swarm", "rig", "--bucket", "inbox", "--no-keys", "--purge-envelopes"
 
 
 @pytest.mark.feature("legacy-state-migration-command")
-def test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply(buses, command, capsys):
+def test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply(
+    buses: Any, command: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
     legacy, scoped = buses
     _seed_inbox(legacy)
     code, report = _run(command, capsys, [*PURGE, "--apply", "--quiescent"])
@@ -322,7 +326,9 @@ def test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply(buses,
 
 
 @pytest.mark.feature("legacy-state-migration-command")
-def test_purge_dry_run_names_the_keys_and_deletes_nothing(buses, command, capsys):
+def test_purge_dry_run_names_the_keys_and_deletes_nothing(
+    buses: Any, command: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
     legacy, _ = buses
     _seed_inbox(legacy)
     code, report = _run(command, capsys, PURGE)
@@ -332,13 +338,15 @@ def test_purge_dry_run_names_the_keys_and_deletes_nothing(buses, command, capsys
 
 
 @pytest.mark.feature("legacy-state-migration-command")
-def test_purge_is_skipped_when_the_apply_fails(buses, command, monkeypatch, capsys):
+def test_purge_is_skipped_when_the_apply_fails(
+    buses: Any, command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.events import nats_migration
 
     legacy, _ = buses
     _seed_inbox(legacy)
 
-    def broken(root, swarm, bucket, keys):
+    def broken(root: Any, swarm: str, bucket: str, keys: list[str]) -> None:
         raise RuntimeError("legacy state changed during migration")
 
     monkeypatch.setattr(nats_migration, "migrate_state", broken)
@@ -350,7 +358,42 @@ def test_purge_is_skipped_when_the_apply_fails(buses, command, monkeypatch, caps
 
 
 @pytest.mark.feature("legacy-state-migration-command")
-def test_report_carries_no_purge_fields_without_the_option(buses, command, capsys):
+def test_a_refused_purge_is_reported_as_a_failure(
+    buses: Any, command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from nats.js.client import JetStreamContext
+    from nats.js.errors import APIError
+
+    legacy, _ = buses
+    _seed_inbox(legacy)
+
+    async def refused(*args: Any, **kwargs: Any) -> bool:
+        raise APIError(description="purge refused")
+
+    monkeypatch.setattr(JetStreamContext, "purge_stream", refused)
+    code, report = _run(command, capsys, [*PURGE, "--apply", "--quiescent"])
+    assert code == 1
+    assert report["failures"] == [str(APIError(description="purge refused"))]
+    assert report["purged"] == []
+    assert legacy.state("inbox").get("send.one").value == _envelope("rig", "one-again")
+
+
+@pytest.mark.feature("legacy-state-migration-command")
+def test_purge_requires_the_no_keys_claim(command: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        command.main(["--swarm", "rig", "--bucket", "inbox", "--key", "send.one", "--purge-envelopes"])
+    assert error.value.code == 2
+    assert (
+        capsys.readouterr()
+        .err.splitlines()[-1]
+        .endswith(": error: --purge-envelopes requires --no-keys: it drops envelope keys instead of importing them")
+    )
+
+
+@pytest.mark.feature("legacy-state-migration-command")
+def test_report_carries_no_purge_fields_without_the_option(
+    buses: Any, command: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
     legacy, _ = buses
     _seed_inbox(legacy)
     code, report = _run(command, capsys, ["--swarm", "rig", "--bucket", "inbox", "--no-keys"])

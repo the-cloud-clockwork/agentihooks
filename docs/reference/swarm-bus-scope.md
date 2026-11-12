@@ -289,8 +289,8 @@ and leaves the import pending, and the same command resumes it.
 `--purge-envelopes` clears one swarm's share of a shared legacy bucket such as `inbox`. The report adds
 `envelope_keys`, the live keys whose current value decodes as an event envelope of `--swarm`, and `purged`. With
 `--apply` and a clean move it purges every revision of those keys from `KV_<bucket>`; keys of other swarms and
-values that are not envelopes stay. A failed move purges nothing. Pair it with `--no-keys` to drop delivered send
-items instead of importing them:
+values that are not envelopes stay. A failed move or a refused purge purges nothing further and is reported under
+`failures`. It requires `--no-keys`, because it drops those keys instead of importing them:
 
 ```bash
 python -m scripts.events.migrate_state --swarm rig --bucket inbox --no-keys --purge-envelopes
