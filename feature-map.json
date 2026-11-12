@@ -5139,10 +5139,12 @@
         "tests/quick/test_guard_layout.py::test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed",
         "tests/quick/test_room_tick_launch.py::test_a_pane_left_at_a_bare_shell_is_never_typed_into",
         "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does",
-        "tests/quick/test_room_tick_launch.py::test_a_pane_herdr_no_longer_has_reads_as_not_bare",
+        "tests/quick/test_room_tick_launch.py::test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched",
         "tests/quick/test_room_tick_launch.py::test_up_names_the_engineers_whose_agent_exited_at_launch",
         "tests/quick/test_cli.py::test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch",
-        "tests/quick/test_room_tick_launch.py::test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending"
+        "tests/quick/test_room_tick_launch.py::test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending",
+        "tests/quick/test_room_tick_launch.py::test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds",
+        "tests/quick/test_room_tick_launch.py::test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching"
       ],
       "semgrep_rule": "feature-quick-swarm-pane-typing"
     },

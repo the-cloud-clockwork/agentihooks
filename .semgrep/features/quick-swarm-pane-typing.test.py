@@ -6,10 +6,21 @@ def _busy(seat, herdr):
     return "skipped-typed" if herdr.typed(seat.pane_id) else ""
 
 
-# ok: feature-quick-swarm-pane-typing
+# ruleid: feature-quick-swarm-pane-typing
 def _busy(seat, herdr):
     if herdr.bare(seat.pane_id):
         return "skipped-bare"
+    status = herdr.status(seat.pane_id)
+    if status not in READY_STATES:
+        return f"skipped-{status}"
+    return "skipped-typed" if herdr.typed(seat.pane_id) else ""
+
+
+# ok: feature-quick-swarm-pane-typing
+def _busy(seat, herdr):
+    shell = herdr.bare(seat.pane_id)
+    if shell is not False:
+        return "skipped-bare" if shell else "skipped-unknown"
     status = herdr.status(seat.pane_id)
     if status not in READY_STATES:
         return f"skipped-{status}"
@@ -24,6 +35,29 @@ def tell_master(folder, seat, environ):
 def run_in_seat(seat, launcher, environ):
     # ruleid: feature-quick-swarm-pane-typing
     herdr_host.run(seat.pane_id, launcher, environ)
+
+
+def poke(folder, seat, herdr):
+    # ruleid: feature-quick-swarm-pane-typing
+    herdr.prompt(seat.pane_id, NUDGE)
+
+
+def notify_without_checking(folder, seat, herdr):
+    # ruleid: feature-quick-swarm-pane-typing
+    return "room" if _room_notice(folder, seat, herdr) else "idle"
+
+
+def _nudge(folder, seat, herdr, now):
+    # ok: feature-quick-swarm-pane-typing
+    return herdr.prompt(seat.pane_id, NUDGE)
+
+
+def tell(folder, seat, herdr):
+    why = _busy(seat, herdr)
+    if why:
+        return why
+    # ok: feature-quick-swarm-pane-typing
+    return "room" if _room_notice(folder, seat, herdr) else "idle"
 
 
 class LiveHerdr:

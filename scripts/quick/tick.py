@@ -31,8 +31,8 @@ class Herdr(Protocol):
         """Text waiting on the pane's input line."""
         ...
 
-    def bare(self, pane_id: str) -> bool:
-        """Whether only a shell runs in the pane."""
+    def bare(self, pane_id: str) -> bool | None:
+        """Whether only a shell runs in the pane; None when herdr cannot say."""
         ...
 
     def prompt(self, pane_id: str, text: str) -> bool:
@@ -54,14 +54,15 @@ class LiveHerdr:
         """Text waiting on the pane's input line."""
         return herdr_host.typed(pane_id, self.environ)
 
-    def bare(self, pane_id: str) -> bool:
-        """Whether only a shell runs in the pane; a pane herdr no longer has is not bare."""
+    def bare(self, pane_id: str) -> bool | None:
+        """Whether only a shell runs in the pane; None when herdr cannot say, as for a pane it no longer has."""
         from scripts.herdr_gc import bare_shell
 
         try:
-            return bare_shell(herdr_host.process_info(pane_id, self.environ))
+            info = herdr_host.process_info(pane_id, self.environ)
         except (herdr_host.HerdrError, subprocess.TimeoutExpired):
-            return False
+            return None
+        return bare_shell(info) if info.get("foreground_processes") else None
 
     def prompt(self, pane_id: str, text: str) -> bool:
         """Submit ``text`` as a prompt to the pane's agent."""
@@ -105,8 +106,9 @@ def _nudge(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> bool:
 
 
 def _busy(seat: registry.Seat, herdr: Herdr) -> str:
-    if herdr.bare(seat.pane_id):
-        return "skipped-bare"
+    shell = herdr.bare(seat.pane_id)
+    if shell is not False:
+        return "skipped-bare" if shell else "skipped-unknown"
     status = herdr.status(seat.pane_id)
     if status not in READY_STATES:
         return f"skipped-{status}"

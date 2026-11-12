@@ -73,7 +73,7 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
 
 def exited(
     seats: Sequence[registry.Seat],
-    bare: Callable[[str], bool],
+    bare: Callable[[str], bool | None],
     *,
     wait_s: float = SETTLE_S,
     sleep: Callable[[float], None] = time.sleep,
@@ -82,11 +82,11 @@ def exited(
     watching = {seat.seat: seat.pane_id for seat in seats}
     gone: list[str] = []
     for _ in range(round(wait_s / POLL_S)):
+        sleep(POLL_S)
         gone += [name for name, pane in watching.items() if bare(pane)]
         watching = {name: pane for name, pane in watching.items() if name not in gone}
         if not watching:
             break
-        sleep(POLL_S)
     return sorted(gone)
 
 
@@ -95,14 +95,15 @@ def relaunch(
     seat_name: str,
     base: Mapping[str, str],
     *,
-    bare: Callable[[str], bool],
+    bare: Callable[[str], bool | None],
     start: Start = init_agent,
     wait_s: float = WAIT_BARE_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
     """Start the successor of a pending seat once its pane is back at a bare shell; the outcome.
 
-    A successor whose agent exits back to a bare shell within the settle window leaves the seat pending.
+    The seat stays launching while the successor is watched for SETTLE_S seconds, whatever ``wait_s`` says; one whose
+    agent exits back to a bare shell in that window leaves the seat pending.
     """
     taken = registry.take(folder, seat_name, registry.PENDING, registry.LAUNCHING)
     swarm = registry.load(folder)
@@ -114,14 +115,12 @@ def relaunch(
             registry.set_state(folder, seat_name, registry.PENDING)
             return "pane-busy"
         sleep(POLL_S)
-    code = 1
+    code, gone = 1, True
     try:
         code = start_seat(folder, swarm, taken, base, start)
+        gone = code != 0 or bool(exited([taken], bare, sleep=sleep))
     finally:
-        registry.set_state(folder, seat_name, registry.READY if code == 0 else registry.PENDING)
+        registry.set_state(folder, seat_name, registry.PENDING if gone else registry.READY)
     if code != 0:
         return f"failed-{code}"
-    if exited([taken], bare, sleep=sleep):
-        registry.set_state(folder, seat_name, registry.PENDING)
-        return "exited"
-    return "started"
+    return "exited" if gone else "started"

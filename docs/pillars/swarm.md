@@ -35,7 +35,8 @@ a headless worker refuses, and [placement waits](hives.md#placement-waits) for t
 
 A quick swarm is the smallest swarm: one herdr tab on the workstation, with no Redis, no ledger server and no
 Docker Compose. The session that runs `agentihooks quick up` becomes the master in pane 1. Engineers open in the
-panes to its right, ordered left to right: three by default, four at most (`--agents 2` to `--agents 5`). Every
+panes to its right, ordered left to right: three engineers by default and four at most, so four agents and five
+at most with the master (`--agents 2` to `--agents 5`). Every
 agent, the master included, gets an equal column. Outside herdr, or with its server down, `quick up` refuses and
 says why. An engineer whose agent exits back to a bare shell within 20 seconds of its launch, such as a Codex seat
 with no account free, fails `quick up`, which names it and leaves it pending for the next round.

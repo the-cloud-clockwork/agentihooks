@@ -35,7 +35,7 @@ def test_an_empty_room_has_nothing_waiting(tmp_path):
 
 
 class FakeHerdr:
-    def __init__(self, status: str = "idle", typed: str = "", bare: bool = False) -> None:
+    def __init__(self, status: str = "idle", typed: str = "", bare: bool | None = False) -> None:
         self._status, self._typed, self._bare = status, typed, bare
         self.prompts: list[tuple[str, str]] = []
 
@@ -45,7 +45,7 @@ class FakeHerdr:
     def typed(self, pane_id: str) -> str:
         return self._typed
 
-    def bare(self, pane_id: str) -> bool:
+    def bare(self, pane_id: str) -> bool | None:
         return self._bare
 
     def prompt(self, pane_id: str, text: str) -> bool:
@@ -180,12 +180,36 @@ def test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does(t
 
 
 @pytest.mark.feature("quick-swarm")
-def test_a_pane_herdr_no_longer_has_reads_as_not_bare(monkeypatch):
+def test_a_pane_herdr_cannot_read_is_never_typed_into_nor_relaunched(monkeypatch, tmp_path):
     def gone(pane_id: str, environ: dict[str, str]) -> dict[str, object]:
         raise tick.herdr_host.HerdrError("pane not found")
 
+    def late(pane_id: str, environ: dict[str, str]) -> dict[str, object]:
+        raise tick.subprocess.TimeoutExpired("herdr", 30)
+
     monkeypatch.setattr(tick.herdr_host, "process_info", gone)
-    assert tick.LiveHerdr({}).bare("w1:p9") is False
+    assert tick.LiveHerdr({}).bare("w1:p9") is None
+    monkeypatch.setattr(tick.herdr_host, "process_info", late)
+    assert tick.LiveHerdr({}).bare("w1:p2") is None
+    monkeypatch.setattr(tick.herdr_host, "process_info", lambda pane_id, environ: {})
+    assert tick.LiveHerdr({}).bare("w1:p2") is None
+    shell = {"foreground_processes": [{"name": "bash"}]}
+    monkeypatch.setattr(tick.herdr_host, "process_info", lambda pane_id, environ: shell)
+    assert tick.LiveHerdr({}).bare("w1:p2") is True
+    swarm = _swarm(tmp_path)
+    room.post(tmp_path, "master", "eng-1", "go ahead", 101)
+    herdr = FakeHerdr(bare=None)
+    assert tick.tell(tmp_path, swarm.seats[1], herdr) == "skipped-unknown"
+    assert _round(tmp_path, herdr) == [
+        {"seat": "master", "outcome": "skipped-unknown"},
+        {"seat": "eng-1", "outcome": "skipped-unknown"},
+    ]
+    registry.set_state(tmp_path, "eng-1", registry.PENDING)
+    assert _round(tmp_path, herdr) == [
+        {"seat": "master", "outcome": "skipped-unknown"},
+        {"seat": "eng-1", "outcome": "pending"},
+    ]
+    assert herdr.prompts == []
 
 
 @pytest.mark.feature("quick-swarm")
@@ -199,14 +223,18 @@ def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path):
         return len(seen) > 2
 
     assert launch.exited(swarm.seats[1:], bare, wait_s=3.0, sleep=naps.append) == ["eng-1"]
-    assert seen == ["w1:p2", "w1:p2", "w1:p2"] and naps == [launch.POLL_S, launch.POLL_S]
+    assert seen == ["w1:p2", "w1:p2", "w1:p2"] and naps == [launch.POLL_S] * 3
 
 
-def test_up_waits_the_whole_window_for_engineers_that_keep_running(tmp_path):
+@pytest.mark.feature("quick-swarm")
+def test_up_watches_engineers_that_keep_running_for_the_whole_twenty_seconds(tmp_path):
     swarm = _swarm(tmp_path)
     naps: list[float] = []
     assert launch.exited(swarm.seats[1:], lambda pane_id: False, wait_s=3.0, sleep=naps.append) == []
     assert naps == [launch.POLL_S] * 3
+    naps.clear()
+    assert launch.exited(swarm.seats[1:], lambda pane_id: False, sleep=naps.append) == []
+    assert sum(naps) == 20.0
 
 
 @pytest.mark.feature("quick-swarm")
@@ -293,7 +321,42 @@ def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tm
 @pytest.mark.feature("quick-swarm")
 def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path):
     _swarm(tmp_path, eng_state=registry.PENDING)
-    outcome = launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=lambda a, e: 0, sleep=lambda s: None)
+    states: list[str] = []
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        states.append("started")
+        return 0
+
+    def bare(pane: str) -> bool:
+        loaded = registry.load(tmp_path)
+        seat = loaded.seat("eng-1") if loaded else None
+        states.append(seat.state if seat else "gone")
+        return True
+
+    outcome = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None)
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert outcome == "exited" and seat is not None and seat.state == registry.PENDING
+    assert states == [registry.LAUNCHING, "started", registry.LAUNCHING]
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_successor_that_keeps_running_is_watched_the_whole_settle_window_while_launching(tmp_path):
+    _swarm(tmp_path, eng_state=registry.PENDING)
+    started: list[str] = []
+    naps: list[float] = []
+
+    def bare(pane: str) -> bool:
+        loaded = registry.load(tmp_path)
+        seat = loaded.seat("eng-1") if loaded else None
+        assert seat is not None and seat.state == registry.LAUNCHING
+        return not started
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        started.append("eng-1")
+        return 0
+
+    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=naps.append) == "started"
+    loaded = registry.load(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert seat is not None and seat.state == registry.READY and sum(naps) == launch.SETTLE_S == 20.0
