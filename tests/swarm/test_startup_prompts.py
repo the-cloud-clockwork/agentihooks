@@ -471,16 +471,18 @@ def test_stacked_steps_apply_only_to_code_work():
     assert "park <doc>" not in "\n".join(lines)
 
 
-@pytest.mark.feature("swarm-park-resume-branch")
-@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
-def test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch(kind):
+def test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch(kind: str) -> None:
     lines = _steps({"kind": kind, "branch": "eng-parked", "parked_on": ["t1"]})
     text = "\n".join(lines)
+    origin = f"{CUT} --from origin/eng-parked"
     assert (
         "Your task was parked on branch eng-parked until its dependency finished: continue its work from that "
-        f"branch with {CUT} --from origin/eng-parked."
+        f"branch with {origin}."
     ) in lines
-    assert f"{CUT} (" not in text and f"{CUT})" not in text
+    cuts = [line for line in lines if line[:2] in ("2.", "3.", "4.") and CUT in line]
+    assert all(origin in line for line in cuts)
+    assert len(cuts) == (0 if kind == "research" else 1)
+    assert text.count(CUT) == text.count(origin)
 
 
 SERENA_LINE = (
