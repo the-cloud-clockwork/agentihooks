@@ -2098,6 +2098,32 @@
       ]
     },
     {
+      "id": "swarm-launch-bounded-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",
+      "behaviour": "The launch path reads its Redis hashes by named field or page by page with a counted hash scan, never in one whole hash read: placement, launch checks, launch jobs, local slots, preemption, prerequisite waits, failed panes, run window marks, the dispatcher red dev hold and sent triggers and remote control failures.",
+      "seam": "hash_pages.fields and hash_pages.picked through each launch path reader on a store that refuses a whole hash read",
+      "tests": [
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set",
+        "tests/swarm/test_launch_bounded_reads.py::test_place_holds_spawns_for_another_swarms_waiting_master",
+        "tests/swarm/test_launch_bounded_reads.py::test_launch_check_reads_pending_checks_and_reports_paged",
+        "tests/swarm/test_launch_bounded_reads.py::test_launch_job_collect_drops_a_job_whose_agent_is_gone",
+        "tests/swarm/test_launch_bounded_reads.py::test_local_slots_count_and_claim_held_slots_paged",
+        "tests/swarm/test_launch_bounded_reads.py::test_preempt_keeps_only_asks_of_live_holders",
+        "tests/swarm/test_launch_bounded_reads.py::test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record",
+        "tests/swarm/test_launch_bounded_reads.py::test_failed_panes_held_reads_every_pane",
+        "tests/swarm/test_launch_bounded_reads.py::test_remote_control_failures_reads_every_master",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_red_dev_reads_only_blocked_tasks",
+        "tests/swarm/test_launch_bounded_reads.py::test_run_window_reads_its_marks_by_field",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_wake_reads_sent_triggers_by_id",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_departed_seat_holds_only_sent_triggers",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_refuses_a_reply_that_misses_a_named_field",
+        "tests/swarm/test_launch_bounded_reads.py::test_failed_panes_report_pages_the_launches_hash"
+      ]
+    },
+    {
       "id": "inbox-outage-hold",
       "origin": "inventory",
       "behaviour": "A Redis or provider outage pauses the wake and escalation ladder, which resumes where it stopped once the outage ends.",
