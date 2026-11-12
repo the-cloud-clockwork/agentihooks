@@ -314,6 +314,8 @@ workers:
   masterSwarms: []
   # Placement rank per role, role:rank pairs such as eng:1,ci:1; the lowest rank takes a role's agents first while it has room.
   prefer: ""
+  # Capabilities this hive declares at every start, such as anton; a hive placement need names one to steer a run here.
+  capabilities: []
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev
