@@ -474,3 +474,15 @@ def test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_a
     agents, rows = monitor.tally("otel", [(hive["id"], hive["name"], hive["agents"]) for hive in present])
     assert rows == [{"name": "twin", "agents": 4}, {"name": "twin", "agents": 2}]
     assert agents == {"total": 6, "source": "otel", "reporting": 2, "of": 2, "claude": 3, "codex": 3}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names() -> None:
+    beat = {"heartbeat_at": NOW, "draining": "no"}
+    live = [
+        {"id": "a", "name": "twin", "ui": "no", "members": {"vm-b": beat, "vm-a": beat}},
+        {"id": "b", "name": "twin", "ui": "no"},
+        {"id": "c", "name": "solo", "ui": "no", "members": {"pod-c": beat}},
+        {"id": "d", "name": "desk", "ui": "yes"},
+    ]
+    assert monitor.labels(live) == {"a": "vm-a, vm-b", "b": "twin", "c": "solo", "d": "swarm-master"}
