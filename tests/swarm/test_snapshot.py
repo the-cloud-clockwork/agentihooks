@@ -213,6 +213,22 @@ def test_a_delivery_closing_during_export_never_leaves_its_address_waiting_witho
     assert waiting == (inbox.key("pending", eng) in state["keys"])
 
 
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_export_carries_each_shared_inbox_membership_of_the_swarm_and_none_of_another(store: RedisStore) -> None:
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", eng, "index me")
+    for shared in ("waiting", "indexed", "open-indexed"):
+        store.redis.sadd(inbox.key(shared), eng, "someone@elsewhere")
+    store.redis.sadd(inbox.key("wake-outbox"), item.id, "foreign-item")
+    members = store.export("sw")["members"]
+    for shared in ("waiting", "indexed", "open-indexed"):
+        assert members[inbox.key(shared)] == [eng]
+    assert item.id in members[inbox.key("wake-outbox")]
+    assert "foreign-item" not in members[inbox.key("wake-outbox")]
+
+
 def close_mid_export(
     trigger: Callable[[InboxStore, str, str], Callable[[list[str]], bool]],
 ) -> tuple[dict[str, Any], InboxStore, str, str]:
