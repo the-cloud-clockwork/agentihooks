@@ -46,14 +46,20 @@ def test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome() -> No
 
 @pytest.mark.feature("swarm-health-finding-rows")
 def test_rows_doctrine_or_the_task_required_are_marked() -> None:
-    events = [*ceremony_events(), ev("comment added", "tasks/t0", at=NOW + 35)]
-    [finding] = finding_rows.attach(health.ceremony(events, tasks(), health.Limits()), events, tasks(), [])
+    events = [
+        *ceremony_events(),
+        ev("comment added", "tasks/t0", at=NOW + 35),
+        ev("comment added", "tasks/t2", at=NOW + 36),
+    ]
+    held = {**tasks(), "t2": {"id": "t2", "title": "Finished", "state": "done", "claimed_by": WORKER, "phase": "p2"}}
+    [finding] = finding_rows.attach(health.ceremony(events, held, health.Limits()), events, held, [])
     marks = {(r["kind"], r["target"]): r["required"] for r in finding.rows}
     assert marks[("task pr", "tasks/t1")] == "doctrine"
     assert marks[("comment added", "phases/p1")] == "task"
     assert marks[("comment added", "tasks/t1")] == "task"
     assert marks[("comment edited", "phases/p9")] == ""
     assert marks[("comment added", "tasks/t0")] == ""
+    assert marks[("comment added", "tasks/t2")] == ""
     pr = next(r for r in finding.rows if r["kind"] == "task pr")
     assert pr["text"] == "Build the panel"
     assert pr["at"] == NOW + 30
