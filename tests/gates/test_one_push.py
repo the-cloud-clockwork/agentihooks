@@ -401,8 +401,6 @@ TESTS_RUNNING = [{"status": "IN_PROGRESS", "workflowRun": {"databaseId": 1}}]
         {**NEVER_STARTED, "mergeable": "CONFLICTING"},
         {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": LINT_EXPECTED},
         {**NEVER_STARTED, "mergeable": "MERGEABLE"},
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
     ],
 )
 def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_path, raw):
@@ -456,6 +454,16 @@ def test_a_failed_job_in_a_running_suite_lets_the_push_pass_though_the_required_
     found = pull_request(running_tests(lint))
     assert (found.red, found.running, found.head_red) == (False, True, True)
     assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize(("state_", "head_red"), [("FAILURE", True), ("ERROR", True), ("PENDING", False)])
+def test_a_failed_status_context_on_the_head_lets_the_push_pass(tree, tmp_path, state_, head_red):
+    raw = running_tests("SUCCESS")
+    raw["statusCheckRollup"] = [*raw["statusCheckRollup"], {"context": "ci/x", "state": state_, "isRequired": False}]
+    found = pull_request(raw)
+    assert (found.red, found.running, found.head_red) == (False, True, head_red)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed is head_red
 
 
 @pytest.mark.feature("one-push-failed-or-conflicting-head")

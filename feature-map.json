@@ -5077,9 +5077,10 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2499",
       "behaviour": "The one push gate lets a swarm worker push while its pull request's checks still run when any check on the head has already failed, even though the required gate status passed, or when GitHub reports the pull request as conflicting with its base; a running suite with no failed check on a mergeable head still holds the push.",
-      "seam": "scripts.gates.one_push.OnePush.pushing over scripts.swarm.ledger_events.pull_request and its PullRequest.head_red field",
+      "seam": "scripts.gates.one_push.OnePush.pushing over scripts.swarm.ledger_events.pull_request and its PullRequest.head_red field, and scripts.gates.push_stop.PushStop.checks, which shares OnePush's finished rule",
       "tests": [
         "tests/gates/test_one_push.py::test_a_failed_job_in_a_running_suite_lets_the_push_pass_though_the_required_status_passed",
+        "tests/gates/test_one_push.py::test_a_failed_status_context_on_the_head_lets_the_push_pass",
         "tests/gates/test_one_push.py::test_a_running_suite_with_no_failed_job_still_holds_the_push",
         "tests/gates/test_one_push.py::test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs"
       ]
