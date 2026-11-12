@@ -206,7 +206,9 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
 
 
 @pytest.mark.feature("scheduler-runner-reload-on-revision")
-def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(monkeypatch, tmp_path, capsys):
+def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -233,7 +235,9 @@ def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(monke
 
 
 @pytest.mark.feature("scheduler-runner-reload-on-revision")
-def test_supervisor_keeps_its_runner_when_the_revision_cannot_be_read(monkeypatch, tmp_path):
+def test_supervisor_keeps_its_runner_when_the_revision_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
