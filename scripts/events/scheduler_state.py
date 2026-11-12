@@ -42,12 +42,9 @@ def open_scheduler_state(bucket: str) -> StateStore:
         with _lock:
             config = BusConfig.from_environ()
             swarm = os.environ.get("AGENTIHOOKS_SWARM")
-            if config.scoped and not swarm:
-                config = replace(config, scoped=False)
-            bus = _bus(config)
-            if config.scoped:
-                bus = bus.for_swarm(swarm)
-            return bus.state(bucket)
+            if config.scoped and swarm:
+                return _bus(config).for_swarm(swarm).state(bucket)
+            return _bus(replace(config, scoped=False)).state(bucket)
     from scripts.swarm.store import redis_client
 
     from .redis_state import RedisStateStore
