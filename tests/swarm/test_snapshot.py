@@ -255,16 +255,20 @@ def test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore
     item = seed(store, "sw")
     dispatcher = Dispatcher(InboxStore(store.redis))
     dispatcher.own("master@sw", "bridge-1")
-    [delivery] = dispatcher.reserve("master@sw", "bridge-1")
-    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    deliveries = dispatcher.reserve("master@sw", "bridge-1")
+    assert item.id in {delivery.item for delivery in deliveries}
+    for delivery in deliveries:
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
     snapshot.take(store, "sw", 99, run=_no_git)
     store.redis.flushall()
     snapshot.restore(store, "sw", live=set())
     restored = Dispatcher(InboxStore(store.redis))
     restored.own("master@sw", "bridge-1")
     assert restored.reserve("master@sw", "bridge-1") == []
-    assert [(d.id, d.state) for d in restored.receipts.recover("master@sw", "bridge-1")] == [(delivery.id, "unknown")]
-    assert restored.receipts.accept(delivery.id, "bridge-1", delivery.digest).committed
+    recovered = restored.receipts.recover("master@sw", "bridge-1")
+    assert sorted((d.id, d.state) for d in recovered) == sorted((d.id, "unknown") for d in deliveries)
+    for delivery in deliveries:
+        assert restored.receipts.accept(delivery.id, "bridge-1", delivery.digest).committed
     assert restored.reserve("master@sw", "bridge-1") == []
     states = [h["state"] for h in InboxStore(store.redis).history(item.id)]
     assert states.count("delivered") == 1
