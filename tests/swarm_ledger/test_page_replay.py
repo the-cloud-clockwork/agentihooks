@@ -136,12 +136,12 @@ def test_unclocked_equates_replays_that_differ_only_in_page_clock_stamps() -> No
 @pytest.mark.parametrize(
     "fault",
     [
-        {"text": "Started t2"},
-        {"fixture": 1791294000001},
-        {"html": "<main>changed</main>"},
+        _step(1791300604340, text="Started t2"),
+        _step(1791300604340, fixture=1791294000001),
+        _step(1791300604340, html="<main>changed</main>"),
     ],
 )
 def test_unclocked_still_reports_a_real_page_difference(fault: dict[str, object]) -> None:
     base = page_replay.unclocked([_step(1791300604360)])
-    head = page_replay.unclocked([_step(1791300604340, **fault)])
+    head = page_replay.unclocked([fault])
     assert json.dumps(base) != json.dumps(head)
