@@ -2476,6 +2476,24 @@ def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_
     )
 
 
+@pytest.mark.feature("codex-expired-routing")
+@pytest.mark.parametrize("observed_at", [100, 1])
+def test_aggregate_capacity_closes_an_expired_codex_account(monkeypatch: pytest.MonkeyPatch, observed_at: int) -> None:
+    from scripts.routing import aggregate
+
+    quota = {
+        "observed_at": observed_at,
+        "five_hour": {"used": 0, "resets_at": None},
+        "seven_day": {"used": 15, "resets_at": None},
+        "expired": True,
+    }
+    record = {"harness": "codex", "account": "a", "kind": "pool", "sessions": 2, "quota": quota}
+    monkeypatch.setattr(aggregate, "current", lambda now: {"a": record})
+    rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100, refresh=False)
+    assert len(rows) == 1
+    assert (rows[0].state, rows[0].cap, rows[0].sessions) == ("CLOSED", 0, 2)
+
+
 @pytest.mark.parametrize("observed", [None, -10_000])
 def test_aggregate_capacity_keeps_missing_or_stale_codex_quota_unknown(monkeypatch, observed):
     from scripts.routing import aggregate

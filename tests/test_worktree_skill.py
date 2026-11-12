@@ -7,6 +7,8 @@ import time
 import unittest
 from pathlib import Path
 
+import pytest
+
 WT = Path(__file__).resolve().parents[1] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 BASH = shutil.which("bash")
 
@@ -475,6 +477,47 @@ class Done(WtBase):
         self.assertIn("and branch fork-merged", result.stdout)
         self.assertEqual(calls.read_text().count("-R github.com/fork-owner/agentihooks"), 2)
 
+    def test_done_keeps_a_branch_that_gained_commits_after_its_pull_request_merged(self) -> None:
+        dest = self._published_with_pull_requests("after-merge", "[]")
+        merged = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        (Path(self.tmp) / "after-merge-pulls.json").write_text(
+            f'[{{"state": "MERGED", "url": "https://github.com/o/r/pull/5", "number": 5, "headRefOid": "{merged}"}}]'
+        )
+        (dest / "late.txt").write_text("late\n")
+        _git(dest, "add", "late.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "late", env=self.gitenv)
+        late = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        result = self.run_wt("done", "after-merge", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertTrue(self.branch_exists("after-merge"))
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(self.primary), "rev-parse", "after-merge"], capture_output=True, text=True
+            ).stdout.strip(),
+            late,
+        )
+        self.assertIn("kept", result.stderr)
+        self.assertNotIn("and branch after-merge", result.stdout)
+
+    def test_done_deletes_a_branch_whose_pull_request_merged_at_its_head(self) -> None:
+        dest = self._published_with_pull_requests("at-merge", "[]")
+        merged = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        (Path(self.tmp) / "at-merge-pulls.json").write_text(
+            f'[{{"state": "MERGED", "url": "https://github.com/o/r/pull/4", "number": 4, "headRefOid": "{merged}"}}]'
+        )
+        result = self.run_wt("done", "at-merge", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("at-merge"))
+        self.assertIn("and branch at-merge", result.stdout)
+
 
 class DoneOrigin(WtBase):
     def test_done_pushed_drops_heads_contained_in_a_differently_named_origin_branch(self):
@@ -505,6 +548,91 @@ class DoneOrigin(WtBase):
                 self.assertFalse(dest.exists())
                 self.assertFalse(self.branch_exists(name))
                 _git(self.origin, "merge-base", "--is-ancestor", head, f"refs/heads/{remote}", env=self.gitenv)
+
+
+UPSTREAM_GH = """#!{bash}
+head=""; fields=""
+while (($#)); do
+  case "$1" in --head) head="$2"; shift ;; --json) fields="$2"; shift ;; esac
+  shift
+done
+[[ "$head" == "{merged}" ]] || exit 0
+case "$fields" in number|number,headRefOid) echo 7 ;; headRefOid) echo {oid} ;; *) echo MERGED ;; esac
+"""
+
+
+class TestDoneUpstream(WtBase):
+    def _successor(self, name: str, remote: str) -> Path:
+        dest = Path(self.run_wt("new", name, "--repo", str(self.primary)).stdout.strip())
+        (dest / "continued.txt").write_text("continued\n")
+        _git(dest, "add", "continued.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "continued", env=self.gitenv)
+        _git(dest, "push", "--quiet", "-u", "origin", f"HEAD:refs/heads/{remote}", env=self.gitenv)
+        oid = subprocess.check_output(["git", "-C", str(dest), "rev-parse", "HEAD"], env=self.gitenv, text=True)
+        gh = self.bin / "gh"
+        gh.write_text(UPSTREAM_GH.format(bash=BASH, merged=remote, oid=oid.strip()))
+        gh.chmod(0o755)
+        return dest
+
+    def _on_origin(self, branch: str) -> bool:
+        listed = subprocess.run(
+            ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            env=self.gitenv,
+        )
+        return listed.returncode == 0
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_drops_a_successor_whose_upstream_branch_merged(self) -> None:
+        dest = self._successor("successor", "predecessor")
+        result = self.run_wt("done", "successor", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("successor"), result.stderr)
+        self.assertFalse(self._on_origin("predecessor"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head(self) -> None:
+        dest = self._successor("ahead", "merged-before")
+        (dest / "unpushed.txt").write_text("unpushed\n")
+        _git(dest, "add", "unpushed.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
+        result = self.run_wt("done", "ahead", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("has commits past the merged pull request", result.stderr)
+        self.assertTrue(dest.exists())
+        self.assertTrue(self.branch_exists("ahead"))
+        self.assertTrue(self._on_origin("merged-before"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin(self) -> None:
+        dest = self._successor("parked", "earlier")
+        _git(self.origin, "update-ref", "-d", "refs/heads/earlier", env=self.gitenv)
+        result = self.run_wt("done", "parked", "--repo", str(self.primary), "--pushed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("parked"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_pushed_drops_a_branch_whose_own_merged_head_left_origin(self) -> None:
+        dest = self._successor("own", "own")
+        _git(self.origin, "update-ref", "-d", "refs/heads/own", env=self.gitenv)
+        result = self.run_wt("done", "own", "--repo", str(self.primary), "--pushed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("own"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head(self) -> None:
+        dest = self._successor("later", "merged-earlier")
+        _git(self.origin, "update-ref", "-d", "refs/heads/merged-earlier", env=self.gitenv)
+        (dest / "unpushed.txt").write_text("unpushed\n")
+        _git(dest, "add", "unpushed.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
+        result = self.run_wt("done", "later", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not contained in an origin branch", result.stderr)
+        self.assertTrue(dest.exists())
+        self.assertTrue(self.branch_exists("later"))
 
 
 CONCURRENT_GIT = """#!{bash}
