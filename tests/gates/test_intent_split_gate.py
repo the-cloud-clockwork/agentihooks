@@ -1,4 +1,6 @@
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -28,12 +30,12 @@ def split_task(**fields):
     }
 
 
-def resolve(args, **kwargs):
+def resolve(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     repo = args[args.index("--repo") + 1] if "--repo" in args else "o/r"
     return subprocess.CompletedProcess(args, 0, stdout=f"https://github.com/{repo}/pull/{args[3]}\n")
 
 
-def gate():
+def gate() -> intent.IntentGate:
     return intent.IntentGate(run=resolve)
 
 
@@ -112,7 +114,9 @@ def test_the_judged_half_or_no_named_target_passes(tmp_path, command):
 
 
 @pytest.mark.feature("intent-split-half-own-verdict")
-def test_done_refuses_a_registered_half_without_its_own_verdict(tmp_path, monkeypatch):
+def test_done_refuses_a_registered_half_without_its_own_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     judged(tmp_path, split_task(split_pulls=[FIRST, SECOND]))
     monkeypatch.setattr(intent, "pr_head", lambda url: "abc")
     refused = gate().decide(bash(f"agentihooks swarm {SLUG} done --pr {SECOND}"), WHO, verdicts(tmp_path))
@@ -122,7 +126,9 @@ def test_done_refuses_a_registered_half_without_its_own_verdict(tmp_path, monkey
 
 
 @pytest.mark.feature("intent-split-half-own-verdict")
-def test_a_bare_number_matches_only_the_half_in_its_own_repository(tmp_path, monkeypatch):
+def test_a_bare_number_matches_only_the_half_in_its_own_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     other = "https://github.com/o/other/pull/10"
     task = split_task(split_pulls=[FIRST, other])
     judged(tmp_path, task)
@@ -135,19 +141,35 @@ def test_a_bare_number_matches_only_the_half_in_its_own_repository(tmp_path, mon
     assert gate().decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
 
 
-def test_an_unresolved_bare_number_is_refused_on_a_split_task(tmp_path):
+def test_an_unresolved_bare_number_is_refused_on_a_split_task(tmp_path: Path) -> None:
     verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
     failing = intent.IntentGate(run=lambda args, **kwargs: subprocess.CompletedProcess(args, 1, stdout=""))
     decision = failing.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path))
     assert not decision.allowed
-    assert decision.reason.startswith(f"task {TASK} is split: name the pull request url")
+    assert decision.reason == (
+        f"task {TASK} is split: name the pull request url in the merge so intent matches it to its judged half."
+    )
 
 
-def test_done_target_reads_the_pr_flag():
+def test_a_numeric_slug_keeps_its_place_when_the_number_is_resolved() -> None:
+    words = ["agentihooks", "swarm", "42", "merge", "queue", "42"]
+    assert gate()._named(words, None) == [
+        "agentihooks",
+        "swarm",
+        "42",
+        "merge",
+        "queue",
+        "https://github.com/o/r/pull/42",
+    ]
+
+
+def test_done_target_reads_the_pr_flag() -> None:
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr", SECOND]) == SECOND
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done", f"--pr={SECOND}"]) == SECOND
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done"]) is None
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr"]) is None
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr", "--root-cause", "x"]) is None
+    assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--proof", "x", "--pr", SECOND]) == SECOND
     assert intent._done_target(["agentihooks", "swarm", SLUG, "ready", "--pr", SECOND]) is None
     assert intent._done_target(["gh", "pr", "merge", "--pr", SECOND]) is None
     assert intent._done_target(["FLAG=value"]) is None

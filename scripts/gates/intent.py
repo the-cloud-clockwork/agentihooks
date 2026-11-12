@@ -1203,7 +1203,7 @@ def _done_target(words: list[str]) -> str | None:
         if word.startswith("--pr="):
             return word.removeprefix("--pr=") or None
         if word == "--pr":
-            return next(iter(operands[at + 1 :]), None)
+            return next((value for value in operands[at + 1 : at + 2] if not value.startswith("-")), None)
     return None
 
 
@@ -1382,7 +1382,7 @@ class IntentGate:
             return None
         if not number:
             return [*words, url]
-        at = words.index(number, program_index(words))
+        at = words.index(number, program_index(words) + 3)
         return [*words[:at], url, *words[at + 1 :]]
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
