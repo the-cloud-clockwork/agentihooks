@@ -5,7 +5,7 @@ rules:
     message: >-
       A pass step hook set on timing.BEFORE_STEP is copied into every step worker the engine starts, and a worker
       abandoned at its budget keeps calling it after the pass released its tick lock, renewing a released token and
-      raising a stale tick lock error. Set a tick_activity.Renewal and revoke it before releasing the lock.
+      raising a stale tick lock error. Set a tick_activity.Renewal, which the pass can revoke before it releases the lock.
     paths:
       include:
         - /scripts/
