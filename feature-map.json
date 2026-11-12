@@ -2637,6 +2637,18 @@
       ]
     },
     {
+      "id": "ledger-relay-note",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t532",
+      "behaviour": "The master relays the operator's recorded words to the notes list as a new operator note; words never recorded are refused and add no note.",
+      "seam": "agentihooks ledger relay notes",
+      "tests": [
+        "tests/swarm_ledger/test_ledger_relay.py::test_a_relay_to_the_notes_list_adds_a_new_operator_note_carrying_his_quoted_words",
+        "tests/swarm_ledger/test_ledger_relay.py::test_a_relay_to_the_notes_list_with_words_never_recorded_is_refused_and_adds_no_note",
+        "tests/swarm_ledger/test_ledger_relay.py::test_the_check_and_cli_take_the_notes_list_as_the_relay_item"
+      ]
+    },
+    {
       "id": "ledger-followup-duplicates",
       "origin": "inventory",
       "behaviour": "A follow up repeating an open follow up or task is refused naming it, unless a plain words not duplicate reason is given and stored.",
