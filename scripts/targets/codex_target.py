@@ -306,7 +306,7 @@ def _carry_native_keys(name: str, entry: dict[str, Any], spec: dict[str, Any]) -
     native = {key: spec[key] for key in _NATIVE_KEYS if spec.get(key) is not None}
     for key in list(native):
         if hits := _scan_secrets(json.dumps(native[key]), mode="strict"):
-            cast(ModuleType, _install_module())._cprint(
+            cast(ModuleType, _install_module())._cprint(  # pragma: no mutate
                 f"  [!!] MCP '{name}' {key} looks like a credential ({', '.join(hits)}) — dropped from "
                 "config.toml. Name an environment variable instead of writing its value."
             )

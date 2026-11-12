@@ -854,9 +854,10 @@ class TestCodexEntry:
     def test_native_env_vars_merge_with_forwarded_references(self, said: list[str]) -> None:
         from scripts.targets.codex_target import codex_mcp_entry
 
-        entry, _ = codex_mcp_entry("loc", {"command": "/py", "env": {"REF": "${SRC}"}, "env_vars": ["TOK", "SRC"]})
+        spec = {"command": "/py", "env": {"REF": "${SRC}", "DUP": "${TOK}"}, "env_vars": ["TOK", "NAT"]}
+        entry, _ = codex_mcp_entry("loc", spec)
         assert entry is not None
-        assert entry["env_vars"] == ["SRC", "TOK"]
+        assert entry["env_vars"] == ["NAT", "SRC", "TOK"]
 
     def test_codex_native_http_forwarding_reaches_the_entry(self, said: list[str]) -> None:
         from scripts.targets.codex_target import codex_mcp_entry
@@ -885,17 +886,17 @@ class TestCodexEntry:
     def test_credential_shaped_native_values_are_dropped(self, said: list[str]) -> None:
         from scripts.targets.codex_target import codex_mcp_entry
 
-        tok = "ghp_" + "h" * 36
+        both = "AKIA" + "TESTDUMMY0000000 " + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop"
         spec = {
             "url": "https://g.example/mcp",
-            "bearer_token_env_var": tok,
-            "env_http_headers": {"X-Api": tok},
-            "env_vars": [tok],
+            "bearer_token_env_var": both,
+            "env_http_headers": {"X-Api": both},
+            "env_vars": [both],
             "tool_timeout_sec": 30,
         }
         assert codex_mcp_entry("gw", spec) == ({"url": "https://g.example/mcp", "tool_timeout_sec": 30}, "")
         assert said == [
-            f"  [!!] MCP 'gw' {key} looks like a credential (github_token) — dropped from config.toml. "
+            f"  [!!] MCP 'gw' {key} looks like a credential (aws_access_key, jwt_token) — dropped from config.toml. "
             "Name an environment variable instead of writing its value."
             for key in ("env_vars", "env_http_headers", "bearer_token_env_var")
         ]
