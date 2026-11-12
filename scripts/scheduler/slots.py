@@ -148,7 +148,7 @@ class WorkflowSlot:
             run = run_placement.Run(delivery_id, self.name, self.case, self.project, owner, self.needs)
             placed = run_placement.dispatch(run, redis)
             if isinstance(placed, str):
-                run_collect.remember(redis, Scheduler(state).key(run_collect.SENT), placed, delivery_id, owner)
+                run_collect.remember(redis, Scheduler().key(run_collect.SENT), placed, delivery_id, owner)
             return
         from scripts.workflows import scheduled
 
