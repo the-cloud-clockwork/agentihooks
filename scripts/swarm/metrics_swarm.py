@@ -505,7 +505,7 @@ def record_pass(
     agents = [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)]
     agents += [asdict(agent) for agent in store.agents(slug)]
     handoffs = [json.loads(row) for row in store.redis.hgetall(store.key(slug, "transfers")).values()]
-    gates, reruns = gate_rows(slug, doc, agents, gate_log.recent(slug, limit=None))
+    gates, reruns = gate_rows(slug, doc, agents, gate_log.since(slug, now_ms - metrics_outbox.DAY_MS))
     quota = capacity.read(store, slug)
     hold = store.redis.get(store.key(slug, SPAWN_HOLD)) or ""
     live = [asdict(agent) for agent in store.agents(slug)]
