@@ -494,3 +494,44 @@ def test_status_shows_when_the_last_automatic_snapshot_was_taken(env, capsys):
 
 def test_the_ledger_source_names_the_show_command_for_its_slug():
     assert snapshot.ledger_source("sw") == "agentihooks ledger --slug sw show"
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    for n in range(20):
+        store.redis.set(store.key("sw", f"bulk-{n}"), "x" * 50_000)
+    real, longest = json.dumps, [0]
+
+    def measured(value: object, *args: object, **kwargs: object) -> str:
+        text = real(value, *args, **kwargs)
+        longest[0] = max(longest[0], len(text))
+        return text
+
+    monkeypatch.setattr(json, "dumps", measured)
+    taken = snapshot.take(store, "sw", 99, run=_no_git, environ={})
+    monkeypatch.setattr(json, "dumps", real)
+    written = taken.read_text()
+    assert json.loads(written)["state"]["keys"][store.key("sw", "bulk-3")]["value"] == "x" * 50_000
+    assert longest[0] < len(written) / 10
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    taken = snapshot.auto(store, "sw", 0, {}, run=_no_git)
+    assert taken is not None
+    assert json.loads(taken.with_name(taken.name + ".refs").read_text()) == []
+    taken.write_text("{")
+    assert snapshot.referenced("sw") == set()
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    for n in range(12):
+        snapshot.auto(store, "sw", n * MINUTE, {}, run=_no_git)
+    kept = sorted(p.name for p in snapshot.auto_dir("sw").glob("*.refs"))
+    assert kept == sorted(f"auto-{n * MINUTE}.json.refs" for n in range(2, 12))
