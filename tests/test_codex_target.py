@@ -837,6 +837,51 @@ class TestCodexEntry:
             "Expose a streamable-HTTP endpoint and re-run init.",
         ]
 
+    def test_codex_native_stdio_keys_reach_the_entry(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {
+            "command": "/py",
+            "env_vars": ["TOK"],
+            "cwd": "/work",
+            "startup_timeout_sec": 60,
+            "tool_timeout_sec": 120,
+            "enabled": False,
+        }
+        assert codex_mcp_entry("loc", spec) == (spec, "")
+        assert said == []
+
+    def test_native_env_vars_merge_with_forwarded_references(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        entry, _ = codex_mcp_entry("loc", {"command": "/py", "env": {"REF": "${SRC}"}, "env_vars": ["TOK", "SRC"]})
+        assert entry is not None
+        assert entry["env_vars"] == ["SRC", "TOK"]
+
+    def test_codex_native_http_forwarding_reaches_the_entry(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {"url": "https://g.example/mcp", "bearer_token_env_var": "GW", "env_http_headers": {"X-N": "N"}}
+        assert codex_mcp_entry("gw", spec) == (spec, "")
+
+    def test_claude_shaped_headers_win_over_native_forwarding(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        spec = {
+            "url": "https://g.example/mcp",
+            "headers": {"Authorization": "Bearer ${HDR}", "X-Env": "${E}"},
+            "bearer_token_env_var": "NATIVE",
+            "env_http_headers": {"X-Env": "OLD", "X-N": "N"},
+        }
+        assert codex_mcp_entry("gw", spec) == (
+            {
+                "url": "https://g.example/mcp",
+                "bearer_token_env_var": "HDR",
+                "env_http_headers": {"X-Env": "E", "X-N": "N"},
+            },
+            "",
+        )
+
 
 class TestPersonaIdentityNaming:
     """A linked profile is a capability layer, not part of the persona name."""
