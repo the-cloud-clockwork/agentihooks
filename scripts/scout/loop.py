@@ -62,7 +62,7 @@ def repo_relative(source: str) -> str:
     return source
 
 
-def merged(items: list[dict], found: list[dict]) -> list[dict]:
+def merged(items: list[dict[str, str]], found: list[dict[str, str]]) -> list[dict[str, str]]:
     seen = {(item["source"], item["excerpt"]) for item in items}
     out = list(items)
     for reply in found:
