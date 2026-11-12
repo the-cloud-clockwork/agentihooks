@@ -437,7 +437,7 @@ The delivered writers of each key:
 | `view` | `tick view` | The slow lane event steps, `health findings`, `metrics record`, `status publish` |
 | `live` | `stall watch` | `overrun pass` |
 | `found` | `health findings` | `findings pass`, `metrics record`, `status publish` |
-| `judged`, `stop`, `started` | `intent check`, `ledger health`, `snapshot job` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
+| `judged`, `stop` | `intent check`, `ledger health` | No step; `stop` is read by `scripts.swarm.cli.run_tick` |
 
 Because the readers of `config` need `drained resume`, that step carries
 `DRAINED_RESUME_NEEDS` (`scripts.tick.steps.tasks`) plus `sleeping`: every step
@@ -806,6 +806,23 @@ registry.register(
 )
 ```
 
+### The feature and scenario catalogue
+
+`python -m scripts.tick.catalogue check` imports every step module and calls
+`registry.validate(catalogue)` with the catalogue `scripts.tick.catalogue.load` builds from `feature-map.json` and
+`tests/swarm/tick_scenarios/steps.json`. That index maps each step name to the tick scenario names it runs in (a
+golden key without its `run_tick/` or `tick/` prefix) and lists the steps still unmapped. With a catalogue the
+registry refuses:
+
+- a step whose `feature` is not a feature map id or whose name no scenario lists, unless it is unmapped;
+- an unmapped entry naming a step that is now mapped or no registered step.
+
+`python -m scripts.tick.catalogue shrink --base <base tree> --head <head tree>` refuses an unmapped step the base
+index does not hold, so the unmapped list only shrinks. Production calls `validate()` without a catalogue and skips
+these checks. The `Tick equivalence` workflow runs `check` on the head and `shrink` from the base tree's copy of the
+module, so a head cannot loosen the ratchet, before the scenario replay. A new step gets a feature map entry and an index row in the pull request that registers it; a
+sweep that maps an existing step removes it from `unmapped` in the same change.
+
 ## Tests
 
 The feature map entry `swarm-tick-step-isolation` links the measured timing,
@@ -828,6 +845,7 @@ The delivered proof and limitations are recorded in
 | `tests/tick/test_observe.py` | The `spawn due` step places under the placing lock when the marker exists and sets it |
 | `tests/tick/test_agents.py` | The agent steps in their groups, including the `close` steps before settle and close space, and the tick site printing the actions and failures of handed off slow steps |
 | `tests/tick/test_pass_edges.py` | Every pass box read over the twelve tick scenarios is declared with a need on its writer and every pass box write is declared; a planted undeclared read and a planted missing need are named |
+| `tests/tick/test_catalogue.py` | A step with no feature, an unknown feature or no scenario refused, an unmapped step passing, stale unmapped entries refused, a planted index drop red, a grown unmapped list red from `shrink`, and the recorded catalogue holding every registered step |
 | `tests/tick/test_registry.py` | Unordered writers and crossed readers refused within a lane and across lanes, with the lane names in the message |
 | `tests/tick/test_report.py` | The slow lane report steps and a `CallStep` keeping the lane it is given |
 | `tests/tick/test_closing_lane.py` | The closing deadline starting once at `Pass.close` and outliving an expired critical lane, a closing step running while a critical step in the same group is dropped, the three closing steps in the `closing` group and lane, and a 300 second hung step under a 1 second critical lane still stamping last tick, the heartbeat and the status |
