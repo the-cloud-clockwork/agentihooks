@@ -4929,6 +4929,19 @@
         "tests/deployment/test_worker_hive.py::test_an_empty_charted_capability_list_clears_the_stored_ones",
         "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities"
       ]
+    },
+    {
+      "id": "archive-acknowledged-on-heartbeat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t961",
+      "behaviour": "Once a worker's final checkpoint is published and validated in the artifact store, the supervisor acknowledges the exported transcript end on the lease, which sends it at once on a heartbeat and on every later one, so the controller's archive watermark reaches the completed attempt's transcript end and the retention guard stops holding its cleanup at waiting_archive.",
+      "seam": "scripts.swarm_v2.worker.lease_renewal.Renewer.acknowledge and the heartbeat archive_watermark, driven by scripts.swarm_v2.supervision_runtime.Supervisor.drain and read by scripts.swarm_v2.retention.waiting",
+      "tests": [
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_acknowledged_archive_rides_an_immediate_heartbeat_and_every_later_one",
+        "tests/test_swarm_v2_worker_lease_renewal.py::test_an_unleased_worker_ignores_an_archive_acknowledgement",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_acknowledges_the_archived_transcript_end_once_the_final_checkpoint_validates",
+        "tests/test_swarm_v2_executions_api.py::test_a_completed_pod_whose_archive_the_worker_acknowledged_passes_the_retention_guard"
+      ]
     }
   ],
   "unmapped_rules": [
