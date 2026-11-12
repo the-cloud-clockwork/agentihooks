@@ -29,7 +29,7 @@ class Case:
 
 def load(directory: Path) -> list[Case]:
     """Every case of every corpus file in the directory, in file name order."""
-    cases = []
+    cases: list[Case] = []
     for path in sorted(directory.glob("*.json")):
         corpus = json.loads(path.read_text())
         for case in corpus["cases"]:
@@ -47,7 +47,7 @@ def outcome(case: Case, limits: health.Limits) -> str:
         "_meta": {"events": history.get("events", [])},
         "review_rounds": history.get("review_rounds", {}),
     }
-    found = health.findings(
+    found: list[health.Finding] = health.findings(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         ledger,
         history.get("agents", []),
         history.get("activity", {}),

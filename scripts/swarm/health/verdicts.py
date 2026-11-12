@@ -2,6 +2,7 @@
 
 import json
 from math import inf
+from typing import cast
 from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
@@ -107,7 +108,8 @@ class VerdictStore:
     def false_positives(self) -> dict[str, dict[str, int]]:
         """Per detector, the findings whose current verdict is false-positive out of all judged findings."""
         counts: dict[str, dict[str, int]] = {}
-        for finding_id, raw in sorted(self.redis.hgetall(self.key).items()):
+        stored = cast(dict[str, str], self.redis.hgetall(self.key))  # pyright: ignore[reportUnknownMemberType]
+        for finding_id, raw in sorted(stored.items()):
             verdict = json.loads(raw).get("verdict")
             if not verdict:
                 continue

@@ -5,7 +5,7 @@ from typing import Any
 
 def text(found: list[dict[str, Any]], false_positives: dict[str, dict[str, int]]) -> str:
     """The status lines for the visible findings, led by one false positives line when any finding is judged."""
-    lines = []
+    lines: list[str] = []
     if false_positives:
         counts = (f"{kind} {row['false_positive']} of {row['judged']} judged" for kind, row in false_positives.items())
         lines.append("false positives  " + "  ".join(counts))
