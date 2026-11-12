@@ -32,7 +32,7 @@ def test_scheduler_bus_is_shared_across_timers_and_closed_at_exit(monkeypatch):
         scheduler_state._bus.cache_clear()
 
 
-def test_scheduler_selects_its_swarm_on_a_scoped_bus(monkeypatch):
+def test_scheduler_selects_its_swarm_on_a_scoped_bus(monkeypatch: pytest.MonkeyPatch) -> None:
     from scripts.events import factory
 
     scheduler_state._bus.cache_clear()
@@ -41,10 +41,12 @@ def test_scheduler_selects_its_swarm_on_a_scoped_bus(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_BUS_SCOPED", "1")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "scheduler-proof")
     bus = Mock()
-    monkeypatch.setattr(factory, "open_bus", Mock(return_value=bus))
+    opened = Mock(return_value=bus)
+    monkeypatch.setattr(factory, "open_bus", opened)
     monkeypatch.setattr(scheduler_state, "atexit", Mock())
     try:
         result = scheduler_state.open_scheduler_state("scheduler-member")
+        opened.assert_called_once_with(BusConfig.from_environ())
         bus.for_swarm.assert_called_once_with("scheduler-proof")
         bus.for_swarm.return_value.state.assert_called_once_with("scheduler-member")
         assert result is bus.for_swarm.return_value.state.return_value
