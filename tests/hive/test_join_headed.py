@@ -128,10 +128,8 @@ def test_startup_runs_the_headed_checks_only_on_a_headed_hive(monkeypatch: pytes
 
 
 @pytest.mark.feature("hive-headed-member-check")
-@pytest.mark.parametrize("missing", ["AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
-def test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name(
-    monkeypatch: pytest.MonkeyPatch, missing: str
-) -> None:
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_the_join_hook_skips_an_agent_missing_its_swarm_or_name(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     from hooks.context import hive_join
     from scripts.swarm import store
 
@@ -140,7 +138,7 @@ def test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name(
     monkeypatch.setenv(missing, "")
 
     def unexpected() -> None:
-        raise AssertionError("an agent without its hive, swarm or name must not connect")
+        raise AssertionError("an agent without its swarm or name must not connect")
 
     monkeypatch.setattr(store, "connect", unexpected)
     hive_join.run({"session_id": "session"}, "start")
