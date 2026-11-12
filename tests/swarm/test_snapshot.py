@@ -311,6 +311,35 @@ def test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore(st
     assert restored.get(again.id).state == "pending"
 
 
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_an_alias_recipient_journal_is_exported_under_its_canonical_name(store: RedisStore) -> None:
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    store.names.alias("sw-eng-old", eng)
+    inbox = InboxStore(store.redis)
+    item = inbox.send("operator", "sw-eng-old", "carry on from the parser", ref="sw:2:a1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("sw-eng-old", "bridge-1")
+    [delivery] = dispatcher.reserve("sw-eng-old", "bridge-1")
+    dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    journal = {
+        inbox.key("deliveries", eng),
+        inbox.key("delivery", delivery.id),
+        inbox.key("reservation", item.id),
+        inbox.key("ref-reservation", eng, "sw:2:a1"),
+    }
+    alias_keys, _ = inbox.keys_at(["sw-eng-old"])
+    assert not journal & set(alias_keys)
+    assert journal <= set(store.export("sw")["keys"])
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("sw-eng-old", "bridge-1")
+    assert restored.reserve("sw-eng-old", "bridge-1") == []
+    assert [(d.id, d.state) for d in restored.receipts.recover("sw-eng-old", "bridge-1")] == [(delivery.id, "unknown")]
+
+
 def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
     seed(store, "sw")
     store.update("sw", state="running")
