@@ -193,7 +193,10 @@ def _global(environ: dict, now: float, redis: Any = None) -> list[Account]:
         if row["kind"] == API:
             policy = place.policy(row["harness"], environ)
             cap, weight = policy.cap, policy.weight
-        if (quota and quota.get("refused")) or (row["harness"], account_key(f"{row['account']}")) in refused:
+        if (quota and (quota.get("refused") or quota.get("expired"))) or (
+            row["harness"],
+            account_key(f"{row['account']}"),
+        ) in refused:
             cap = 0
         rows.append(
             Account(
