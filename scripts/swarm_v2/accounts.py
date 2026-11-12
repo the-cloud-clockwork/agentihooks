@@ -59,7 +59,8 @@ def stored_accounts(store: RedisStore) -> list[str]:
     redis = cast(Any, store.redis)
     if not redis.exists(INDEX_BUILT):
         _backfill_index(store)
-    return sorted(cast(set[str], redis.smembers(INDEX)))
+    members: set[str] = redis.smembers(INDEX)
+    return sorted(members)
 
 
 def _backfill_index(store: RedisStore) -> None:
