@@ -2,11 +2,19 @@
 
 import json
 from math import inf
+from typing import Any
 from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
 
 VERDICTS = ("false-positive", "early-real", "established", "insufficient-evidence", "resolved")
+
+
+def _rows(finding: Any) -> dict[str, Any]:
+    """The ledger rows and last outcome a finding carries once status attached them, else nothing."""
+    if not finding.last_outcome:
+        return {}
+    return {"rows": [dict(row) for row in finding.rows], "last_outcome": finding.last_outcome}
 
 
 class VerdictStore:
@@ -23,10 +31,9 @@ class VerdictStore:
             before = json.loads(stored[finding.id]) if finding.id in stored else None
             record = {**(before or {"seen_at": now_ms, "verdict": None, "returned": False})}
             record.update(evidence=list(finding.evidence), measure=finding.measure, metrics=list(finding.metrics))
+            record.update(_rows(finding))
             if finding.basis:
                 record["basis"] = finding.basis
-            if finding.last_outcome:
-                record.update(rows=[dict(row) for row in finding.rows], last_outcome=finding.last_outcome)
             verdict = record["verdict"]
             if finding.evidence_identity is not None:
                 record["evidence_identity"] = list(finding.evidence_identity)
