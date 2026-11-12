@@ -1,6 +1,8 @@
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -304,7 +306,7 @@ def test_alert_line_names_each_open_stale_claim_with_its_claimant_and_last_nudge
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks(open_page):
+def test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks(open_page: Callable[..., Any]) -> None:
     at = NOW_MS - 300_000
     ceremony = {
         "id": "ceremony/eng-58",

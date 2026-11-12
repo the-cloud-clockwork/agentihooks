@@ -32,7 +32,7 @@ def ceremony_events() -> list[dict]:
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome():
+def test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome() -> None:
     events = ceremony_events()
     found = health.ceremony(events, tasks(), health.Limits())
     [finding] = finding_rows.attach(found, events, tasks(), [])
@@ -45,7 +45,7 @@ def test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome():
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_rows_doctrine_or_the_task_required_are_marked():
+def test_rows_doctrine_or_the_task_required_are_marked() -> None:
     events = ceremony_events()
     [finding] = finding_rows.attach(health.ceremony(events, tasks(), health.Limits()), events, tasks(), [])
     marks = {(r["kind"], r["target"]): r["required"] for r in finding.rows}
@@ -59,18 +59,22 @@ def test_rows_doctrine_or_the_task_required_are_marked():
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_a_task_finding_lists_its_task_rows_and_its_claimant_outcome():
+def test_a_task_finding_lists_its_task_rows_and_its_claimant_outcome() -> None:
     events = [ev("task started", "tasks/t1", by="", at=NOW + n) for n in range(4)]
+    events.append({**ev("task started", "tasks/t1", by="", at=NOW + 5), "after": "park"})
+    events.append({**ev("comment added", "tasks/t1", by="sw-eng-7", at=NOW + 6), "text": "looked at it"})
     events.append(ev("task done", "tasks/t0", at=NOW - MIN))
     found = health.proof_loops(events, tasks(), health.Limits(), {})
     [finding] = finding_rows.attach(found, events, tasks(), [])
-    assert [r["kind"] for r in finding.rows] == ["task started"] * 4
+    assert [r["kind"] for r in finding.rows] == ["task started"] * 5 + ["comment added"]
+    assert [r["text"] for r in finding.rows[3:]] == ["Build the panel", "after park", "looked at it"]
     assert finding.rows[0]["required"] == ""
+    assert finding.rows[-1]["required"] == ""
     assert finding.last_outcome.startswith("Earlier work at ")
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_a_seat_finding_reads_the_rows_of_the_agent_in_the_seat():
+def test_a_seat_finding_reads_the_rows_of_the_agent_in_the_seat() -> None:
     seat = health.Finding("master blocked on prompt", "master@rig", "s", ("e",), "t", 4)
     events = [ev("comment added", "chat", by="master@rig-1")]
     agents = [{"name": "master@rig-1", "seat": "master@rig"}]
@@ -80,7 +84,7 @@ def test_a_seat_finding_reads_the_rows_of_the_agent_in_the_seat():
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_status_text_prints_every_finding_with_its_rows_and_marks():
+def test_status_text_prints_every_finding_with_its_rows_and_marks() -> None:
     events = ceremony_events()
     [finding] = finding_rows.attach(health.ceremony(events, tasks(), health.Limits()), events, tasks(), [])
     text = finding_rows.text({"id": finding.id, **finding.as_dict(), "verdict": None})
@@ -93,7 +97,7 @@ def test_status_text_prints_every_finding_with_its_rows_and_marks():
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_status_text_says_when_a_finding_has_no_rows():
+def test_status_text_says_when_a_finding_has_no_rows() -> None:
     bare = health.Finding("stalled", "nobody", "busy", ("pane working",), "10 minutes", 12)
     [finding] = finding_rows.attach([bare], [], {}, [])
     text = finding_rows.text({"id": finding.id, **finding.as_dict(), "verdict": None})
@@ -101,7 +105,7 @@ def test_status_text_says_when_a_finding_has_no_rows():
 
 
 @pytest.mark.feature("swarm-health-finding-rows")
-def test_the_verdict_record_stores_the_rows_and_the_last_outcome():
+def test_the_verdict_record_stores_the_rows_and_the_last_outcome() -> None:
     import json
 
     from fakeredis import FakeRedis
@@ -119,7 +123,7 @@ def test_the_verdict_record_stores_the_rows_and_the_last_outcome():
 
 
 @pytest.mark.feature("swarm-health-proof-loop-parks")
-def test_a_task_claimed_four_times_with_three_parks_is_no_proof_loop():
+def test_a_task_claimed_four_times_with_three_parks_is_no_proof_loop() -> None:
     first = {"kind": "task started", "target": "tasks/t1", "at": NOW, "head": None}
     parked = [{**first, "at": NOW + n, "after": "park"} for n in (1, 2, 3)]
     tasks_ = {"t1": {"id": "t1", "state": "claimed"}}

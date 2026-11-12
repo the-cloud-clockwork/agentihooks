@@ -1,7 +1,7 @@
 """Health finding rows: the ledger events behind each finding, the agent's last outcome, and which rows were required.
 
 A row is required by doctrine when it is a task state change the engineer loop must record, and by the task when it
-is a comment on the agent's own claimed task or that task's phase.
+is the agent's own comment on its claimed task or that task's phase, which the task prompt asks for as work lands.
 """
 
 from dataclasses import replace
@@ -38,21 +38,38 @@ def _with_rows(finding: Finding, events: list[dict[str, Any]], tasks: dict[str, 
     return replace(finding, rows=rows, rows_total=len(mine), last_outcome=_last_outcome(events, tasks, actor))
 
 
-def _owned(tasks: dict[str, dict[str, Any]], actor: str) -> set[str]:
+def _owned(tasks: dict[str, dict[str, Any]], actor: str) -> set[tuple[str, str]]:
     held = [task for task in tasks.values() if actor and task.get("claimed_by") == actor]
-    return {f"tasks/{task['id']}" for task in held} | {f"phases/{task['phase']}" for task in held if task.get("phase")}
+    targets = {f"tasks/{task['id']}" for task in held} | {
+        f"phases/{task['phase']}" for task in held if task.get("phase")
+    }
+    return {(actor, target) for target in targets}
 
 
-def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[str]) -> dict[str, Any]:
+def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[tuple[str, str]]) -> dict[str, Any]:
     kind, target = event.get("kind", ""), event.get("target", "")
     required = ""
     if kind in DOCTRINE:
         required = "doctrine"
-    elif kind == "comment added" and target in owned:
+    elif kind == "comment added" and (event.get("by", ""), target) in owned:
         required = "task"
-    tid = _task_id(target)
-    text = (tasks.get(tid, {}).get("title") or "") if tid else str(event.get("error") or "")
-    return {"at": event.get("at") or 0, "kind": kind, "target": target, "text": text[:TEXT_LIMIT], "required": required}
+    label = _label(event, tasks)
+    return {
+        "at": event.get("at") or 0,
+        "kind": kind,
+        "target": target,
+        "text": label[:TEXT_LIMIT],
+        "required": required,
+    }
+
+
+def _label(event: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> str:
+    if event.get("text"):
+        return str(event["text"])
+    if event.get("after"):
+        return f"after {event['after']}"
+    tid = _task_id(event.get("target") or "")
+    return (tasks.get(tid, {}).get("title") or "") if tid else str(event.get("error") or "")
 
 
 def _last_outcome(events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]], actor: str) -> str:
@@ -62,7 +79,7 @@ def _last_outcome(events: list[dict[str, Any]], tasks: dict[str, dict[str, Any]]
         if actor
         and e.get("by") == actor
         and e.get("kind") == "task done"
-        and _outcome(tasks.get(_task_id(e["target"]), {}))
+        and _outcome(tasks.get(_task_id(e.get("target") or ""), {}))
     ]
     if not done:
         return "none recorded"

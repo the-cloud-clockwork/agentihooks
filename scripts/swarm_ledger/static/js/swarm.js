@@ -351,7 +351,7 @@ export function renderSwarm(sw) {
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
   $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
-  $("alert-findings").replaceChildren(...open.filter((f) => f.last_outcome).map(findingRows));
+  $("alert-findings").replaceChildren(...open.map(findingRows));
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);
