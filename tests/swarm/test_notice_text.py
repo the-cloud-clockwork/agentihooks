@@ -112,6 +112,7 @@ PULL = "https://github.com/o/r/pull/1961"
         (f"{JOB} ran (slow)", f"{JOB} ran slow"),
         (f"see {PULL} and {JOB}", f"see {PULL} and {JOB}"),
         (f"merged {PULL}", f"merged {PULL}"),
+        (f"merged {PULL},", f"merged {PULL}"),
         (f"see {PULL}(a)(b);c", f"see {PULL}%28a%29%28b%29%3Bc"),
     ],
 )
