@@ -4,6 +4,7 @@ import sys
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 from scripts.swarm import hash_pages, successor_retry
 from scripts.swarm.store import SwarmConfig
@@ -94,11 +95,20 @@ def read(job: dict, now_ms: int) -> Placed | None:
     return Placed(**outcome["placed"])
 
 
-def pending(store, slug: str, launch, placed: Placed) -> None:
+def pending(store: Any, slug: str, launch: Any, placed: Placed) -> None:
     entry = {"task": launch.task, "placed": asdict(placed)}
     if launch.task.get("handoff"):
         entry["primed"] = launch.primed
     store.redis.hset(store.key(slug, KEY), launch.record.name, json.dumps(entry))
+    decided = replace(
+        launch.record,
+        harness=placed.harness,
+        account=placed.account,
+        model=placed.model,
+        effort=placed.effort,
+        profile=placed.profile,
+    )
+    store.put_agent(slug, decided)
     store.record_launch(slug, launch.record, STATE)
 
 
