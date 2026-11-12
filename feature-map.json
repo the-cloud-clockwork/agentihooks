@@ -1502,6 +1502,19 @@
       ]
     },
     {
+      "id": "swarm-tick-abandoned-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2494",
+      "behaviour": "A step worker its pass abandoned at the step budget never renews the tick lock once that pass released it: the late renewal returns quietly, raises no stale lock error and leaves a successor pass's lock and the activity mark untouched.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal, revoked by run_tick before it releases the tick lock",
+      "tests": [
+        "tests/swarm/test_abandoned_tick_renewal.py::test_an_abandoned_step_worker_never_renews_the_lock_its_pass_released"
+      ],
+      "rules": [
+        "pass-step-hook-unrevoked"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
@@ -1961,6 +1974,17 @@
       "tests": [
         "tests/swarm/test_waits.py::test_a_wait_on_intent_names_its_own_tasks_pull_request",
         "tests/swarm/test_waits.py::test_target_problem_takes_intent_only_on_the_own_tasks_pull_request"
+      ]
+    },
+    {
+      "id": "intent-split-half-own-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t976",
+      "behaviour": "On a split task, swarm done naming a half's pull request is refused unless that half carries its own intent verdict, and a merge naming a bare pull request number matches only a registered half in the command's own repository.",
+      "seam": "scripts.gates.intent.IntentGate.decide on swarm done, gh pr merge and swarm merge queue commands",
+      "tests": [
+        "tests/gates/test_intent_split_gate.py::test_done_refuses_a_registered_half_without_its_own_verdict",
+        "tests/gates/test_intent_split_gate.py::test_a_bare_number_matches_only_the_half_in_its_own_repository"
       ]
     },
     {
@@ -5125,6 +5149,17 @@
         "tests/gates/test_progress.py::test_branch_head_is_unread_when_github_fails_or_the_repository_is_elsewhere",
         "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
         "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
+      ]
+    },
+    {
+      "id": "swarm-auto-snapshot-size-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2500",
+      "behaviour": "After each automatic swarm snapshot the newest ten are kept only while their summed size from the newest stays within one gibibyte, the newest always kept, so the kept set fits under the controller's two gibibyte ephemeral storage limit.",
+      "seam": "scripts.swarm.snapshot.auto pruning through scripts.swarm.snapshot.stale",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest",
+        "tests/swarm/test_snapshot.py::test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget"
       ]
     }
   ],

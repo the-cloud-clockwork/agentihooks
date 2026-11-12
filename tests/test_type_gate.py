@@ -479,7 +479,7 @@ def test_a_checker_failure_names_its_output(
     assert _grade(base, head, capsys) == (1, "::error::basedpyright exited 2: boom\n")
     assert calls[-1] == {
         "cwd": head,
-        "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=6656"},
+        "env": {**os.environ, "NODE_OPTIONS": "--max-old-space-size=5120"},
         "capture_output": True,
         "text": True,
     }
