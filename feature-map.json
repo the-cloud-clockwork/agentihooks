@@ -4855,11 +4855,12 @@
       "id": "hive-chart-capabilities",
       "origin": "operator",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-anton-hive-capability-chart",
-      "behaviour": "A worker hive's chart settings declare its capabilities in workers.capabilities, rendered into the HIVE_CAPABILITIES setting of each worker hive container, and the worker start registers exactly those capabilities on the hive record with hive set, so a new hive pod carries them with no hand step; a worker started without the setting keeps the capabilities already stored.",
+      "behaviour": "A worker hive's chart settings declare its capabilities in workers.capabilities, rendered into the HIVE_CAPABILITIES setting of each worker hive container, and the worker start registers exactly those capabilities on the hive record with hive set, so a new hive pod carries them with no hand step; the chart is authoritative, so an empty list clears stored capabilities, while a pod rendered by an older chart that has no such setting, which a newer worker image can start under, keeps the capabilities already stored.",
       "seam": "the hive set the worker start script runs, fed by the HIVE_CAPABILITIES setting the worker hive template renders",
       "tests": [
         "tests/deployment/test_worker_hive.py::test_the_charted_capabilities_are_registered_on_every_start",
-        "tests/deployment/test_worker_hive.py::test_a_worker_without_charted_capabilities_keeps_the_stored_ones"
+        "tests/deployment/test_worker_hive.py::test_an_empty_charted_capability_list_clears_the_stored_ones",
+        "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities"
       ]
     }
   ],

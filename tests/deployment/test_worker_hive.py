@@ -157,7 +157,7 @@ def test_the_charted_placement_rank_is_registered_on_every_start(tmp_path, monke
 
 
 @pytest.mark.feature("hive-chart-capabilities")
-def test_the_charted_capabilities_are_registered_on_every_start(tmp_path, monkeypatch):
+def test_the_charted_capabilities_are_registered_on_every_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HIVE_CAPABILITIES", "anton,gpu")
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
@@ -168,7 +168,18 @@ def test_the_charted_capabilities_are_registered_on_every_start(tmp_path, monkey
 
 
 @pytest.mark.feature("hive-chart-capabilities")
-def test_a_worker_without_charted_capabilities_keeps_the_stored_ones(tmp_path, monkeypatch):
+def test_an_empty_charted_capability_list_clears_the_stored_ones(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HIVE_CAPABILITIES", "")
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (
+        "hive set --keep --reason the worker started worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= "
+        "prefer= capabilities="
+    ) in commands.splitlines()
+
+
+@pytest.mark.feature("hive-chart-capabilities")
+def test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HIVE_CAPABILITIES", raising=False)
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
