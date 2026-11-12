@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from hooks.classifier.child import skip_classifier_child
-from hooks.observability import otel
+from hooks.observability import otel, presence
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -2745,6 +2745,8 @@ def main() -> None:
         from hooks.observability.token_monitor import record_lifecycle_context
 
         record_lifecycle_context(payload)
+
+        presence.mark(payload)
 
         event_name = payload.get("hook_event_name", "Unknown")
         _blocked_event = event_name
