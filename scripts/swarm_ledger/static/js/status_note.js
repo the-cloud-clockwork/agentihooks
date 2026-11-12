@@ -3,7 +3,7 @@ import { $, h } from "./dom.js";
 const DISMISSED = "swarm-note-dismissed";
 const failures = new Map();
 let seen = new Set();
-let drawn = "";
+let drawn = null;
 let held = "";
 
 function readDismissed() {
@@ -40,6 +40,7 @@ export function replayCommands(commands, actionOf, textOf) {
     else if (!dismissed.has(command.id)) noteFailure(actionOf(command), textOf(command), command.id || "");
   }
   seen = current;
+  drawFailures();
 }
 
 export function holdNote(text) {
