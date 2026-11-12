@@ -282,7 +282,8 @@ def test_a_swarm_store_error_answers_503_storage_error():
     assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "no store")
 
 
-def test_two_live_interface_hives_without_members_keep_a_row_each():
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_two_live_interface_hives_without_members_keep_a_row_each() -> None:
     second = {"id": "old-id", "name": "swarm-master", "ui": "yes", "live": True}
     readings = {
         "root": {**HOST, "agents": {"claude": 6, "codex": 0}},
