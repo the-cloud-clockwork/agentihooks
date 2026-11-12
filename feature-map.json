@@ -4640,6 +4640,7 @@
     {
       "id": "metrics-gate-rows-span-the-window",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t617",
       "behaviour": "The swarm metrics pass reads gate denies and reruns from the whole one day metrics window of the gate log, so rows older than its last 64 KB still reach the agent and delivery tables.",
       "seam": "scripts.swarm.metrics_swarm.record_pass through scripts.gates.log.since",
       "tests": [
