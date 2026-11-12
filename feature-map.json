@@ -2278,6 +2278,18 @@
       ]
     },
     {
+      "id": "inbox-refused-answer-resend",
+      "origin": "regression",
+      "behaviour": "After the ledger page refuses an agent answer to an operator message, a fresh reply sends the new answer, or says the answer was refused when the item cannot take one; the wake pass reports a refused message it must hold for a retry as held, never closed.",
+      "seam": "InboxStore.reply in scripts.inbox.store and the wake pass operator step in scripts.inbox.wake",
+      "tests": [
+        "tests/inbox/test_store.py::test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer",
+        "tests/inbox/test_store.py::test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text",
+        "tests/inbox/test_store.py::test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused",
+        "tests/inbox/test_wake.py::test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held"
+      ]
+    },
+    {
       "id": "swarm-launch-bounded-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",

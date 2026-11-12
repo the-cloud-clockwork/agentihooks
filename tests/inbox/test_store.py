@@ -242,16 +242,46 @@ def test_a_replayed_reply_bound_to_a_refused_answer_is_refused_and_keeps_the_ite
     assert store.get(item.id).state == "read"
 
 
-def test_a_reply_without_an_operation_id_keeps_returning_its_refused_answer(store):
-    item, answer = refused_answer(store)
-    assert store.reply(item.id, "master", "two tasks left").id == answer.id
-    assert store.get(item.id).state == "done"
+def fresh_answer_closes_the_item(store, item, refused, fresh, text):
+    assert fresh.id != refused.id
+    assert (fresh.sender, fresh.address, fresh.text, fresh.state, fresh.ref) == (
+        "master",
+        "operator",
+        text,
+        "pending",
+        item.id,
+    )
+    assert store.get(refused.id).state == "cancelled"
+    closed = store.get(item.id)
+    assert closed.state == "done" and fresh.id in closed.reason
+    assert store.redis.hget(store.key("item", item.id), "reply:master") == fresh.id
 
 
-def test_a_new_reply_operation_on_a_refused_answer_slot_is_not_taken_for_a_replay(store):
+@pytest.mark.feature("inbox-refused-answer-resend")
+def test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer(store):
     item, answer = refused_answer(store)
-    assert store.reply(item.id, "master", "two tasks left", answer_id="op-new").id == answer.id
-    assert store.get(item.id).state == "done"
+    fresh = store.reply(item.id, "master", "two tasks left")
+    fresh_answer_closes_the_item(store, item, answer, fresh, "two tasks left")
+
+
+@pytest.mark.feature("inbox-refused-answer-resend")
+def test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text(store):
+    item, answer = refused_answer(store)
+    fresh = store.reply(item.id, "master", "one task left", answer_id="op-new")
+    assert fresh.id == "op-new"
+    fresh_answer_closes_the_item(store, item, answer, fresh, "one task left")
+    history = [entry["reason"] for entry in store.history(item.id)]
+    assert history[-2] == "reopened: its answer was refused by the ledger page"
+
+
+@pytest.mark.feature("inbox-refused-answer-resend")
+def test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused(store):
+    item, answer = refused_answer(store)
+    store.redis.hset(store.key("item", item.id), "reason", "closed elsewhere")
+    with pytest.raises(InboxError) as refused:
+        store.reply(item.id, "master", "one task left", answer_id="op-new")
+    assert str(refused.value) == f"answer {answer.id} to message {item.id} was refused"
+    assert not store.redis.exists(store.key("item", "op-new"))
 
 
 @pytest.mark.parametrize("moved", ["cancel", "handoff", "open", "other answer"])
