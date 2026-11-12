@@ -57,8 +57,6 @@ def run_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcomes: list[B
 def test_each_pass_writes_one_end_line_naming_its_number_and_outcome(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import redis
-
     calls = run_passes(
         monkeypatch,
         tmp_path,
