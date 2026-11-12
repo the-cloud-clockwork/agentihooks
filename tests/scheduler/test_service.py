@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -892,7 +892,7 @@ def test_a_supervisor_that_raises_names_the_exception_it_exits_on(monkeypatch, c
     )
 
 
-def _clock(service: object, monkeypatch: pytest.MonkeyPatch, readings: list[int]) -> None:
+def _clock(service: ModuleType, monkeypatch: pytest.MonkeyPatch, readings: list[int]) -> None:
     ticks = iter(readings)
     monkeypatch.setattr(service, "time", SimpleNamespace(monotonic=lambda: next(ticks), time=service.time.time))
 
@@ -948,11 +948,17 @@ async def test_an_answer_restarts_the_silence_bound(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.feature("scheduler-unreachable-endpoint-stop")
-async def test_a_held_dispatch_lock_counts_as_an_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("answer", ["Busy", "ResponseError", "StateConflict"])
+async def test_a_store_that_answers_with_an_error_restarts_the_silence_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answer: str
+) -> None:
     from redis import exceptions
 
+    from scripts.events.state import StateConflict
     from scripts.scheduler import service
     from scripts.scheduler.lease import Busy
+
+    answers = {"Busy": Busy, "ResponseError": exceptions.ResponseError, "StateConflict": StateConflict}
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
@@ -962,7 +968,7 @@ async def test_a_held_dispatch_lock_counts_as_an_answer(monkeypatch: pytest.Monk
     def drain() -> None:
         passes.append(1)
         if len(passes) == 2:
-            raise Busy("held")
+            raise answers[answer]("held")
         if len(passes) == 4:
             stop.set()
             return

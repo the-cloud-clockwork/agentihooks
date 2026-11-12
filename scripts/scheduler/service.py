@@ -83,11 +83,15 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
 
     Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
     """
+    from redis.exceptions import ConnectionError as Refused
+    from redis.exceptions import TimeoutError as Unanswered
+
     from scripts.events import state
     from scripts.scheduler.lease import Busy, LostLock
     from scripts.swarm.naming import PROOF_RE
 
     transient = state.unavailable()
+    silence = (Refused, Unanswered, OSError)
     stopped = stop if stop is not None else _on_signals()
     silent_since: float | None = None
     scratch = PROOF_RE.fullmatch(os.environ.get("AGENTIHOOKS_SWARM") or "") is not None
@@ -100,7 +104,7 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
             except (LostLock, Busy) as exc:
                 silent_since = None
                 print(f"scheduler pass ended: {exc}", file=sys.stderr)
-            except transient:
+            except silence:
                 now = time.monotonic()
                 silent_since = now if silent_since is None else silent_since
                 if scratch and now - silent_since >= UNREACHABLE_S:
@@ -108,6 +112,9 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
                         f"scheduler stops: the state store did not answer for {UNREACHABLE_S} seconds", file=sys.stderr
                     )
                     return True
+                print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
+            except transient:
+                silent_since = None
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=1)

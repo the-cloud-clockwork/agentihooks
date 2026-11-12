@@ -614,12 +614,12 @@
       "id": "scheduler-unreachable-endpoint-stop",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-scratch-scheduler-reap",
-      "behaviour": "A proof swarm's scheduler runner whose state store has not answered for 300 consecutive seconds stops and exits with code 3, and its supervisor ends instead of starting a new runner, so a scheduler left bound to a finished proof's scratch Redis does not run forever; any answer, a held dispatch lock included, restarts the bound, and a runner outside a proof swarm keeps waiting for its state store.",
+      "behaviour": "A proof swarm's scheduler runner whose state store has refused or timed out every pass for 300 consecutive seconds stops and exits with code 3, and its supervisor ends instead of starting a new runner, so a scheduler left bound to a finished proof's scratch Redis does not run forever; any answer, an error the store answered with included, restarts the bound, and a runner outside a proof swarm keeps waiting for its state store.",
       "seam": "scripts.scheduler.service.run, main and supervise",
       "tests": [
         "tests/scheduler/test_service.py::test_a_runner_stops_once_its_state_store_stays_silent_past_the_bound",
         "tests/scheduler/test_service.py::test_an_answer_restarts_the_silence_bound",
-        "tests/scheduler/test_service.py::test_a_held_dispatch_lock_counts_as_an_answer",
+        "tests/scheduler/test_service.py::test_a_store_that_answers_with_an_error_restarts_the_silence_bound",
         "tests/scheduler/test_service.py::test_a_runner_outside_a_proof_swarm_keeps_waiting_for_its_state_store",
         "tests/scheduler/test_service.py::test_the_runner_entrypoint_exits_with_the_unreachable_code_only_when_it_stopped_on_silence",
         "tests/scheduler/test_service.py::test_a_supervisor_ends_without_a_new_runner_once_its_runner_stopped_on_silence"
