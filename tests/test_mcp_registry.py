@@ -52,6 +52,7 @@ class TestMCPRegistry:
             "culture",
             "agents",
             "plans",
+            "workflows",
         }
 
     def test_the_server_serves_the_scheduler_tools(self, tools):
@@ -65,6 +66,15 @@ class TestMCPRegistry:
             "cron_add",
             "cron_list",
             "cron_remove",
+        } <= set(tools)
+
+    def test_the_server_serves_the_workflow_tools(self, tools):
+        assert {
+            "workflow_list",
+            "workflow_run",
+            "workflow_status",
+            "workflow_schedule",
+            "workflow_unschedule",
         } <= set(tools)
 
     def test_build_server_callable(self):

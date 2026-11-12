@@ -8,3 +8,6 @@ Commits carry noreply@anthropic.com and 1234+bot@users.noreply.github.com.
 Clone git@github.com:org/repo.git or https://user:secret-placeholder@github.com/org/repo.git.
 The service is nats.nats.svc.cluster.local and the swarm is swarm.example.internal.
 Read settings.local.json and call pathlib.Path.home.
+An antonym, Antonio and Santon are words, not lab names.
+The public host ip-203-0-113-9 and the build id i-12345 are fine.
+Documentation addresses 2001:db8::1 and loopback ::1 pass.
