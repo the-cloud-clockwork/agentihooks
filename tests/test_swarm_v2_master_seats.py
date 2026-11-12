@@ -732,9 +732,9 @@ def test_a_seats_write_that_keeps_losing_its_race_names_what_was_not_saved(
         writes.append(len(writes))
         store.redis.hset(seats.key(SLUG), "touched", len(writes))
 
-    def checking(*args: str | int | list[str]) -> None:
+    def checking(slug: str, count: int, hive_id: str, owner: str, retired: list[str]) -> None:
         touch()
-        check(*args)
+        check(slug, count, hive_id, owner, retired)
 
     def numbering(slug: str, address: str) -> int:
         touch()
