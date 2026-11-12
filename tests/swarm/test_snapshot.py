@@ -522,6 +522,28 @@ def test_only_the_ten_newest_automatic_snapshots_are_kept(store):
     assert snapshot.path("sw").exists()
 
 
+@pytest.mark.feature("swarm-auto-snapshot-size-budget")
+def test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest(store, monkeypatch):
+    monkeypatch.setattr(snapshot, "KEEP_BYTES", 1_000_000, raising=False)
+    _running(store, snapshot_minutes=1)
+    snapshot.auto_dir("sw").mkdir(parents=True)
+    for n in range(1, 6):
+        (snapshot.auto_dir("sw") / f"auto-{n * MINUTE}.json").write_text(json.dumps({"taken_at": n}).ljust(400_000))
+    snapshot.auto(store, "sw", 10 * MINUTE, {}, run=_no_git)
+    kept = snapshot.automatic("sw")
+    assert [p.name for p in kept] == [f"auto-{n * MINUTE}.json" for n in (4, 5, 10)]
+    assert sum(p.stat().st_size for p in kept) <= 1_000_000
+
+
+@pytest.mark.feature("swarm-auto-snapshot-size-budget")
+def test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget(tmp_path):
+    files = [tmp_path / f"auto-{n}.json" for n in (1, 2)]
+    for file in files:
+        with file.open("wb") as planted:
+            planted.truncate(3 << 30)
+    assert snapshot.stale(files) == files[:1]
+
+
 @pytest.mark.parametrize("slug", ["", ".", "..", "sw/..", "/abs"])
 def test_automatic_pruning_refuses_a_name_that_is_not_one_swarm_folder(store, slug):
     _running(store, slug=slug, snapshot_minutes=1)
