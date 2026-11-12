@@ -2742,6 +2742,18 @@
       ]
     },
     {
+      "id": "ledger-layout-unload-save",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t230",
+      "behaviour": "A layout save still pending when the ledger page hides or closes is sent at once as a keepalive request, so the server keeps the newest layout.",
+      "seam": "The layout save of the ledger page on pagehide and on a hidden visibilitychange",
+      "tests": [
+        "tests/swarm_ledger/test_layout_unload.py::test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layout",
+        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request",
+        "tests/swarm_ledger/test_layout_unload.py::test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
+      ]
+    },
+    {
       "id": "ledger-tabs",
       "origin": "inventory",
       "behaviour": "The ledger page tabs keep the shell fixed, scroll only the active body, and keep the tab choice and scroll positions across switches.",
@@ -4976,6 +4988,17 @@
       "seam": "WriterLease.acquire in the swarm v2 ledger writer",
       "tests": [
         "tests/test_swarm_v2_ledger_writer.py::test_a_failed_holder_record_write_releases_the_lock"
+      ]
+    },
+    {
+      "id": "swarm-park-foreign-dependency-no-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
+      "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
+        "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
       ]
     }
   ],
