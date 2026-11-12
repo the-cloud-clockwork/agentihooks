@@ -19,7 +19,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 
-async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, tmp_path):
+async def test_one_runner_drains_work_and_refuses_a_second_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -49,7 +51,7 @@ async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, t
         pass
 
 
-async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
+async def test_runner_polls_again_after_the_wait_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -71,7 +73,9 @@ async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["ConnectionError", "TimeoutError"])
-async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp_path, capsys, failure):
+async def test_runner_survives_a_redis_that_does_not_answer_yet(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], failure: str
+) -> None:
     from redis import exceptions
 
     from scripts.scheduler import service
@@ -90,7 +94,7 @@ async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp
     assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
 
 
-async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
+async def test_runner_still_stops_on_any_other_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -139,7 +143,9 @@ async def test_a_pass_that_loses_its_dispatch_lock_ends_and_the_next_pass_reacqu
 
 
 @pytest.mark.parametrize("lost", ["LostLock", "Busy"])
-async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(monkeypatch, tmp_path, capsys, lost):
+async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], lost: str
+) -> None:
     from scripts.scheduler import lease, service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -553,7 +559,9 @@ def test_drain_never_signals_without_a_supervisor_pid(monkeypatch, tmp_path, pid
 
 
 @pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGINT])
-def test_a_signalled_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch, tmp_path, number):
+def test_a_signalled_runner_finishes_the_dispatch_in_hand_and_exits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, number: int
+) -> None:
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
