@@ -46,7 +46,9 @@ def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its
     assert STALE.summary in cause["description"] and "task t1" in cause["description"]
     for task in (cause, fixed):
         assert TASK_ID.match(task["task"])
-        assert ledger_comments.problems(task["title"], "item") == []
+        title = task["title"]
+        assert isinstance(title, str)
+        assert ledger_comments.problems(title, "item") == []
         ledger_kinds.check(task)
 
 

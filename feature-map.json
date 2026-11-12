@@ -2674,6 +2674,17 @@
       ]
     },
     {
+      "id": "ledger-plain-words-skip-links",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-plain-words-skip-links",
+      "behaviour": "The ledger plain words check counts parentheses and semicolons on prose only, so a web link carrying them stays whole, while the same marks in the prose beside it still count.",
+      "seam": "ledger comments plain words check",
+      "tests": [
+        "tests/test_ledger_comments.py::test_parentheses_and_semicolons_inside_a_web_link_are_not_counted",
+        "tests/test_ledger_comments.py::test_parentheses_and_semicolons_in_prose_beside_a_link_are_still_counted"
+      ]
+    },
+    {
       "id": "artifact-request-rule",
       "origin": "inventory",
       "behaviour": "An agent publishes an artifact only on a task marked artifact requested or against an operator message that asked for it; any other publish is refused naming where proofs go.",
