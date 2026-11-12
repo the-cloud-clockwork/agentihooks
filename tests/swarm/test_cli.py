@@ -2186,7 +2186,9 @@ def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):
     assert any("followups/f1" in action for action in actions)
 
 
-def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monkeypatch, tmp_path):
+def test_status_carries_health_findings_for_the_master_to_read(
+    env: tuple, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     store.put_agent("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", idle_ticks=4))
@@ -2206,10 +2208,12 @@ def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monk
         "  id idle-with-claim/engineer@a1b2c3-0001",
         "  last outcome none recorded",
     ]
-    assert out[start + 5].startswith("  rows ")
+    assert out[start + 5] == "  rows none in the ledger events"
 
 
-def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypatch):
+def test_status_prints_each_evidence_entry_on_its_own_line(
+    env: tuple, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     run("sw", "create", "--repo", "/repo")
     entries = ("Split the parser, gain 4", "Cache the index, gain 1.5", "q2, no gain stated")
     finding = cli.health.Finding(

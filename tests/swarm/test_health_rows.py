@@ -46,13 +46,14 @@ def test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome() -> No
 
 @pytest.mark.feature("swarm-health-finding-rows")
 def test_rows_doctrine_or_the_task_required_are_marked() -> None:
-    events = ceremony_events()
+    events = [*ceremony_events(), ev("comment added", "tasks/t0", at=NOW + 35)]
     [finding] = finding_rows.attach(health.ceremony(events, tasks(), health.Limits()), events, tasks(), [])
     marks = {(r["kind"], r["target"]): r["required"] for r in finding.rows}
     assert marks[("task pr", "tasks/t1")] == "doctrine"
     assert marks[("comment added", "phases/p1")] == "task"
     assert marks[("comment added", "tasks/t1")] == "task"
     assert marks[("comment edited", "phases/p9")] == ""
+    assert marks[("comment added", "tasks/t0")] == ""
     pr = next(r for r in finding.rows if r["kind"] == "task pr")
     assert pr["text"] == "Build the panel"
     assert pr["at"] == NOW + 30
@@ -62,7 +63,7 @@ def test_rows_doctrine_or_the_task_required_are_marked() -> None:
 def test_a_task_finding_lists_its_task_rows_and_its_claimant_outcome() -> None:
     events = [ev("task started", "tasks/t1", by="", at=NOW + n) for n in range(4)]
     events.append({**ev("task started", "tasks/t1", by="", at=NOW + 5), "after": "park"})
-    events.append({**ev("comment added", "tasks/t1", by="sw-eng-7", at=NOW + 6), "text": "looked at it"})
+    events.append({**ev("comment added", "tasks/t1", by="sw-eng-7", at=NOW + 6), "text": "looked\n  at it"})
     events.append(ev("task done", "tasks/t0", at=NOW - MIN))
     found = health.proof_loops(events, tasks(), health.Limits(), {})
     [finding] = finding_rows.attach(found, events, tasks(), [])

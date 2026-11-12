@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -199,7 +200,12 @@ def test_the_grace_follows_its_health_setting():
 
 
 @pytest.mark.feature("swarm-health-drain")
-def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(env, capsys, monkeypatch, tmp_path):  # noqa: F811
+def test_swarm_status_prints_the_capacity_decision_and_the_drain_finding(
+    env: tuple,  # noqa: F811
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     from scripts.swarm import cli, status
 
     store, ledger, _ = env

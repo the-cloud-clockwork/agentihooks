@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from scripts.swarm.health.findings import NOT_TRANSITIONS, Finding, _outcome, _task_id
+from scripts.swarm.health.findings import HELD, NOT_TRANSITIONS, Finding, _outcome, _task_id
 
 ROW_LIMIT = 20
 TEXT_LIMIT = 60
@@ -39,7 +39,7 @@ def _with_rows(finding: Finding, events: list[dict[str, Any]], tasks: dict[str, 
 
 
 def _owned(tasks: dict[str, dict[str, Any]], actor: str) -> set[tuple[str, str]]:
-    held = [task for task in tasks.values() if actor and task.get("claimed_by") == actor]
+    held = [task for task in tasks.values() if actor and task.get("claimed_by") == actor and task.get("state") in HELD]
     targets = {f"tasks/{task['id']}" for task in held} | {
         f"phases/{task['phase']}" for task in held if task.get("phase")
     }
@@ -53,7 +53,7 @@ def _row(event: dict[str, Any], tasks: dict[str, dict[str, Any]], owned: set[tup
         required = "doctrine"
     elif kind == "comment added" and (event.get("by", ""), target) in owned:
         required = "task"
-    label = _label(event, tasks)
+    label = " ".join(_label(event, tasks).split())
     return {
         "at": event.get("at") or 0,
         "kind": kind,
