@@ -3511,6 +3511,16 @@
       ]
     },
     {
+      "id": "root-hive-github-user-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
+      "behaviour": "The hive join github check probes the installation endpoint only when the auth mode is app, or is unset on a joined hive member; a root hive session with no auth mode and no member id probes its user login, so a workstation launch on a user gh login passes the check.",
+      "seam": "scripts.hive.join_checks.github_ready",
+      "tests": [
+        "tests/hive/test_join_checks.py::test_root_hive_without_an_auth_mode_checks_github_as_its_user_login"
+      ]
+    },
+    {
       "id": "scheduler-bounded-history",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-headed-hive-oom",

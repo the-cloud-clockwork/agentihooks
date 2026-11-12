@@ -88,6 +88,7 @@ def test_a_probe_exception_becomes_a_failed_check(exception):
 def test_github_app_credentials_are_checked_as_an_installation(monkeypatch, mode):
     from scripts.hive import join_checks
 
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
     if mode is None:
         monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
     else:
@@ -98,6 +99,20 @@ def test_github_app_credentials_are_checked_as_an_installation(monkeypatch, mode
     )
     assert join_checks.github_ready() is True
     assert calls == [["gh", "api", "installation/repositories", "--silent"]]
+
+
+@pytest.mark.feature("root-hive-github-user-login")
+def test_root_hive_without_an_auth_mode_checks_github_as_its_user_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.hive import join_checks
+
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        join_checks.subprocess, "run", lambda argv, **kwargs: calls.append(argv) or SimpleNamespace(returncode=0)
+    )
+    assert join_checks.github_ready() is True
+    assert calls == [["gh", "api", "user", "--silent"]]
 
 
 def test_status_and_verdict_probe_only_the_engineer_keys():
