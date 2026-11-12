@@ -136,6 +136,22 @@ def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
     assert shown(store, [watching(41)], T0 + 2 * HOUR + 1) == []
 
 
+@pytest.mark.feature("swarm-health-false-positives")
+def test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings(board) -> None:
+    _, store = board
+    stale = Finding("stale claim", "t9", "no progress", ("quiet",), "30 minutes", 40)
+    other = Finding("over monitoring", "sw-eng-2", "more watch calls", ("x",), "y", 30)
+    store.visible([watching(33), stale, other], T0, HOUR)
+    assert store.false_positives() == {}
+    store.judge("over-monitoring/sw-master-1", "false-positive", "ledger re-arms", "sw-master-1", T0)
+    store.judge("over-monitoring/sw-eng-2", "established", "", "sw-master-1", T0)
+    store.judge("stale-claim/t9", "false-positive", "waiting on checks", "sw-master-1", T0)
+    assert store.false_positives() == {
+        "over-monitoring": {"false_positive": 1, "judged": 2},
+        "stale-claim": {"false_positive": 1, "judged": 1},
+    }
+
+
 def test_an_identical_finding_writes_nothing(board):
     client, store = board
     store.visible([watching(33)], T0, HOUR)
