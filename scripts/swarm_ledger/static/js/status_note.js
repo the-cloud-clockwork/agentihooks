@@ -27,7 +27,8 @@ export function noteFailure(action, text, id = "") {
 }
 
 export function noteSuccess(action) {
-  if (failures.delete(action)) drawFailures();
+  failures.delete(action);
+  drawFailures();
 }
 
 export function replayCommands(commands, actionOf, textOf) {

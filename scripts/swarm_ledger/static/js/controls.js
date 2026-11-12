@@ -5,7 +5,7 @@ import { capDraft, doctorOn, laneCeilings, overlayChanges, pending, renderSwarm,
 import { wireHives } from "./hives.js";
 import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 import { meta } from "./sync.js";
-import { noteFailure, noteSuccess, replayCommands, wireFailures } from "./status_note.js";
+import { drawFailures, noteFailure, noteSuccess, replayCommands, wireFailures } from "./status_note.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
@@ -133,7 +133,8 @@ function opNote(phase, action, error) {
 
 export function showNote(phase, action, error) {
   if (phase === "error") noteFailure(action, opNote(phase, action, error).text);
-  else if (phase !== "pending") noteSuccess(action);
+  else if (phase === "pending") drawFailures();
+  else noteSuccess(action);
 }
 
 function renderFocus(config) {
