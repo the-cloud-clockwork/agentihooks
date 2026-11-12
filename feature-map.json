@@ -1852,7 +1852,23 @@
         "tests/profiles/test_hub_import.py::test_an_unsafe_file_in_agent_hooks_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_a_dangling_agent_hooks_symlink_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_an_asset_holding_a_literal_credential_refuses_the_import",
-        "tests/profiles/test_hub_import.py::test_a_profile_file_taken_twice_refuses_the_import"
+        "tests/profiles/test_hub_import.py::test_a_profile_file_taken_twice_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_nested_manifest_that_installs_nothing_is_copied",
+        "tests/profiles/test_hub_import.py::test_a_nested_manifest_that_installs_is_not_copied",
+        "tests/profiles/test_hub_import.py::test_an_agent_hooks_file_colliding_with_a_package_file_names_both"
+      ]
+    },
+    {
+      "id": "hub-import-paths",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-import-absolute-paths",
+      "behaviour": "A hub import rewrites each workstation home path in the copied instructions, rules and skills to its bundle relative profile form when it names an imported agent's package, hooks or folder, else to its HOME environment form, and refuses the import naming any Windows user path or hub agent file outside the profile.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_workstation_paths_in_instructions_become_bundle_or_environment_forms",
+        "tests/profiles/test_hub_import.py::test_a_workstation_path_with_no_portable_form_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_workstation_paths_outside_instructions_are_left_alone",
+        "tests/profiles/test_hub_import.py::test_undecodable_instruction_bytes_survive_a_path_rewrite"
       ]
     },
     {
