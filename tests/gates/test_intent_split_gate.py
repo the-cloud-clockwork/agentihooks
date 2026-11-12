@@ -169,6 +169,14 @@ def test_a_numeric_slug_keeps_its_place_when_the_number_is_resolved() -> None:
     ]
 
 
+def test_with_pull_rewrites_only_the_operand_naming_the_number() -> None:
+    url = "https://github.com/o/r/pull/10"
+    merge = intent._with_pull(["gh", "pr", "merge", "10", "--squash"], "10", url)
+    assert merge == ["gh", "pr", "merge", url, "--squash"]
+    done = intent._with_pull(["agentihooks", "swarm", SLUG, "done", "--pr=10", "--proof", "x"], "10", url)
+    assert done == ["agentihooks", "swarm", SLUG, "done", f"--pr={url}", "--proof", "x"]
+
+
 def test_done_target_reads_the_pr_flag() -> None:
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done", "--pr", SECOND]) == SECOND
     assert intent._done_target(["agentihooks", "swarm", SLUG, "done", f"--pr={SECOND}"]) == SECOND
