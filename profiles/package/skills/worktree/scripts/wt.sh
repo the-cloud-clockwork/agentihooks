@@ -136,7 +136,7 @@ release() {
 origin_repo() {
   local url
   url="$(git -C "$1" config --get remote.origin.url)" || return 1
-  url="${url%.git}"; url="${url#*://}"; url="${url#*@}"
+  url="${url%/}"; url="${url%.git}"; url="${url#*://}"; url="${url##*@}"
   echo "${url/://}"
 }
 
@@ -237,7 +237,8 @@ case "${cmd}" in
         || die "branch '${BR}' is not contained in an origin branch — worktree kept"
     elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
-        PR_STATE="$(cd "${REPO}" && gh pr list -R "$(origin_repo "${REPO}")" --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
+        ORIGIN_REPO="$(origin_repo "${REPO}")" || die "no origin remote in ${REPO} — worktree kept"
+        PR_STATE="$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \
           || die "cannot read pull requests for '${BR}' — worktree kept"
         if [[ "${PR_STATE}" == "CLOSED "* ]]; then
           [[ "${FORCE}" -eq 1 ]] \
@@ -286,8 +287,8 @@ case "${cmd}" in
       git -C "${REPO}" fetch origin "${BASE}" --quiet 2>/dev/null || true
       MERGED=0
       [[ -z "$(git -C "${REPO}" rev-list "origin/${BASE}..${BR}" 2>/dev/null)" ]] && MERGED=1
-      if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1; then
-        [[ -n "$(cd "${REPO}" && gh pr list -R "$(origin_repo "${REPO}")" --head "${BR}" --base "${BASE}" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]] && MERGED=1
+      if [[ "${MERGED}" -eq 0 ]] && command -v gh >/dev/null 2>&1 && ORIGIN_REPO="$(origin_repo "${REPO}")"; then
+        [[ -n "$(cd "${REPO}" && gh pr list -R "${ORIGIN_REPO}" --head "${BR}" --base "${BASE}" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]] && MERGED=1
       fi
       if [[ "${MERGED}" -eq 1 || "${FORCE}" -eq 1 || "${PUSHED}" -eq 1 ]]; then
         git -C "${REPO}" branch -D "${BR}" >/dev/null && echo "wt: removed ${TARGET} and branch ${BR}"

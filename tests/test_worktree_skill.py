@@ -435,7 +435,7 @@ class Done(WtBase):
                 self.assertTrue(self.branch_exists(name))
                 self.assertTrue(self.remote_branch_exists(name))
 
-    def test_done_in_a_fork_reads_the_pull_request_merged_on_origin(self):
+    def test_done_in_a_fork_reads_the_pull_request_merged_on_origin(self) -> None:
         dest = self._new("fork-merged")
         (dest / "fork.txt").write_text("fork\n")
         _git(dest, "add", "fork.txt", env=self.gitenv)
