@@ -861,8 +861,9 @@ def test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_c
 
 
 @pytest.mark.feature("merge-pass-dependent-conflict-on-prerequisite-merge")
+@pytest.mark.parametrize("held", [False, True])
 def test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_already_failed(
-    merging: SimpleNamespace,
+    merging: SimpleNamespace, held: bool
 ) -> None:
     from scripts.inbox.store import InboxStore
     from scripts.swarm.ledger_events import pull_request
@@ -872,6 +873,12 @@ def test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_
     merging.rows["t1"]["awaiting"] = ""
     merging.rows["t3"] = {"id": "t3", "state": "pr", "claimed_by": owner, "pr_url": dependent, "depends_on": ["t1"]}
     merging.store.put_agent("sw", AgentRecord(owner, "eng", "t3", state="working"))
+    if held:
+        merging.rows["t3"]["awaiting"] = "merge"
+        merging.rows["t5"] = {"id": "t5", "state": "open", "claimed_by": ""}
+        found = ready.held_record(dependent, HEAD, TOP, owner, NOW)
+        found["dependency"] = {"kind": "task", "target": "t5"}
+        ready.save(merging.store, "sw", "t3", found)
     queued = pull_request({"state": "OPEN", "mergeable": "MERGEABLE", "mergeQueueEntry": {"state": "UNMERGEABLE"}})
     stale = {URL: MERGED, dependent: queued}
     fresh = {**stale, dependent: pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})}
