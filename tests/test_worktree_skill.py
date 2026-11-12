@@ -475,6 +475,33 @@ class Done(WtBase):
         self.assertIn("and branch fork-merged", result.stdout)
         self.assertEqual(calls.read_text().count("-R github.com/fork-owner/agentihooks"), 2)
 
+    def test_done_keeps_a_branch_that_gained_commits_after_its_pull_request_merged(self) -> None:
+        dest = self._published_with_pull_requests("after-merge", "[]")
+        merged = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        (Path(self.tmp) / "after-merge-pulls.json").write_text(
+            f'[{{"state": "MERGED", "url": "https://github.com/o/r/pull/5", "number": 5, "headRefOid": "{merged}"}}]'
+        )
+        (dest / "late.txt").write_text("late\n")
+        _git(dest, "add", "late.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "late", env=self.gitenv)
+        late = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        result = self.run_wt("done", "after-merge", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertTrue(self.branch_exists("after-merge"))
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", str(self.primary), "rev-parse", "after-merge"], capture_output=True, text=True
+            ).stdout.strip(),
+            late,
+        )
+        self.assertIn("kept", result.stderr)
+        self.assertNotIn("and branch after-merge", result.stdout)
+
 
 class DoneOrigin(WtBase):
     def test_done_pushed_drops_heads_contained_in_a_differently_named_origin_branch(self):
