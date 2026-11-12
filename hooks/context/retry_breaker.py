@@ -249,7 +249,7 @@ def on_post_tool_result(payload: dict) -> None:
     tool_result = payload.get("tool_response") or payload.get("tool_result")
     session_id = payload.get("session_id", "")
 
-    if not session_id or tool_result is None:
+    if not session_id or (tool_result is None and not payload.get("error")):
         return
 
     op_key = _payload_operation_key(payload)

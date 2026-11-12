@@ -12,7 +12,7 @@ import hooks.context.retry_breaker as breaker
 from hooks import hook_manager
 from scripts import install
 
-pytestmark = [pytest.mark.unit, pytest.mark.feature("claude-tool-failure-breaker")]
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,6 +39,7 @@ def memory_breaker() -> Iterator[None]:
     breaker._memory_state.clear()
 
 
+@pytest.mark.feature("claude-tool-failure-breaker")
 def test_a_claude_failure_payload_is_counted_by_the_retry_breaker(memory_breaker: None) -> None:
     with patch("scripts.swarm.health.activity.finish") as finish:
         for call in range(3):
@@ -51,6 +52,7 @@ def test_a_claude_failure_payload_is_counted_by_the_retry_breaker(memory_breaker
     assert [c.kwargs for c in finish.call_args_list] == [{"call_id": f"toolu_{n}"} for n in range(3)]
 
 
+@pytest.mark.feature("claude-tool-failure-breaker")
 def test_a_claude_failure_trips_the_breaker_at_its_threshold(memory_breaker: None) -> None:
     with (
         patch("scripts.swarm.health.activity.finish"),
@@ -63,6 +65,7 @@ def test_a_claude_failure_trips_the_breaker_at_its_threshold(memory_breaker: Non
     assert inject.call_args.args == ("Bash", {"command": "npm install"}, "Exit code 1\nnpm ERR! ENOENT not found", 5)
 
 
+@pytest.mark.feature("claude-tool-failure-breaker")
 def test_a_payload_with_neither_a_response_nor_an_error_is_not_counted(memory_breaker: None) -> None:
     payload = _failure("claude-empty", 0)
     del payload["error"]
@@ -71,6 +74,7 @@ def test_a_payload_with_neither_a_response_nor_an_error_is_not_counted(memory_br
     assert breaker._memory_state == {}
 
 
+@pytest.mark.feature("claude-tool-failure-breaker")
 def test_a_disabled_breaker_leaves_a_claude_failure_uncounted(
     memory_breaker: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -89,6 +93,7 @@ def claude_installer(_isolate_real_user_paths: None, monkeypatch: pytest.MonkeyP
         monkeypatch.setattr(install, name, getattr(fixture_install, name))
 
 
+@pytest.mark.feature("claude-tool-failure-breaker")
 def test_the_installed_claude_settings_carry_the_failure_event(claude_installer: None) -> None:
     from scripts.targets.claude_target import ClaudeAdapter
 
