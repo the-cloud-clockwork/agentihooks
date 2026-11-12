@@ -545,12 +545,14 @@ def test_headroom_emits_presence_after_each_liveness_touch(monkeypatch):
     order = []
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: order.append(("headroom", hive, now_ms)))
     monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: order.append(("touch", hive, now_ms)))
-    monkeypatch.setattr(daemon, "emit_presence", lambda client, hive, now_ms: order.append(("presence", hive, now_ms)))
+    monkeypatch.setattr(
+        daemon, "emit_presence", lambda client, hive, now_ms: order.append(("presence", client, hive, now_ms))
+    )
     monkeypatch.setattr(daemon.time, "time", lambda: 3)
     stop, _, _ = _paced(monkeypatch, 2)
     client: Any = object()
     PUBLISH_HEADROOM(client, client, "local", stop)
-    assert order == [("headroom", "local", 3_000), ("touch", "local", 3_000), ("presence", "local", 3_000)]
+    assert order == [("headroom", "local", 3_000), ("touch", "local", 3_000), ("presence", client, "local", 3_000)]
 
 
 def test_a_failed_presence_emit_is_logged_and_keeps_the_cadence(monkeypatch, capsys):

@@ -40,8 +40,18 @@ def test_a_hive_seen_exactly_at_the_fresh_limit_still_counts():
 
 
 def test_samples_skip_comments_and_unparsable_values_and_keep_a_trailing_timestamp():
-    text = '# c\nm{a="1",b="x y"} 2.5 1700000000000\nm{a="2"} bad\nbare 3\n'
-    assert otel_presence.samples(text) == [("m", {"a": "1", "b": "x y"}, 2.5)]
+    text = '# c\nm{a="1",b="x y"} 2.5 1700000000000\nm{a="2"} bad\nbare 3\nm{a="3"} 4\n'
+    assert otel_presence.samples(text) == [("m", {"a": "1", "b": "x y"}, 2.5), ("m", {"a": "3"}, 4.0)]
+
+
+def test_two_series_of_one_harness_on_one_hive_are_summed():
+    text = (
+        f'agentihooks_presence_hive{{hive_id="h"}} {NOW}\n'
+        'agentihooks_presence_hive_agents{harness="claude",hive_id="h",job="a"} 2\n'
+        'agentihooks_presence_hive_agents{harness="claude",hive_id="h",job="b"} 3\n'
+        'agentihooks_presence_hive_agents{harness="codex"} 9\n'
+    )
+    assert otel_presence.hives(text, NOW)[0]["agents"] == {"claude": 5}
 
 
 def test_read_is_none_when_no_url_is_configured():
@@ -78,7 +88,7 @@ def test_read_fetches_again_after_the_cache_window(monkeypatch):
 
 def test_fetch_returns_none_when_the_collector_does_not_answer(monkeypatch):
     def refuse(url, timeout):
-        assert timeout == otel_presence.TIMEOUT_S
+        assert (url, timeout) == ("http://c/metrics", otel_presence.TIMEOUT_S)
         raise OSError("refused")
 
     monkeypatch.setattr(otel_presence, "urllib", SimpleNamespace(request=SimpleNamespace(urlopen=refuse)))
@@ -96,6 +106,8 @@ def test_fetch_returns_the_decoded_body(monkeypatch):
         def read(self):
             return b"m 1\n"
 
-    opener = SimpleNamespace(urlopen=lambda url, timeout: Response())
+    opened = []
+    opener = SimpleNamespace(urlopen=lambda url, timeout: opened.append((url, timeout)) or Response())
     monkeypatch.setattr(otel_presence, "urllib", SimpleNamespace(request=opener))
     assert otel_presence.fetch("http://c/metrics") == "m 1\n"
+    assert opened == [("http://c/metrics", otel_presence.TIMEOUT_S)]

@@ -57,7 +57,7 @@ def hives(text: str, now_s: float) -> list[Hive]:
         if name == HIVE and "hive_id" in labels and now_s - value <= FRESH_S
     }
     for name, labels, value in parsed:
-        hive = fresh.get(labels.get("hive_id", ""))
+        hive = fresh.get(labels["hive_id"]) if "hive_id" in labels else None
         if name == HIVE_AGENTS and hive is not None and "harness" in labels:
             hive["agents"][labels["harness"]] = hive["agents"].get(labels["harness"], 0) + int(value)
     return sorted(fresh.values(), key=lambda hive: hive["id"])
@@ -74,7 +74,7 @@ def fetch(url: str) -> str | None:
 
 def read(environ: Mapping[str, str], now_s: float, get: Callable[[str], str | None] = fetch) -> list[Hive] | None:
     """Fresh hives from the configured exposition, fetched at most once per CACHE_S; None when unset or silent."""
-    url = environ.get(URL_ENV, "")
+    url = environ.get(URL_ENV)
     if not url:
         return None
     cached = _cache.get(url)
