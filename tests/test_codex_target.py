@@ -882,6 +882,32 @@ class TestCodexEntry:
             "",
         )
 
+    def test_credential_shaped_native_values_are_dropped(self, said: list[str]) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        tok = "ghp_" + "h" * 36
+        spec = {
+            "url": "https://g.example/mcp",
+            "bearer_token_env_var": tok,
+            "env_http_headers": {"X-Api": tok},
+            "env_vars": [tok],
+            "tool_timeout_sec": 30,
+        }
+        assert codex_mcp_entry("gw", spec) == ({"url": "https://g.example/mcp", "tool_timeout_sec": 30}, "")
+        assert said == [
+            f"  [!!] MCP 'gw' {key} looks like a credential (github_token) — dropped from config.toml. "
+            "Name an environment variable instead of writing its value."
+            for key in ("env_vars", "env_http_headers", "bearer_token_env_var")
+        ]
+
+    @pytest.mark.parametrize("key", ["env_vars", "env_http_headers", "cwd", "enabled"])
+    def test_empty_native_values_survive_and_none_stays_out(self, said: list[str], key: str) -> None:
+        from scripts.targets.codex_target import codex_mcp_entry
+
+        empty = {"env_vars": [], "env_http_headers": {}, "cwd": "", "enabled": False}[key]
+        assert codex_mcp_entry("a", {"command": "/a", key: empty}) == ({"command": "/a", key: empty}, "")
+        assert codex_mcp_entry("a", {"command": "/a", key: None}) == ({"command": "/a"}, "")
+
 
 class TestPersonaIdentityNaming:
     """A linked profile is a capability layer, not part of the persona name."""
