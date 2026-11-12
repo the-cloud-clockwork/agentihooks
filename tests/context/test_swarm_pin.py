@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from hooks.context import swarm_pin
 
 IDENTITY = {
@@ -47,6 +49,23 @@ def test_a_session_started_inside_the_agent_is_nested(tmp_path):
     proc = _tree(tmp_path)
     assert swarm_pin.nested(IDENTITY, 23, proc)
     assert swarm_pin.nested(IDENTITY, 41, proc)
+
+
+def test_a_copilot_session_started_inside_the_agent_drops_its_identity(tmp_path: Path) -> None:
+    proc = _tree(tmp_path)
+    _proc(proc, 45, "bash", 12)
+    _proc(proc, 46, "copilot", 45)
+    _proc(proc, 47, "sh", 46)
+    environ = dict(IDENTITY)
+    assert swarm_pin.unpin(environ, 47, proc)
+    assert environ == {}
+
+
+def test_an_orphaned_copilot_keeps_its_identity(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _proc(root, 60, "copilot", 1, 10)
+    _proc(root, 61, "sh", 60, 10)
+    assert not swarm_pin.nested(IDENTITY, 61, root)
 
 
 def test_a_session_outside_the_launcher_is_nested(tmp_path):
