@@ -2489,6 +2489,17 @@
       ]
     },
     {
+      "id": "scout-sources-repo-relative",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-scout-relative-evidence",
+      "behaviour": "A scout that cites an absolute file path inside a git checkout, such as a hive worker checkout, records that source relative to the checkout's repository root, so the evidence schema accepts it and a hive placed workflow run no longer fails its scout stage; an absolute path outside any checkout is still refused.",
+      "seam": "scripts.scout.loop.run evidence sources through scripts.scout.cli.main and the evidence schema",
+      "tests": [
+        "tests/scout/test_cli.py::test_a_source_inside_a_worker_checkout_is_cited_relative_to_its_repository_root",
+        "tests/scout/test_cli.py::test_an_absolute_source_outside_any_checkout_is_still_refused"
+      ]
+    },
+    {
       "id": "ledger-event-relay",
       "origin": "inventory",
       "behaviour": "The ledger event relay publishes each unsent outbox row once on its subject in revision order with only its catalogued fields, a crash between publish and mark never duplicates an event, and a row the bus refuses as too large never holds back the rows after it.",
@@ -3172,6 +3183,19 @@
       "tests": [
         "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_backs_off_after_a_ledger_timeout_and_runs_the_next_pass",
         "tests/swarm/test_controller_ledger_timeout.py::test_controller_run_once_reports_a_ledger_timeout_as_a_failed_pass"
+      ]
+    },
+    {
+      "id": "controller-pass-end-line",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-pass-end-log",
+      "behaviour": "Every controller pass that ends, whether it completed, ended on an unreachable ledger or ended on a Redis error inside the grace window, writes exactly one JSON line to standard output with event controller_pass_end, the pass number counted from one and its outcome ok, ledger_unreachable or redis_grace, so a start check can wait on pass end lines instead of fixed cadence sleeps.",
+      "seam": "scripts.swarm.controller._passes run loop standard output",
+      "tests": [
+        "tests/swarm/test_controller_pass_end.py::test_each_pass_writes_one_end_line_naming_its_number_and_outcome",
+        "tests/swarm/test_controller_pass_end.py::test_a_single_pass_writes_its_end_line_before_returning",
+        "tests/swarm/test_controller_pass_end.py::test_a_single_failed_pass_names_its_failure_in_the_end_line",
+        "tests/swarm/test_controller_pass_end.py::test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once"
       ]
     },
     {
