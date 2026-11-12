@@ -30,7 +30,7 @@ def test_the_tick_reopens_a_split_task_whose_earlier_half_is_unmerged(store):  #
     actions = done_gate.recheck_pass(store, "sw", doc([split_done()], events), ledger, NOW, read)
     assert actions == ["task t1 reopened, its pull request is closed"]
     assert seen == [FIRST]
-    assert ledger.updates == [("t1", {"state": "open", "claimed_by": ""})]
+    assert ledger.updates == [("t1", {"state": "open", "claimed_by": "", "pr_url": SECOND})]
     assert FIRST in ledger.comments[0][1]
 
 

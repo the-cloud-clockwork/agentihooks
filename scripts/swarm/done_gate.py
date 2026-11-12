@@ -30,6 +30,8 @@ REOPENED = (
 def refusal(task, url, github):
     """Why `swarm done` must refuse this task, or '' when it may close."""
     kind = ledger_kinds.kind(task)
+    if url and url in (task.get("merged_pulls") or []):
+        return f"pull request {url} merged before this task reopened; give the new pull request with --pr <url>"
     if kind not in GATED:
         return _unmerged(url, github, READY) if url and gated(task) else ""
     if task.get("split"):
@@ -99,7 +101,7 @@ def recheck_pass(store, slug, doc, ledger, now_ms, github):
         for url in _pulls(task):
             state = _unmerged_state(store, slug, url, github)
             if state:
-                ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""})
+                ledger.update_task(slug, task_id, {"state": "open", "claimed_by": "", "pr_url": task["pr_url"]})
                 ledger.comment(slug, task_id, REOPENED.format(url=url, state=state), by="swarm")
                 actions.append(f"task {task_id} reopened, its pull request is {state}")
                 break

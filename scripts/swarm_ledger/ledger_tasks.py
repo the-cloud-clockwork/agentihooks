@@ -48,6 +48,7 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "merged_pulls",
     "pull_scopes",
     "after_release",
     "applied_at",
@@ -79,6 +80,7 @@ LIST_FIELDS = (
     "parked_repos",
     "overlays",
     "split_pulls",
+    "merged_pulls",
     "repositories",
     "needs",
     "doc_items",
@@ -577,7 +579,17 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
     return ""
 
 
+def _reopened(task: dict, fields: dict) -> dict:
+    """Move a done task's pull request to its merged history when a reopen leaves the pull request unnamed."""
+    if task.get("state") != "done" or fields.get("state", "done") == "done" or "pr_url" in fields:
+        return fields
+    if not task.get("pr_url"):
+        return fields
+    return {**fields, "pr_url": "", "merged_pulls": [*task.get("merged_pulls", []), task["pr_url"]]}
+
+
 def _update_fields(task: dict, fields: dict) -> dict:
+    fields = _reopened(task, fields)
     if "contract" in fields:
         fields = {**fields, "contract": {**(task.get("contract") or {}), **fields["contract"]}}
     if (
