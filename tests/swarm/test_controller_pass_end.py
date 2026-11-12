@@ -6,6 +6,7 @@ from types import ModuleType
 from typing import cast
 
 import pytest
+import redis
 
 from scripts.gates import intent
 from scripts.swarm import controller, redis_grace
@@ -89,18 +90,42 @@ def test_a_single_pass_writes_its_end_line_before_returning(
 @pytest.mark.feature("controller-pass-end-line")
 @pytest.mark.parametrize(
     ("error", "outcome"),
-    [(LedgerUnreachable("ledger timed out"), "ledger_unreachable"), (None, "redis_grace")],
+    [(LedgerUnreachable("ledger timed out"), "ledger_unreachable"), (redis.ConnectionError("refused"), "redis_grace")],
 )
 def test_a_single_failed_pass_names_its_failure_in_the_end_line(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    error: BaseException | None,
+    error: BaseException,
     outcome: str,
 ) -> None:
-    import redis
-
-    run_passes(monkeypatch, tmp_path, [error or redis.ConnectionError("refused")])
+    run_passes(monkeypatch, tmp_path, [error])
 
     assert controller._passes(STORE, None, PROOF, True, redis_grace.Outage(30, Clock())) == 1
     assert ended(capsys.readouterr().out) == [{"event": "controller_pass_end", "pass": 1, "outcome": outcome}]
+
+
+class Stdout:
+    """A standard output double that records each write and flush in order."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def write(self, text: str) -> int:
+        self.events.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.events.append("<flush>")
+
+
+@pytest.mark.feature("controller-pass-end-line")
+def test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stdout = Stdout()
+    run_passes(monkeypatch, tmp_path, [None])
+    monkeypatch.setattr(controller.sys, "stdout", stdout)
+
+    assert controller._passes(STORE, None, PROOF, True, redis_grace.Outage(30, Clock())) == 0
+    assert stdout.events == ['{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n', "<flush>"]

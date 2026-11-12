@@ -3167,7 +3167,8 @@
       "tests": [
         "tests/swarm/test_controller_pass_end.py::test_each_pass_writes_one_end_line_naming_its_number_and_outcome",
         "tests/swarm/test_controller_pass_end.py::test_a_single_pass_writes_its_end_line_before_returning",
-        "tests/swarm/test_controller_pass_end.py::test_a_single_failed_pass_names_its_failure_in_the_end_line"
+        "tests/swarm/test_controller_pass_end.py::test_a_single_failed_pass_names_its_failure_in_the_end_line",
+        "tests/swarm/test_controller_pass_end.py::test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once"
       ]
     },
     {
