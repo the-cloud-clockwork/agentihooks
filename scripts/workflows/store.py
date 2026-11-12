@@ -40,11 +40,11 @@ def save(folder: Path, state: dict) -> None:
 
 
 def files(folder: Path) -> dict[str, str]:
-    """Every regular file in the run folder as text, keyed by its path relative to the folder."""
+    """Every regular file in the run folder as text, keyed by its path relative to the folder; a symlink is skipped."""
     return {
         path.relative_to(folder).as_posix(): path.read_text(errors="replace")
         for path in sorted(folder.rglob("*"))
-        if path.is_file()
+        if path.is_file() and not path.is_symlink()
     }
 
 

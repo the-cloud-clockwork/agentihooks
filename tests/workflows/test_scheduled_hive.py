@@ -117,6 +117,20 @@ def test_report_keeps_the_first_result_for_a_run_id(home: Path, redis: Any) -> N
 
 
 @pytest.mark.feature("hive-run-result")
+def test_report_leaves_out_a_symlink_to_a_file_outside_the_run_folder(home: Path, tmp_path: Path, redis: Any) -> None:
+    folder = finished_run(home, {"status": "passed"})
+    host_file = tmp_path / "outside" / "host-file"
+    host_file.parent.mkdir()
+    host_file.write_text("host only")
+    (folder / store.OUTPUTS_DIR / "link.md").symlink_to(host_file)
+
+    scheduled.report(HIVE, RUN, redis)
+
+    saved = json.loads(redis.hget(scheduled.receipt(HIVE, RUN), scheduled.RESULT))["files"]
+    assert sorted(saved) == sorted(["outputs/build.md", store.STATE_FILE])
+
+
+@pytest.mark.feature("hive-run-result")
 def test_collect_restores_the_run_so_workflow_status_reads_the_same_result(
     home: Path, tmp_path: Path, redis: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
