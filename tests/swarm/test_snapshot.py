@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -186,6 +187,40 @@ def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisSt
     assert store.key("sw", "tick-lock") not in keys
     assert store.key("sw", "") in keys
     assert store.culture.key("sw") in keys
+
+
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_journal() -> None:
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    other = fakeredis.FakeRedis(server=server, decode_responses=True)
+
+    class Closing(fakeredis.FakeRedis):
+        watched = ""
+        close: Callable[[], None] = staticmethod(lambda: None)
+
+        def execute_command(self, *args: object, **options: object) -> object:
+            result = super().execute_command(*args, **options)
+            words = [str(arg) for arg in args]
+            if self.watched and self.watched in words[1:] and words[0].upper() not in ("TYPE", "EXISTS"):
+                Closing.watched = ""
+                Closing.close()
+            return result
+
+    store = RedisStore(Closing(server=server, decode_responses=True))
+    seed(store, "sw")
+    eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
+    inbox = InboxStore(other)
+    item = inbox.send("operator", eng, "close me while the snapshot reads")
+    item_key, history_key = inbox.key("item", item.id), inbox.key("history", item.id)
+    before = (other.hgetall(item_key), other.lrange(history_key, 0, -1))
+    Closing.close = staticmethod(lambda: inbox.close(item.id, eng, "done"))
+    Closing.watched = item_key
+    keys = store.export("sw")["keys"]
+    after = (other.hgetall(item_key), other.lrange(history_key, 0, -1))
+    assert before != after
+    assert (keys[item_key]["value"], keys[history_key]["value"]) in (before, after)
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):

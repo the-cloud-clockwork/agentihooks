@@ -5000,6 +5000,16 @@
         "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
         "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
       ]
+    },
+    {
+      "id": "swarm-snapshot-atomic-read",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-snapshot-atomic-read",
+      "behaviour": "A swarm snapshot export reads the type, value and time to live of every key it selected in one atomic Redis read, so an inbox delivery that closes while the snapshot runs is recorded wholly before or wholly after the close and never as an old item beside a newer history.",
+      "seam": "scripts.swarm.store.RedisStore.export through _dump against concurrent inbox close",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_journal"
+      ]
     }
   ],
   "unmapped_rules": [
