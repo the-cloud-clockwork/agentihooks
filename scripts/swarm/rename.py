@@ -3,9 +3,10 @@ from dataclasses import asdict, replace
 
 from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 
 LOCK_MS = 600_000
+CONNECT_S = 5.0
 
 
 def rename_swarm(store, slug, ledger, runtime, at):
@@ -35,9 +36,12 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 keep()
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
-            if agent.harness == "codex" and not live_binding.managed(agent):
+            if agent.harness == "codex":
                 keep()
-                _name_session(store, slug, runtime, agent.pane_id, new)
+                if live_binding.managed(agent):
+                    _name_thread(store, slug, agent, new)
+                else:
+                    _name_session(store, slug, runtime, agent.pane_id, new)
             keep()
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
@@ -63,6 +67,28 @@ def _name_session(store, slug, runtime, pane_id, new):
     if store.redis.get(key) != new:
         runtime.herdr(["pane", "run", pane_id, f"/rename {new}"])
         store.redis.set(key, new)
+
+
+def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> None:
+    """Name a managed Codex agent's app server thread with the title launch gives it."""
+    from scripts.codex_session import protocol, supervisor
+
+    record = live_binding.transport(store, agent)
+    if record is None or not record.thread_id:
+        return
+    name = supervisor.thread_title(slug, replace(agent, name=new))
+    key = store.key(slug, "session-name", agent.pane_id)
+    if store.redis.get(key) == name:
+        return
+    try:
+        connection, _ = protocol.connect(record.endpoint_ref.removeprefix(supervisor.UNIX), CONNECT_S)
+        try:
+            supervisor.name_thread(connection, record.thread_id, name)
+        finally:
+            connection.close()
+    except (OSError, TimeoutError, protocol.ProtocolError) as exc:
+        raise SwarmError(f"cannot name the thread of {agent.name}: {exc}") from exc
+    store.redis.set(key, name)
 
 
 def _check_pane(names, agent, pane, reserved=""):
