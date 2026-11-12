@@ -138,6 +138,7 @@ class RefusedLedger:
         self.reads: list[str] = []
 
     def binned(self, slug: str) -> bool:
+        assert slug == "proof"
         return False
 
     def closed(self, slug: str) -> bool:
