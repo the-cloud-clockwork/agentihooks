@@ -1,6 +1,35 @@
 {
   "features": [
     {
+      "id": "controller-done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
+      "behaviour": "The swarm v2 controller clears awaiting when committing a verified done outcome, and the ledger accepts the matching fields and receipt replay.",
+      "seam": "Outcomes.complete through ledger_tasks.complete_outcome and SQLiteLedgerRepository",
+      "tests": [
+        "tests/test_swarm_v2_outcomes.py::test_controller_completion_clears_awaiting_and_replays"
+      ],
+      "rules": [
+        "controller-done-keeps-awaiting"
+      ]
+    },
+    {
+      "id": "codex-expired-routing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
+      "behaviour": "Forced Codex routes refuse an expired latest quota reading. Hives publish their own expired observation and retain it instead of adopting a live remote report. Global capacity keeps expired Codex accounts closed.",
+      "seam": "codex_router.select; hive.daemon._subscriptions and adopt_caps; swarm.capacity.accounts",
+      "tests": [
+        "tests/test_codex_router.py::test_a_forced_route_refuses_an_expired_reading",
+        "tests/hive/test_daemon.py::test_an_expired_codex_reading_publishes_its_timestamp_and_no_cap",
+        "tests/hive/test_daemon.py::test_a_hive_keeps_its_own_expired_codex_reading",
+        "tests/swarm/test_capacity.py::test_aggregate_capacity_closes_an_expired_codex_account"
+      ],
+      "rules": [
+        "codex-expired-reading-discarded"
+      ]
+    },
+    {
       "id": "account-keys-indexed-not-scanned",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
@@ -1460,6 +1489,19 @@
       ]
     },
     {
+      "id": "swarm-tick-abandoned-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2494",
+      "behaviour": "A step worker its pass abandoned at the step budget never renews the tick lock once that pass released it: the late renewal returns quietly, raises no stale lock error and leaves a successor pass's lock and the activity mark untouched.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal, revoked by run_tick before it releases the tick lock",
+      "tests": [
+        "tests/swarm/test_abandoned_tick_renewal.py::test_an_abandoned_step_worker_never_renews_the_lock_its_pass_released"
+      ],
+      "rules": [
+        "pass-step-hook-unrevoked"
+      ]
+    },
+    {
       "id": "swarm-tick-source-control-port",
       "origin": "inventory",
       "behaviour": "Swarm code reaches source control through the source control port: a gh list or the GitHub adapter's command builder outside the adapter is refused unless its file is on an exception list that only shrinks, and a change read names its state, head and head branch inside a deadline.",
@@ -1928,6 +1970,17 @@
       "tests": [
         "tests/swarm/test_waits.py::test_a_wait_on_intent_names_its_own_tasks_pull_request",
         "tests/swarm/test_waits.py::test_target_problem_takes_intent_only_on_the_own_tasks_pull_request"
+      ]
+    },
+    {
+      "id": "intent-split-half-own-verdict",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t976",
+      "behaviour": "On a split task, swarm done naming a half's pull request is refused unless that half carries its own intent verdict, and a merge naming a bare pull request number matches only a registered half in the command's own repository.",
+      "seam": "scripts.gates.intent.IntentGate.decide on swarm done, gh pr merge and swarm merge queue commands",
+      "tests": [
+        "tests/gates/test_intent_split_gate.py::test_done_refuses_a_registered_half_without_its_own_verdict",
+        "tests/gates/test_intent_split_gate.py::test_a_bare_number_matches_only_the_half_in_its_own_repository"
       ]
     },
     {
@@ -2915,6 +2968,21 @@
       ]
     },
     {
+      "id": "snapshot-job-bounded-memory",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2497",
+      "behaviour": "The automatic snapshot job writes the snapshot document one entry at a time, loading the Redis export and the ledger one after the other and never building the whole document as one string, and source pruning reads the small refs file beside each kept snapshot instead of parsing every kept snapshot whole, so the job's peak memory stays near its largest single part instead of the sum of the export, the ledger, their text and two parsed snapshots.",
+      "seam": "scripts.swarm.snapshot.take, auto and referenced against the snapshot files and the refs file beside each",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string",
+        "tests/swarm/test_snapshot.py::test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot",
+        "tests/swarm/test_snapshot.py::test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it",
+        "tests/swarm/test_snapshot.py::test_each_entry_down_to_the_split_depth_is_written_as_its_own_string",
+        "tests/swarm/test_snapshot.py::test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot"
+      ],
+      "rules": []
+    },
+    {
       "id": "swarm-tick-delta-reads",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-c1",
@@ -2992,6 +3060,20 @@
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_keeps_every_colon_after_the_selector",
         "tests/swarm_ledger/test_live_rows.py::test_a_selector_value_may_end_in_a_colon",
         "tests/tick/test_live_rows_replay.py::test_pass_state_filters_a_stand_in_read_only_for_a_scope_narrower_than_the_tick"
+      ]
+    },
+    {
+      "id": "claude-tool-failure-breaker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t598",
+      "behaviour": "A failed Claude tool call, delivered as PostToolUseFailure with an error field and no tool response, is counted by the retry breaker and trips it at its threshold while still closing the stall clock, and the installed Claude settings keep that event registered.",
+      "seam": "hooks.hook_manager.EVENT_HANDLERS PostToolUseFailure through hooks.context.retry_breaker.on_post_tool_result, and scripts.targets.claude_target.ClaudeAdapter.write_settings",
+      "tests": [
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_payload_is_counted_by_the_retry_breaker",
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_trips_the_breaker_at_its_threshold",
+        "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
+        "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
+        "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
       ]
     },
     {
@@ -4391,7 +4473,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -4705,6 +4787,16 @@
       "seam": "scripts.swarm.metrics_swarm.placement_counts against scripts.hive.registry.hives",
       "tests": [
         "tests/swarm/test_metrics_swarm.py::test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs"
+      ]
+    },
+    {
+      "id": "metrics-gate-rows-span-the-window",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t617",
+      "behaviour": "The swarm metrics pass reads gate denies and reruns from the whole one day metrics window of the gate log, so rows older than its last 64 KB still reach the agent and delivery tables.",
+      "seam": "scripts.swarm.metrics_swarm.record_pass through scripts.gates.log.since",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail"
       ]
     },
     {
@@ -5024,6 +5116,46 @@
         "tests/test_worktree_skill.py::TestDoneUpstream::test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head",
         "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
         "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
+      ]
+    },
+    {
+      "id": "tick-progress-heads",
+      "origin": "inventory",
+      "behaviour": "The tick step progress heads reads each claimed or in review task's pull request head, or its branch head and open pull request on GitHub at most every five minutes, and records a changed head as a pushed outcome and a newly opened pull request as a pull request opened outcome for the claimant, whatever harness or command made it; the first sight of a task is a baseline and a failed read records nothing.",
+      "seam": "scripts.gates.progress.heads_pass, branch_head and origin, called by scripts.tick.steps.report._progress_heads registered as tick step progress heads",
+      "tests": [
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads",
+        "tests/gates/test_progress.py::test_a_push_the_command_pattern_misses_is_still_an_outcome",
+        "tests/gates/test_progress.py::test_a_first_push_of_a_new_branch_is_an_outcome",
+        "tests/gates/test_progress.py::test_a_deleted_branch_is_no_outcome",
+        "tests/gates/test_progress.py::test_each_task_keeps_its_own_lookup_window",
+        "tests/gates/test_progress.py::test_each_task_keeps_its_own_head",
+        "tests/gates/test_progress.py::test_an_opened_pull_request_is_an_outcome",
+        "tests/gates/test_progress.py::test_a_push_and_an_opened_pull_request_in_one_pass_end_on_the_push",
+        "tests/gates/test_progress.py::test_a_new_head_on_a_recorded_pull_request_is_a_push_once",
+        "tests/gates/test_progress.py::test_a_recorded_pull_request_after_a_branch_read_is_an_opened_pull_request",
+        "tests/gates/test_progress.py::test_an_unread_pull_request_records_nothing",
+        "tests/gates/test_progress.py::test_a_failed_branch_read_keeps_no_baseline",
+        "tests/gates/test_progress.py::test_a_branch_is_read_at_most_once_per_lookup_window",
+        "tests/gates/test_progress.py::test_the_claimant_worktree_branch_on_the_swarm_repository_is_read_when_none_is_recorded",
+        "tests/gates/test_progress.py::test_only_held_tasks_with_a_claimant_and_a_repository_are_read",
+        "tests/gates/test_progress.py::test_a_new_claimant_starts_from_a_baseline",
+        "tests/gates/test_progress.py::test_branch_head_reads_the_branch_commit_and_its_open_pull_request",
+        "tests/gates/test_progress.py::test_branch_head_reads_a_missing_branch_as_empty",
+        "tests/gates/test_progress.py::test_branch_head_is_unread_when_github_fails_or_the_repository_is_elsewhere",
+        "tests/gates/test_progress.py::test_origin_reads_the_public_origin_address_of_a_checkout",
+        "tests/tick/steps/test_progress_heads.py::test_progress_heads_reads_held_tasks_through_the_pass_view_and_the_swarm_origin"
+      ]
+    },
+    {
+      "id": "swarm-auto-snapshot-size-budget",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2500",
+      "behaviour": "After each automatic swarm snapshot the newest ten are kept only while their summed size from the newest stays within one gibibyte, the newest always kept, so the kept set fits under the controller's two gibibyte ephemeral storage limit.",
+      "seam": "scripts.swarm.snapshot.auto pruning through scripts.swarm.snapshot.stale",
+      "tests": [
+        "tests/swarm/test_snapshot.py::test_kept_automatic_snapshots_fit_the_size_budget_counted_from_the_newest",
+        "tests/swarm/test_snapshot.py::test_the_newest_automatic_snapshot_is_kept_even_past_the_size_budget"
       ]
     }
   ],

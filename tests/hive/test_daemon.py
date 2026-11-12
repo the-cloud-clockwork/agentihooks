@@ -1597,7 +1597,8 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
 
 
-def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+@pytest.mark.feature("codex-expired-routing")
+def test_an_expired_codex_reading_publishes_its_timestamp_and_no_cap(observations: Any) -> None:
     from scripts.codex_quota import CodexQuota
 
     balancer = observations
@@ -1609,9 +1610,10 @@ def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
     slots, quota = daemon._subscriptions({"AH_CX_TOKEN_two": "sentinel"}, {"claude": {}, "codex": {}}, 122)
     assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
     assert quota["codex:two"] == {
-        "five_hour": {"used": None, "resets_at": None},
-        "seven_day": {"used": None, "resets_at": None},
-        "observed_at": None,
+        "five_hour": {"used": 30, "resets_at": 1000},
+        "seven_day": {"used": 40, "resets_at": 2000},
+        "observed_at": 121,
+        "expired": True,
     }
 
 
@@ -2265,6 +2267,22 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
     assert published["codex:two"] == _reading(500)
     assert published["claude:own"] == _reading(600)
     assert published["claude:alone"] == _reading(None)
+
+
+@pytest.mark.feature("codex-expired-routing")
+@pytest.mark.parametrize("remote_at", [400, 600])
+def test_a_hive_keeps_its_own_expired_codex_reading(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, remote_at: int
+) -> None:
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: None)
+    slot = {"harness": "codex", "account": "two", "kind": "subscription", "cap": 6}
+    _publish(redis, monkeypatch, "remote", [slot], {"codex:two": _reading(remote_at)}, 1000)
+    local = {"codex:two": _reading(500) | {"expired": True}}
+    _publish(redis, monkeypatch, "local", [slot | {"cap": 0}], local, 1000)
+    published = registry.show(redis, "local")
+    assert published is not None
+    assert published["slots"][0]["cap"] == 0
+    assert json.loads(redis.get(f"{registry.key('local')}:quota")) == local
 
 
 def test_beat_publishes_the_configuration_with_the_repo_identities(redis, monkeypatch):
