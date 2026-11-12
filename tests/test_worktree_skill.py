@@ -502,6 +502,20 @@ class Done(WtBase):
         self.assertIn("kept", result.stderr)
         self.assertNotIn("and branch after-merge", result.stdout)
 
+    def test_done_deletes_a_branch_whose_pull_request_merged_at_its_head(self) -> None:
+        dest = self._published_with_pull_requests("at-merge", "[]")
+        merged = subprocess.run(
+            ["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        (Path(self.tmp) / "at-merge-pulls.json").write_text(
+            f'[{{"state": "MERGED", "url": "https://github.com/o/r/pull/4", "number": 4, "headRefOid": "{merged}"}}]'
+        )
+        result = self.run_wt("done", "at-merge", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("at-merge"))
+        self.assertIn("and branch at-merge", result.stdout)
+
 
 class DoneOrigin(WtBase):
     def test_done_pushed_drops_heads_contained_in_a_differently_named_origin_branch(self):
