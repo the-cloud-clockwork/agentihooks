@@ -86,6 +86,7 @@ How a step is added is in [Tick engine steps](tick-engine-steps.md#adding-a-step
 | overrun pass | wrapper events | tick | 2 | 60 | stall watch | none | none |
 | priorities sweep | wrapper events | slow | 2 | 60 | tick view | none | none |
 | progress checks | wrapper events | slow | 2 | 60 | tick view | none | none |
+| progress heads | wrapper events | slow | 2 | 60 | tick view | source_control | tick-progress-heads |
 | quiet pass | wrapper events | tick | 2 | 60 | none | none | none |
 | stall watch | wrapper events | tick | 18 | 60 | page relay, tick view | none | none |
 | waits end | wrapper events | tick | 3 | 60 | tick view | none | none |
