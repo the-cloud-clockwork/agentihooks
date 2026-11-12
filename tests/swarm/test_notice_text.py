@@ -116,7 +116,7 @@ PULL = "https://github.com/o/r/pull/1961"
         (f"see {PULL}(a)(b);c", f"see {PULL}%28a%29%28b%29%3Bc"),
     ],
 )
-def test_plain_keeps_every_web_link_whole(text, expected):
+def test_plain_never_splits_a_web_link(text, expected):
     shown = notice_text.plain(text)
     assert shown == expected
     assert ledger_comments.problems(shown, "comment") == []
