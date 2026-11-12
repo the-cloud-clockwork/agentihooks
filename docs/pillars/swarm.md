@@ -7387,8 +7387,9 @@ this item once you have looked.
 ```
 
 It comes from sender `swarm`, carries the ref `<slug>:overrun:<task>` and is tagged with the task. It goes to the
-master seat that owns the task's phase, or to the lead master when that seat is not live. The last steps are the
-lines of the task's latest `progress.md` tail. For a task running on a hive, they come from the copy the hive
+master seat that owns the task's phase. When that seat is not live it goes to the lead master, or to the lowest
+numbered live master when the lead seat is not live either. The last steps are the last three non empty lines of
+the task's `progress.md`. For a task running on a hive, they come from the copy the hive
 published, so they match the task's progress on the ledger page. A task with no progress lines reads
 `no steps recorded in progress.md`.
 
@@ -7396,8 +7397,8 @@ The report changes nothing else. Wall time never asks an agent to hand off, neve
 task: only the agent's [context recycle](#context-recycle) at its compact limit hands it off. The master
 decides what to do with the item: send the agent a hint by inbox, fix the blocker, or leave it to finish. Pull
 request 4858 first added a second limit that asked the agent to push and hand off at 150 minutes and ended it 15
-minutes later. Pull request 9793 removed both steps, and the Semgrep rule `overrun-no-wall-time-handoff` refuses any
-message of either shape coming back.
+minutes later. Pull request 9725 added the Semgrep rule `feature-overrun-no-wall-time-handoff`, which refuses any
+message of either shape, and pull request 9793 removed both steps from the overrun pass.
 
 #### What counts toward the age
 
@@ -7416,9 +7417,10 @@ An agent is watched only while all of these hold:
 | Its record is not `finished` | Agents that released through `ready` or handed off |
 | No outage holds it | Agents in provider or Redis outage recovery |
 
-An agent is reported once per task. The pass keeps a mark per agent in the Redis hash
-`agentihooks:swarm:<slug>:overrun`, holding the report time and the task. The mark is dropped when the agent finishes
-or leaves. When an agent moves to another task, or a successor takes the same task, the new task or the new agent
+An agent is reported once for each task it holds in each life. The pass keeps a mark per agent in the Redis hash
+`agentihooks:swarm:<slug>:overrun` (the prefix follows `AGENTIHOOKS_SWARM_KEY_PREFIX` when set), holding the report
+time and the task. The mark is dropped when the agent's record finishes or is removed. An agent still in the swarm
+but off its claim keeps its mark, so it is not reported again if it reclaims the same task. When an agent moves to another task, or a successor takes the same task, the new task or the new agent
 starts its own 90 minute clock.
 
 #### Configuration
@@ -7436,13 +7438,13 @@ redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL agentihooks:swarm:<slug>:ove
 
 The first command lists the master's open items. The second shows which agents were already reported, with the time
 in milliseconds. A tick that sends a report lists it among its actions as
-`overrun: told master@<slug> that <agent> has run 90 minutes on task <id>`. `agentihooks swarm <slug> tick-report`
+`overrun: told <master seat> that <agent> has run 90 minutes on task <id>`, naming the seat the item went to. `agentihooks swarm <slug> tick-report`
 shows the step's wall time against its budget.
 
 | Symptom | Cause |
 |---|---|
 | No report for an agent past 90 minutes | It falls under a row of the table above, or an outage added paused time. Check its task state, `claimed_by` and pane |
-| A second report for the same task | A new agent took the task, or the agent left and came back. Each life gets one report |
+| A second report for the same task | A new agent took the task, or the agent's record finished and it came back. Each life gets one report |
 | `Last steps` is `no steps recorded in progress.md` | The agent appended nothing to `progress.md`, or its hive has not published its folder yet |
 | The agent kept running after the report | Expected. Only its context limit or the master ends it |
 
