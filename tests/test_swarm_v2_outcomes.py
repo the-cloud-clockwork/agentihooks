@@ -1,7 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -378,10 +378,12 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
 @pytest.mark.feature("controller-done-clears-awaiting")
 def test_controller_completion_clears_awaiting_and_replays(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.swarm_ledger.api.resources import revision
+    from scripts.swarm_ledger.repository import LedgerRepository
     from tests import sv2_ctl05_cases
 
     outcomes, repository, token, proposal, _, _, agent = sv2_ctl05_cases.build(monkeypatch, tmp_path)
-    _, rejected = repository.apply_ops(
+    ledger = cast(LedgerRepository, repository)
+    _, rejected = ledger.apply_ops(
         outcomes.authority.slug,
         ops=[
             {
@@ -394,19 +396,21 @@ def test_controller_completion_clears_awaiting_and_replays(monkeypatch: pytest.M
         ],
     )
     assert rejected == []
-    task = repository.get_document(outcomes.authority.slug)["tasks"][0]
+    task = ledger.get_document(outcomes.authority.slug)["tasks"][0]
     assert task["awaiting"] == "merge"
     proposal = replace(proposal, task_revision=revision(task))
     outcomes.propose(token, proposal)
 
-    result = outcomes.complete(token, proposal.generation, repository)
-    completed = repository.get_document(outcomes.authority.slug)
+    result = outcomes.complete(token, proposal.generation, ledger)
+    completed = ledger.get_document(outcomes.authority.slug)
     assert completed["tasks"][0]["state"] == "done"
     assert completed["tasks"][0]["done"] is True
     assert completed["tasks"][0]["awaiting"] == ""
-    assert outcomes.authority.current(proposal.task_id).state == "completed"
-    assert outcomes.complete(token, proposal.generation, repository) == result
-    assert repository.get_document(outcomes.authority.slug) == completed
+    claim = outcomes.authority.current(proposal.task_id)
+    assert claim is not None
+    assert claim.state == "completed"
+    assert outcomes.complete(token, proposal.generation, ledger) == result
+    assert ledger.get_document(outcomes.authority.slug) == completed
 
 
 def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture: tuple[Any, ...]) -> None:
