@@ -673,6 +673,12 @@ def _reached(outage: redis_grace.Outage) -> RedisStore:
         return store
 
 
+def _journal_pass(number: int, outcome: str) -> None:
+    """Write the one structured line that marks the end of a controller pass and names its outcome."""
+    sys.stdout.write(json.dumps({"event": "controller_pass_end", "pass": number, "outcome": outcome}) + "\n")
+    sys.stdout.flush()
+
+
 def _passes(
     store: RedisStore,
     service: "ControlService | None",
@@ -683,12 +689,15 @@ def _passes(
     """Run passes one tick apart, riding out Redis errors until they outlast the grace window."""
     if not once:
         intent.keep_judging()
+    number = 0
     while True:
         started = monotonic()
+        number += 1
         try:
             _finishing(store, service, proof_swarm)
         except LedgerUnreachable as exc:
             print(f"controller: pass ended, next pass after one tick: {exc}", file=sys.stderr, flush=True)
+            _journal_pass(number, "ledger_unreachable")
             if once:
                 return 1
             scheduled_wait(lease.tick_ms() / 1000)
@@ -700,12 +709,14 @@ def _passes(
                 f"controller: pass ended inside the Redis grace window, next pass after one tick: {exc}",
                 file=sys.stderr,
             )
+            _journal_pass(number, "redis_grace")
             if once:
                 return 1
             scheduled_wait(lease.tick_ms() / 1000)
             continue
         outage.ended()
         redis_grace.cleared(redis_grace.marker(os.environ))
+        _journal_pass(number, "ok")
         if once:
             return 0
         _cadence_wait(started)
