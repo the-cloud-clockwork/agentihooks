@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.834 · 2026-11-12
+
+### 2026-11-12 · 6383b192940c · #10894 · @agenticore-app
+
+**Cap the mutation planner at 12 oss batch runners**
+
+This change lowers the mutation planner's BATCH_RUNNERS from 40 to 12, with SHARD_CEILING adjusted to 24 (two waves), bringing the oss batch runner pool in line with the available CPU capacity identified after the November 9th scheduling incident where 43 runner pods sat pending. Planner tests and docs were updated to match the smaller pool, and the 12-runner cap is justified by historical data showing the largest mutation plan over 150 runs used only 23 shard jobs. Note the lint check comparing this against antoncore stays red until the paired antoncore PR (#1704) merges; rerun checks afterward.
+
 ## v2.17.833 · 2026-11-12
 
 ### 2026-11-12 · e529cc2768a9 · #10878 · @agenticore-app
