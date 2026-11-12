@@ -200,3 +200,36 @@ def test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draini
     registry.update(redis, "machine", ["name=Worker"])
     daemon.beat(redis, "machine")
     assert polls == ["machine"] * polled
+
+
+def test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack(
+    setup: tuple[Any, Any, Any, Start, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import RECEIPT_SECONDS
+
+    redis, run_consumer, run_orders, start, _ = setup
+    store = run_orders.RunOrders(redis)
+    sent = order(run_orders, expires_at=1_000_000 + 2 * RECEIPT_SECONDS * 1000)
+    store.send("host", sent)
+    clock = [1000.0]
+    monkeypatch.setattr(run_consumer.time, "time", lambda: clock[0])
+    finish = run_orders.RunOrders.finish
+    crashes = [RuntimeError("crash before the ack")]
+
+    def crashing(self: Any, hive: str, item: str, chosen: Any, ack: Any) -> None:
+        if crashes:
+            raise crashes.pop()
+        finish(self, hive, item, chosen, ack)
+
+    monkeypatch.setattr(run_orders.RunOrders, "finish", crashing)
+    with pytest.raises(RuntimeError):
+        run_consumer.RunConsumer(redis, "host").poll()
+    assert len(start.calls) == 1
+    left = redis.pttl(store.receipt(sent))
+    clock[0] += RECEIPT_SECONDS + 1
+    assert clock[0] * 1000 < sent.expires_at
+    if left < (RECEIPT_SECONDS + 1) * 1000:
+        redis.delete(store.receipt(sent))
+    run_consumer.RunConsumer(redis, "host").poll()
+    assert len(start.calls) == 1
+    assert redis.xlen(store.stream("host")) == 1
