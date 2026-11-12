@@ -30,31 +30,40 @@ class Mark:
     talk: int = 0
 
 
-def outcome_of(command):
+def outcome_of(command: str | None) -> str:
+    """The outcome a shell command is, empty when it is none."""
     return next((kind for kind, pattern in OUTCOME_COMMANDS if command and pattern.search(command)), "")
 
 
 class Progress:
-    def __init__(self, redis, slug):
-        self.redis, self.slug = redis, slug
+    """Each swarm agent's progress mark, one Redis hash per agent."""
 
-    def key(self, agent):
+    def __init__(self, redis: Any, slug: str) -> None:
+        self.redis: Any = redis
+        self.slug = slug
+
+    def key(self, agent: str) -> str:
+        """The Redis key of the agent's progress hash."""
         from scripts.hive import scope
 
         return f"{scope.readings(self.redis, self.slug, agent)}:{self.slug}:progress:{agent}"
 
-    def read(self, agent):
-        raw = self.redis.hgetall(self.key(agent))
+    def read(self, agent: str) -> Mark:
+        """The agent's last outcome and its talk count since."""
+        raw: dict[str, str] = self.redis.hgetall(self.key(agent))
         return Mark(int(raw.get("outcome_at") or 0), raw.get("outcome", ""), int(raw.get("talk") or 0))
 
-    def talk(self, agent):
+    def talk(self, agent: str) -> int:
+        """Count one talk write and return the count since the last outcome."""
         return int(self.redis.hincrby(self.key(agent), "talk"))
 
-    def outcome(self, agent, kind, now_ms=None):
+    def outcome(self, agent: str, kind: str, now_ms: int | None = None) -> None:
+        """Record an outcome and reset the talk count."""
         at = int(time.time() * 1000) if now_ms is None else now_ms
         self.redis.hset(self.key(agent), mapping={"outcome_at": at, "outcome": kind, "talk": 0})
 
-    def outcome_once(self, agent, kind, resolution, now_ms=None):
+    def outcome_once(self, agent: str, kind: str, resolution: str, now_ms: int | None = None) -> bool:
+        """Record an outcome unless this resolution was already recorded, True when it was recorded."""
         if self.redis.hget(self.key(agent), "resolved") == resolution:
             return False
         self.redis.hset(self.key(agent), "resolved", resolution)
@@ -62,8 +71,16 @@ class Progress:
         return True
 
 
-def checks_pass(redis, slug, tasks, github, now_ms=None):
-    marks, stamped = Progress(redis, slug), []
+def checks_pass(
+    redis: Any,
+    slug: str,
+    tasks: Iterable[dict[str, Any]],
+    github: Callable[[str], Any],
+    now_ms: int | None = None,
+) -> list[str]:
+    """Record each resolved pull request check result as an outcome of the task's claimant."""
+    marks = Progress(redis, slug)
+    stamped: list[str] = []
     for task in tasks:
         url, owner = task.get("pr_url"), task.get("claimed_by")
         if task.get("state") != "pr" or not (url and owner):
@@ -156,7 +173,8 @@ def heads_pass(
 ) -> list[str]:
     """Record a new head or pull request GitHub shows for each held task as an outcome of its claimant, whatever
     harness or command pushed it; the first sight of a task is its baseline."""
-    marks, stamped = Progress(redis, slug), []
+    marks = Progress(redis, slug)
+    stamped: list[str] = []
     for task in tasks:
         owner = task.get("claimed_by")
         if task.get("state") not in HELD or not owner:
