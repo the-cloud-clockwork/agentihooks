@@ -5,6 +5,7 @@ evidence; this store is the authority for distributed launches."""
 import json
 from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass, replace
+from typing import Any, cast
 
 from scripts.swarm import lease
 from scripts.swarm.keyspace import ROOT
@@ -55,16 +56,18 @@ def seat_holder(name: str) -> str:
 
 def stored_accounts(store: RedisStore) -> list[str]:
     """Every account with a slot hash, read from the account index; the first read on a Redis without one builds it."""
-    if not store.redis.exists(INDEX_BUILT):
+    redis = cast(Any, store.redis)
+    if not redis.exists(INDEX_BUILT):
         _backfill_index(store)
-    return sorted(store.redis.smembers(INDEX))
+    return sorted(cast(set[str], redis.smembers(INDEX)))
 
 
 def _backfill_index(store: RedisStore) -> None:
     """Index account hashes written without the index, by an older writer, with one keyspace walk an hour at most."""
+    redis = cast(Any, store.redis)
     prefix = account_key("")
-    found = [key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=10000)]
-    with store.redis.pipeline() as pipe:
+    found = [cast(str, key).removeprefix(prefix) for key in redis.scan_iter(match=account_key("*"), count=10000)]
+    with redis.pipeline() as pipe:
         if found:
             pipe.sadd(INDEX, *found)
         pipe.set(INDEX_BUILT, 1, ex=INDEX_REWALK_S)
@@ -169,7 +172,7 @@ class AccountCapacity:
                         for slot in written:
                             pipe.hset(key, slot.holder, encode(slot))
                         if written:
-                            pipe.sadd(INDEX, account)
+                            cast(Any, pipe).sadd(INDEX, account)
                         pipe.execute()
                     return result
                 except WatchError:
