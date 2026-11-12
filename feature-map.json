@@ -4802,6 +4802,16 @@
       ]
     },
     {
+      "id": "hive-run-case-text",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-run-case-text",
+      "behaviour": "A scheduled workflow slot placed on a hive sends the text of its case file in the run order, never the case file location, so the hive run reads the case the scheduler was given.",
+      "seam": "scripts.scheduler.commands.target_slot and scripts.scheduler.slots.WorkflowSlot.deliver through scripts.hive.run_placement.dispatch onto the hive run order stream",
+      "tests": [
+        "tests/hive/test_run_case_text.py::test_a_hive_placed_scheduled_run_sends_its_case_file_text"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",

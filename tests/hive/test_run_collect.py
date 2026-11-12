@@ -153,7 +153,9 @@ def test_a_reported_hive_run_reaches_its_owner_from_the_sending_host(
 
 
 @pytest.mark.feature("hive-run-collect")
-def test_a_hive_slot_remembers_the_run_order_it_sent(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_hive_slot_remembers_the_run_order_it_sent(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.events.redis_state import RedisStateStore
     from scripts.hive import run_placement
     from scripts.scheduler.core import Scheduler
@@ -161,7 +163,9 @@ def test_a_hive_slot_remembers_the_run_order_it_sent(redis: Any, monkeypatch: py
 
     state = RedisStateStore(redis, "scheduler")
     monkeypatch.setattr(run_placement, "dispatch", lambda run, r: HIVE)
-    slot = WorkflowSlot("nightly", "/case.md", "/repo", "hive", ("build",))
+    case = tmp_path / "case.md"
+    case.write_text("case")
+    slot = WorkflowSlot("nightly", str(case), "/repo", "hive", ("build",))
 
     slot.deliver({"owner": OWNER}, RUN, state)
 
@@ -170,7 +174,9 @@ def test_a_hive_slot_remembers_the_run_order_it_sent(redis: Any, monkeypatch: py
 
 
 @pytest.mark.feature("hive-run-collect")
-def test_a_hive_slot_with_no_fitting_hive_remembers_nothing(redis: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_hive_slot_with_no_fitting_hive_remembers_nothing(
+    redis: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.events.redis_state import RedisStateStore
     from scripts.hive import run_placement
     from scripts.hive.placement import Wait
@@ -179,7 +185,9 @@ def test_a_hive_slot_with_no_fitting_hive_remembers_nothing(redis: Any, monkeypa
 
     state = RedisStateStore(redis, "scheduler")
     monkeypatch.setattr(run_placement, "dispatch", lambda run, r: Wait("no live hive lists the repo /repo"))
-    slot = WorkflowSlot("nightly", "/case.md", "/repo", "hive", ("build",))
+    case = tmp_path / "case.md"
+    case.write_text("case")
+    slot = WorkflowSlot("nightly", str(case), "/repo", "hive", ("build",))
 
     slot.deliver({"owner": OWNER}, RUN, state)
 
