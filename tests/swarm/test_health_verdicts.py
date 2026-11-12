@@ -137,7 +137,9 @@ def test_it_returns_at_most_once_and_carries_its_earlier_verdict(board):
 
 
 @pytest.mark.feature("swarm-health-false-positives")
-def test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings(board) -> None:
+def test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings(
+    board: tuple[Writes, verdicts.VerdictStore],
+) -> None:
     _, store = board
     stale = Finding("stale claim", "t9", "no progress", ("quiet",), "30 minutes", 40)
     other = Finding("over monitoring", "sw-eng-2", "more watch calls", ("x",), "y", 30)

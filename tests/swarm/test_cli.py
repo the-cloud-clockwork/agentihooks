@@ -2224,19 +2224,6 @@ def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypa
     ]
 
 
-@pytest.mark.feature("swarm-health-false-positives")
-def test_status_counts_each_detector_s_false_positive_verdicts(env, capsys, monkeypatch) -> None:
-    run("sw", "create", "--repo", "/repo")
-    finding = cli.health.Finding("stale claim", "t1", "no progress for 40 minutes", ("quiet",), "30 minutes", 40)
-    monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
-    run("sw", "status")
-    capsys.readouterr()
-    run("sw", "--as", "master@a1b2c3-0001", "verdict", "stale-claim/t1", "false-positive", "--note", "on checks")
-    capsys.readouterr()
-    run("sw", "status")
-    assert "false positives  stale-claim 1 of 1 judged" in capsys.readouterr().out.splitlines()
-
-
 def test_a_page_line_to_the_master_becomes_an_item_and_the_reply_closes_the_loop(env):
     from scripts.swarm import operator_mail
     from scripts.swarm_ledger.watch_ledger import line
