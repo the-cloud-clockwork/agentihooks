@@ -402,9 +402,9 @@ def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_reg
     data = viewed(Store({}), *ports_for(hives, readings, published=published))
     assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 4, "claude": 7, "codex": 1}
     assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": None},
         {"name": "automation", "agents": 5},
         {"name": "dark-hive", "agents": 0},
-        {"name": "root", "agents": None},
         {"name": "swarm-hive-001", "agents": 3},
     ]
     assert data["hives"]["live"] == 4
@@ -462,6 +462,28 @@ def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_hive_coun
         {"name": "swarm-hive-003", "agents": 16},
     ]
     assert data["agents"] == {"total": 29, "source": "hives", "reporting": 4, "of": 4, "claude": 27, "codex": 2}
+
+
+@pytest.mark.feature("monitor-row-per-live-hive")
+def test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    presence_of(
+        monkeypatch,
+        [
+            {"id": "root", "name": "swarm-master", "agents": {"claude": 2}},
+            {"id": AUTOMATION["id"], "name": "swarm-master", "agents": {"claude": 9}},
+            {"id": "elsewhere", "name": "unregistered", "agents": {"codex": 1}},
+        ],
+    )
+    data = viewed(Store({}), *ports_for([WORKSTATION, AUTOMATION, POD_HIVE], {}))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 2},
+        {"name": "automation-vm", "agents": 9},
+        {"name": "swarm-hive-001", "agents": None},
+        {"name": "unregistered", "agents": 1},
+    ]
+    assert data["agents"] == {"total": 12, "source": "otel", "reporting": 3, "of": 4, "claude": 11, "codex": 1}
 
 
 @pytest.mark.feature("monitor-row-per-live-hive")

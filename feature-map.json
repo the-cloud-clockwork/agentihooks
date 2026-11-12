@@ -4888,6 +4888,7 @@
       "tests": [
         "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_herdr_readings",
         "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_hive_counts",
+        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_presence",
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two",
         "tests/swarm_ledger/test_api_monitor.py::test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names"
       ]

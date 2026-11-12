@@ -57,8 +57,8 @@ def herdr_machines(
 ) -> list[tuple[str, str, dict[str, int] | None]] | None:
     """Each machine the herdr client on every live interface hive last counted, by hive id and row name, with None
     for one that did not answer. A hive two readings name is counted once, from its own reading unless that one is
-    silent. A label matching a known hive is shown under that hive's current name and dropped if the hive is no longer live; a label
-    matching nothing in the registry is kept as herdr reported it."""
+    silent. A label matching a known hive is shown under that hive's current name and dropped if the hive is no
+    longer live; a label matching nothing in the registry is kept as herdr reported it."""
     stats = ports.hive().herdr_stats
     readings = [(hive, stats.read(redis, hive["id"], now_ms)) for hive in live if hive.get("ui") == "yes"]
     published = [(hive, reading) for hive, reading in readings if reading is not None]
@@ -127,9 +127,10 @@ def view(store: object, now_ms: int) -> dict:
     machines = herdr_machines(store.redis, hives, live, now_ms)
     present = ports.presence().read(os.environ, now_ms / 1000)
     if present:
-        seen = {hive["id"] for hive in present}
-        silent = [(hive["id"], hive["name"], None) for hive in live if hive["id"] not in seen]
-        agents, rows = tally("otel", [(hive["id"], hive["name"], hive["agents"]) for hive in present] + silent)
+        seen, names = {hive["id"] for hive in present}, labels(live)
+        silent = [(hive["id"], names[hive["id"]], None) for hive in live if hive["id"] not in seen]
+        reported = [(hive["id"], names.get(hive["id"], hive["name"]), hive["agents"]) for hive in present]
+        agents, rows = tally("otel", reported + silent)
     elif machines is None or all(counts is None for _, _, counts in machines):
         agents, rows = tally("hives", hive_machines(store, live, readings))
     else:
