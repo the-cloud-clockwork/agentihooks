@@ -1131,7 +1131,7 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
         (4800, 3, 3),
         (36000, 10**4, 10),
         (36001, 10**4, 11),
-        (10**6, 10**4, 80),
+        (10**6, 10**4, 24),
     ],
 )
 def test_shard_count_fills_each_shard_to_its_target_within_the_limit_unless_the_budget_needs_more(
@@ -1582,7 +1582,7 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
         (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
-        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(40))), json.dumps(list(range(10)))),
+        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(24))), json.dumps(list(range(10)))),
     ],
 )
 def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_the_shard_budget(

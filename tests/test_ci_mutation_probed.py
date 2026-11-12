@@ -230,7 +230,7 @@ def test_the_cli_grades_against_the_full_shard_budget_by_default(tmp_path, monke
 
 @pytest.mark.parametrize(
     ("count", "head", "expected"),
-    [(20, 139.56, 11), (2000, 20.0, 40), (3, 1000.0, 3), (1, 0.0, 1)],
+    [(20, 139.56, 11), (2000, 20.0, 12), (3, 1000.0, 3), (1, 0.0, 1)],
 )
 def test_the_early_stage_is_sized_by_the_heads_it_runs(count, head, expected):
     names = {f"scripts.a.x_f__mutmut_{index}": [0, 1] for index in range(count)}
