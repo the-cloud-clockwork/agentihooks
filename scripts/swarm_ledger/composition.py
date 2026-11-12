@@ -1,9 +1,9 @@
 from scripts.swarm_ledger import ports
-from scripts.swarm_ledger.adapters import hive, hooks, swarm
+from scripts.swarm_ledger.adapters import hive, hooks, presence, swarm
 
 
 def adapters() -> dict[str, object]:
-    return {"swarm": swarm.Swarm(), "hive": hive.Hive(), "hooks": hooks.Hooks()}
+    return {"swarm": swarm.Swarm(), "hive": hive.Hive(), "hooks": hooks.Hooks(), "presence": presence}
 
 
 def wire() -> None:
