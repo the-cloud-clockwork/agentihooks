@@ -4966,18 +4966,6 @@
       ]
     },
     {
-      "id": "monitor-row-per-live-hive",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t2505",
-      "behaviour": "The HOME resource monitor shows one row per live hive keyed by its hive id, so two interface hives that share the swarm master name, such as the workstation and the automation VM, never fold into one row, and a hive whose name another live hive shares is shown by its member names.",
-      "seam": "scripts.swarm_ledger.api.monitor.view",
-      "tests": [
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats",
-        "tests/swarm_ledger/test_api_monitor.py::test_two_live_interface_hives_without_members_keep_a_row_each",
-        "tests/swarm_ledger/test_api_monitor.py::test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names"
-      ]
-    },
-    {
       "id": "monitor-counts-registered-seats",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
@@ -5000,11 +4988,8 @@
       "behaviour": "The HOME resource monitor shows one row per live hive keyed by its hive id, so two interface hives that share the swarm master name, such as the workstation and the automation VM, never fold into one row, and a hive whose name another live hive shares is shown by its member names.",
       "seam": "scripts.swarm_ledger.api.monitor.view",
       "tests": [
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_herdr_readings",
+        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_seats",
         "tests/swarm_ledger/test_api_monitor.py::test_two_live_interface_hives_without_members_keep_a_row_each",
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_hive_counts",
-        "tests/swarm_ledger/test_api_monitor.py::test_two_interface_hives_sharing_a_name_show_a_row_each_from_their_presence",
-        "tests/swarm_ledger/test_api_monitor.py::test_a_hive_presence_reports_twice_is_one_row_and_two_hives_sharing_a_name_are_two",
         "tests/swarm_ledger/test_api_monitor.py::test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_names"
       ]
     },

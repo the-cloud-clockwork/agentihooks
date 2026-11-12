@@ -183,7 +183,7 @@ def test_a_swarm_store_error_answers_503_storage_error() -> None:
 
 
 @pytest.mark.feature("monitor-counts-registered-seats")
-@pytest.mark.parametrize("operator_panes", [1, 2])
+@pytest.mark.parametrize("operator_panes", [1, 2, 3])
 def test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane(operator_panes: int) -> None:
     machine = {"claude": 3 + operator_panes, "codex": 1}
     published = {"machines": {"master": machine}, "silent": [], "measured_at": NOW}
@@ -233,6 +233,7 @@ def test_a_seat_on_a_hive_no_longer_live_keeps_its_registered_name_and_an_unknow
     ("hive", "host", "rows"),
     [
         ("pod", "", [1, 1]),
+        ("pod", "root", [1, 1]),
         ("", "pod", [1, 1]),
         ("", "", [2, 0]),
     ],
