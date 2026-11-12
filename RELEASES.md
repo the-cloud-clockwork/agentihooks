@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.814 · 2026-11-12
+
+### 2026-11-11 · 2c85ec91e3c6 · #10788 · @agenticore-app
+
+**Docs sanity: agnostic matchers for lab names, cloud hosts, private IPv6 and secret values**
+
+The docs sanity checker now has built-in, keyword-list-independent matchers for lab names, cloud-host identifiers, private IPv6 ranges, and secret-like values, so public docs stay protected even without a private keyword list. A baseline mechanism tracks per-file/rule hit counts that can only shrink, with address and secret hits never allowed to be grandfathered in, and CI grades against a protected baseline copy so pull requests can't inflate their own allowance. Existing docs and fixtures were redacted in place to pass cleanly, with the 730 pre-existing lab-name lines held by baseline pending future scrub work per docs area.
+
+### 2026-11-11 · 29aceef80cc7 · #10781 · @agenticore-app
+
+**Count every live interface hive's herdr reading in the HOME monitor**
+
+Fixes the HOME resource monitor so it counts the herdr reading from every live interface hive instead of stopping at the first one that publishes. Previously only one hive's reading was used (whichever came first in the registry), so the monitor undercounted hives and agents whenever multiple interface hives, like root and the automation VM, published readings. Now each hive is counted once from its own reading, or from another hive's reading that names it if its own is silent, giving an accurate total agent and hive count regardless of registry order.
+
+### 2026-11-11 · 976534001ea9 · #10741 · @agenticore-app
+
+**Add the workflows MCP category**
+
+This change introduces a new "workflows" category to the MCP tool registry, exposing five tools—workflow_list, workflow_run, workflow_status, workflow_schedule, and workflow_unschedule—so agents can discover, launch, check, and manage scheduled workflow runs directly through MCP instead of needing separate interfaces. It builds on the earlier scheduler work that added workflow targets to scheduling commands, completing the wsc3 task in the scheduled workflows phase and giving the scheduler a full set of tools to start workflow runs and surface results back to the owner's inbox.
+
 ## v2.17.813 · 2026-11-11
 
 ### 2026-11-11 · 63e2b3923645 · #10756 · @agenticore-app
