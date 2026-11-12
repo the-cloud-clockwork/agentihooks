@@ -2986,6 +2986,20 @@
       ]
     },
     {
+      "id": "claude-tool-failure-breaker",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t598",
+      "behaviour": "A failed Claude tool call, delivered as PostToolUseFailure with an error field and no tool response, is counted by the retry breaker and trips it at its threshold while still closing the stall clock, and the installed Claude settings keep that event registered.",
+      "seam": "hooks.hook_manager.EVENT_HANDLERS PostToolUseFailure through hooks.context.retry_breaker.on_post_tool_result, and scripts.targets.claude_target.ClaudeAdapter.write_settings",
+      "tests": [
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_payload_is_counted_by_the_retry_breaker",
+        "tests/test_claude_tool_failure_breaker.py::test_a_claude_failure_trips_the_breaker_at_its_threshold",
+        "tests/test_claude_tool_failure_breaker.py::test_a_payload_with_neither_a_response_nor_an_error_is_not_counted",
+        "tests/test_claude_tool_failure_breaker.py::test_a_disabled_breaker_leaves_a_claude_failure_uncounted",
+        "tests/test_claude_tool_failure_breaker.py::test_the_installed_claude_settings_carry_the_failure_event"
+      ]
+    },
+    {
       "id": "claude-settings-additive-merge",
       "origin": "inventory",
       "behaviour": "agentihooks init merges its rendered settings into the existing ~/.claude/settings.json additively instead of replacing it: every operator key, including one added between runs, survives; a dict merges recursively; a list unions existing order first then the rendered entries with no duplicates; a key agentihooks stops rendering is removed on the next run. agentihooks uninstall removes only the leaf paths, list entries, hook groups, enabledPlugins entries and managed-by marker it recorded writing, leaving every operator key untouched.",
