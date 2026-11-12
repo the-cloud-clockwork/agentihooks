@@ -1148,7 +1148,7 @@ def _swarm_tool_end(payload: dict) -> None:
     finish(call_id=payload.get("tool_use_id") or "")
 
 
-def on_post_tool_use_failure(payload: dict) -> None:
+def on_post_tool_use_failure(payload: dict[str, Any]) -> None:
     """Handle PostToolUseFailure: close the stall clock and count the failure in the retry breaker."""
     _swarm_tool_end(payload)
     from hooks.config import RETRY_BREAKER_ENABLED

@@ -1,11 +1,11 @@
 """A failed Claude tool call reaches the retry breaker through the PostToolUseFailure hook."""
 
+import importlib
 import json
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
-import install as fixture_install
 import pytest
 
 import hooks.context.retry_breaker as breaker
@@ -92,6 +92,7 @@ def test_a_disabled_breaker_leaves_a_claude_failure_uncounted(
 @pytest.fixture
 def claude_installer(_isolate_real_user_paths: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """The canonical installer pointed at the isolated Claude home."""
+    fixture_install = importlib.import_module("install")
     for name in ("CLAUDE_HOME", "AGENTIHOOKS_STATE_DIR", "STATE_JSON", "_CLAUDE_JSON", "_BASHRC", "AGENTIHOOKS_ROOT"):
         monkeypatch.setattr(install, name, getattr(fixture_install, name))
 

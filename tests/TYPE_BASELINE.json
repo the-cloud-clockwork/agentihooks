@@ -75,7 +75,7 @@
   "hooks/context/quarantine.py": 151,
   "hooks/context/quota_policy.py": 103,
   "hooks/context/quota_usage.py": 59,
-  "hooks/context/retry_breaker.py": 96,
+  "hooks/context/retry_breaker.py": 77,
   "hooks/context/rules_refresh.py": 27,
   "hooks/context/scheduled_broadcasts.py": 22,
   "hooks/context/serena_edit_guard.py": 30,
