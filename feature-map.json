@@ -3501,6 +3501,16 @@
       ]
     },
     {
+      "id": "root-hive-join-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
+      "behaviour": "A swarm session on a hive that carries no member id, such as the workstation root hive, writes its hive join report under the hive id its hive runner acknowledges launches with, so a controller running off that hive grades the launch from the report instead of retiring it as missing.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
       "id": "scheduler-bounded-history",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-headed-hive-oom",
@@ -4068,7 +4078,7 @@
         "tests/hive/test_join_headed.py::test_git_identity_needs_both_a_global_name_and_email",
         "tests/hive/test_join_headed.py::test_startup_runs_the_headed_checks_only_on_a_headed_hive",
         "tests/hive/test_join_headed.py::test_a_hive_is_headed_when_its_registry_record_carries_the_interface",
-        "tests/hive/test_join_headed.py::test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name"
+        "tests/hive/test_join_headed.py::test_the_join_hook_skips_an_agent_missing_its_swarm_or_name"
       ]
     },
     {
