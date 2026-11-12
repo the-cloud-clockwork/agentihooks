@@ -2279,7 +2279,9 @@ def test_a_hive_keeps_its_own_expired_codex_reading(
     _publish(redis, monkeypatch, "remote", [slot], {"codex:two": _reading(remote_at)}, 1000)
     local = {"codex:two": _reading(500) | {"expired": True}}
     _publish(redis, monkeypatch, "local", [slot | {"cap": 0}], local, 1000)
-    assert registry.show(redis, "local")["slots"][0]["cap"] == 0
+    published = registry.show(redis, "local")
+    assert published is not None
+    assert published["slots"][0]["cap"] == 0
     assert json.loads(redis.get(f"{registry.key('local')}:quota")) == local
 
 
