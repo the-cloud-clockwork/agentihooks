@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, replace
+from typing import Any
 
 from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
@@ -38,10 +39,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 actions.append(f"renamed {agent.name} to {new}")
             if agent.harness == "codex":
                 keep()
-                if live_binding.managed(agent):
-                    _name_thread(store, slug, agent, new)
-                else:
-                    _name_session(store, slug, runtime, agent.pane_id, new)
+                _name_codex(store, slug, runtime, agent, new)
             keep()
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
@@ -60,6 +58,14 @@ def rename_swarm(store, slug, ledger, runtime, at):
         return actions
     finally:
         controller.release_tick_lock(store, slug, token, "rename")
+
+
+def _name_codex(store: RedisStore, slug: str, runtime: Any, agent: AgentRecord, new: str) -> None:
+    """Name a Codex agent's conversation: its app server thread when managed, else its pane session."""
+    if live_binding.managed(agent):
+        _name_thread(store, slug, agent, new)
+    else:
+        _name_session(store, slug, runtime, agent.pane_id, new)
 
 
 def _name_session(store, slug, runtime, pane_id, new):
