@@ -81,8 +81,8 @@ def test_intent_waits_for_the_pull_request_body_and_diff(body: str, files: list[
 
     state = {"pull_request_title": "T", "pull_request_body": body, "changed_files": files}
     answer = intent.judged(state, decide)
-    reason = f"the pull request has no {missing} yet; the intent check judges it once it has both"
-    assert answer == {"verdict": intent.UNCHECKED, "reason": reason, "stage": "delivered"}
+    reason = f"the pull request lacks {missing}; the intent check judges it once it has both"
+    assert answer == {"verdict": intent.FAIL, "reason": reason, "stage": "delivered"}
 
 
 @pytest.mark.parametrize(

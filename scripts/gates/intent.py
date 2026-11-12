@@ -738,8 +738,8 @@ def judged(state, decide=decide):
     stage = _stage(state)
     lacking = unready(state)
     if lacking:
-        reason = f"the pull request has no {lacking} yet; the intent check judges it once it has both"
-        return {"verdict": UNCHECKED, "reason": reason, "stage": stage}
+        reason = f"the pull request lacks {lacking}; the intent check judges it once it has both"
+        return {"verdict": FAIL, "reason": reason, "stage": stage}
     if stage == "tests-first" and not isinstance(state.get("pull_request_diff"), str):
         reason = "the tests first part requires a complete pull request diff to judge gate behaviour"
         return {"verdict": FAIL, "reason": reason, "stage": stage, "criterion": "tests-first"}
