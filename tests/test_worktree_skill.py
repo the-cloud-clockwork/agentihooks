@@ -480,7 +480,7 @@ case "$fields" in number) echo 7 ;; headRefOid) echo {oid} ;; *) echo MERGED ;; 
 """
 
 
-class DoneUpstream(WtBase):
+class TestDoneUpstream(WtBase):
     def _successor(self, name: str, remote: str) -> Path:
         dest = Path(self.run_wt("new", name, "--repo", str(self.primary)).stdout.strip())
         (dest / "continued.txt").write_text("continued\n")
