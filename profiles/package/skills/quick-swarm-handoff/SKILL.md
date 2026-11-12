@@ -36,5 +36,5 @@ The quick swarm block names your seat folder. Everything goes there.
 
 5. Stop. At your next stop this session ends with its pane kept, and the
    successor opens in the same pane with the seat's seed and your handoff as
-   its opening prompt. If it does not, the quick tick starts it within a
-   minute.
+   its opening prompt. If it does not, the next hourly quick tick round starts
+   it.

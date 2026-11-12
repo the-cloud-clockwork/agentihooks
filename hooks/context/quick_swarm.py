@@ -4,33 +4,14 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping
-from pathlib import Path
-from typing import Any
 
 EVERY = 40
 STATE_DIR = "quick_refocus"
 
 
-def _state_path(environ: Mapping[str, str], session_id: str) -> Path:
-    home = environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME") or Path.home()) / ".agentihooks"
-    return Path(home) / STATE_DIR / f"{session_id}.json"
-
-
-def _load(path: Path) -> dict[str, Any]:
-    try:
-        data: Any = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
-    try:
-        items: Any = data.items()
-    except AttributeError:
-        return {}
-    return {str(key): value for key, value in items}
-
-
 def refocus(session_id: str, event: str, environ: Mapping[str, str] | None = None) -> str:
     """The quick swarm block when it is due: first sight, after compaction, on change and every EVERY tool calls."""
-    from scripts.quick import member, seeds
+    from scripts.quick import member, paths, seeds
 
     env = os.environ if environ is None else environ
     found = member.find(env) if session_id else None
@@ -38,8 +19,8 @@ def refocus(session_id: str, event: str, environ: Mapping[str, str] | None = Non
         return ""
     block = seeds.block(found)
     digest = hashlib.sha256(block.encode()).hexdigest()
-    path = _state_path(env, session_id)
-    state = _load(path)
+    path = paths.home(env) / STATE_DIR / f"{session_id}.json"
+    state = paths.read_object(path)
     calls = int(state.get("calls", 0)) + (event == "tool")
     due = (
         event == "compact"

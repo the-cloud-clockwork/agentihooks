@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scripts.quick import guard, handoff, launch, layout, member, paths, registry, room, tick
 from scripts.quick.guard import QuickError
-from scripts.swarm import naming
+from scripts.swarm import naming, safety_nudge
 
 NOT_MEMBER = "this session is not a member of a quick swarm: run it from a quick swarm pane"
 
@@ -54,33 +54,45 @@ def _folder(environ: Mapping[str, str], quick_id: str, directory: Path) -> Path:
     return Path(environ.get("HOME") or Path.home()) / "scratchpad" / name
 
 
-def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
-    caller = guard.require(environ)
-    directory = Path(args.dir or os.getcwd()).resolve()
+def _swarm_for(
+    args: argparse.Namespace, environ: dict[str, str], caller: str, quick_id: str, directory: Path
+) -> registry.Swarm:
     names = layout.seats(args.agents)
     harnesses = _harnesses(args.harness, len(names) - 1)
-    quick_id = naming.quick_id(environ)
-    folder = _folder(environ, quick_id, directory)
-    if registry.load(folder) is not None:
-        raise QuickError(f"quick swarm {quick_id} is already up; see agentihooks quick status")
     panes = layout.build(caller, args.agents, layout.HerdrPanes(directory, environ))
     harness = environ.get("AGENTIHOOKS_TARGET") or "claude"
     session = environ.get("CLAUDE_CODE_SESSION_ID", "")
-    master = registry.Seat(1, names[0], panes[0], harness, f"{quick_id}-{names[0]}", session_id=session)
+    master = registry.Seat(1, names[0], caller, harness, f"{quick_id}-{names[0]}", session_id=session)
     engineers = [
         registry.Seat(position, name, pane, harness, f"{quick_id}-{name}")
         for position, (name, pane, harness) in enumerate(zip(names[1:], panes[1:], harnesses, strict=True), 2)
     ]
-    swarm = registry.Swarm(quick_id, str(directory), (master, *engineers))
-    paths.create(folder, names)
-    registry.save(folder, swarm)
-    paths.register(environ, quick_id, folder)
+    return registry.Swarm(quick_id, str(directory), (master, *engineers))
+
+
+def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
+    caller = guard.require(environ)
+    directory = Path(args.dir or os.getcwd()).resolve()
+    quick_id = naming.quick_id(environ)
+    folder = _folder(environ, quick_id, directory)
+    with paths.host_locked(environ):
+        if registry.load(folder) is not None:
+            raise QuickError(f"quick swarm {quick_id} is already up; see agentihooks quick status")
+        safety_nudge.install(environ)
+        swarm = _swarm_for(args, environ, caller, quick_id, directory)
+        paths.create(folder, [seat.seat for seat in swarm.seats])
+        registry.save(folder, swarm)
+        paths.register(environ, quick_id, folder)
     started = launch.start_all(folder, swarm, environ)
-    tick.install(environ)
+    failed = sorted(name for name, code in started.items() if code != 0)
+    for name in failed:
+        registry.update(folder, name, state=registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
     for seat in swarm.seats:
         print(json.dumps(dataclasses.asdict(seat)))
-    return 0
+    if failed:
+        print(f"agentihooks quick: {', '.join(failed)} did not start; the next round retries it", file=sys.stderr)
+    return 1 if failed else 0
 
 
 def _member(environ: Mapping[str, str]) -> member.Member:
@@ -116,10 +128,11 @@ def _relaunch(seat: str, folder: str, environ: dict[str, str]) -> int:
 
 def _send(to: str, text: str, environ: Mapping[str, str]) -> int:
     found = _member(environ)
-    if found.swarm.seat(to) is None:
+    target = found.swarm.seat(to)
+    if target is None:
         raise QuickError(f"quick swarm {found.swarm.quick_id} has no seat {to}")
     room.post(found.folder, found.seat.seat, to, text, int(time.time()))
-    print(f"posted to {to}")
+    print(f"posted to {to}: {tick.tell(found.folder, target, tick.LiveHerdr(dict(environ)))}")
     return 0
 
 
@@ -132,11 +145,10 @@ def _room(environ: Mapping[str, str]) -> int:
 
 def _stop(environ: dict[str, str]) -> int:
     found = _member(environ)
-    registry.path(found.folder).unlink(missing_ok=True)
-    shutil.rmtree(paths.room(found.folder).parent, ignore_errors=True)
-    paths.unregister(environ, found.swarm.quick_id)
-    if not paths.folders(environ):
-        tick.remove(environ)
+    with paths.host_locked(environ):
+        registry.path(found.folder).unlink(missing_ok=True)
+        shutil.rmtree(paths.room(found.folder).parent, ignore_errors=True)
+        paths.unregister(environ, found.swarm.quick_id)
     print(f"stopped quick swarm {found.swarm.quick_id}; seat folders stay in {found.folder}")
     return 0
 
@@ -162,7 +174,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     args = parser().parse_args(argv)
     try:
         return _run(args, dict(os.environ if environ is None else environ))
-    except QuickError as error:
+    except RuntimeError as error:
         print(f"agentihooks quick: {error}", file=sys.stderr)
         return 2
 

@@ -94,6 +94,9 @@ def relaunch(
             registry.update(folder, seat_name, state=registry.PENDING)
             return "pane-busy"
         sleep(POLL_S)
-    code = start_seat(folder, swarm, taken, base, start)
-    registry.update(folder, seat_name, state=registry.READY if code == 0 else registry.PENDING)
+    code = 1
+    try:
+        code = start_seat(folder, swarm, taken, base, start)
+    finally:
+        registry.update(folder, seat_name, state=registry.READY if code == 0 else registry.PENDING)
     return "started" if code == 0 else f"failed-{code}"

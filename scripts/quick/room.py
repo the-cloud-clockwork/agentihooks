@@ -26,18 +26,7 @@ def _lines(folder: Path) -> list[Line]:
         raw = paths.room(folder).read_text().splitlines()
     except OSError:
         return []
-    found: list[Line] = []
-    for text in raw:
-        try:
-            parsed: Any = json.loads(text)
-        except ValueError:
-            continue
-        try:
-            items: Any = parsed.items()
-        except AttributeError:
-            continue
-        found.append({str(key): value for key, value in items})
-    return found
+    return [line for line in map(paths.json_object, raw) if line]
 
 
 def _cursor(folder: Path, seat: str) -> Path:

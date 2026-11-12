@@ -49,7 +49,7 @@ def seats(count: int) -> list[str]:
 
 
 def build(caller: str, count: int, panes: Panes) -> list[str]:
-    """Pane ids left to right with the caller first: each split halves the widest pane, the leftmost on a tie."""
+    """The caller's pane, then the new panes left to right: each split halves the widest pane, the leftmost on a tie."""
     seats(count)
     owned = [caller]
     while len(owned) < count:
@@ -57,4 +57,4 @@ def build(caller: str, count: int, panes: Panes) -> list[str]:
         widest = min(owned, key=lambda pane: (-columns[pane][1], columns[pane][0]))
         owned.append(panes.split(widest))
     columns = panes.columns(caller)
-    return sorted(owned, key=lambda pane: columns[pane][0])
+    return [caller, *sorted(owned[1:], key=lambda pane: columns[pane][0])]

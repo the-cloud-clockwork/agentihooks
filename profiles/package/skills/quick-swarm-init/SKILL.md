@@ -39,8 +39,7 @@ It runs only inside herdr; outside it the command refuses and says why.
 
    `agentihooks quick stop`
 
-   It removes the per-minute quick tick and the room. Seat folders stay for
-   review.
+   It removes the room and the registry. Seat folders stay for review.
 
 If `quick up` refuses because herdr is missing, not running or this session is
 outside a herdr pane, report the refusal word for word and stop.

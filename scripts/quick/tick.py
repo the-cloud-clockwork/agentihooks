@@ -1,7 +1,6 @@
-"""The quick tick: a per-minute round that nudges idle engineers, tells the master of room lines and relaunches."""
+"""The quick tick: the round, run by the hourly safety nudge, that nudges idle engineers, tells seats of room lines
+and relaunches pending seats."""
 
-import shutil
-import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -16,10 +15,6 @@ NUDGE = "Quick swarm nudge: continue the next open stage of your plan, or tell t
 ROOM = "Quick swarm room: {count} message(s) for you; read them with `agentihooks quick room`."
 NUDGE_EVERY_S = 600
 READY_STATES = ("idle", "done")
-MARKER = "# agentihooks-quick-swarm"
-SCHEDULE = "* * * * *"
-CRON = "crontab"
-BASE_PATH = ("/usr/local/bin", "/usr/bin", "/bin")
 Relaunch = Callable[[Path, str], str]
 Row = dict[str, Any]
 
@@ -89,24 +84,48 @@ def _open_stages(folder: Path, seat: str) -> bool:
     return done < total
 
 
-def _ready_seat(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> str:
+def _room_notice(folder: Path, seat: registry.Seat, herdr: Herdr) -> bool:
+    count = room.waiting(folder, seat.seat)
+    told = _stamp(folder, seat.seat, "room.told")
+    if count < _number(told):
+        told.write_text(str(count))
+    if count <= _number(told) or not herdr.prompt(seat.pane_id, ROOM.format(count=count)):
+        return False
+    told.write_text(str(count))
+    return True
+
+
+def _nudge(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> bool:
+    nudged = _stamp(folder, seat.seat, "nudged.at")
+    due = seat.seat != MASTER and _open_stages(folder, seat.seat) and now - _number(nudged) >= NUDGE_EVERY_S
+    if not due or not herdr.prompt(seat.pane_id, NUDGE):
+        return False
+    nudged.write_text(str(now))
+    return True
+
+
+def _busy(seat: registry.Seat, herdr: Herdr) -> str:
     status = herdr.status(seat.pane_id)
     if status not in READY_STATES:
         return f"skipped-{status}"
-    if herdr.typed(seat.pane_id):
-        return "skipped-typed"
-    count = room.waiting(folder, seat.seat)
-    told = _stamp(folder, seat.seat, "room.told")
-    if count > _number(told):
-        herdr.prompt(seat.pane_id, ROOM.format(count=count))
-        told.write_text(str(count))
+    return "skipped-typed" if herdr.typed(seat.pane_id) else ""
+
+
+def tell(folder: Path, seat: registry.Seat, herdr: Herdr) -> str:
+    """Tell an idle seat, with nothing typed in its pane, that room lines wait for it; the outcome."""
+    why = _busy(seat, herdr)
+    if why:
+        return why
+    return "room" if _room_notice(folder, seat, herdr) else "idle"
+
+
+def _ready_seat(folder: Path, seat: registry.Seat, herdr: Herdr, now: float) -> str:
+    why = _busy(seat, herdr)
+    if why:
+        return why
+    if _room_notice(folder, seat, herdr):
         return "room"
-    nudged = _stamp(folder, seat.seat, "nudged.at")
-    if seat.seat != MASTER and _open_stages(folder, seat.seat) and now - _number(nudged) >= NUDGE_EVERY_S:
-        herdr.prompt(seat.pane_id, NUDGE)
-        nudged.write_text(str(now))
-        return "nudged"
-    return "idle"
+    return "nudged" if _nudge(folder, seat, herdr, now) else "idle"
 
 
 def _outcome(folder: Path, seat: registry.Seat, herdr: Herdr, relaunch: Relaunch, now: float) -> str:
@@ -125,51 +144,17 @@ def round_for(folder: Path, herdr: Herdr, relaunch: Relaunch, now: float) -> lis
     return [{"seat": seat.seat, "outcome": _outcome(folder, seat, herdr, relaunch, now)} for seat in swarm.seats]
 
 
-def run_round(environ: Mapping[str, str]) -> list[Row]:
-    """One tick over every live quick swarm on this host."""
+def run_round(environ: Mapping[str, str], herdr: Herdr | None = None) -> list[Row]:
+    """One tick over every live quick swarm on this host, run by the hourly safety nudge round."""
     from scripts.quick import launch
 
-    live = LiveHerdr(dict(environ))
+    live = herdr or LiveHerdr(dict(environ))
 
     def relaunch(folder: Path, seat: str) -> str:
         return launch.relaunch(folder, seat, environ, bare=live.bare, wait_s=0.0)
 
     now = time.time()
-    return [
-        {"folder": str(folder), **row}
-        for folder in paths.folders(environ)
-        for row in round_for(folder, live, relaunch, now)
-    ]
-
-
-def command(environ: Mapping[str, str]) -> str:
-    """The cron line running the quick tick every minute with agentihooks and herdr on its PATH."""
-    found = [shutil.which(tool, path=environ.get("PATH")) for tool in ("agentihooks", "herdr")]
-    exe = found[0] or "agentihooks"
-    dirs = dict.fromkeys([*(str(Path(tool).parent) for tool in found if tool), *BASE_PATH])
-    socket = environ.get("HERDR_SOCKET_PATH")
-    prefix = f"HERDR_SOCKET_PATH={socket} " if socket else ""
-    return f"{SCHEDULE} PATH={':'.join(dirs)} {prefix}{exe} quick tick >/dev/null 2>&1 {MARKER}"
-
-
-def _table() -> list[str]:
-    done = subprocess.run([CRON, "-l"], capture_output=True, text=True, check=False)
-    return done.stdout.splitlines() if done.returncode == 0 else []
-
-
-def _write(lines: list[str]) -> None:
-    done = subprocess.run([CRON, "-"], input="\n".join(lines) + "\n", capture_output=True, text=True, check=False)
-    if done.returncode != 0:
-        raise RuntimeError(f"{CRON} refused the quick tick: {done.stderr.strip()}")
-
-
-def install(environ: Mapping[str, str]) -> str:
-    """Register the per-minute quick tick in the user's cron table, replacing an earlier one."""
-    line = command(environ)
-    _write([kept for kept in _table() if MARKER not in kept] + [line])
-    return line
-
-
-def remove(environ: Mapping[str, str]) -> None:
-    """Drop the quick tick from the user's cron table."""
-    _write([kept for kept in _table() if MARKER not in kept])
+    rows: list[Row] = []
+    for folder in paths.folders(environ):
+        rows += [{"folder": str(folder), **row} for row in round_for(folder, live, relaunch, now)]
+    return rows

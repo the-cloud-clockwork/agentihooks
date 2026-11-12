@@ -58,10 +58,13 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
 - At the compaction limit a quick seat writes its Handoff v2 to its seat folder (Read first takes `seat:<seat>`)
   and runs `agentihooks quick handoff`. At its next stop the session ends with its pane kept and the successor
   opens in the same pane with the seed and the handoff as its opening prompt.
-- A per-minute quick tick (`* * * * *` crontab entry) nudges idle engineers whose plan has open stages, at most
-  every 10 minutes, tells an idle seat of new room lines and relaunches a pending seat whose pane sits at a bare
-  shell. It never types into a busy pane or one holding typed text, and never nudges the master.
-- `agentihooks quick stop` removes the tick, the room and the registry; the seat folders stay.
+- `agentihooks quick send` tells the receiving seat at once when its pane sits idle with nothing typed.
+- The quick tick runs inside the hourly safety nudge round (`agentihooks safety-nudge round`, installed by
+  `quick up`), because a quick swarm has no Redis for the agentihooks scheduler. It nudges idle engineers whose
+  plan has open stages, tells an idle seat of room lines it has not been told about and relaunches a pending seat
+  whose pane sits at a bare shell. It never types into a busy pane or one holding typed text, never nudges the
+  master, and retries a prompt herdr did not take on the next round.
+- `agentihooks quick stop` removes the room and the registry; the seat folders stay.
 
 ## Event driven engine
 

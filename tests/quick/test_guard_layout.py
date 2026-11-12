@@ -73,6 +73,15 @@ def test_panes_outside_the_quick_swarm_are_never_split_or_ordered():
 
 
 @pytest.mark.feature("quick-swarm")
+def test_the_caller_stays_first_when_other_panes_sit_left_of_it():
+    panes = FakePanes(160)
+    panes.rects = {"w1:p0": (0, 100), "w1:p1": (100, 160)}
+    ordered = layout.build("w1:p1", 3, panes)
+    assert ordered[0] == "w1:p1" and "w1:p0" not in ordered
+    assert [panes.rects[pane][0] for pane in ordered[1:]] == sorted(panes.rects[pane][0] for pane in ordered[1:])
+
+
+@pytest.mark.feature("quick-swarm")
 def test_seats_are_the_master_then_numbered_engineers():
     assert layout.DEFAULT_AGENTS == 4 and layout.MAX_AGENTS == 5
     assert layout.seats(4) == ["master", "eng-1", "eng-2", "eng-3"]

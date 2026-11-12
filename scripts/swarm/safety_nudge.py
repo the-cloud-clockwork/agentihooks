@@ -3,6 +3,7 @@
 Masters record themselves in a registry file under the agentihooks home when they join their ledger as orchestrator
 and on later tool calls. An hourly operating system cron entry runs one round: for each registered master whose
 process still lives, it types the safety nudge into the master's herdr pane when that pane sits idle at its prompt.
+The same round runs the quick tick over every quick swarm on the host, which has no tick of its own.
 Nothing here reads Redis, the swarm tick or the Anton controller.
 """
 
@@ -167,7 +168,9 @@ def nudge(herdr: Messenger, entry: Entry) -> str:
 def run_round(
     environ: Mapping[str, str], herdr: Messenger | None = None, now: float | None = None, proc: Path = PROC
 ) -> list[Entry]:
-    """One nudge round over the live masters in the registry, each outcome appended to the log."""
+    """One nudge round over the live masters in the registry and every quick swarm, each outcome appended to the log."""
+    from scripts.quick.tick import run_round as quick_round
+
     path = registry_path(environ)
     with locked(path):
         entries = live(load(path), proc)
@@ -175,6 +178,7 @@ def run_round(
     at = int(time.time() if now is None else now)
     sender = (herdr or messenger()) if entries else None
     results = [{**entry, "at": at, "outcome": nudge(sender, entry)} for entry in entries.values() if sender]
+    results += quick_round(environ)
     target = log_path(environ)
     target.parent.mkdir(exist_ok=True)
     with target.open("a") as handle:

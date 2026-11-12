@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts import herdr_host
-from scripts.quick import cli, guard, member, paths, registry, room
+from scripts.quick import cli, guard, member, paths, registry, room, tick
 
 pytestmark = pytest.mark.unit
 
@@ -23,6 +23,23 @@ class FakePanes:
         return dict(self.rects)
 
 
+class IdleHerdr:
+    prompts: list[tuple[str, str]] = []
+
+    def status(self, pane_id: str) -> str:
+        return "idle"
+
+    def typed(self, pane_id: str) -> str:
+        return ""
+
+    def bare(self, pane_id: str) -> bool:
+        return True
+
+    def prompt(self, pane_id: str, text: str) -> bool:
+        IdleHerdr.prompts.append((pane_id, text))
+        return True
+
+
 @pytest.fixture
 def launched() -> list[str]:
     return []
@@ -37,8 +54,8 @@ def quick_env(monkeypatch, tmp_path, launched) -> dict[str, str]:
     monkeypatch.setattr(cli.guard, "require", lambda environ: "w1:p1")
     monkeypatch.setattr(cli.layout, "HerdrPanes", FakePanes)
     monkeypatch.setattr(cli.launch, "start_all", start_all)
-    monkeypatch.setattr(cli.tick, "install", lambda environ: launched.append("cron") or "line")
-    monkeypatch.setattr(cli.tick, "remove", lambda environ: launched.append("uncron"))
+    monkeypatch.setattr(cli.safety_nudge, "install", lambda environ: launched.append("cron") or "line")
+    monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: IdleHerdr())
     monkeypatch.setattr(cli.naming, "repo_name", lambda path: "repo")
     return {
         "HOME": str(tmp_path),
@@ -51,7 +68,7 @@ def quick_env(monkeypatch, tmp_path, launched) -> dict[str, str]:
 @pytest.mark.feature("quick-swarm")
 def test_up_seats_the_caller_as_master_and_launches_the_engineers(quick_env, launched, tmp_path, capsys):
     assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 0
-    assert launched == ["eng-1", "eng-2", "eng-3", "cron"]
+    assert launched == ["cron", "eng-1", "eng-2", "eng-3"]
     folder = tmp_path / "scratchpad" / "repo" / "quick-d039e169"
     swarm = registry.load(folder)
     assert swarm is not None and swarm.quick_id == "quick-d039e169" and swarm.directory == str(tmp_path)
@@ -89,6 +106,25 @@ def test_up_outside_herdr_fails_loudly(monkeypatch, quick_env, tmp_path, capsys)
     assert guard.NOT_INSTALLED in capsys.readouterr().err
 
 
+@pytest.mark.feature("quick-swarm")
+def test_an_engineer_that_fails_to_start_fails_up_and_waits_for_a_relaunch(monkeypatch, quick_env, tmp_path, capsys):
+    monkeypatch.setattr(cli.launch, "start_all", lambda folder, swarm, environ: {"eng-1": 0, "eng-2": 3, "eng-3": 0})
+    assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 1
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None and [s.state for s in swarm.seats] == ["ready", "ready", "handoff", "ready"]
+    assert "eng-2 did not start" in capsys.readouterr().err
+
+
+def test_a_cron_table_that_refuses_the_round_fails_up_in_one_line(monkeypatch, quick_env, tmp_path, capsys):
+    def refuse(environ: dict[str, str]) -> str:
+        raise RuntimeError("the cron table refused the entry")
+
+    monkeypatch.setattr(cli.safety_nudge, "install", refuse)
+    assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 2
+    assert capsys.readouterr().err == "agentihooks quick: the cron table refused the entry\n"
+    assert registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169") is None
+
+
 def test_up_twice_is_refused(quick_env, tmp_path, capsys):
     assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 0
     assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 2
@@ -99,8 +135,10 @@ def test_send_posts_to_the_room_and_room_reads_it(quick_env, tmp_path, capsys):
     assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 0
     folder = tmp_path / "scratchpad" / "repo" / "quick-d039e169"
     engineer = {**quick_env, member.DIR_ENV: str(folder), member.SEAT_ENV: "eng-2", "HERDR_PANE_ID": "w1:p2"}
+    IdleHerdr.prompts = []
     assert cli.main(["send", "master", "plan ready"], engineer) == 0
-    capsys.readouterr()
+    assert "posted to master: room" in capsys.readouterr().out
+    assert IdleHerdr.prompts == [("w1:p1", tick.ROOM.format(count=1))]
     assert cli.main(["room"], quick_env) == 0
     assert "eng-2 -> master: plan ready" in capsys.readouterr().out
     assert room.waiting(folder, "master") == 0
@@ -120,14 +158,13 @@ def test_commands_outside_a_quick_swarm_are_refused(tmp_path, capsys):
 
 
 @pytest.mark.feature("quick-swarm")
-def test_stop_forgets_the_swarm_and_its_room_but_keeps_the_seat_folders(quick_env, launched, tmp_path):
+def test_stop_forgets_the_swarm_and_its_room_but_keeps_the_seat_folders(quick_env, tmp_path):
     assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 0
     folder = tmp_path / "scratchpad" / "repo" / "quick-d039e169"
     room.post(folder, "eng-1", "master", "bye", 1)
     assert cli.main(["stop"], quick_env) == 0
     assert registry.load(folder) is None and paths.folders(quick_env) == []
     assert not paths.room(folder).exists() and paths.plan(folder, "eng-1").is_file()
-    assert launched[-1] == "uncron"
 
 
 def test_status_lists_every_seat(quick_env, tmp_path, capsys):

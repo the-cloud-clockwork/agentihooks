@@ -1,8 +1,10 @@
 """Where a quick swarm keeps its state: one scratchpad folder with the registry, culture, room and seat folders."""
 
+import contextlib
+import fcntl
 import json
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Generator, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -55,22 +57,46 @@ def create(folder: Path, seats: Iterable[str]) -> None:
             (seat_dir(folder, seat) / name).touch()
 
 
+def json_object(text: str) -> dict[str, Any]:
+    """The JSON object in ``text``; empty when it is not JSON or not an object."""
+    try:
+        data: Any = json.loads(text)
+        items: Any = data.items()
+    except (ValueError, AttributeError):
+        return {}
+    return {str(key): value for key, value in items}
+
+
+def read_object(path: Path) -> dict[str, Any]:
+    """The JSON object stored in ``path``; empty when it is missing or unreadable."""
+    try:
+        return json_object(path.read_text())
+    except OSError:
+        return {}
+
+
+def home(environ: Mapping[str, str]) -> Path:
+    """The agentihooks home folder."""
+    return Path(environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME") or Path.home()) / ".agentihooks")
+
+
 def index_path(environ: Mapping[str, str]) -> Path:
     """The host-wide index of live quick swarms, in the agentihooks home."""
-    home = environ.get("AGENTIHOOKS_HOME") or Path(environ.get("HOME") or Path.home()) / ".agentihooks"
-    return Path(home) / INDEX
+    return home(environ) / INDEX
+
+
+@contextlib.contextmanager
+def host_locked(environ: Mapping[str, str]) -> Generator[None, None, None]:
+    """Hold the host-wide quick swarm lock while the index or the cron table is read and rewritten."""
+    target = index_path(environ)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.with_name(f".{INDEX}.lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
 
 
 def _index(environ: Mapping[str, str]) -> dict[str, str]:
-    try:
-        data: Any = json.loads(index_path(environ).read_text())
-    except (OSError, ValueError):
-        return {}
-    try:
-        items: Any = data.items()
-    except AttributeError:
-        return {}
-    return {str(key): str(value) for key, value in items}
+    return {key: str(value) for key, value in read_object(index_path(environ)).items()}
 
 
 def _write_index(environ: Mapping[str, str], entries: dict[str, str]) -> None:

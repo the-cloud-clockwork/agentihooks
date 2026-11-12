@@ -117,9 +117,56 @@ def test_a_pending_seat_whose_agent_still_runs_waits(tmp_path):
     assert {"seat": "eng-1", "outcome": "pending"} in outcomes and {"relaunched": "eng-1"} not in outcomes
 
 
-def test_the_cron_line_runs_the_quick_tick_every_minute():
-    line = tick.command({"PATH": "/usr/bin"})
-    assert line.startswith("* * * * * ") and "quick tick" in line and line.endswith(tick.MARKER)
+def test_a_seat_that_read_the_room_is_told_again_about_the_next_line(tmp_path):
+    _swarm(tmp_path)
+    herdr = FakeHerdr()
+    room.post(tmp_path, "eng-1", "master", "one", 1)
+    room.post(tmp_path, "eng-1", "master", "two", 2)
+    _round(tmp_path, herdr)
+    room.unread(tmp_path, "master")
+    _round(tmp_path, herdr)
+    room.post(tmp_path, "eng-1", "master", "three", 3)
+    _round(tmp_path, herdr)
+    assert herdr.prompts == [("w1:p1", tick.ROOM.format(count=2)), ("w1:p1", tick.ROOM.format(count=1))]
+
+
+class RefusingHerdr(FakeHerdr):
+    def prompt(self, pane_id: str, text: str) -> bool:
+        self.prompts.append((pane_id, text))
+        return False
+
+
+def test_a_prompt_herdr_refuses_is_retried_on_the_next_round(tmp_path):
+    _swarm(tmp_path)
+    paths.plan(tmp_path, "eng-1").write_text("- [ ] two\n")
+    room.post(tmp_path, "eng-1", "master", "hello", 1)
+    herdr = RefusingHerdr()
+    _round(tmp_path, herdr, now=10_000.0)
+    _round(tmp_path, herdr, now=10_001.0)
+    assert herdr.prompts.count(("w1:p1", tick.ROOM.format(count=1))) == 2
+    assert herdr.prompts.count(("w1:p2", tick.NUDGE)) == 2
+
+
+def test_tell_skips_a_busy_seat_and_tells_an_idle_one(tmp_path):
+    swarm = _swarm(tmp_path)
+    room.post(tmp_path, "eng-1", "master", "hello", 1)
+    assert tick.tell(tmp_path, swarm.seats[0], FakeHerdr(status="working")) == "skipped-working"
+    assert tick.tell(tmp_path, swarm.seats[0], FakeHerdr()) == "room"
+
+
+@pytest.mark.feature("quick-swarm")
+def test_the_hourly_safety_round_runs_the_quick_tick(monkeypatch, tmp_path):
+    from scripts.swarm import safety_nudge
+
+    _swarm(tmp_path)
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path / "home")}
+    paths.register(environ, "quick-abc", tmp_path)
+    paths.plan(tmp_path, "eng-1").write_text("- [ ] two\n")
+    herdr = FakeHerdr()
+    monkeypatch.setattr(tick, "LiveHerdr", lambda env: herdr)
+    rows = safety_nudge.run_round(environ, now=1)
+    assert {"folder": str(tmp_path), "seat": "eng-1", "outcome": "nudged"} in rows
+    assert herdr.prompts == [("w1:p2", tick.NUDGE)]
 
 
 @pytest.mark.feature("quick-swarm")
@@ -158,6 +205,19 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path):
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert seat is not None and seat.state == registry.READY
+
+
+def test_a_relaunch_that_raises_leaves_the_seat_pending(tmp_path):
+    _swarm(tmp_path, eng_state=registry.PENDING)
+
+    def start(argv: list[str], environ: dict[str, str]) -> int:
+        raise OSError("init-agent is missing")
+
+    with pytest.raises(OSError):
+        launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=start)
+    loaded = registry.load(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert seat is not None and seat.state == registry.PENDING
 
 
 def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tmp_path):
