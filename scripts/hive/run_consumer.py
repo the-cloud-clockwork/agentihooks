@@ -69,7 +69,7 @@ class RunConsumer:
         try:
             case.parent.mkdir(parents=True, exist_ok=True)
             case.write_text(order.case)
-            scheduled.start(order.workflow, str(case), checkout, order.run_id, order.owner)
+            scheduled.start(order.workflow, str(case), checkout, order.run_id, order.owner, hive=self.hive)
         except OSError:
             return Ack(FAILED, {}, START)
         return Ack(DONE, {"host_id": self.hive})
