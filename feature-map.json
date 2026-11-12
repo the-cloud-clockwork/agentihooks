@@ -118,9 +118,10 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-readiness-key-ownership",
       "behaviour": "The hub's scoped event fan in skips a swarm whose scoped state stream cannot be created over a legacy key value bucket that still holds entries, prints one line naming that swarm and bucket, and keeps fetching every other swarm's events, so one unmigrated swarm cannot stop the readiness offer poll or any other reactor for the rest.",
-      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
+      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning, and readiness.publish, which stores no offer for a swarm whose legacy inbox state is unowned until migrate_state moves it",
       "tests": [
         "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_migration.py::test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated",
         "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
       ]
     },
@@ -564,6 +565,31 @@
       ]
     },
     {
+      "id": "scheduled-run-hive-placement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
+      "behaviour": "A scheduled workflow slot runs locally by default; a slot placed on a hive sends its run to a live, undrained hive that lists the project repository and declares every needed capability, fewest running runs first, and with no fitting hive records a named wait reason and sends nothing, never starting the run on the workstation.",
+      "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
+      "tests": [
+        "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
+        "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
+        "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
+        "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
+        "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
+        "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
+        "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
+        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
+        "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
+        "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
+        "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",
+        "tests/scheduler/test_commands.py::test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally",
+        "tests/scheduler/test_cli.py::test_cron_add_places_a_workflow_on_a_hive_with_its_needs",
+        "tests/hive/test_run_placement.py::test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not",
+        "tests/hive/test_run_placement.py::test_a_placed_run_carries_the_hive_path_of_its_repository",
+        "tests/scheduler/test_cli.py::test_cron_add_refuses_an_unknown_placement"
+      ]
+    },
+    {
       "id": "swarm-tick-characterisation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a2",
@@ -940,7 +966,7 @@
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
-      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record; a live swarm, a stopped one or a held seat is refused untouched.",
+      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running or paused scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record, leaving a paused swarm paused; a live swarm, a stopped one or a held seat is refused untouched.",
       "seam": "scripts.swarm.night_watch_drill.command through the swarm command parser",
       "tests": [
         "tests/swarm/test_night_watch_drill.py::test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_records_it",
@@ -955,6 +981,10 @@
         "tests/swarm/test_night_watch_drill.py::test_the_drill_needs_both_the_scratch_flag_and_a_proof_swarm_name",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_night_watch_drill.py::test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_redis_budget_rebinds_every_part_of_the_running_view",
+        "tests/swarm/test_night_watch_drill.py::test_an_update_through_the_running_view_keeps_the_stored_state_paused",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
       ]
     },

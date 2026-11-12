@@ -223,6 +223,29 @@ effort, two when the first reply does not match its schema. It ignores
 `--harness`: it runs on `AGENTIHOOKS_TARGET`, else Claude, and falls back to
 Claude when Codex refuses the route.
 
+## Scheduled runs
+
+`agentihooks timer add`, `stopwatch start` and `cron add` start a run when they
+fire with `--workflow NAME --case FILE`. The project is the folder the command
+ran in. The slot's `placement` field says where the run starts:
+
+| Placement | Set with | Where the run starts |
+|---|---|---|
+| `local` | the default, or `--placement local` | a detached run on the machine that delivers the slot, in the project folder |
+| `hive` | `--placement hive [--needs NAME,NAME]` | a live hive that is not draining, lists the project repository and declares every name in `needs`; among those, the hive with the fewest unfinished run orders, ties by hive id |
+
+A hive placement sends the chosen hive one run order and starts nothing
+locally. When no hive fits, the delivery sends nothing and records the reason
+under its delivery id in the run placement waits, `no live hive lists the repo
+<repo>` or `no live hive that lists the repo <repo> declares <needs>`; a later
+placement of the same delivery clears it. `--needs` is refused without
+`--placement hive`, and a slot stored before the field existed runs locally.
+
+```bash
+agentihooks cron add --expr "0 3 * * *" --workflow nightly --case case.json \
+  --placement hive --needs build,test "nightly grade"
+```
+
 ## Run folder
 
 ```text

@@ -169,7 +169,14 @@ def test_workflow_schedule_arms_a_cron_and_unschedule_cancels_it(
     assert answer["success"] is True
     assert (entry["kind"], entry["owner"], entry["payload"], entry["due"]) == ("cron", SID, "workflow sample", 1200.0)
     assert entry["targets"] == [
-        {"kind": "workflow", "name": "sample", "case": str(case.resolve()), "project": str(project)}
+        {
+            "kind": "workflow",
+            "name": "sample",
+            "case": str(case.resolve()),
+            "project": str(project),
+            "placement": "local",
+            "needs": [],
+        }
     ]
     assert tools["workflow_unschedule"](entry["id"]) == {"success": True, "entry": {**entry, "state": "cancelled"}}
     assert scheduler.get(entry["id"]).state == "cancelled"
