@@ -225,7 +225,8 @@ def test_error_messages_name_the_file_and_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("argv", [[], ["cutover"]])
-def test_command_and_grader_root_are_required(argv: list[str]) -> None:
+def test_command_and_grader_root_are_required(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         delivery.main(argv, {})
     assert exited.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: python -m scripts.ci_lab ")
