@@ -202,6 +202,7 @@ def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch
     assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
 
 
+@pytest.mark.feature("tick-view-pull-batch-cache-ttl")
 def test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     calls = []

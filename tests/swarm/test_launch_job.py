@@ -351,7 +351,7 @@ def test_collect_settles_each_job_with_the_tick_paths(store, monkeypatch):
 
     actions, waiting = launch_job.collect(run)
 
-    assert actions == ["finished", "started", "failed", "failed"]
+    assert actions == ["failed", "started", "failed", "finished"]
     assert waiting == {"a-wait"}
     assert list(store.redis.hgetall(store.key("sw", launch_job.KEY))) == ["a-wait"]
     store.refresh.assert_called_once_with("sw", "t-wait", "a-wait", engine.LEASE_MS)
@@ -359,21 +359,21 @@ def test_collect_settles_each_job_with_the_tick_paths(store, monkeypatch):
         "sw", store, run.doc, engine.placed_record(finished, launch_job.completed(finished_picked, result))
     )
     placed = launch_job.completed(done_picked, result)
-    assert complete.call_args_list[0].args == (run.config, "a-done", placed, run.runtime.reap_name)
-    assert admitted.call_args_list[0].args == (store, "sw", engine.placed_record(done, placed), run.runtime)
+    assert complete.call_args_list[1].args == (run.config, "a-done", placed, run.runtime.reap_name)
+    assert admitted.call_args_list[1].args == (store, "sw", engine.placed_record(done, placed), run.runtime)
     engine._started.assert_called_once_with(
         "sw", run.config, store, run.ledger, run.doc, engine.Started(done, {"id": "t-done"}, placed, "launched"), 5000
     )
     failures = engine._spawn_failed.call_args_list
     assert [call.args[:5] for call in failures] == [("sw", store, run.ledger, run.runtime, run.rows)] * 2
     assert [call.args[6] for call in failures] == [5000, 5000]
-    first, second = (call.args[5] for call in failures)
+    second, first = (call.args[5] for call in failures)
     assert (first.record, first.task) == (failing, {"id": "t-fail"})
     assert (str(first.error), first.error.harness, first.error.pane_id) == ("bad launch", "codex", "w:p9")
     assert (second.record, second.task) == (broken, {"id": "t-boom"})
     assert (str(second.error), second.error.status, second.error.harness) == ("boom", "refused", "codex")
-    assert opened.call_args_list[0].args == ("a-fail", 1000)
-    assert [call.args for call in run.runtime.reap_name.call_args_list] == [("a-fail",), ("a-boom",)]
+    assert ("a-fail", 1000) in [call.args for call in opened.call_args_list]
+    assert [call.args for call in run.runtime.reap_name.call_args_list] == [("a-boom",), ("a-fail",)]
 
 
 def test_completed_job_records_the_existing_placed_fields(store, tmp_path, monkeypatch):

@@ -3,7 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from scripts.swarm import lease
+from scripts.swarm import hash_pages, lease
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
 from scripts.swarm_v2.runtime.base import LOCAL
 
@@ -32,7 +32,9 @@ def key(machine: str) -> str:
 
 
 def held(store: RedisStore, machine: str, slug: str, task: str, cache: PassCache | None = None) -> int:
-    return len(_held(store, store.redis.hgetall(key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0])
+    return len(
+        _held(store, hash_pages.fields(store.redis, key(machine)), f"{slug}/{task}", lease.now_ms(store), cache)[0]
+    )
 
 
 def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = None) -> int:
@@ -41,7 +43,7 @@ def running(store: RedisStore, slug: str, task: str, cache: PassCache | None = N
 
 def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
     running = len(_workers(_records(store), None))
-    held, _ = _held(store, store.redis.hgetall(key(machine)), None, lease.now_ms(store))
+    held, _ = _held(store, hash_pages.fields(store.redis, key(machine)), None, lease.now_ms(store))
     return running, len(held)
 
 
@@ -65,7 +67,7 @@ def claim(
             try:
                 pipe.watch(key(machine))
                 now = lease.now_ms(store)
-                taken, settled = _held(store, pipe.hgetall(key(machine)), f"{slug}/{task}", now, cache)
+                taken, settled = _held(store, hash_pages.fields(pipe, key(machine)), f"{slug}/{task}", now, cache)
                 if len(taken) >= local_max:
                     _journal(slug, machine, task, name, local_max, taken)
                     return len(taken)

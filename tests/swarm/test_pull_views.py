@@ -402,6 +402,7 @@ def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypat
     assert fallback == ["other"]
 
 
+@pytest.mark.feature("tick-view-pull-batch-cache-ttl")
 def test_tick_view_batches_claimed_pull_requests_with_the_tick_view_ttl(monkeypatch):
     import fakeredis
 

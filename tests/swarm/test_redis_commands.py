@@ -697,18 +697,21 @@ def passed(tmp_path: Path) -> code_reach.Program:
         ("scripts.passed:Holder.__init__", {"XLEN"}),
     ],
 )
+@pytest.mark.feature("redis-command-map-caller-argument-typing")
 def test_an_unannotated_parameter_is_typed_from_the_argument_its_caller_passes(
     passed: code_reach.Program, unit: str, commands: set[str]
 ) -> None:
     assert set(passed.commands([unit])) == commands
 
 
+@pytest.mark.feature("redis-command-map-caller-argument-typing")
 def test_a_getattr_call_with_a_literal_redis_method_name_shows_up_in_the_map(passed: code_reach.Program) -> None:
     assert passed.commands(passed.reach(("scripts.passed:looked",))) == dict.fromkeys(
         ("HSTRLEN", "HSETNX"), {"scripts.passed:looked"}
     )
 
 
+@pytest.mark.feature("redis-command-map-caller-argument-typing")
 def test_receiver_typing_stops_once_a_pass_changes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/__init__.py").write_text("")
