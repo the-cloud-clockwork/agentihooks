@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.827 · 2026-11-12
+
+### 2026-11-12 · d2c225bec1ed · #10857 · @agenticore-app
+
+**Expire placed hive run orders an hour after send in milliseconds**
+
+Fixes a units mismatch that caused every hive-placed scheduled run to be rejected as expired on arrival: the placement sender computed expires_at in seconds-plus-one-hour while the hive run consumer compares against its millisecond clock, so orders expired instantly. The sender now writes expires_at in milliseconds, matching the consumer, with new tests covering both the sent value and the hour-long validity window. This unblocks scheduled workflows actually running on the Anton hives instead of failing immediately on receipt.
+
+### 2026-11-12 · 47e310d513cb · #10845 · @agenticore-app
+
+**Send a hive placed scheduled run's case text, never its case file location**
+
+This fixes a bug where a scheduled workflow slot placed on a hive sent the case file's path rather than its contents when triggering a run, causing the hive run consumer to write the literal file location as the case instead of the actual case text. The slot now reads and sends the case file's contents, with a missing file correctly falling through to the scheduler's existing retry logic for failed deliveries. A regression test and feature map entry cover this, and two existing tests were updated to supply real case files.
+
+### 2026-11-12 · b9f355a6ebc8 · #10842 · @agenticore-app
+
+**Gate the legacy fencing import scan on the legacy controller epoch**
+
+This change stops the hive join report from scanning the entire shared Redis keyspace on every session start. Previously, swarms without a fencing document triggered a full legacy import, walking all keys three times, which pushed master respawn past the 270s launch deadline and broke the canary. Now the scan only runs if the swarm's legacy control-epoch key exists, replacing a costly keyspace walk with a single cheap existence check, restoring timely master launches for new swarms while preserving correct behavior for legacy ones.
+
 ## v2.17.826 · 2026-11-12
 
 ### 2026-11-12 · bb262302eb29 · #10840 · @agenticore-app
