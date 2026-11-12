@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,11 @@ class FakePanes:
     def __init__(self, directory: Path, environ: dict[str, str]) -> None:
         self.rects = {"w1:p1": (0, 160)}
 
-    def split(self, pane_id: str) -> str:
+    def split(self, pane_id: str, ratio: float) -> str:
         x, width = self.rects[pane_id]
+        kept = round(width * ratio)
         new = f"w1:p{len(self.rects) + 1}"
-        self.rects[pane_id], self.rects[new] = (x, width // 2), (x + width // 2, width - width // 2)
+        self.rects[pane_id], self.rects[new] = (x, kept), (x + kept, width - kept)
         return new
 
     def columns(self, pane_id: str) -> dict[str, tuple[int, int]]:
@@ -33,7 +35,7 @@ class IdleHerdr:
         return ""
 
     def bare(self, pane_id: str) -> bool:
-        return True
+        return False
 
     def prompt(self, pane_id: str, text: str) -> bool:
         IdleHerdr.prompts.append((pane_id, text))
@@ -54,6 +56,7 @@ def quick_env(monkeypatch, tmp_path, launched) -> dict[str, str]:
     monkeypatch.setattr(cli.guard, "require", lambda environ: "w1:p1")
     monkeypatch.setattr(cli.layout, "HerdrPanes", FakePanes)
     monkeypatch.setattr(cli.launch, "start_all", start_all)
+    monkeypatch.setattr(cli.launch, "exited", lambda swarm, bare: [])
     monkeypatch.setattr(cli.safety_nudge, "install", lambda environ: launched.append("cron") or "line")
     monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: IdleHerdr())
     monkeypatch.setattr(cli.paths.herdr_host, "repo_label", lambda directory: "repo")
@@ -74,8 +77,8 @@ def test_up_seats_the_caller_as_master_and_launches_the_engineers(quick_env, lau
     assert swarm is not None and swarm.quick_id == "quick-d039e169" and swarm.directory == str(tmp_path)
     assert [(s.position, s.seat, s.pane_id) for s in swarm.seats] == [
         (1, "master", "w1:p1"),
-        (2, "eng-1", "w1:p3"),
-        (3, "eng-2", "w1:p2"),
+        (2, "eng-1", "w1:p2"),
+        (3, "eng-2", "w1:p3"),
         (4, "eng-3", "w1:p4"),
     ]
     assert swarm.seats[0].session_id == quick_env["CLAUDE_CODE_SESSION_ID"]
@@ -113,6 +116,24 @@ def test_an_engineer_that_fails_to_start_fails_up_and_waits_for_a_relaunch(monke
     swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
     assert swarm is not None and [s.state for s in swarm.seats] == ["ready", "ready", "handoff", "ready"]
     assert "eng-2 did not start" in capsys.readouterr().err
+
+
+@pytest.mark.feature("quick-swarm")
+def test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch(
+    monkeypatch, quick_env, tmp_path, capsys
+):
+    watched: list[str] = []
+
+    def exited(swarm: registry.Swarm, bare: Callable[[str], bool]) -> list[str]:
+        watched.extend(seat.seat for seat in swarm.seats[1:] if not bare(seat.pane_id))
+        return ["eng-3"]
+
+    monkeypatch.setattr(cli.launch, "exited", exited)
+    assert cli.main(["up", "--dir", str(tmp_path)], quick_env) == 1
+    swarm = registry.load(tmp_path / "scratchpad" / "repo" / "quick-d039e169")
+    assert swarm is not None and [s.state for s in swarm.seats] == ["ready", "ready", "ready", "handoff"]
+    assert watched == ["eng-1", "eng-2", "eng-3"]
+    assert "eng-3 did not start" in capsys.readouterr().err
 
 
 def test_a_cron_table_that_refuses_the_round_fails_up_in_one_line(monkeypatch, quick_env, tmp_path, capsys):
@@ -185,8 +206,10 @@ def test_herdr_split_right_returns_the_new_pane(monkeypatch, tmp_path):
     seen: list[list[str]] = []
     pane = {"pane": {"workspace_id": "w1", "tab_id": "t1", "pane_id": "w1:p2", "terminal_id": "term"}}
     monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: seen.append(args) or pane)
-    assert herdr_host.split_right("w1:p1", tmp_path, {}).pane_id == "w1:p2"
-    assert seen == [["pane", "split", "w1:p1", "--direction", "right", "--cwd", str(tmp_path), "--no-focus"]]
+    assert herdr_host.split_right("w1:p1", tmp_path, {}, 0.25).pane_id == "w1:p2"
+    assert seen == [
+        ["pane", "split", "w1:p1", "--direction", "right", "--ratio", "0.25", "--cwd", str(tmp_path), "--no-focus"]
+    ]
 
 
 def test_herdr_existing_pane_and_run_with_variables(monkeypatch, tmp_path):

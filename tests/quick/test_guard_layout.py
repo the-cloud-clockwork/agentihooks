@@ -34,14 +34,15 @@ def test_the_refusals_name_herdr_and_what_to_do():
 class FakePanes:
     def __init__(self, width: int) -> None:
         self.rects = {"w1:p1": (0, width)}
-        self.splits: list[str] = []
+        self.splits: list[tuple[str, float]] = []
 
-    def split(self, pane_id: str) -> str:
+    def split(self, pane_id: str, ratio: float) -> str:
         x, width = self.rects[pane_id]
+        kept = round(width * ratio)
         new = f"w1:p{len(self.splits) + 2}"
-        self.rects[pane_id] = (x, width // 2)
-        self.rects[new] = (x + width // 2, width - width // 2)
-        self.splits.append(pane_id)
+        self.rects[pane_id] = (x, kept)
+        self.rects[new] = (x + kept, width - kept)
+        self.splits.append((pane_id, ratio))
         return new
 
     def columns(self, pane_id: str) -> dict[str, tuple[int, int]]:
@@ -52,9 +53,19 @@ class FakePanes:
 def test_four_agents_fill_four_equal_columns_with_the_caller_first():
     panes = FakePanes(160)
     ordered = layout.build("w1:p1", 4, panes)
-    assert ordered == ["w1:p1", "w1:p3", "w1:p2", "w1:p4"]
+    assert ordered == ["w1:p1", "w1:p2", "w1:p3", "w1:p4"]
     assert [panes.rects[pane] for pane in ordered] == [(0, 40), (40, 40), (80, 40), (120, 40)]
-    assert panes.splits == ["w1:p1", "w1:p1", "w1:p2"]
+    assert panes.splits == [("w1:p1", 1 / 4), ("w1:p2", 1 / 3), ("w1:p3", 1 / 2)]
+
+
+@pytest.mark.feature("quick-swarm")
+@pytest.mark.parametrize("count", [2, 3, 4, 5])
+def test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed(count):
+    panes = FakePanes(173)
+    ordered = layout.build("w1:p1", count, panes)
+    widths = [panes.rects[pane][1] for pane in ordered]
+    assert ordered == ["w1:p1", *(f"w1:p{n}" for n in range(2, count + 1))]
+    assert max(widths) - min(widths) <= 1 and sum(widths) == 173
 
 
 @pytest.mark.parametrize("count", [2, 3, 5])

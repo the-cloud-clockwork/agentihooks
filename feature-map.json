@@ -5135,8 +5135,15 @@
         "tests/quick/test_seeds.py::test_the_master_seed_makes_it_the_front_door_over_its_own_panes",
         "tests/quick/test_seeds.py::test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting",
         "tests/quick/test_seeds.py::test_the_injected_block_names_the_seat_its_folder_and_its_next_stage",
-        "tests/quick/test_seeds.py::test_the_block_tells_a_seat_of_room_lines_waiting_for_it"
-      ]
+        "tests/quick/test_seeds.py::test_the_block_tells_a_seat_of_room_lines_waiting_for_it",
+        "tests/quick/test_guard_layout.py::test_every_agent_gets_an_equal_column_so_the_master_is_never_squeezed",
+        "tests/quick/test_room_tick_launch.py::test_a_pane_left_at_a_bare_shell_is_never_typed_into",
+        "tests/quick/test_room_tick_launch.py::test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does",
+        "tests/quick/test_room_tick_launch.py::test_a_pane_herdr_no_longer_has_reads_as_not_bare",
+        "tests/quick/test_room_tick_launch.py::test_up_names_the_engineers_whose_agent_exited_at_launch",
+        "tests/quick/test_cli.py::test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaunch"
+      ],
+      "semgrep_rule": "feature-quick-swarm-pane-typing"
     },
     {
       "id": "tick-progress-heads",

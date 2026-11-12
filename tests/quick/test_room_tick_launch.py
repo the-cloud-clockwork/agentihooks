@@ -155,6 +155,61 @@ def test_tell_skips_a_busy_seat_and_tells_an_idle_one(tmp_path):
 
 
 @pytest.mark.feature("quick-swarm")
+def test_a_pane_left_at_a_bare_shell_is_never_typed_into(tmp_path):
+    swarm = _swarm(tmp_path)
+    room.post(tmp_path, "eng-1", "master", "plan ready", 100)
+    room.post(tmp_path, "master", "eng-1", "go ahead", 101)
+    herdr = FakeHerdr(bare=True)
+    assert tick.tell(tmp_path, swarm.seats[0], herdr) == "skipped-bare"
+    assert tick.tell(tmp_path, swarm.seats[1], herdr) == "skipped-bare"
+    assert herdr.prompts == []
+
+
+@pytest.mark.feature("quick-swarm")
+def test_an_engineer_whose_agent_exited_starts_again_and_the_master_never_does(tmp_path):
+    _swarm(tmp_path)
+    paths.plan(tmp_path, "eng-1").write_text("- [ ] stage one\n")
+    herdr = FakeHerdr(bare=True)
+    assert _round(tmp_path, herdr) == [
+        {"seat": "master", "outcome": "skipped-bare"},
+        {"seat": "eng-1", "outcome": "revived-started"},
+        {"relaunched": "eng-1"},
+    ]
+    swarm = registry.load(tmp_path)
+    assert herdr.prompts == [] and swarm is not None and swarm.seats[1].state == registry.PENDING
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_pane_herdr_no_longer_has_reads_as_not_bare(monkeypatch):
+    def gone(pane_id: str, environ: dict[str, str]) -> dict[str, object]:
+        raise tick.herdr_host.HerdrError("pane not found")
+
+    monkeypatch.setattr(tick.herdr_host, "process_info", gone)
+    assert tick.LiveHerdr({}).bare("w1:p9") is False
+
+
+@pytest.mark.feature("quick-swarm")
+def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path):
+    swarm = _swarm(tmp_path)
+    seen: list[str] = []
+    naps: list[float] = []
+
+    def bare(pane_id: str) -> bool:
+        seen.append(pane_id)
+        return len(seen) > 2
+
+    assert launch.exited(swarm, bare, wait_s=3.0, sleep=naps.append) == ["eng-1"]
+    assert seen == ["w1:p2", "w1:p2", "w1:p2"] and naps == [launch.POLL_S, launch.POLL_S]
+
+
+def test_up_waits_the_whole_window_for_engineers_that_keep_running(tmp_path):
+    swarm = _swarm(tmp_path)
+    naps: list[float] = []
+    assert launch.exited(swarm, lambda pane_id: False, wait_s=3.0, sleep=naps.append) == []
+    assert naps == [launch.POLL_S] * 3
+
+
+@pytest.mark.feature("quick-swarm")
 def test_the_hourly_safety_round_runs_the_quick_tick(monkeypatch, tmp_path):
     from scripts.swarm import safety_nudge
 
