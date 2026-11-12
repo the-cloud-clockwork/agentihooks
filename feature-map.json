@@ -125,6 +125,19 @@
       ]
     },
     {
+      "id": "legacy-state-migration-command",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
+      "behaviour": "One command moves a swarm's legacy key value state bucket into its scoped state stream with key ownership claimed explicitly, by named keys or none: a dry run reports the owned revisions it would move and writes nothing, an apply copies only the owned history and reports the count, a rerun moves nothing, and a failed copy exits 1, reports the failure and is resumed by the same command, so the hub fan in skip clears without Python.",
+      "seam": "python -m scripts.events.migrate_state main, over NatsBus.migrate_state",
+      "tests": [
+        "tests/events/test_migrate_state.py::test_dry_run_reports_what_it_would_move_and_writes_nothing",
+        "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
+        "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
+        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
@@ -551,6 +564,31 @@
       ]
     },
     {
+      "id": "scheduled-run-hive-placement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
+      "behaviour": "A scheduled workflow slot runs locally by default; a slot placed on a hive sends its run to a live, undrained hive that lists the project repository and declares every needed capability, fewest running runs first, and with no fitting hive records a named wait reason and sends nothing, never starting the run on the workstation.",
+      "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
+      "tests": [
+        "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
+        "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
+        "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
+        "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
+        "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
+        "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
+        "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
+        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
+        "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
+        "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
+        "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",
+        "tests/scheduler/test_commands.py::test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally",
+        "tests/scheduler/test_cli.py::test_cron_add_places_a_workflow_on_a_hive_with_its_needs",
+        "tests/hive/test_run_placement.py::test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not",
+        "tests/hive/test_run_placement.py::test_a_placed_run_carries_the_hive_path_of_its_repository",
+        "tests/scheduler/test_cli.py::test_cron_add_refuses_an_unknown_placement"
+      ]
+    },
+    {
       "id": "swarm-tick-characterisation",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-a2",
@@ -921,6 +959,28 @@
         "tests/tick/steps/test_masters_moved.py::test_run_group_runs_the_registered_steps_and_notes_the_left_box",
         "tests/tick/steps/test_masters_moved.py::test_print_actions_prints_actions_failures_and_the_held_exception",
         "tests/tick/steps/test_masters_moved.py::test_codex_hook_order_reports_the_hooks_it_restored"
+      ]
+    },
+    {
+      "id": "swarm-night-watch-drill",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
+      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record; a live swarm, a stopped one or a held seat is refused untouched.",
+      "seam": "scripts.swarm.night_watch_drill.command through the swarm command parser",
+      "tests": [
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_records_it",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_records_when_the_night_watch_first_saw_the_empty_seat",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_drops_a_seat_stall_from_stale_night_watch_passes_and_recovers_once",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_ages_a_new_stall_when_stale_passes_saw_no_empty_seat",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_keeps_a_stall_seen_by_passes_exactly_at_the_gap",
+        "tests/swarm/test_night_watch_drill.py::test_a_fresh_stall_younger_than_the_threshold_records_no_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_reads_the_ledger_document_to_see_a_starting_master_hold_the_seat",
+        "tests/swarm/test_night_watch_drill.py::test_a_master_retired_with_no_new_tasks_leaves_the_drill_without_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_passes_five_minutes_apart_and_keeps_every_pass_action",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_needs_both_the_scratch_flag_and_a_proof_swarm_name",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
       ]
     },
     {
@@ -1839,7 +1899,23 @@
         "tests/profiles/test_hub_import.py::test_an_unsafe_file_in_agent_hooks_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_a_dangling_agent_hooks_symlink_refuses_the_import",
         "tests/profiles/test_hub_import.py::test_an_asset_holding_a_literal_credential_refuses_the_import",
-        "tests/profiles/test_hub_import.py::test_a_profile_file_taken_twice_refuses_the_import"
+        "tests/profiles/test_hub_import.py::test_a_profile_file_taken_twice_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_a_nested_manifest_that_installs_nothing_is_copied",
+        "tests/profiles/test_hub_import.py::test_a_nested_manifest_that_installs_is_not_copied",
+        "tests/profiles/test_hub_import.py::test_an_agent_hooks_file_colliding_with_a_package_file_names_both"
+      ]
+    },
+    {
+      "id": "hub-import-paths",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-import-absolute-paths",
+      "behaviour": "A hub import rewrites each workstation home path in the copied instructions, rules and skills to its bundle relative profile form when it names an imported agent's package, hooks or folder, else to its HOME environment form, and refuses the import naming any Windows user path or hub agent file outside the profile.",
+      "seam": "scripts.profiles.hub_import.import_hub",
+      "tests": [
+        "tests/profiles/test_hub_import.py::test_workstation_paths_in_instructions_become_bundle_or_environment_forms",
+        "tests/profiles/test_hub_import.py::test_a_workstation_path_with_no_portable_form_refuses_the_import",
+        "tests/profiles/test_hub_import.py::test_workstation_paths_outside_instructions_are_left_alone",
+        "tests/profiles/test_hub_import.py::test_undecodable_instruction_bytes_survive_a_path_rewrite"
       ]
     },
     {
@@ -3240,7 +3316,7 @@
     {
       "id": "tick-doc-items-map",
       "origin": "inventory",
-      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing.",
+      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing. The step needs the tick view step, so it is never ready before the wrapper view site hook answers and is not rested when that hook answers past the step's own budget.",
       "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed and the ledger port read watchdog_copy of the ledger operation watchdog_copy, stored by python -m scripts.swarm.doc_items --store-as",
       "tests": [
         "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
@@ -3253,6 +3329,7 @@
         "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
+        "tests/tick/steps/test_doc_items_map.py::test_the_step_runs_when_the_wrapper_view_hook_answers_past_its_budget",
         "tests/swarm_ledger/test_watchdog_copy.py::test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest",
         "tests/swarm_ledger/test_watchdog_copy.py::test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy",
         "tests/swarm_ledger/test_watchdog_copy.py::test_the_doc_items_command_stores_the_watchdog_copy_from_a_file"
@@ -3580,6 +3657,20 @@
         "tests/test_codex_usage.py::test_a_refusal_code_counts_only_with_its_own_status",
         "tests/codex_session/test_serve.py::test_a_pump_ended_on_an_account_refusal_takes_the_account_out_of_routing",
         "tests/inbox/test_codex_pump.py::test_turn_events_without_a_turn_id_leave_the_turn_ids_empty"
+      ]
+    },
+    {
+      "id": "codex-transient-expired-recovers",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-codex-transient-expired",
+      "behaviour": "An expired Codex reading for an account whose bearer token exp is still in the future is probed again on the next normal quota refresh, ahead of the freshness window, and a successful usage read clears it so the account gets its seats back. A token whose exp has passed stays expired and is not probed again. One 401 token_expired read no longer holds a valid account at zero seats until someone logs in.",
+      "seam": "scripts.hive.quota_refresh stale_codex and refresh; scripts.codex_router.recheck_expired and fresh_quotas; scripts.codex_router.account_cap",
+      "tests": [
+        "tests/test_codex_usage.py::test_one_transient_401_token_expired_then_a_healthy_read_reopens_the_account_on_the_next_refresh",
+        "tests/test_codex_usage.py::test_an_expired_reading_for_a_token_past_its_exp_stays_expired_and_is_not_probed_again",
+        "tests/test_codex_usage.py::test_a_live_token_answered_401_again_is_probed_at_most_once_per_refresh_window",
+        "tests/test_codex_usage.py::test_an_expired_reading_recorded_without_a_probe_attempt_is_rechecked_at_once",
+        "tests/test_codex_usage.py::test_only_an_expired_reading_of_a_token_whose_exp_is_ahead_is_rechecked"
       ]
     },
     {
@@ -4549,28 +4640,22 @@
       ]
     },
     {
-      "id": "scheduled-run-hive-placement",
+      "id": "hive-headless-run-consumer",
       "origin": "inventory",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
-      "behaviour": "A scheduled workflow slot runs locally by default; a slot placed on a hive sends its run to a live, undrained hive that lists the project repository and declares every needed capability, fewest running runs first, and with no fitting hive records a named wait reason and sends nothing, never starting the run on the workstation.",
-      "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr2",
+      "behaviour": "Each hive daemon beat on a hive neither fenced nor draining reads its run order stream, claims each order once by its receipt, writes the case file and starts the run detached through the scheduled workflow start in the hive checkout of the project repository with no herdr pane, and acks expired orders, unknown repositories, missing workflows and failed starts with their reason.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.poll through scripts.hive.daemon.beat",
       "tests": [
-        "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
-        "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
-        "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
-        "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
-        "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
-        "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
-        "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
-        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
-        "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
-        "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
-        "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",
-        "tests/scheduler/test_commands.py::test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally",
-        "tests/scheduler/test_cli.py::test_cron_add_places_a_workflow_on_a_hive_with_its_needs",
-        "tests/hive/test_run_placement.py::test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not",
-        "tests/hive/test_run_placement.py::test_a_placed_run_carries_the_hive_path_of_its_repository",
-        "tests/scheduler/test_cli.py::test_cron_add_refuses_an_unknown_placement"
+        "tests/hive/test_run_consumer.py::test_a_run_order_starts_one_detached_run_in_the_project_checkout",
+        "tests/hive/test_run_consumer.py::test_a_poll_starts_one_batch_of_run_orders",
+        "tests/hive/test_run_consumer.py::test_a_run_order_is_claimed_once_by_its_receipt",
+        "tests/hive/test_run_consumer.py::test_a_run_order_that_cannot_start_acks_failed_with_its_reason",
+        "tests/hive/test_run_consumer.py::test_a_claimed_run_order_past_its_expiry_acks_expired",
+        "tests/hive/test_run_consumer.py::test_a_run_order_whose_start_fails_acks_start_failed",
+        "tests/hive/test_run_consumer.py::test_an_unreadable_run_order_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_for_another_hive_starts_nothing",
+        "tests/hive/test_run_consumer.py::test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining"
       ]
     }
   ],

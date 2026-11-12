@@ -45,6 +45,7 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
     from scripts.hive.orders import Consumer, alive
+    from scripts.hive.run_consumer import RunConsumer
 
     alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
@@ -83,6 +84,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     adopt_capabilities(redis, local_id)
     if not fenced and not registry.member_draining(redis, local_id, registry.member_name()):
         dispatch.poll(consumer)
+        RunConsumer(redis, local_id).poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
