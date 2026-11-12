@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.830 · 2026-11-12
+
+### 2026-11-12 · aba036f8e1d6 · #10854 · @agenticore-app
+
+**Register the capabilities a worker hive's chart settings declare**
+
+This change adds a `workers.capabilities` chart setting that renders into a `HIVE_CAPABILITIES` environment variable for every worker hive, including extras under `workers.hives`, with validation guarding against invalid characters like commas in names. Worker startup now passes this value to the hive set registration, meaning the chart becomes the authoritative source for capabilities: an empty list clears previously stored ones, while pods running an older chart without this setting preserve whatever was already registered, allowing the image to roll ahead of chart releases safely. A new smoke test confirms the render behaves correctly.
+
 ## v2.17.829 · 2026-11-12
 
 ### 2026-11-12 · 30ac392deb9f · #10859 · @agenticore-app
