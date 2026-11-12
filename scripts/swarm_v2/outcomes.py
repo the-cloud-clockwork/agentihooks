@@ -185,7 +185,7 @@ class Outcomes:
             "op": "task_update",
             "item": f"tasks/{proposal['task_id']}",
             "by": claim.holder,
-            "fields": {"state": "done", "pr_url": proposal["pr_url"], "proof": proposal["proof"]},
+            "fields": {"state": "done", "awaiting": "", "pr_url": proposal["pr_url"], "proof": proposal["proof"]},
         }
         state, rejected = repository.apply_ops(self.authority.slug, ops=[op], gate=gate)
         if rejected:
