@@ -4934,18 +4934,19 @@
       "id": "shared-swarm-units-installed-binary",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t620",
-      "behaviour": "Every path that writes the shared swarm user units (ensure, reconcile, guard through ensure, the spoke install and swarm start) refuses unless the agentihooks binary it would name and the running interpreter both live in the environment of the installed CLI that agentihooks init links into the user's local bin, so a proof swarm run from a scratch venv whose own install reports its scratch copy as installed leaves the shared tick, waker, prober, waits, tick watch, scheduler and spoke units unchanged, while a unit dir other than the shared one still takes any binary.",
+      "behaviour": "Every path that writes the shared swarm user units (ensure, reconcile, guard before it recycles or starts the scheduler supervisor, the spoke install and swarm start) refuses unless the agentihooks binary it would name and the running interpreter both live in the environment of the installed CLI that agentihooks init links into the user's local bin, so a proof swarm run from a scratch venv whose own install reports its scratch copy as installed leaves the shared tick, waker, prober, waits, tick watch, scheduler and spoke units unchanged, while a unit dir other than the shared one still takes any binary.",
       "seam": "the shared unit refusal in the swarm timer ensure and reconcile, observed through the unit files and systemctl calls",
       "tests": [
         "tests/swarm/test_timer_scratch_binary.py::test_ensure_refuses_a_scratch_binary_although_the_running_root_reads_as_installed",
         "tests/swarm/test_timer_scratch_binary.py::test_ensure_refuses_the_installed_binary_run_by_a_scratch_interpreter",
         "tests/swarm/test_timer_scratch_binary.py::test_reconcile_refuses_a_scratch_binary_with_stale_or_current_units",
-        "tests/swarm/test_timer_scratch_binary.py::test_guard_restoring_the_tick_timer_from_a_scratch_binary_leaves_the_units_alone",
         "tests/swarm/test_timer_scratch_binary.py::test_a_spoke_workstation_with_a_scratch_binary_leaves_the_units_alone",
         "tests/swarm/test_timer_scratch_binary.py::test_a_swarm_started_from_a_scratch_venv_leaves_the_shared_units_unchanged",
         "tests/swarm/test_timer_scratch_binary.py::test_the_installed_binary_and_interpreter_still_write_the_shared_units",
         "tests/swarm/test_timer_scratch_binary.py::test_a_proof_unit_dir_still_takes_a_scratch_binary",
-        "tests/swarm/test_timer_scratch_binary.py::test_a_missing_installed_cli_link_refuses_every_binary"
+        "tests/swarm/test_timer_scratch_binary.py::test_a_missing_installed_cli_link_refuses_every_binary",
+        "tests/swarm/test_timer_scratch_binary.py::test_guard_from_a_scratch_binary_leaves_the_units_and_the_scheduler_alone",
+        "tests/swarm/test_timer_scratch_binary.py::test_reconcile_refuses_the_installed_binary_run_from_a_foreign_root"
       ]
     }
   ],

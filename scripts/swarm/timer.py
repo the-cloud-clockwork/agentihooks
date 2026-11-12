@@ -429,11 +429,16 @@ def _scratch_binary(binary: str, unit_dir: Path) -> str:
     return ""
 
 
+def _shared_refusal(binary: str, unit_dir: Path) -> str:
+    """Why this run may not touch the shared swarm units, empty when it runs the installed agentihooks."""
+    return _foreign_run(unit_dir) or _scratch_binary(binary, unit_dir)
+
+
 def ensure(
     binary: str, unit_dir: Path | None = None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
 ) -> bool:
     unit_dir = unit_dir or UNIT_DIR
-    refusal = _foreign_run(unit_dir) or _scratch_binary(binary, unit_dir)
+    refusal = _shared_refusal(binary, unit_dir)
     if refusal:
         print(refusal, file=sys.stderr)
         return False
@@ -476,8 +481,13 @@ def ensure(
     return schedule("the swarm timer install") and all(proc.returncode == 0 for proc in procs)
 
 
-def guard(binary, unit_dir=None, run=subprocess.run):
+def guard(
+    binary: str, unit_dir: Path | None = None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+) -> bool:
     unit_dir = unit_dir or UNIT_DIR
+    if refusal := _shared_refusal(binary, unit_dir):
+        print(refusal, file=sys.stderr)
+        return False
     recycle()
     supervise()
     if not _kept():
@@ -496,7 +506,7 @@ def reconcile(
     binary: str, unit_dir: Path | None = None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
 ) -> bool:
     unit_dir = unit_dir or UNIT_DIR
-    if refusal := _worktree_run(unit_dir) or _scratch_binary(binary, unit_dir):
+    if refusal := _shared_refusal(binary, unit_dir):
         print(refusal, file=sys.stderr)
         return False
     expected = units(binary)

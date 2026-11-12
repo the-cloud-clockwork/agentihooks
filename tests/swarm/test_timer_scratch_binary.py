@@ -109,18 +109,38 @@ def test_reconcile_refuses_a_scratch_binary_with_stale_or_current_units(
 
 
 @pytest.mark.feature("shared-swarm-units-installed-binary")
-def test_guard_restoring_the_tick_timer_from_a_scratch_binary_leaves_the_units_alone(
+def test_guard_from_a_scratch_binary_leaves_the_units_and_the_scheduler_alone(
     shared: Namespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(timer, "recycle", lambda: None)
-    monkeypatch.setattr(timer, "supervise", lambda: True)
+    monkeypatch.setattr(timer, "recycle", lambda: pytest.fail("the scheduler supervisor was recycled"))
+    monkeypatch.setattr(timer, "supervise", lambda: pytest.fail("the scheduler supervisor was started"))
     monkeypatch.setattr(timer, "undelivered", lambda: "the last swarm tick was delivered 400 seconds ago")
     before, calls = _snapshot(shared.units), []
     binary = shared.scratch / "agentihooks"
     assert real_guard(str(binary), run=_runner(calls)) is False
     assert _snapshot(shared.units) == before
-    assert [argv for argv in calls if argv[2] != "is-enabled"] == []
+    assert calls == []
     assert capsys.readouterr().err == _refusal(binary, shared)
+
+
+@pytest.mark.feature("shared-swarm-units-installed-binary")
+def test_reconcile_refuses_the_installed_binary_run_from_a_foreign_root(
+    shared: Namespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.targets._common import _install_module
+
+    install = _install_module()
+    primary = tmp_path / "primary"
+    monkeypatch.setattr(install, "install_root", lambda: primary)
+    before, calls = _snapshot(shared.units), []
+    assert real_reconcile(str(shared.link), run=_runner(calls)) is False
+    assert _snapshot(shared.units) == before
+    assert calls == []
+    running = install.AGENTIHOOKS_ROOT.resolve()
+    assert capsys.readouterr().err == (
+        f"this run comes from {running}, not the installed agentihooks at {primary.resolve()}, "
+        f"so it leaves the shared swarm timer units in {shared.units} alone\n"
+    )
 
 
 @pytest.mark.feature("shared-swarm-units-installed-binary")
