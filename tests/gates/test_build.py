@@ -460,7 +460,8 @@ class TestMore:
         ledgers.mkdir()
         legacy_page.store(ledgers, SLUG, {"tasks": [{"id": TASK, "territory": ["power"]}]})
         call = Call(tool="Edit", tool_input={"file_path": str(world.repo / "power/x.py")}, cwd=str(world.repo))
-        decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), None)
+        state = Verdicts(SLUG, "build", Path.home() / "gates")
+        decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), state)
         assert decision.allowed
 
     def test_the_work_folder_and_scratchpad_are_exempt_inside_a_git_tree(self, world):
