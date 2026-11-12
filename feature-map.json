@@ -3578,6 +3578,17 @@
       ]
     },
     {
+      "id": "hive-run-order-receipt-outlives-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
+      "behaviour": "A hive run consumer that claims a run order refreshes its receipt to live a day past the order's own expiry, so an order left on the stream by a crash before its ack is never claimed and started a second time once the one day send receipt would have expired.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.apply",
+      "tests": [
+        "tests/hive/test_run_consumer.py::test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack",
+        "tests/hive/test_run_consumer.py::test_a_run_order_claimed_past_its_expiry_keeps_its_receipt_one_receipt_lifetime"
+      ]
+    },
+    {
       "id": "fleet-red-claim-view-cache-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2440",
@@ -4631,17 +4642,6 @@
         "tests/hive/test_run_consumer.py::test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid",
         "tests/hive/test_run_consumer.py::test_a_run_order_for_another_hive_starts_nothing",
         "tests/hive/test_run_consumer.py::test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining"
-      ]
-    },
-    {
-      "id": "hive-run-order-receipt-outlives-order",
-      "origin": "regression",
-      "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
-      "behaviour": "A hive run consumer that claims a run order refreshes its receipt to live a day past the order's own expiry, so an order left on the stream by a crash before its ack is never claimed and started a second time once the one day send receipt would have expired.",
-      "seam": "scripts.hive.run_consumer.RunConsumer.apply",
-      "tests": [
-        "tests/hive/test_run_consumer.py::test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack",
-        "tests/hive/test_run_consumer.py::test_a_run_order_claimed_past_its_expiry_keeps_its_receipt_one_receipt_lifetime"
       ]
     }
   ],
