@@ -1211,6 +1211,13 @@ def _named_target(words: list[str]) -> str | None:
     return _merge_target(words) or _done_target(words)
 
 
+def _with_pull(words: list[str], number: str, url: str) -> list[str]:
+    """The command with the operand naming the bare pull request number rewritten to its resolved url."""
+    start = program_index(words) + 3
+    at = next(index for index in range(start, len(words)) if words[index] in (number, f"--pr={number}"))
+    return [*words[:at], words[at].removesuffix(number) + url, *words[at + 1 :]]
+
+
 def _unnamed_merge(words):
     index = program_index(words)
     return (
@@ -1367,7 +1374,7 @@ class IntentGate:
         return replace(call, tool_input={**call.tool_input, "command": " && ".join(map(shlex.join, named))})
 
     def _named(self, words: list[str], cwd: str | None) -> list[str] | None:
-        target = _merge_target(words)
+        target = _named_target(words)
         number = target if target and target.isdigit() else None
         if not (number or _unnamed_merge(words)):
             return words
@@ -1380,10 +1387,7 @@ class IntentGate:
         url = done.stdout.strip()
         if done.returncode != 0 or not PULL.search(url):
             return None
-        if not number:
-            return [*words, url]
-        at = words.index(number, program_index(words) + 3)
-        return [*words[:at], url, *words[at + 1 :]]
+        return _with_pull(words, number, url) if number else [*words, url]
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
         if not bound and _other_half(call.command, record):

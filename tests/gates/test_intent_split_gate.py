@@ -83,6 +83,7 @@ def test_a_split_verdict_held_pending_by_the_tick_keeps_its_half(tmp_path, view)
         f"agentihooks swarm {SLUG} merge queue 10",
         f"agentihooks swarm {SLUG} done --pr {SECOND}",
         f"agentihooks swarm {SLUG} done --pr={SECOND}",
+        f"agentihooks swarm {SLUG} done --pr 10",
         "gh pr merge 9 --repo o/other",
     ],
 )
@@ -104,6 +105,7 @@ def test_a_half_the_verdict_did_not_judge_is_refused(tmp_path, command):
         f"agentihooks swarm {SLUG} merge queue {FIRST}",
         f"agentihooks swarm {SLUG} merge queue 9",
         f"agentihooks swarm {SLUG} done --pr {FIRST}",
+        f"agentihooks swarm {SLUG} done --pr=9",
         f"agentihooks swarm {SLUG} done",
         "gh pr merge 9 --repo o/r",
     ],
@@ -139,6 +141,10 @@ def test_a_bare_number_matches_only_the_half_in_its_own_repository(
     assert foreign.reason == "Intent requires a pull request registered on this task."
     assert gate().decide(bash("gh pr merge 10 --repo o/other"), WHO, verdicts(tmp_path)).allowed
     assert gate().decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+    for done in [f"agentihooks swarm {SLUG} done --pr 10", f"agentihooks swarm {SLUG} done --pr=10"]:
+        refused = gate().decide(bash(done), WHO, verdicts(tmp_path))
+        assert (refused.allowed, refused.reason) == (False, "Intent requires a pull request registered on this task.")
+    assert gate().decide(bash(f"agentihooks swarm {SLUG} done --pr=9"), WHO, verdicts(tmp_path)).allowed
 
 
 def test_an_unresolved_bare_number_is_refused_on_a_split_task(tmp_path: Path) -> None:
