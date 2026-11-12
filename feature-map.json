@@ -1,6 +1,22 @@
 {
   "features": [
     {
+      "id": "codex-expired-routing",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
+      "behaviour": "Forced Codex routes refuse an expired latest quota reading. Hives publish their own expired observation and retain it instead of adopting a live remote report. Global capacity keeps expired Codex accounts closed.",
+      "seam": "codex_router.select; hive.daemon._subscriptions and adopt_caps; swarm.capacity.accounts",
+      "tests": [
+        "tests/test_codex_router.py::test_a_forced_route_refuses_an_expired_reading",
+        "tests/hive/test_daemon.py::test_an_expired_codex_reading_publishes_its_timestamp_and_no_cap",
+        "tests/hive/test_daemon.py::test_a_hive_keeps_its_own_expired_codex_reading",
+        "tests/swarm/test_capacity.py::test_aggregate_capacity_closes_an_expired_codex_account"
+      ],
+      "rules": [
+        "codex-expired-reading-discarded"
+      ]
+    },
+    {
       "id": "account-keys-indexed-not-scanned",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
@@ -5010,6 +5026,22 @@
       "tests": [
         "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
         "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
+      ]
+    },
+    {
+      "id": "successor-upstream-branch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t549",
+      "behaviour": "A successor's worktree whose local branch tracks the earlier remote branch it continues is recorded under that remote branch, and wt.sh done reads its pull request and remote branch by that upstream name, so merged cleanup drops the local and remote branch and parking drops a worktree whose merged upstream left origin.",
+      "seam": "scripts.swarm.cli.worktree_branch and the wt.sh done command against a real origin",
+      "tests": [
+        "tests/swarm/test_cli.py::test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks",
+        "tests/swarm/test_cli.py::test_an_unpushed_checkout_tracking_a_base_branch_is_refused",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_branch_whose_own_merged_head_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_drops_a_successor_whose_upstream_branch_merged",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
+        "tests/test_worktree_skill.py::TestDoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
       ]
     }
   ],

@@ -5,6 +5,7 @@ import { capDraft, doctorOn, laneCeilings, overlayChanges, pending, renderSwarm,
 import { wireHives } from "./hives.js";
 import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 import { meta } from "./sync.js";
+import { drawFailures, noteFailure, noteSuccess, replayCommands, wireFailures } from "./status_note.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
@@ -13,7 +14,6 @@ const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" }
 const MASTER_AGENTS = ["claude", "codex"];
 const LANE_STEP = /^(eng|ci|plan)_(up|down)$/;
 
-let noteError = false;
 let models = {};
 let applied = null;
 
@@ -39,10 +39,6 @@ function renderModels(values) {
     }
     select.value = current;
   }
-}
-
-export function clearNoteError() {
-  noteError = false;
 }
 
 function swarmControls(state) {
@@ -136,11 +132,9 @@ function opNote(phase, action, error) {
 }
 
 export function showNote(phase, action, error) {
-  noteError = phase === "error";
-  const text = noteError ? opNote(phase, action, error).text : "";
-  $("swarm-note").className = "sw-note bad";
-  $("swarm-note").textContent = text;
-  $("swarm-note").title = text;
+  if (phase === "error") noteFailure(action, opNote(phase, action, error).text);
+  else if (phase === "pending") drawFailures();
+  else noteSuccess(action);
 }
 
 function renderFocus(config) {
@@ -187,12 +181,7 @@ export function renderControls() {
     input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, pageLimits(), models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
-  const command = swarm && (swarm.commands || []).at(-1);
-  if (!pending && !noteError && command) {
-    const phase = { pending: "queued", accepted: "accepted", acknowledged: "acknowledged", failed: "error" }[command.state];
-    const action = commandAction(command);
-    showNote(phase, action, command.error);
-  }
+  if (swarm) replayCommands(swarm.commands || [], commandAction, (command) => opNote("error", commandAction(command), command.error).text);
   const note = affinityNote(swarm);
   $("affinity-state").textContent = note.text;
   $("affinity-state").className = `sw-unit sw-affinity-state ${note.cls}`;
@@ -202,9 +191,17 @@ function commandAction(command) {
   if (command.command === "quota") return "quota_refresh";
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
-  if (action === "set" && command.argv.some((pair) => pair.startsWith("autonomy="))) return "autonomy";
-  if (action === "set" && command.argv.some((pair) => pair.startsWith("scaling="))) return "scaling";
+  if (action === "set") return setAction(command.argv);
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
+}
+
+function setAction(argv) {
+  const has = (test) => argv.some(test);
+  if (has((pair) => pair.startsWith("autonomy="))) return "autonomy";
+  if (has((pair) => pair.startsWith("scaling="))) return "scaling";
+  if (has((pair) => /^[^=]+-gate=/.test(pair))) return "gate";
+  if (has((pair) => pair.startsWith("overlays-"))) return "overlays";
+  return "apply";
 }
 
 export function renderGates(sw) {
@@ -226,8 +223,10 @@ export async function refreshQuota() {
   btn.setAttribute("aria-busy", "true");
   try {
     const resp = await writeSwarm({ action: "quota_refresh" });
-    if (resp.ok) renderSwarm(await resp.json());
-    else showNote("error", "quota_refresh", (await resp.text()) || `server answered ${resp.status}`);
+    if (resp.ok) {
+      showNote("done", "quota_refresh");
+      renderSwarm(await resp.json());
+    } else showNote("error", "quota_refresh", (await resp.text()) || `server answered ${resp.status}`);
   } catch (e) {
     showNote("error", "quota_refresh", "ledger server unreachable");
   }
@@ -262,6 +261,7 @@ function applyCaps() {
 
 export function wireSwarm() {
   loadModels();
+  wireFailures();
   $("quota-refresh").addEventListener("click", refreshQuota);
 
   $("closed-banner").addEventListener("click", (event) => {
