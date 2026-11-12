@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Any
 
 from nats.errors import Error as NatsError
-from nats.js.errors import APIError, NoKeysError, NotFoundError
+from nats.js.errors import APIError, NotFoundError
 
 from .config import BusConfig
 from .nats import DEFAULT_URL, NatsBus, NatsStateStore
@@ -31,16 +31,20 @@ def _target(bus: Any, swarm: str, bucket: str, keys: list[str]) -> tuple[int, bo
 
 
 def _legacy(bus: Any, bucket: str, keys: list[str]) -> tuple[list[str], int]:
-    """Every key the legacy bucket holds and the retained revisions of the owned keys."""
+    """Every live key the legacy bucket holds, read from its stream subjects, and the owned keys' retained revisions."""
+    stream = f"KV_{bucket}"
     try:
-        kv = bus._loop.run(bus._js.key_value(bucket))
+        info = bus._loop.run(bus._js.stream_info(stream, subjects_filter=">"))
     except NotFoundError:
         return [], 0
+    prefix = f"$KV.{bucket}."
+    present: list[str] = []
+    subjects: dict[str, int] = info.state.subjects or {}
+    for name in sorted(subjects):
+        headers: dict[str, str] = bus._loop.run(bus._js.get_last_msg(stream, name)).headers or {}
+        if headers.get("KV-Operation") not in ("DEL", "PURGE"):
+            present.append(name.removeprefix(prefix))
     store = NatsStateStore(bus._loop, bus._js, bucket, False)
-    try:
-        present: list[str] = sorted(bus._loop.run(kv.keys()))
-    except NoKeysError:
-        present = []
     return present, sum(1 for key in keys for _ in store.watch(key))
 
 
