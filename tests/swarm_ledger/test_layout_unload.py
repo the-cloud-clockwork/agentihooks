@@ -37,9 +37,25 @@ def test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layou
 def test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request(visit: Callable[..., Tab]) -> None:
     page = visit()
     page.tab.evaluate(RECORD_LAYOUT_WRITES)
-    page.tab.evaluate(ARROW_DOWN)
+    page.tab.evaluate(f"() => ({ARROW_DOWN})()")
     assert page.tab.evaluate(
         "() => (window.dispatchEvent(new PageTransitionEvent('pagehide')), window.layoutWrites)"
+    ) == [True]
+    page.tab.wait_for_timeout(500)
+    assert page.tab.evaluate("() => window.layoutWrites") == [True]
+
+
+@pytest.mark.feature("ledger-layout-unload-save")
+def test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request(visit: Callable[..., Tab]) -> None:
+    page = visit()
+    page.tab.evaluate(RECORD_LAYOUT_WRITES)
+    page.tab.evaluate(f"() => ({ARROW_DOWN})()")
+    assert page.tab.evaluate(
+        """() => {
+          Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+          document.dispatchEvent(new Event("visibilitychange"));
+          return window.layoutWrites;
+        }"""
     ) == [True]
     page.tab.wait_for_timeout(500)
     assert page.tab.evaluate("() => window.layoutWrites") == [True]

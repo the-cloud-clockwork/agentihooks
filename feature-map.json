@@ -2694,10 +2694,11 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t230",
       "behaviour": "A layout save still pending when the ledger page hides or closes is sent at once as a keepalive request, so the server keeps the newest layout.",
-      "seam": "The layout save of the ledger page on page hide",
+      "seam": "The layout save of the ledger page on pagehide and on a hidden visibilitychange",
       "tests": [
         "tests/swarm_ledger/test_layout_unload.py::test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layout",
-        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
+        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request",
+        "tests/swarm_ledger/test_layout_unload.py::test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
       ]
     },
     {
