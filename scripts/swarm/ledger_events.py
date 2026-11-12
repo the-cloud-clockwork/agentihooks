@@ -111,13 +111,14 @@ class PullRequest:
     body: str = ""
     started: bool = False
     fallback: str = ""
+    head_red: bool = False
 
 
 def iso_ms(text):
     return int(datetime.fromisoformat(text).timestamp() * 1000)
 
 
-def pull_request(raw):
+def pull_request(raw: dict[str, Any]) -> PullRequest:
     suites = raw.get("checkSuites") or []
     rollup = raw.get("statusCheckRollup") or []
     newest = _newest_runs(rollup, suites)
@@ -195,6 +196,7 @@ def pull_request(raw):
         running or any(result in PENDING for result in results),
         raw.get("body") or "",
         started,
+        head_red=any((check.get("conclusion") or check.get("state")) in RED for check in everything),
     )
 
 
