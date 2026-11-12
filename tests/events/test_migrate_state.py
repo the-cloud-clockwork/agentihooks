@@ -141,6 +141,7 @@ def test_interrupted_move_reports_failure_and_stays_pending(buses, command, monk
 
 @pytest.mark.feature("legacy-state-migration-command")
 def test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch(buses, command, monkeypatch, capsys):
+    from nats.js.client import JetStreamContext
     from nats.js.kv import KeyValue
 
     legacy, _ = buses
@@ -155,6 +156,8 @@ def test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch(buses, comm
     with monkeypatch.context() as no_watch:
         no_watch.setattr(KeyValue, "keys", refuse_watch)
         no_watch.setattr(KeyValue, "watchall", refuse_watch)
+        no_watch.setattr(JetStreamContext, "subscribe", refuse_watch)
+        no_watch.setattr(JetStreamContext, "pull_subscribe_bind", refuse_watch)
         code, report = _run(command, capsys, ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned"])
     assert code == 0
     assert report["unowned"] == ["foreign"]
