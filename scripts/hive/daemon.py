@@ -188,7 +188,7 @@ def adopt_caps(redis: "Redis", report: dict) -> None:
 
 
 def _newer(reading: dict | None, mine: dict) -> bool:
-    if reading is None or reading["observed_at"] is None:
+    if mine.get("expired") or reading is None or reading["observed_at"] is None:
         return False
     return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
 
@@ -497,9 +497,11 @@ def _subscriptions(environ: Mapping[str, str], counts: dict, now: float) -> tupl
         )
         quota[f"codex:{account.name}"] = (
             _reading(reading.five_hour, reading.seven_day, reading.observed_at)
-            if reading and not reading.expired
+            if reading
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
+        if reading and reading.expired:
+            quota[f"codex:{account.name}"]["expired"] = True
     return slots, quota
 
 
