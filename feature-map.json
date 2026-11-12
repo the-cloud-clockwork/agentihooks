@@ -3253,7 +3253,7 @@
     {
       "id": "tick-doc-items-map",
       "origin": "inventory",
-      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing.",
+      "behaviour": "When the newest watchdog document copy stored on the ledger changes, the next tick reads it through the ledger port, maps its open items onto their tasks once and records the copy digest; the read happens only when the copy's store stamp in the held ledger view moved, and an unchanged copy or a ledger without one runs nothing. The step needs the tick view step, so it is never ready before the wrapper view site hook answers and is not rested when that hook answers past the step's own budget.",
       "seam": "scripts.tick.steps.report._doc_items_map registered as tick step doc items map, over scripts.swarm.doc_items.map_changed and the ledger port read watchdog_copy of the ledger operation watchdog_copy, stored by python -m scripts.swarm.doc_items --store-as",
       "tests": [
         "tests/tick/steps/test_doc_items_map.py::test_doc_items_map",
@@ -3266,6 +3266,7 @@
         "tests/tick/steps/test_doc_items_map.py::test_an_invalid_ledger_tag_refuses_the_copy_once_until_it_changes",
         "tests/tick/steps/test_doc_items_map.py::test_the_step_stops_when_its_deadline_expires",
         "tests/tick/steps/test_doc_items_map.py::test_the_coordination_store_reads_back_the_mark_it_wrote",
+        "tests/tick/steps/test_doc_items_map.py::test_the_step_runs_when_the_wrapper_view_hook_answers_past_its_budget",
         "tests/swarm_ledger/test_watchdog_copy.py::test_a_watchdog_copy_lands_on_the_ledger_and_the_tick_ledger_port_reads_the_newest",
         "tests/swarm_ledger/test_watchdog_copy.py::test_the_watchdog_copy_operation_refuses_an_empty_oversized_or_unsigned_copy",
         "tests/swarm_ledger/test_watchdog_copy.py::test_the_doc_items_command_stores_the_watchdog_copy_from_a_file"
