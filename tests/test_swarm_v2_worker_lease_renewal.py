@@ -130,6 +130,7 @@ def test_an_acknowledged_archive_rides_an_immediate_heartbeat_and_every_later_on
     lease.tick()
     clock.advance(1.0)
     assert lease.acknowledge(10) is True
+    assert lease.acknowledge(10) is True
     assert lease.acknowledge(4) is True
     clock.advance(lease_renewal.INTERVAL_SECONDS)
     lease.tick()
@@ -147,11 +148,11 @@ def test_an_archive_acknowledgement_the_controller_missed_is_resent_after_the_re
     controller = Controller(clock, (503, {}))
     lease = renewer(tmp_path, clock, controller)
 
-    assert lease.acknowledge(10) is False
+    assert lease.acknowledge(1) is False
     clock.advance(lease_renewal.RETRY_SECONDS)
 
-    assert lease.acknowledge(10) is True
-    assert [call[3]["archive_watermark"] for call in heartbeats(controller)] == [10, 10]
+    assert lease.acknowledge(1) is True
+    assert [call[3]["archive_watermark"] for call in heartbeats(controller)] == [1, 1]
     assert lease.lost is None
 
 

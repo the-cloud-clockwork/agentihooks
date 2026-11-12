@@ -2566,6 +2566,7 @@
         "tests/test_swarm_v2_worker_lease_renewal.py::test_an_unleased_worker_has_no_archive_acknowledgement_to_wait_on",
         "tests/test_swarm_v2_supervision_runtime.py::test_drain_acknowledges_the_archived_transcript_end_once_the_final_checkpoint_validates",
         "tests/test_swarm_v2_supervision_runtime.py::test_drain_keeps_acknowledging_until_the_controller_accepts_the_archived_transcript_end",
+        "tests/test_swarm_v2_supervision_runtime.py::test_drain_stops_acknowledging_when_the_checkpoint_budget_ends",
         "tests/test_swarm_v2_executions_api.py::test_a_completed_pod_whose_archive_the_worker_acknowledged_passes_the_retention_guard"
       ]
     },
