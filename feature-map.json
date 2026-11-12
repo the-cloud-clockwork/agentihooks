@@ -1001,6 +1001,18 @@
       ]
     },
     {
+      "id": "swarm-night-watch-drill-needs-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drill-recovered-needs-seat",
+      "behaviour": "The night watch drill records recovered only when, after its passes, a live master holds the front door seat as seated: working, or starting with a ledger write since launch; a respawn whose master never launches, is not live, stays starting or sits on another seat records recovered false.",
+      "seam": "scripts.swarm.night_watch_drill.run through the swarm command parser",
+      "tests": [
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_that_never_launches_leaves_the_drill_without_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_drill_without_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_seated_on_the_front_door_is_a_recovery"
+      ]
+    },
+    {
       "id": "swarm-tick-spawn",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h12",

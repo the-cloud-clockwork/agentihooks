@@ -70,8 +70,15 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
         routes.append(kwargs)
         return runtime
 
+    launch = {"seats": True}
+
     def master(slug: str, config: SwarmConfig, held: RedisStore, live: Runtime, at: int) -> list[str]:
         started.append((slug, at))
+        if launch["seats"]:
+            name = f"master@{slug}"
+            seat = front_door.seat(slug)
+            store.put_agent(slug, AgentRecord(name, MASTER, MASTER, started_at=at, state="working", seat=seat))
+            runtime.live.add(name)
         return [f"started master of {slug}"]
 
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
@@ -81,7 +88,15 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> dict[str, Any]:
     monkeypatch.setattr("scripts.swarm.ledger_client.LedgerClient", lambda: ledger)
     monkeypatch.setattr("scripts.swarm_v2.runtime.routed.routed", routed)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
-    return {"store": store, "ledger": ledger, "runtime": runtime, "started": started, "docs": docs, "routes": routes}
+    return {
+        "store": store,
+        "ledger": ledger,
+        "runtime": runtime,
+        "started": started,
+        "docs": docs,
+        "routes": routes,
+        "launch": launch,
+    }
 
 
 def no_pass(*args: Any) -> list[str]:
@@ -327,3 +342,52 @@ def test_a_master_retired_with_no_new_tasks_leaves_the_drill_without_a_recovery(
     stored = json.loads(capsys.readouterr().out)
     assert stored["recovered"] is False and stored["respawned"] is None and rig["started"] == []
     assert night_watch.read(store, SCRATCH).get("seat") is None
+
+
+@pytest.mark.feature("swarm-night-watch-drill-needs-seat")
+def test_a_respawned_master_that_never_launches_leaves_the_drill_without_a_recovery(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = rig["store"]
+    rig["launch"]["seats"] = False
+    drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert rig["started"] == [(SCRATCH, NOW)] and stored["respawned"] == NOW
+    assert stored["recovered"] is False
+
+
+@pytest.mark.feature("swarm-night-watch-drill-needs-seat")
+@pytest.mark.parametrize(
+    ("state", "live", "seat"), [("working", False, None), ("starting", True, None), ("working", True, "master-2")]
+)
+def test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_drill_without_a_recovery(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str], state: str, live: bool, seat: str | None
+) -> None:
+    store = rig["store"]
+    rig["launch"]["seats"] = False
+    name = "master@proof"
+    held = front_door.seat(SCRATCH) if seat is None else f"{seat}@{SCRATCH}"
+
+    def master(slug: str, config: SwarmConfig, held_store: RedisStore, runtime: Runtime, at: int) -> list[str]:
+        store.put_agent(slug, AgentRecord(name, MASTER, MASTER, started_at=at, state=state, seat=held))
+        if live:
+            rig["runtime"].live.add(name)
+        return [f"started master of {slug}"]
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(tick, "_master", master)
+        drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert stored["respawned"] == NOW and stored["recovered"] is False
+
+
+@pytest.mark.feature("swarm-night-watch-drill-needs-seat")
+def test_a_respawned_master_seated_on_the_front_door_is_a_recovery(
+    rig: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = rig["store"]
+    drill(store, SCRATCH)
+    stored = json.loads(capsys.readouterr().out)
+    assert stored["recovered"] is True
+    master = next(agent for agent in store.agents(SCRATCH) if agent.lane == MASTER)
+    assert master.seat == front_door.seat(SCRATCH) and master.name in rig["runtime"].live
