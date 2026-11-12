@@ -51,14 +51,15 @@ def test_hive_hook_starts_and_ends_the_same_execution(monkeypatch, tmp_path):
     assert join_report.read(client.redis, replace(agent, generation=agent.generation + 1)) == {}
 
 
-def test_workstation_hook_does_not_connect(monkeypatch):
+def test_session_outside_a_swarm_does_not_connect(monkeypatch):
     from hooks.context import hive_join
     from scripts.swarm import store
 
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
 
     def unexpected():
-        raise AssertionError("workstation must not probe hive access")
+        raise AssertionError("a session outside a swarm must not probe hive access")
 
     monkeypatch.setattr(store, "connect", unexpected)
     assert hive_join.run({"session_id": "session"}, "start") is None
@@ -74,13 +75,14 @@ def test_root_hive_session_writes_its_join_report_without_a_member_id(
     from scripts.hive import join_checks, join_report
     from scripts.swarm import commands, store
 
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "root")
     client = store.RedisStore(FakeRedis(decode_responses=True))
     client.create(store.SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     name = client.next_name("sw", "eng")
-    agent = store.AgentRecord(name, "eng", "task", hive="root", harness="claude", seat="eng-1@sw")
+    agent = store.AgentRecord(name, "eng", "task", hive=commands.hive_id(), harness="claude", seat="eng-1@sw")
     agent = client.start_execution("sw", agent)
     client.put_agent("sw", agent)
-    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     for key, value in {
         "AGENTIHOOKS_SWARM": "sw",
         "AGENTIHOOKS_AGENT_NAME": name,
@@ -88,7 +90,6 @@ def test_root_hive_session_writes_its_join_report_without_a_member_id(
         "HERDR_PANE_ID": "pane",
     }.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(commands, "hive_id", lambda: "root")
     monkeypatch.setattr(store, "connect", lambda: client)
     monkeypatch.setattr(
         join_checks, "startup", lambda *args: dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
