@@ -307,6 +307,18 @@
       ]
     },
     {
+      "id": "inbox-young-connection-ramp",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-inbox-read-reset",
+      "behaviour": "When the swarm Redis path resets a pipeline of item rows, the inbox reads that batch again on the new connection in chunks that start at fifty rows and double up to the row batch, so a large history listing or open index rebuild returns whole instead of raising the reset.",
+      "seam": "InboxStore._batch and ramped, through InboxStore.inbox and InboxStore.open_items",
+      "tests": [
+        "tests/inbox/test_row_batches.py::test_a_large_history_lists_whole_when_a_new_connection_resets_large_first_pipelines",
+        "tests/inbox/test_row_batches.py::test_the_open_index_rebuilds_whole_when_a_new_connection_resets_large_first_pipelines",
+        "tests/inbox/test_row_batches.py::test_a_retried_batch_is_read_in_chunks_that_start_small_and_double_up_to_the_batch"
+      ]
+    },
+    {
       "id": "hive-master-account-seat",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2128",
