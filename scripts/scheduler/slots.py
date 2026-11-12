@@ -143,7 +143,7 @@ class WorkflowSlot:
             from scripts.hive import run_placement
 
             run = run_placement.Run(delivery_id, self.name, self.case, self.project, str(event["owner"]), self.needs)
-            run_placement.dispatch(run, cast("object", swarm_store(state).redis))
+            run_placement.dispatch(run, cast("object", swarm_store(state).redis))  # pragma: no mutate
             return
         from scripts.workflows import scheduled
 

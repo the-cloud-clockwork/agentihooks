@@ -76,6 +76,23 @@ def test_no_hosting_hive_with_every_need_names_the_missing_needs() -> None:
 
 
 @pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not() -> None:
+    hives = [hive("bare", capabilities=None), hive("exact", capabilities=["build", "lint"])]
+    assert run_placement.choose(hives, REPO, RUN.needs, {"exact": 5}, NOW) == "exact"
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_placed_run_carries_the_hive_path_of_its_repository() -> None:
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    orders = Orders({})
+    elsewhere = hive("far", repos=["/srv/hive/agentihooks"])
+    assert run_placement.deliver(redis, RUN, [elsewhere], orders, NOW) == "far"
+    assert [(hive_id, run.project) for hive_id, run in orders.sent] == [("far", "/srv/hive/agentihooks")]
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
 def test_a_placed_run_sends_one_run_order_to_the_chosen_hive() -> None:
     import fakeredis
 
@@ -120,11 +137,12 @@ def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch: pytes
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(run_placement, "time", SimpleNamespace(time=lambda: NOW / 1000))
-    monkeypatch.setattr(registry, "hives", lambda client: [hive("a"), hive("b")])
+    stale = hive("a", heartbeat_at=NOW - 100_000, beat_at=NOW - 100_000)
+    monkeypatch.setattr(registry, "hives", lambda client: [stale, hive("b"), hive("c")])
     store = run_orders.RunOrders(redis)
     first = run_placement.RunOrderSender(redis, NOW / 1000)
-    first.send("a", run_placement.Run("other", "grade", "/c", REPO, "o", ()))
-    assert first.running("a") == 1
+    first.send("c", run_placement.Run("other", "grade", "/c", REPO, "o", ()))
+    assert first.running("c") == 1
     assert run_placement.dispatch(RUN, redis) == "b"
     [(_, fields)] = cast("list[tuple[str, dict[str, str]]]", redis.xrange(store.stream("b")))
     assert run_orders.RunOrder.decode(fields["order"]) == run_orders.RunOrder(

@@ -244,6 +244,16 @@ def test_cron_add_places_a_workflow_on_a_hive_with_its_needs(
     assert (view["targets"][0]["placement"], view["targets"][0]["needs"]) == ("hive", ["build", "lint"])
 
 
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_cron_add_refuses_an_unknown_placement(
+    capsys: pytest.CaptureFixture[str], scheduler: object, tmp_path: Path
+) -> None:
+    case = tmp_path / "case.json"
+    case.write_text("{}")
+    argv = ["add", "--expr", "0 9 * * *", "--workflow", "nightly", "--case", str(case), "--placement", "cloud", "go"]
+    assert run(capsys, cli.cron, argv) == (1, None, "agentihooks cron: placement must be local or hive, not cloud\n")
+
+
 @pytest.mark.feature("scheduler-workflow-target-case")
 def test_a_case_on_another_target_is_refused(capsys, scheduler, tmp_path):
     case = tmp_path / "case.json"

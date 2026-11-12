@@ -18,7 +18,6 @@ import json
 import sys
 
 from scripts.scheduler import commands
-from scripts.scheduler.slots import PLACEMENTS
 
 
 def _targets(parser: argparse.ArgumentParser) -> None:
@@ -27,7 +26,7 @@ def _targets(parser: argparse.ArgumentParser) -> None:
     for target in ("swarm", "seat", "session", "workflow"):
         group.add_argument(f"--{target}", dest="target", type=lambda name, kind=target: (kind, name))
     parser.add_argument("--case")
-    parser.add_argument("--placement", choices=PLACEMENTS)
+    parser.add_argument("--placement")
     parser.add_argument("--needs")
     parser.add_argument("message", nargs="+")
 
