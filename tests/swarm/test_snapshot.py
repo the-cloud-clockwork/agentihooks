@@ -230,7 +230,7 @@ def close_mid_export(
             result = super().execute_command(*args, **options)
             if armed and armed[0]([str(arg) for arg in args]):
                 armed.clear()
-                inbox.close(item.id, eng, "done")
+                inbox.close(item.id, eng, "done", "answered while the snapshot read")
             return result
 
     store = RedisStore(Closing(server=server, decode_responses=True))
