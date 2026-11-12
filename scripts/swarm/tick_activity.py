@@ -18,8 +18,7 @@ def read(store: RedisStore, slug: str) -> int:
 @dataclass
 class Renewal:
     """A pass's step hook: before each step it checks for a stop and renews the pass's tick lock, until the pass
-    revokes it before releasing that lock. A step worker the pass abandoned keeps a copied context holding this hook,
-    so a revoked hook returns quietly and never renews a released token."""
+    revokes it before releasing that lock; a revoked hook returns quietly."""
 
     store: RedisStore
     slug: str

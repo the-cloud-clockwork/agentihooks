@@ -1,0 +1,18 @@
+rules:
+  - id: pass-step-hook-unrevoked
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A pass step hook set on timing.BEFORE_STEP is copied into every step worker the engine starts, and a worker
+      abandoned at its budget keeps calling it after the pass released its tick lock, renewing a released token and
+      raising a stale tick lock error. Set a tick_activity.Renewal and revoke it before releasing the lock.
+    paths:
+      include:
+        - /scripts/
+        - pass-step-hook-unrevoked.py
+    patterns:
+      - pattern: timing.BEFORE_STEP.set($HOOK)
+      - pattern-not: timing.BEFORE_STEP.set(tick_activity.Renewal(...))
+      - pattern-not-inside: |
+          $RENEWAL = tick_activity.Renewal(...)
+          ...
