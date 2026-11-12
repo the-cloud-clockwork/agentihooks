@@ -638,8 +638,8 @@ def test_a_green_run_closes_open_and_blocked_promotion_tasks_and_the_alert(store
     ledger = Ledger(tasks, alerts)
     actions = refresh(store, ledger, gh([GREEN]))
     assert ledger.updates == [
-        (SLUG, "promo-900-0", {"state": "done"}, "swarm", ("open", "blocked")),
-        (SLUG, "promo-900-1", {"state": "done"}, "swarm", ("open", "blocked")),
+        (SLUG, "promo-900-0", {"state": "done", "awaiting": ""}, "swarm", ("open", "blocked")),
+        (SLUG, "promo-900-1", {"state": "done", "awaiting": ""}, "swarm", ("open", "blocked")),
     ]
     cleared = "A later dev push run of Tests passed, so the swarm closed this promotion task."
     assert ledger.comments == [(SLUG, "promo-900-0", cleared, "swarm"), (SLUG, "promo-900-1", cleared, "swarm")]

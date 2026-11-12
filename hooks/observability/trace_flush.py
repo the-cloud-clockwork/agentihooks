@@ -38,6 +38,7 @@ class Budget:
     interval: float = 15.0
     attempt_timeout: float = 5.0
     attempts: int = 3
+    idle: float = 300.0
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ def budget(environ: Mapping[str, str] | None = None) -> Budget:
         interval=number("AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC", 15.0),
         attempt_timeout=number("AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC", 5.0),
         attempts=int(number("AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS", 3)),
+        idle=number("AGENTIHOOKS_TRACE_FLUSH_IDLE_SEC", 300.0),
     )
 
 
@@ -210,12 +212,11 @@ def recover(limits: Budget | None = None, send: Callable[[str, str, float, str],
 def _spawn(session_id: str) -> None:
     from hooks._async import fork_and_call
 
-    fork_and_call(run, session_id, timeout_sec=7 * 24 * 3600, task_name="trace_flush")
+    fork_and_call(run, session_id, timeout_sec=3600, task_name="trace_flush")
     fork_and_call(recover, timeout_sec=60, task_name="trace_recovery")
 
 
 def run(session_id: str) -> None:
-    signal.alarm(0)
     os.nice(10)
     try:
         result = supervise(session_id)
@@ -334,6 +335,7 @@ def supervise(
         me = {"supervisor_pid": os.getpid(), "supervisor_start": start_time(os.getpid())}
         _write(owner_path(session_id), me)
         flushed_size, failing, seen, due = None, False, None, clock()
+        worked = due
         while True:
             record = _read(request_path(session_id))
             owner_alive = is_alive(_owner(record, "owner_"))
@@ -348,12 +350,15 @@ def supervise(
             if transcript and size is not None and (failing or size != flushed_size):
                 failing = not _drain(session_id, transcript, limits, send, trigger)
                 flushed_size = size
+                worked = clock()
+            if fresh:
+                worked = clock()
             due = clock() + limits.interval
-            if owner_alive:
+            if owner_alive and (failing or clock() - worked < limits.idle):
                 continue
             owner_path(session_id).unlink(missing_ok=True)
             if _read(request_path(session_id)).get("at") == seen:
-                return "owner exited"
+                return "idle" if owner_alive else "owner exited"
             _write(owner_path(session_id), me)
 
 
