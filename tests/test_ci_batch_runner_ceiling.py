@@ -85,8 +85,7 @@ def test_lint_grades_the_planner_ceiling_against_the_antoncore_dev_batch_chart()
     assert '--agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"' in check["run"]
 
 
-@pytest.mark.parametrize(("graded", "expected"), [(True, "grader"), (False, "head")])
-def test_lint_prefers_the_protected_grader_copy(tmp_path: Path, graded: bool, expected: str) -> None:
+def _run_check(tmp_path: Path, graded: bool) -> subprocess.CompletedProcess[str]:
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
     check = next(s for s in steps if "scripts.ci_batch_runner_ceiling" in s.get("run", ""))
     grader = tmp_path / "runner" / "grader"
@@ -100,6 +99,20 @@ def test_lint_prefers_the_protected_grader_copy(tmp_path: Path, graded: bool, ex
             f"from pathlib import Path\nPath({str(tmp_path / 'graded')!r}).write_text({name!r})\n"
         )
     env = dict(os.environ, RUNNER_TEMP=str(tmp_path / "runner"), GITHUB_WORKSPACE=str(tmp_path), PYTHONSAFEPATH="")
-    result = subprocess.run(["bash", "-e", "-c", check["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+    return subprocess.run(["bash", "-e", "-c", check["run"]], cwd=tmp_path, env=env, capture_output=True, text=True)
+
+
+def test_lint_grades_with_the_protected_grader_copy(tmp_path: Path) -> None:
+    result = _run_check(tmp_path, graded=True)
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "graded").read_text() == expected
+    assert (tmp_path / "graded").read_text() == "grader"
+
+
+def test_lint_refuses_a_grader_without_the_ceiling_check(tmp_path: Path) -> None:
+    result = _run_check(tmp_path, graded=False)
+    assert result.returncode == 1
+    assert (
+        "::error::The protected grader carries no scripts/ci_batch_runner_ceiling.py,"
+        " so nothing trusted can grade the batch runner ceiling."
+    ) in result.stdout
+    assert not (tmp_path / "graded").exists()
