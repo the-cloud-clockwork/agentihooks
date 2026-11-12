@@ -728,7 +728,7 @@ def launch_token(binary: str, args: list[str], environ: Mapping[str, str], repor
 
 def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], report: str) -> None:
     from scripts.claude_quota_balancer import RoutingError
-    from scripts.claude_trust import ensure_trusted
+    from scripts.claude_trust import WAIT_NOTICE, ensure_trusted
     from scripts.hive.account_slots import execute
     from scripts.install import _claude_command, _write_route_report
 
@@ -739,7 +739,9 @@ def launch_claude(binary: str, args: list[str], environ: Mapping[str, str], repo
     if prepared is None:
         return launch_token(binary, args, environ, report)
     target, found = prepared
-    ensure_trusted(Path.cwd(), {"CLAUDE_CONFIG_DIR": str(target)})
+    trust, why = ensure_trusted(Path.cwd(), {**environ, "CLAUDE_CONFIG_DIR": str(target)})
+    if trust == "untrusted":
+        print(f"[agenti] Claude does not trust {Path.cwd()} ({why}); {WAIT_NOTICE}", file=sys.stderr)
     _write_route_report(report, status="routed", account=found, placement="forced")
     print(f"[agenti] account={found} route={ROUTE}", flush=True)
     execute(

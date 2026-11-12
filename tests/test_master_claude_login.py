@@ -788,9 +788,7 @@ def test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home(
     login._write(login.root() / login.OWNER, {"epoch": 3, "holders": {"master@a-0": os.getppid()}})
     scratch = tmp_path / "scratch"
     (scratch / ".git").mkdir(parents=True)
-    config = json.loads((rendered / login.CONFIG).read_text())
-    config["projects"] = {str(scratch): {"hasTrustDialogAccepted": True}}
-    (rendered / login.CONFIG).write_text(json.dumps(config))
+    assert "projects" not in json.loads((login.home() / login.CONFIG).read_text())
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.chdir(scratch)
     executed = []
@@ -799,6 +797,29 @@ def test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home(
     assert executed[0]["CLAUDE_CONFIG_DIR"] == str(login.home())
     projects = json.loads((login.home() / login.CONFIG).read_text())["projects"]
     assert projects[str(scratch)] == {"hasTrustDialogAccepted": True}
+
+
+@pytest.mark.feature("master-login-launch-folder-trust")
+def test_a_master_launch_with_folder_trust_off_reports_the_wait_and_marks_nothing(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.claude_trust import WAIT_NOTICE
+    from scripts.routing import native_login
+
+    monkeypatch.setattr(native_login, "check", lambda *_: dict(native_login.PROOF))
+    _seed(rendered)
+    scratch = tmp_path / "scratch"
+    (scratch / ".git").mkdir(parents=True)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.chdir(scratch)
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, env: executed.append(env))
+    login.launch_claude("/opt/claude", [], _environ(rendered, AGENTIHOOKS_TRUST_LAUNCH_DIR="0"), "")
+    assert len(executed) == 1
+    assert "projects" not in json.loads((login.home() / login.CONFIG).read_text())
+    assert capsys.readouterr().err == (
+        f"[agenti] Claude does not trust {scratch} (AGENTIHOOKS_TRUST_LAUNCH_DIR is off); {WAIT_NOTICE}\n"
+    )
 
 
 def test_the_claude_launcher_hands_the_master_login_route_to_this_module(tmp_path, monkeypatch):
