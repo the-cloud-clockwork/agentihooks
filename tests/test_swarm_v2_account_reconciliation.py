@@ -157,26 +157,36 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
     }
 
 
-def test_stored_accounts_scans_the_keyspace_in_pages_of_ten_thousand():
+def test_stored_accounts_backfills_its_index_by_scanning_the_keyspace_in_pages_of_ten_thousand() -> None:
     from types import SimpleNamespace
-    from unittest.mock import Mock
+    from unittest.mock import MagicMock
 
-    scan = Mock(return_value=iter([accounts.account_key("b"), accounts.account_key("a")]))
-    store = SimpleNamespace(redis=SimpleNamespace(scan_iter=scan))
+    redis = MagicMock()
+    redis.exists.return_value = 0
+    redis.scan_iter.return_value = iter([accounts.account_key("b"), accounts.account_key("a")])
+    redis.smembers.return_value = {"a", "b"}
+    pipe = redis.pipeline.return_value.__enter__.return_value
 
-    assert accounts.stored_accounts(store) == ["a", "b"]
-    scan.assert_called_once_with(match=accounts.account_key("*"), count=10000)
+    assert accounts.stored_accounts(SimpleNamespace(redis=redis)) == ["a", "b"]
+    redis.exists.assert_called_once_with(accounts.INDEX_BUILT)
+    redis.scan_iter.assert_called_once_with(match=accounts.account_key("*"), count=10000)
+    pipe.sadd.assert_called_once_with(accounts.INDEX, "b", "a")
+    pipe.set.assert_called_once_with(accounts.INDEX_BUILT, 1, ex=3600)
+    redis.smembers.assert_called_once_with(accounts.INDEX)
 
 
-def test_fleet_held_scans_the_keyspace_in_pages_of_ten_thousand():
+def test_fleet_held_reads_the_account_index_and_never_scans_once_it_is_built() -> None:
     from types import SimpleNamespace
-    from unittest.mock import Mock
+    from unittest.mock import MagicMock
 
-    scan = Mock(return_value=iter([]))
-    store = SimpleNamespace(redis=SimpleNamespace(scan_iter=scan))
+    redis = MagicMock()
+    redis.exists.return_value = 1
+    redis.smembers.return_value = {"a"}
+    redis.hvals.return_value = []
 
-    assert accounts.fleet_held(store, 0) == {}
-    scan.assert_called_once_with(match=accounts.account_key("*"), count=10000)
+    assert accounts.fleet_held(SimpleNamespace(redis=redis), 0) == {}
+    redis.scan_iter.assert_not_called()
+    redis.hvals.assert_called_once_with(accounts.account_key("a"))
 
 
 def test_a_successor_that_never_confirms_leaves_the_old_slot_counted(world):
