@@ -138,6 +138,7 @@
         "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch",
         "tests/events/test_migrate_state.py::test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply",
         "tests/events/test_migrate_state.py::test_purge_dry_run_names_the_keys_and_deletes_nothing",
+        "tests/events/test_migrate_state.py::test_purge_dry_run_of_a_missing_bucket_names_no_keys",
         "tests/events/test_migrate_state.py::test_purge_is_skipped_when_the_apply_fails",
         "tests/events/test_migrate_state.py::test_a_refused_purge_is_reported_as_a_failure",
         "tests/events/test_migrate_state.py::test_purge_requires_the_no_keys_claim",

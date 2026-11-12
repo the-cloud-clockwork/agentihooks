@@ -327,14 +327,32 @@ def test_purge_removes_only_this_swarms_envelope_keys_after_a_clean_apply(
 
 @pytest.mark.feature("legacy-state-migration-command")
 def test_purge_dry_run_names_the_keys_and_deletes_nothing(
-    buses: Any, command: Any, capsys: pytest.CaptureFixture[str]
+    buses: Any, command: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from nats.js.client import JetStreamContext
+
     legacy, _ = buses
     _seed_inbox(legacy)
-    code, report = _run(command, capsys, PURGE)
+
+    async def refuse_write(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("purge dry run attempted bucket provisioning")
+
+    with monkeypatch.context() as read_only:
+        for name in ("create_key_value", "add_stream", "update_stream", "purge_stream"):
+            read_only.setattr(JetStreamContext, name, refuse_write)
+        code, report = _run(command, capsys, PURGE)
     assert code == 0
     assert (report["applied"], report["envelope_keys"], report["purged"]) == (False, ["send.one", "send.two"], [])
     assert legacy.state("inbox").get("send.one").value == _envelope("rig", "one-again")
+
+
+@pytest.mark.feature("legacy-state-migration-command")
+def test_purge_dry_run_of_a_missing_bucket_names_no_keys(
+    buses: Any, command: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, report = _run(command, capsys, PURGE)
+    assert code == 0
+    assert (report["unowned"], report["envelope_keys"], report["purged"]) == ([], [], [])
 
 
 @pytest.mark.feature("legacy-state-migration-command")

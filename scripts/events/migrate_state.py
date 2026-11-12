@@ -51,6 +51,8 @@ def _legacy(bus: Any, bucket: str, keys: list[str]) -> tuple[list[str], int]:
 
 def _envelope_keys(bus: Any, swarm: str, bucket: str, present: list[str]) -> list[str]:
     """Live legacy keys whose current value decodes as an event envelope of this swarm."""
+    if not present:
+        return []
     store = NatsStateStore(bus._loop, bus._js, bucket, False)
     owned: list[str] = []
     for key in present:
