@@ -149,7 +149,7 @@ def test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch(buses, comm
     kv = legacy._loop.run(legacy._js.key_value("spoke-work"))
     legacy._loop.run(kv.delete("gone"))
 
-    async def refuse_watch(*args, **kwargs):
+    async def refuse_watch(*args: object, **kwargs: object) -> None:
         raise AssertionError("listing opened a flow controlled key watch")
 
     with monkeypatch.context() as no_watch:
