@@ -613,12 +613,15 @@ def test_retirement_keeps_only_the_newest_history_rows(
             raise WatchError
         return execute(pipe, *args, **kwargs)
 
-    names = []
+    names = [
+        store.start_execution(
+            "fixture", AgentRecord(store.next_name("fixture", "eng"), "eng", f"task-{at}", seat=f"eng-{at}@fixture")
+        ).name
+        for at in range(5)
+    ]
     with patch.object(pipe_type, "execute", commit):
-        for at in range(5):
-            agent = started(store)
-            names.append(agent.name)
-            assert store.drop_agent("fixture", agent.name, at=100 + at)
+        for at, name in enumerate(names):
+            assert store.drop_agent("fixture", name, at=100 + at)
     rows = [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)]
     assert [row["name"] for row in rows] == names[-3:]
     assert [row["ended_at"] for row in rows] == [102, 103, 104]
