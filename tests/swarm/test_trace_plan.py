@@ -563,7 +563,8 @@ TWO_REPOS = (
 def test_parse_reads_a_repository_prefix_on_a_piece():
     own, other = trace_plan.parse(TWO_REPOS, "t1")
     assert own == trace_plan.Piece("a light", ("src/light",), "it lights")
-    assert other == trace_plan.Piece("a profile", ("profiles/x", "rules"), "b", BUNDLE)
+    areas = ("agentihooks-bundle:profiles/x", "agentihooks-bundle:rules")
+    assert other == trace_plan.Piece("a profile", areas, "b", BUNDLE)
     assert other.key == "a profile | agentihooks-bundle:profiles/x, agentihooks-bundle:rules | b"
     assert trace_plan.repositories([own, other]) == ["", BUNDLE]
 
@@ -604,6 +605,27 @@ def test_a_two_repository_plan_names_the_repository_whose_slice_is_too_big(monke
         f"the slice in {BUNDLE} is sized several pull requests at confidence 0.80, above one pull request"
     ]
     assert record["size"] == {"level": 2, "name": "several pull requests", "confidence": 0.8}
+
+
+def test_a_plan_grown_into_a_new_repository_is_traced_and_sized_whole(monkeypatch):
+    own, other = trace_plan.parse(TWO_REPOS, "t1")
+    monkeypatch.setattr(trace_plan, "decide", Recorder({"piece_0": needed(0.9), "size": size(1.0, 0.9)}))
+    previous = trace_plan.trace([own], INTENT, None)
+    fake, record = _two_repo_trace(monkeypatch, (1.0, 0.9), (2.0, 0.9))
+    record = trace_plan.trace([own, other], INTENT, previous)
+    assert sorted(fake.calls[-1][1]) == ["piece_0", "piece_1", "size", "size_1"]
+    assert record["verdict"] == "fail"
+
+
+def test_a_plan_grown_inside_its_repositories_traces_only_the_new_piece(monkeypatch):
+    own, other = trace_plan.parse(TWO_REPOS, "t1")
+    _, previous = _two_repo_trace(monkeypatch, (1.0, 0.9), (1.0, 0.9))
+    more = trace_plan.Piece("a rule", ("agentihooks-bundle:rules/y",), "c", BUNDLE)
+    fake = Recorder({"piece_2": needed(0.9)})
+    monkeypatch.setattr(trace_plan, "decide", fake)
+    record = trace_plan.trace([own, other, more], INTENT, previous)
+    assert sorted(fake.calls[0][1]) == ["piece_2"]
+    assert (record["verdict"], record["sizes"]) == ("pass", previous["sizes"])
 
 
 @pytest.mark.feature("trace-plan-per-repository-size")

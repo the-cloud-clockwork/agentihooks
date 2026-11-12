@@ -2,7 +2,8 @@
 
 plan.md in the task work folder holds one piece per line, `- what | area, area | why`. A piece the classifier finds
 off intent is cut and, once the plan passes, filed as a ledger follow up. An area written `repo:path` belongs to that
-repository, any other to the task's own, and each repository's slice is sized on its own. A plan with more than half
+repository, any other to the task's own, and each repository's slice is sized on its own; a plan that grows into a
+new repository is traced whole. A plan with more than half
 its pieces cut, or a slice sized above one pull request, fails whole: it returns to the planner once, then the task
 is blocked. The verdict lands in plan-verdict.json beside the plan. With no classifier answer the verdict is
 unchecked, counted as fail-open.
@@ -34,7 +35,7 @@ NO_ANSWER = "the classifier did not answer"
 FAIL_KINDS = {"enforce": "deny", "observe": "observe"}
 CLEARANCE = PurePosixPath("mutation-cleared.txt")
 CLEARANCE_FOLDER = PurePosixPath("mutation-clearances")
-REPO_AREA = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*):(.+)$")
+REPO_AREA = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*):.")
 OWN_REPO = "the task's own repository"
 
 
@@ -55,9 +56,8 @@ class Piece:
     repo: str = ""
 
     @property
-    def key(self) -> str:
-        areas = [f"{self.repo}:{area}" if self.repo else area for area in self.areas]
-        return " | ".join((self.what, ", ".join(areas), self.why))
+    def key(self):
+        return " | ".join((self.what, ", ".join(self.areas), self.why))
 
 
 def followup_text(task_id, what):
@@ -69,11 +69,10 @@ def _piece(line: str, number: int, task_id: str, task_ids: tuple | list) -> Piec
     areas = tuple(area for area in (a.strip() for a in parts[1].split(",")) if area) if len(parts) == 3 else ()
     if len(parts) != 3 or not (parts[0] and areas and parts[2]):
         raise ValueError(f"plan line {number} is not a piece; write {FORMAT}")
-    named = [_repository(area) for area in areas]
-    repos = {repo for repo, _ in named}
+    repos = {_repository(area) for area in areas}
     if len(repos) > 1:
         raise ValueError(f"plan line {number} names more than one repository; give each repository its own pieces")
-    piece = Piece(parts[0], tuple(path for _, path in named), parts[2], repos.pop())
+    piece = Piece(parts[0], areas, parts[2], repos.pop())
     found = ledger_comments.problems(followup_text(task_id, piece.what), "item", task_ids=task_ids)
     if found:
         raise ValueError(
@@ -82,9 +81,9 @@ def _piece(line: str, number: int, task_id: str, task_ids: tuple | list) -> Piec
     return piece
 
 
-def _repository(area: str) -> tuple[str, str]:
+def _repository(area: str) -> str:
     named = REPO_AREA.match(area)
-    return (named[1], named[2]) if named else ("", area)
+    return named[1] if named else ""
 
 
 def repositories(pieces: list[Piece]) -> list[str]:
@@ -161,17 +160,19 @@ def _kept(ruling, probability, off_intent) -> bool:
     return ruling or probability is None or probability >= off_intent
 
 
-def _row_key(row: dict) -> str:
-    return Piece(row["what"], tuple(row["areas"]), row["why"], row.get("repo", "")).key
+def _row_key(row):
+    return Piece(row["what"], tuple(row["areas"]), row["why"]).key
 
 
-def _known(previous, pieces, ids, state):
+def _known(previous: dict, pieces: list[Piece], ids: list[str], state: dict) -> list[dict]:
     rows = previous.get("pieces") or []
     if previous.get("verdict") != PASS or len(rows) >= len(pieces) or previous.get("authorizations", []) != ids:
         return []
     if [_row_key(row) for row in rows] != [piece.key for piece in pieces[: len(rows)]]:
         return []
     if previous.get("plan_hash") != plan_hash(pieces[: len(rows)], state):
+        return []
+    if set(repositories(pieces)) != set(repositories(pieces[: len(rows)])):
         return []
     return list(rows)
 
