@@ -213,7 +213,13 @@ def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     revisions = iter(["loaded", "moved"])
-    monkeypatch.setattr(service, "revision", lambda root: next(revisions))
+    roots = []
+
+    def revision(root: Path) -> str:
+        roots.append(root)
+        return next(revisions)
+
+    monkeypatch.setattr(service, "revision", revision)
     old, new = Mock(pid=11), Mock(pid=12)
     old.poll.side_effect = [None, 0]
     old.returncode = 0
@@ -228,6 +234,7 @@ def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(
     old.terminate.assert_called_once_with()
     old.wait.assert_called_once_with()
     new.terminate.assert_called_once_with()
+    assert roots == [service.ROOT, service.ROOT]
     assert json.loads((tmp_path / "supervisor.json").read_text())["revision"] == "moved"
     assert capsys.readouterr().err.splitlines()[0] == (
         f"the scheduler supervisor {os.getpid()} restarts its runner 11: the checkout moved from loaded to moved"
