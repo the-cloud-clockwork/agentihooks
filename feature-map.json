@@ -4632,6 +4632,15 @@
         "tests/hive/test_run_consumer.py::test_a_run_order_for_another_hive_starts_nothing",
         "tests/hive/test_run_consumer.py::test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining"
       ]
+    },
+    {
+      "id": "launch-order-receipt-outlives-order",
+      "origin": "inventory",
+      "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
+      "seam": "scripts.hive.orders.Consumer.poll through apply and resumed, against the expiry carried by the launch receipt, which today has none",
+      "tests": [
+        "tests/hive/test_orders.py::test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt"
+      ]
     }
   ],
   "unmapped_rules": [
