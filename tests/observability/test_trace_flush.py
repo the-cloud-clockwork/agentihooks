@@ -79,8 +79,10 @@ def test_budget_defaults_and_overrides():
             "AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC": "2",
             "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": "0.5",
             "AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS": "4",
+            "AGENTIHOOKS_TRACE_FLUSH_IDLE_SEC": "30",
         }
-    ) == trace_flush.Budget(2.0, 0.5, 4)
+    ) == trace_flush.Budget(2.0, 0.5, 4, 30.0)
+    assert trace_flush.budget({}).idle == 300.0
     bad = {"AGENTIHOOKS_TRACE_FLUSH_INTERVAL_SEC": "soon", "AGENTIHOOKS_TRACE_FLUSH_ATTEMPTS": "0"}
     assert trace_flush.budget(bad) == trace_flush.Budget(15.0, 5.0, 3)
 
