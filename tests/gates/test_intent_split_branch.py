@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -112,9 +113,16 @@ def test_an_unsplit_task_merges_by_branch_without_reading_github(tmp_path):
     assert run.calls == []
 
 
-@pytest.mark.parametrize("command", [f"gh pr merge {FIRST}", "gh pr merge 9", "agentihooks swarm demo done"])
+@pytest.mark.parametrize("command", [f"gh pr merge {FIRST}", "agentihooks swarm demo done"])
 def test_a_named_split_merge_or_release_reads_no_pull_view(tmp_path, command):
     verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
     run = Viewed(SECOND)
     assert intent.IntentGate(run=run).decide(bash(command), WHO, verdicts(tmp_path)).allowed
     assert run.calls == []
+
+
+def test_a_bare_split_merge_number_is_read_in_its_repository(tmp_path: Path) -> None:
+    verdicts(tmp_path).write(TASK, "pass", "judged", NOW, url=FIRST, split=True)
+    run = Viewed(FIRST)
+    assert intent.IntentGate(run=run).decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path)).allowed
+    assert [args for args, _ in run.calls] == [["gh", "pr", "view", "9", "--json", "url", "--jq", ".url"]]
