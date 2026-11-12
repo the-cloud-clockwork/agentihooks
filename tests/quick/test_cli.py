@@ -56,7 +56,7 @@ def quick_env(monkeypatch, tmp_path, launched) -> dict[str, str]:
     monkeypatch.setattr(cli.launch, "start_all", start_all)
     monkeypatch.setattr(cli.safety_nudge, "install", lambda environ: launched.append("cron") or "line")
     monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: IdleHerdr())
-    monkeypatch.setattr(cli.naming, "repo_name", lambda path: "repo")
+    monkeypatch.setattr(cli.paths.herdr_host, "repo_label", lambda directory: "repo")
     return {
         "HOME": str(tmp_path),
         "AGENTIHOOKS_HOME": str(tmp_path / ".agentihooks"),

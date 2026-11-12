@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +9,7 @@ from hooks.context import quick_swarm
 from hooks.lifecycle import handoff_close
 from scripts import init_agent
 from scripts.quick import member, paths, registry
-from scripts.swarm import naming
+from scripts.quick.guard import QuickError
 
 pytestmark = pytest.mark.unit
 
@@ -134,7 +135,7 @@ def test_init_agent_runs_in_a_given_pane_without_opening_or_owning_it(monkeypatc
         lambda pane, environ: SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id=pane),
     )
     monkeypatch.setattr(init_agent.herdr_host, "run", lambda pane, launcher, environ, env=None: ran.update(pane=pane))
-    args = SimpleNamespace(title="", placement="tab", workspace="", resume="", pane="w1:p3")
+    args = argparse.Namespace(title="", placement="tab", workspace="", resume="", pane="w1:p3")
     report = init_agent._start_herdr(tmp_path / "eng.sh", tmp_path, "eng", args, "claude", {})
     assert ran == {"pane": "w1:p3"} and "pane_id=w1:p3" in report
 
@@ -156,8 +157,13 @@ def test_a_quick_seat_launcher_exports_its_quick_variables(tmp_path):
     assert member.QUICK_ENV not in plain.read_text()
 
 
-def test_the_quick_folder_name_comes_from_the_master_session(tmp_path):
-    environ = {"CLAUDE_CODE_SESSION_ID": "d039e169-c93c-4613-a495-d6dfb5284ff5"}
-    assert naming.quick_id(environ) == "quick-d039e169"
-    seat = {member.QUICK_ENV: "quick-d039e169", member.DIR_ENV: str(tmp_path / "agentihooks" / "quick-d039e169")}
-    assert naming.scratch({**environ, **seat}, tmp_path) == "agentihooks/quick-d039e169"
+def test_the_quick_folder_name_comes_from_the_master_session(monkeypatch, tmp_path):
+    environ = {"CLAUDE_CODE_SESSION_ID": "d039e169-c93c-4613-a495-d6dfb5284ff5", "HOME": str(tmp_path)}
+    assert paths.quick_id(environ) == "quick-d039e169"
+    monkeypatch.setattr(paths.herdr_host, "repo_label", lambda directory: "agentihooks")
+    assert paths.folder_for(environ, "quick-d039e169", tmp_path) == tmp_path / "scratchpad/agentihooks/quick-d039e169"
+
+
+def test_a_quick_swarm_needs_the_master_session_id():
+    with pytest.raises(QuickError, match="no session id"):
+        paths.quick_id({"CLAUDE_CODE_SESSION_ID": "abc"})

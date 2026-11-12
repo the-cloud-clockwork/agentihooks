@@ -4,12 +4,29 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 from collections.abc import Generator, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from scripts import herdr_host
+from scripts.quick.guard import QuickError
+
 INDEX = "quick-swarms.json"
 SEAT_FILES = ("plan.md", "notes.md", "learned.md", "handoff.md")
+
+
+def quick_id(environ: Mapping[str, str]) -> str:
+    """The quick swarm id, built from the session that starts it as master."""
+    session = re.sub(r"[^0-9a-f]", "", environ.get("CLAUDE_CODE_SESSION_ID", "").lower())
+    if len(session) < 8:
+        raise QuickError("no session id: a quick swarm is named after the session that starts it as master")
+    return f"quick-{session[:8]}"
+
+
+def folder_for(environ: Mapping[str, str], quick: str, directory: Path) -> Path:
+    """The scratchpad folder of quick swarm ``quick`` working in ``directory``."""
+    return Path(environ.get("HOME") or Path.home()) / "scratchpad" / herdr_host.repo_label(directory) / quick
 
 
 def seat_dir(folder: Path, seat: str) -> Path:

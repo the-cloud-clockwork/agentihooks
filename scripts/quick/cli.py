@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scripts.quick import guard, handoff, launch, layout, member, paths, registry, room, tick
 from scripts.quick.guard import QuickError
-from scripts.swarm import naming, safety_nudge
+from scripts.swarm import safety_nudge
 
 NOT_MEMBER = "this session is not a member of a quick swarm: run it from a quick swarm pane"
 
@@ -49,11 +49,6 @@ def _harnesses(value: str, engineers: int) -> list[str]:
     return names
 
 
-def _folder(environ: Mapping[str, str], quick_id: str, directory: Path) -> Path:
-    name = naming.scratch({**environ, member.QUICK_ENV: quick_id}, directory)
-    return Path(environ.get("HOME") or Path.home()) / "scratchpad" / name
-
-
 def _swarm_for(
     args: argparse.Namespace, environ: dict[str, str], caller: str, quick_id: str, directory: Path
 ) -> registry.Swarm:
@@ -73,8 +68,8 @@ def _swarm_for(
 def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     caller = guard.require(environ)
     directory = Path(args.dir or os.getcwd()).resolve()
-    quick_id = naming.quick_id(environ)
-    folder = _folder(environ, quick_id, directory)
+    quick_id = paths.quick_id(environ)
+    folder = paths.folder_for(environ, quick_id, directory)
     with paths.host_locked(environ):
         if registry.load(folder) is not None:
             raise QuickError(f"quick swarm {quick_id} is already up; see agentihooks quick status")

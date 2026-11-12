@@ -37,7 +37,7 @@ EVIDENCE = re.compile(
 HYPOTHESIS = re.compile(r"\bhypothes[ie]s\b", re.IGNORECASE)
 
 
-def problems(text: str, resolves: Callable[[str], bool]) -> list[str]:
+def problems(text: str, resolves: Callable[[str], object]) -> list[str]:
     """Every structural problem in the document, empty when it conforms; resolves(address) says an address exists."""
     lines = text.splitlines()
     sections = _sections(lines)
