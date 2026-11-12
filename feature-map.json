@@ -4929,6 +4929,16 @@
         "tests/deployment/test_worker_hive.py::test_an_empty_charted_capability_list_clears_the_stored_ones",
         "tests/deployment/test_worker_hive.py::test_a_pod_from_a_chart_without_the_setting_keeps_the_stored_capabilities"
       ]
+    },
+    {
+      "id": "ledger-writer-lease-failed-record-releases",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t412",
+      "behaviour": "When the ledger writer lease takes its lock but writing the holder record fails, it closes the lock file before raising, so the lease is not held, the lock is released and the next writer can take the lease.",
+      "seam": "WriterLease.acquire in the swarm v2 ledger writer",
+      "tests": [
+        "tests/test_swarm_v2_ledger_writer.py::test_a_failed_holder_record_write_releases_the_lock"
+      ]
     }
   ],
   "unmapped_rules": [
