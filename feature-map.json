@@ -121,6 +121,7 @@
       "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
       "tests": [
         "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_migration.py::test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated",
         "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
       ]
     },
