@@ -3017,9 +3017,11 @@ jobs:
       - name: Hold the mutation planner's batch runner ceiling equal to the antoncore batch runner chart
         if: ${{ !cancelled() }}
         run: |
-          if [[ -f "$RUNNER_TEMP/grader/scripts/ci_batch_runner_ceiling.py" ]]; then
-            cd "$RUNNER_TEMP/grader"
+          if [[ ! -f "$RUNNER_TEMP/grader/scripts/ci_batch_runner_ceiling.py" ]]; then
+            echo "::error::The protected grader carries no scripts/ci_batch_runner_ceiling.py, so nothing trusted can grade the batch runner ceiling."
+            exit 1
           fi
+          cd "$RUNNER_TEMP/grader"
           python -m scripts.ci_batch_runner_ceiling --agentihooks "$GITHUB_WORKSPACE" --antoncore "$GITHUB_WORKSPACE/.antoncore"
 
       - name: Select artifact browser checks
