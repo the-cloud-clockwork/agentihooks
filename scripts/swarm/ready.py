@@ -233,7 +233,7 @@ def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str])
         merged = sorted(closed.intersection([*(row.get("depends_on") or []), *(row.get("parked_on") or [])]))
         if not merged or task_id in closed or row.get("state") not in ("claimed", "pr") or not row.get("pr_url"):
             continue
-        if row.get("state") == "pr" and getattr(run.github(row["pr_url"]), "merge_problem", ""):
+        if _told_by_loop(run, row):
             continue
         pull = run.reread(row["pr_url"])
         if pull is None or pull.state != "OPEN" or not pull.merge_problem:
@@ -243,6 +243,14 @@ def _dependents(run: Pass, rows: Mapping[str, dict[str, Any]], closed: set[str])
                 f"task {task_id} {row['pr_url']} {pull.merge_problem} after task {merged[0]} merged, its owner was told"
             )
     return actions
+
+
+def _told_by_loop(run: Pass, row: Mapping[str, Any]) -> bool:
+    """Whether the per task branch of the merge pass already sent this unqueued pull request's owner its notice."""
+    if row.get("state") != "pr" or row.get("awaiting") == AWAITING:
+        return False
+    cached = run.github(row["pr_url"])
+    return cached is not None and cached.state == "OPEN" and bool(cached.merge_problem)
 
 
 def _close_merged(run: Pass, rows: Mapping[str, dict[str, Any]], row: dict[str, Any], closed: set[str]) -> list[str]:
