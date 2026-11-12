@@ -261,6 +261,17 @@
       ]
     },
     {
+      "id": "merge-pass-dependent-conflict-on-prerequisite-merge",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t928",
+      "behaviour": "On the merge pass that closes a merged prerequisite, each dependent task with an open pull request is read fresh and the live owner of one that no longer merges is told at once; a clean dependent is left alone.",
+      "seam": "ready merge pass closing a merged task, then a fresh pull request read of its dependents and the owner inbox notice",
+      "tests": [
+        "tests/swarm/test_ready.py::test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_clean_one",
+        "tests/swarm/test_ready.py::test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_already_failed"
+      ]
+    },
+    {
       "id": "hive-workstation-release",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2154",
@@ -2278,6 +2289,20 @@
       ]
     },
     {
+      "id": "inbox-refused-answer-resend",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t917",
+      "behaviour": "After the ledger page refuses an agent answer to an operator message, a fresh reply sends the new answer, or says the answer was refused when the item cannot take one; the wake pass reports a refused message it must hold for a retry as held, never closed.",
+      "seam": "InboxStore.reply in scripts.inbox.store and the wake pass operator step in scripts.inbox.wake",
+      "tests": [
+        "tests/inbox/test_store.py::test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer",
+        "tests/inbox/test_store.py::test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text",
+        "tests/inbox/test_store.py::test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused",
+        "tests/inbox/test_store.py::test_a_fresh_reply_on_an_answer_its_recipient_cancelled_reopens_nothing",
+        "tests/inbox/test_wake.py::test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held"
+      ]
+    },
+    {
       "id": "swarm-launch-bounded-reads",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",
@@ -2714,6 +2739,18 @@
         "tests/swarm_ledger/test_column_resize.py::test_every_table_on_the_ledger_page_is_one_the_column_grips_reach",
         "tests/swarm_ledger/test_column_resize.py::test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths",
         "tests/swarm_ledger/test_column_resize.py::test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them"
+      ]
+    },
+    {
+      "id": "ledger-layout-unload-save",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t230",
+      "behaviour": "A layout save still pending when the ledger page hides or closes is sent at once as a keepalive request, so the server keeps the newest layout.",
+      "seam": "The layout save of the ledger page on pagehide and on a hidden visibilitychange",
+      "tests": [
+        "tests/swarm_ledger/test_layout_unload.py::test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layout",
+        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request",
+        "tests/swarm_ledger/test_layout_unload.py::test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
       ]
     },
     {
@@ -4879,6 +4916,19 @@
       ]
     },
     {
+      "id": "done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t913",
+      "behaviour": "Every task done writer clears the task's awaiting field, so a done task that reopens shows no stale approval, verify or fix wait.",
+      "seam": "scripts.swarm.cli.cmd_done with its group members and scripts.swarm.promotion_watch green closing, against the ledger task update that merges fields",
+      "tests": [
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members",
+        "tests/swarm/test_done_awaiting.py::test_the_tick_reopens_a_done_task_without_a_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_a_green_promotion_run_clears_awaiting_and_a_reopened_task_shows_no_stale_wait"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
@@ -4957,6 +5007,17 @@
         "tests/swarm/test_timer_scratch_binary.py::test_a_missing_installed_cli_link_refuses_every_binary",
         "tests/swarm/test_timer_scratch_binary.py::test_guard_from_a_scratch_binary_leaves_the_units_and_the_scheduler_alone",
         "tests/swarm/test_timer_scratch_binary.py::test_reconcile_refuses_the_installed_binary_run_from_a_foreign_root"
+      ]
+    },
+    {
+      "id": "swarm-park-foreign-dependency-no-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
+      "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
+        "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
       ]
     }
   ],

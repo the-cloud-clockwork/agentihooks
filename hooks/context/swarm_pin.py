@@ -14,7 +14,7 @@ IDENTITY = (
     "AGENTIHOOKS_SWARM_TASK",
     LAUNCHER,
 )
-AGENTS = frozenset({"claude", "codex"})
+AGENTS = frozenset({"claude", "codex", "copilot"})
 
 
 def nested(environ, start: int | None = None, proc: Path = _PROC) -> bool:

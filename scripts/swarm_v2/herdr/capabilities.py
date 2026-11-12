@@ -72,6 +72,7 @@ class Verdict:
     refusals: tuple[str, ...]
     matrix: dict[str, str]
     server: dict = field(default_factory=dict)
+    client: dict[str, object] = field(default_factory=dict[str, object])
 
     @property
     def compatible(self) -> bool:
@@ -108,7 +109,9 @@ def matrix(methods: frozenset[str]) -> dict[str, str]:
 
 
 def qualify(target: str, incarnation: str, observed: Observation) -> Verdict:
-    return Verdict(target, incarnation, tuple(refusals(observed)), matrix(observed.methods), observed.server)
+    return Verdict(
+        target, incarnation, tuple(refusals(observed)), matrix(observed.methods), observed.server, observed.client
+    )
 
 
 def _json(run: Callable[[list[str]], subprocess.CompletedProcess], command: list[str]) -> dict:
@@ -139,6 +142,13 @@ def machine_status(run: Callable[[list[str]], subprocess.CompletedProcess]) -> C
     return status
 
 
+def machine_client(run: Callable[[list[str]], subprocess.CompletedProcess[str]]) -> Callable[[], dict[str, object]]:
+    def client() -> dict[str, object]:
+        return _json(run, ["herdr", *STATUS_CLIENT])
+
+    return client
+
+
 def machine_probe(run: Callable[[list[str]], subprocess.CompletedProcess]) -> Callable[[str], Observation]:
     status = machine_status(run)
 
@@ -165,16 +175,22 @@ class Qualifier:
     """The incarnation is the execution attempt id. herdr reports no server process id, so the server status document
     the gate reads itself tells a server restarted under one attempt."""
 
-    def __init__(self, probe: Callable[[str], Observation], status: Callable[[str], dict]) -> None:
+    def __init__(
+        self,
+        probe: Callable[[str], Observation],
+        status: Callable[[str], dict[str, object]],
+        client: Callable[[], dict[str, object]] | None = None,
+    ) -> None:
         self.probe = probe
         self.status = status
+        self.client = client
         self.verdicts: dict[str, Verdict] = {}
         self.retired: dict[str, set[str]] = {}
         self.mismatches: Counter = Counter()
 
     @classmethod
     def machine(cls, run: Callable[[list[str]], subprocess.CompletedProcess]) -> "Qualifier":
-        return cls(machine_probe(run), machine_status(run))
+        return cls(machine_probe(run), machine_status(run), machine_client(run))
 
     def verdict(self, target: str, incarnation: str) -> Verdict:
         if not target or target.startswith("-") or not incarnation:
@@ -183,7 +199,12 @@ class Qualifier:
             raise Incompatible(f"herdr server incarnation {incarnation} on {target} was replaced")
         cached = self.verdicts.get(target)
         same = cached is not None and cached.incarnation == incarnation
-        if same and self.status(target) == cached.server:
+        if (
+            cached is not None
+            and same
+            and self.status(target) == cached.server
+            and (self.client is None or self.client() == cached.client)
+        ):
             return cached
         fresh = qualify(target, incarnation, self.probe(target))
         if cached is not None and not same:
