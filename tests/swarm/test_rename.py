@@ -165,6 +165,76 @@ def test_rename_names_a_running_codex_session_after_its_new_name(store, harness,
     assert len([m for m in mutations if m[:2] == ["pane", "run"]]) == (1 if typed else 0)
 
 
+def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from scripts.codex_session import protocol, supervisor
+    from scripts.codex_session.binding import CONNECTED, BindingStore, TransportRecord
+    from scripts.swarm.rename import CONNECT_S, rename_swarm
+    from scripts.swarm.runtime import HerdrRuntime, herdr_target
+
+    old = store.next_name("sw", "eng")
+    agent = store.start_execution(
+        "sw",
+        AgentRecord(
+            old, "eng", "t1", pane_id="w1:p1", harness="codex", seat="eng-1@sw", transport=APP_SERVER_TRANSPORT
+        ),
+    )
+    bindings = BindingStore(store)
+    record = bindings.reserve(
+        "sw",
+        TransportRecord(
+            agent.execution_id,
+            agent.generation,
+            agent.seat,
+            agent.name,
+            agent.task,
+            "unix:///run/managed/server.sock",
+            thread_id="thread",
+        ),
+    )
+    bindings.put("sw", replace(record, state=CONNECTED))
+    connection = Mock()
+    connector = Mock(return_value=(connection, {}))
+    monkeypatch.setattr(protocol, "connect", connector)
+    titled: list[str] = []
+    title = supervisor.thread_title
+
+    def spy(slug: str, row: AgentRecord) -> str:
+        titled.append(slug)
+        return title(slug, row)
+
+    monkeypatch.setattr(supervisor, "thread_title", spy)
+    pane = {"pane_id": "w1:p1", "name": old, "workspace_id": "w1"}
+
+    def herdr(args: list[str]) -> dict:
+        if args == ["agent", "list"]:
+            return {"agents": [pane]}
+        if args == ["workspace", "list"]:
+            return {"workspaces": []}
+        if args[:2] == ["agent", "rename"]:
+            pane["name"] = args[3]
+        return {}
+
+    ledger = SimpleNamespace(tasks=lambda slug: [], rename_agent=lambda slug, old, new: None)
+    connection.request.side_effect = protocol.Refused("thread/name/set refused")
+    rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 5)
+    assert store.redis.get(store.key("sw", "session-name", "w1:p1")) is None
+    connection.reset_mock()
+    connection.request.side_effect = None
+    pane["name"] = old
+    rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
+    new = store.agents("sw")[0].name
+    assert pane["name"] == herdr_target(new) != old
+    assert connector.call_args.args == ("/run/managed/server.sock", CONNECT_S)
+    connection.request.assert_called_once_with("thread/name/set", {"threadId": "thread", "name": new})
+    connection.close.assert_called_once()
+    assert store.redis.get(store.key("sw", "session-name", "w1:p1")) == new
+    assert set(titled) == {"sw"}
+    rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 20)
+    connection.request.assert_called_once()
+
+
 def test_rename_retypes_a_codex_session_name_that_failed_after_its_pane_was_renamed(store):
     from scripts.swarm.rename import rename_swarm
     from scripts.swarm.runtime import HerdrRuntime
