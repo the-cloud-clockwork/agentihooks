@@ -367,15 +367,17 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
 
 
 @pytest.mark.feature("inbox-refused-answer-resend")
-def test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held(inbox, monkeypatch):
+def test_a_refused_message_whose_operator_item_cannot_reopen_yet_is_reported_held(
+    inbox: InboxStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from scripts.inbox.store import Contended
     from scripts.swarm.store import SwarmError
 
     class RefusingLedger(FakeLedger):
-        def raise_alert(self, slug, source, text, item=None):
+        def raise_alert(self, slug: str, source: str, text: str, item: str | None = None) -> None:
             raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
 
-    def busy(answer, by, reason):
+    def busy(answer: object, by: str, reason: str) -> None:
         raise Contended("message changed meanwhile; run the command again")
 
     asked = inbox.send("operator", "sw-eng-2", "how far along are we")

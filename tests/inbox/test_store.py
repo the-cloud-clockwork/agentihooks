@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.inbox.store import NOTIFY, Contended, InboxError, InboxStore
+from scripts.inbox.store import NOTIFY, Contended, InboxError, InboxStore, Item
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 
@@ -242,7 +242,7 @@ def test_a_replayed_reply_bound_to_a_refused_answer_is_refused_and_keeps_the_ite
     assert store.get(item.id).state == "read"
 
 
-def fresh_answer_closes_the_item(store, item, refused, fresh, text):
+def fresh_answer_closes_the_item(store: InboxStore, item: Item, refused: Item, fresh: Item, text: str) -> None:
     assert fresh.id != refused.id
     assert (fresh.sender, fresh.address, fresh.text, fresh.state, fresh.ref) == (
         "master",
@@ -258,14 +258,14 @@ def fresh_answer_closes_the_item(store, item, refused, fresh, text):
 
 
 @pytest.mark.feature("inbox-refused-answer-resend")
-def test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer(store):
+def test_a_reply_without_an_operation_id_after_a_refused_chat_answer_sends_a_new_answer(store: InboxStore) -> None:
     item, answer = refused_answer(store)
     fresh = store.reply(item.id, "master", "two tasks left")
     fresh_answer_closes_the_item(store, item, answer, fresh, "two tasks left")
 
 
 @pytest.mark.feature("inbox-refused-answer-resend")
-def test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text(store):
+def test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text(store: InboxStore) -> None:
     item, answer = refused_answer(store)
     fresh = store.reply(item.id, "master", "one task left", answer_id="op-new")
     assert fresh.id == "op-new"
@@ -275,7 +275,7 @@ def test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text(st
 
 
 @pytest.mark.feature("inbox-refused-answer-resend")
-def test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused(store):
+def test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused(store: InboxStore) -> None:
     item, answer = refused_answer(store)
     store.redis.hset(store.key("item", item.id), "reason", "closed elsewhere")
     with pytest.raises(InboxError) as refused:
