@@ -56,13 +56,16 @@ def failure(probe: Callable[[], object]) -> dict | None:
 
 
 def github_ready() -> bool:
+    default = "app" if os.environ.get("AGENTIHOOKS_HIVE_ID") else "user"
     return checked(
         lambda: (
             subprocess.run(
                 [
                     "gh",
                     "api",
-                    "installation/repositories" if os.environ.get("HIVE_GITHUB_AUTH_MODE", "app") == "app" else "user",
+                    "installation/repositories"
+                    if os.environ.get("HIVE_GITHUB_AUTH_MODE", default) == "app"
+                    else "user",
                     "--silent",
                 ],
                 stdout=subprocess.DEVNULL,
