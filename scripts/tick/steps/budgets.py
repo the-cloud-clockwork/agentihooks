@@ -151,6 +151,7 @@ FLOORS: dict[str, Timing] = {
     "doc items map": Timing(LIGHT_S, CRITICAL_S),
     "step starvation": Timing(LIGHT_S, CRITICAL_S),
     "knowledge warm": Timing(LIGHT_S, CRITICAL_S),
+    "progress heads": Timing(LIGHT_S, CRITICAL_S),
 }
 
 

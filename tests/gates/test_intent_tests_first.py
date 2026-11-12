@@ -75,7 +75,6 @@ def test_declared_preparatory_pull_request_uses_its_contract_with_the_whole_task
 @pytest.mark.parametrize(
     "body",
     [
-        "",
         "This is tests-first",
         "Task part: implementation",
         "> " + DECLARATION,

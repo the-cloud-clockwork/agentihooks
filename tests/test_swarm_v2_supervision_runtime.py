@@ -490,6 +490,74 @@ def test_drain_reports_acknowledged_material_only(supervisor, monkeypatch, clean
     assert wait.call_count == int(clean and not identifier)
 
 
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+@pytest.mark.parametrize("portable,validated,expected", [(True, True, [10]), (True, False, []), (False, True, [])])
+def test_drain_acknowledges_the_archived_transcript_end_once_the_final_checkpoint_validates(
+    supervisor, monkeypatch, portable, validated, expected
+):
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    monkeypatch.setattr(runtime, "checkpoint", Mock(return_value="checkpoint"))
+    monkeypatch.setattr(runtime.trees, "cleanup", Mock())
+    monkeypatch.setattr(supervisor, "validated", lambda identifier, deadline: validated)
+    if portable:
+        supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    protocol.write(
+        supervisor.root / "exporter.checkpoint.json", {**supervisor.scope, "status": "complete", "transcript_end": 10}
+    )
+    acknowledged = []
+    supervisor.lease = SimpleNamespace(lost=None, acknowledge=lambda end: acknowledged.append(end) or True)
+
+    supervisor.drain("agent_completed")
+
+    assert acknowledged == expected
+
+
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_drain_keeps_acknowledging_until_the_controller_accepts_the_archived_transcript_end(supervisor, monkeypatch):
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    monkeypatch.setattr(runtime, "checkpoint", Mock(return_value="checkpoint"))
+    monkeypatch.setattr(runtime.trees, "cleanup", Mock())
+    monkeypatch.setattr(supervisor, "validated", lambda identifier, deadline: True)
+    wait = Mock(side_effect=[None, None])
+    monkeypatch.setattr(supervisor, "wait", wait)
+    supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    protocol.write(
+        supervisor.root / "exporter.checkpoint.json", {**supervisor.scope, "status": "complete", "transcript_end": 10}
+    )
+    acknowledge = Mock(side_effect=[False, False, True])
+    supervisor.lease = SimpleNamespace(lost=None, acknowledge=acknowledge)
+
+    supervisor.drain("agent_completed")
+
+    assert [call.args for call in acknowledge.call_args_list] == [(10,), (10,), (10,)]
+    assert wait.call_count == 2
+
+
+@pytest.mark.feature("archive-acknowledged-on-heartbeat")
+def test_drain_stops_acknowledging_when_the_checkpoint_budget_ends(supervisor, monkeypatch):
+    budget = supervisor.launch.budgets.checkpoint
+    readings = iter([0.0, 0.0, budget])
+    clock = SimpleNamespace(monotonic=lambda: next(readings, budget + 1), time=runtime.time.time)
+    monkeypatch.setattr(runtime, "time", clock)
+    monkeypatch.setattr(supervisor, "quiesce", lambda: True)
+    monkeypatch.setattr(runtime, "checkpoint", Mock(return_value="checkpoint"))
+    monkeypatch.setattr(runtime.trees, "cleanup", Mock())
+    monkeypatch.setattr(supervisor, "validated", lambda identifier, deadline: True)
+    wait = Mock(side_effect=AssertionError("drain waited past the checkpoint budget"))
+    monkeypatch.setattr(supervisor, "wait", wait)
+    supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    protocol.write(
+        supervisor.root / "exporter.checkpoint.json", {**supervisor.scope, "status": "complete", "transcript_end": 10}
+    )
+    acknowledge = Mock(side_effect=[False])
+    supervisor.lease = SimpleNamespace(lost=None, acknowledge=acknowledge)
+
+    supervisor.drain("agent_completed")
+
+    assert acknowledge.call_count == 1
+    assert wait.call_count == 0
+
+
 @pytest.mark.parametrize(
     "reason,status,code",
     [("agent_completed", "complete", 0), ("termination", "incomplete", 75), ("exporter_failure", "complete", 70)],
