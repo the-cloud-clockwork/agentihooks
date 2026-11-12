@@ -206,6 +206,36 @@ def test_write_command_requires_a_reader_and_a_reason(tmp_path: Path, missing: s
     assert not (tmp_path / "mutation-clearances").exists()
 
 
+def test_write_command_refuses_an_unknown_command_by_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    argv = ["erase", str(source), "hooks.example.x_f__mutmut_1", "--reader", "Standards", "--reason", "Equivalent"]
+    with pytest.raises(SystemExit) as stopped:
+        main([*argv, "--root", str(tmp_path)])
+    assert stopped.value.code == 2
+    assert "argument command: invalid choice: 'erase'" in capsys.readouterr().err
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+def test_write_command_writes_under_the_given_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    root = tmp_path / "repository"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    name = "hooks.example.x_f__mutmut_1"
+    argv = ["write", str(source), name, "--reader", RULING["reader"], "--reason", RULING["reason"]]
+    assert main([*argv, "--root", str(root)]) == 0
+    assert load_clearances(root) == {SURVIVOR_KEYS[name]: RULING}
+    assert not (elsewhere / "mutation-clearances").exists()
+
+
 def test_bare_command_still_migrates_the_legacy_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
