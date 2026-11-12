@@ -3612,6 +3612,20 @@
       ]
     },
     {
+      "id": "hive-join-fencing-read-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-join-fencing-scan",
+      "behaviour": "The hive join agent read for a swarm with no fencing document walks no Redis keyspace: the legacy claim, fence and journal import scans only for a swarm whose legacy controller epoch key exists, so a proof swarm read at session start stays a few point reads instead of three full scans of the shared Redis.",
+      "seam": "scripts.hive.join_report.running_executions",
+      "tests": [
+        "tests/hive/test_join_report_scan.py::test_the_hive_join_agent_read_for_a_swarm_with_no_fencing_entry_walks_no_keyspace",
+        "tests/hive/test_join_report_scan.py::test_a_swarm_that_predates_the_fencing_document_still_imports_its_legacy_claims"
+      ],
+      "rules": [
+        "swarm-part-scan-ungated"
+      ]
+    },
+    {
       "id": "root-hive-github-user-login",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
