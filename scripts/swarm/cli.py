@@ -644,10 +644,12 @@ def _pass_tools(store: RedisStore, slug: str, owner: str, ledger: Any = None, ru
     )
 
 
-def _end_hold(store: RedisStore, slug: str, token: str, keeping: Token[Any]) -> None:
-    """Release the pass's tick lock, then drop its step hook and stop hold even when the release raises."""
+def _end_hold(store: RedisStore, slug: str, token: str, keeping: Token[Any], revoke: Callable[[], None]) -> None:
+    """Revoke the pass's step hook, release its tick lock, then drop the hook and stop hold even when the release
+    raises."""
     from scripts.swarm import controller
 
+    revoke()
     try:
         controller.release_tick_lock(store, slug, token, "pass")
     finally:
@@ -683,13 +685,10 @@ def run_tick(
         return ["another tick is running"]
     tick_stop.hold(token, lambda: controller.release_tick_lock(store, slug, token, "pass stop"))
 
-    def before_step():
-        tick_stop.check()
-        tick_activity.keep(
-            store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass step"), now_ms
-        )
-
-    keeping = timing.BEFORE_STEP.set(before_step)
+    renewal = tick_activity.Renewal(
+        store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS, "pass step"), now_ms
+    )
+    keeping = timing.BEFORE_STEP.set(renewal)
     doc, view, beating, box, ended = {}, None, ExitStack(), PassBox(), None
     wrapper: _Wrapper | None = None
     failed: BaseException | None = None
@@ -752,7 +751,7 @@ def run_tick(
             try:
                 beating.close()
             finally:
-                _end_hold(store, slug, token, keeping)
+                _end_hold(store, slug, token, keeping, renewal.revoke)
 
 
 def cmd_list(store, args):
