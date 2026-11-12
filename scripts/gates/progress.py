@@ -170,5 +170,7 @@ def heads_pass(
         kind = _change(seen, task["id"], head, url)
         if kind:
             marks.outcome(owner, kind, now_ms)
-            stamped.append(f"{kind} {head} on {url or task.get('branch') or 'its worktree branch'}, an outcome for {owner}")
+            stamped.append(
+                f"{kind} {head} on {url or task.get('branch') or 'its worktree branch'}, an outcome for {owner}"
+            )
     return stamped
