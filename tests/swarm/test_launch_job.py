@@ -282,6 +282,48 @@ def test_pending_launch_keeps_claim_and_is_not_launched_twice(store, tmp_path, m
     assert [agent.name for agent in store.agents("sw") if agent.task == "t1"] == [name]
 
 
+class DecidedRuntime(DetachedRuntime):
+    def spawn(self, config, lane, name, task):
+        placed = super().spawn(config, lane, name, task)
+        return replace(placed, account="acct-a", model="opus", effort="high", profile="engineer")
+
+
+@pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
+def test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_and_account(
+    store, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
+    ledger, runtime = tasks(("t1", "eng")), DecidedRuntime(tmp_path)
+    tick("sw", store, ledger, runtime, now_ms=1000)
+    agent = next(agent for agent in store.agents("sw") if agent.task == "t1")
+    assert (agent.harness, agent.account, agent.model, agent.effort, agent.profile) == (
+        "claude",
+        "acct-a",
+        "opus",
+        "high",
+        "engineer",
+    )
+    assert agent.pane_id == ""
+
+
+@pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
+def test_a_detached_placement_carries_the_routed_account_model_and_profile():
+    from scripts.swarm.model_pick import ModelPick
+    from scripts.swarm.runtime import _decided
+
+    job = {"path": "/jobs/e.json", "started_at": 1000, "timeout": 300}
+    placed = _decided(Placed("", "codex", launch_job=job), ["--route", "acct-b"], ModelPick("gpt", "xhigh"), "eng")
+    assert (placed.harness, placed.account, placed.model, placed.effort, placed.profile) == (
+        "codex",
+        "acct-b",
+        "gpt",
+        "xhigh",
+        "eng",
+    )
+    synchronous = Placed("w:p1", "claude", account="acct-c")
+    assert _decided(synchronous, ["--route", "acct-d"], ModelPick("opus", "high"), "eng") is synchronous
+
+
 def _job_entry(store, name, task, state="working", harness="claude"):
     from scripts.swarm.store import AgentRecord
 
