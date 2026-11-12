@@ -125,6 +125,19 @@
       ]
     },
     {
+      "id": "legacy-state-migration-command",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-migrate-legacy-state-cmd",
+      "behaviour": "One command moves a swarm's legacy key value state bucket into its scoped state stream with key ownership claimed explicitly, by named keys or none: a dry run reports the owned revisions it would move and writes nothing, an apply copies only the owned history and reports the count, a rerun moves nothing, and a failed copy exits 1, reports the failure and is resumed by the same command, so the hub fan in skip clears without Python.",
+      "seam": "python -m scripts.events.migrate_state main, over NatsBus.migrate_state",
+      "tests": [
+        "tests/events/test_migrate_state.py::test_dry_run_reports_what_it_would_move_and_writes_nothing",
+        "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
+        "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
+        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending"
+      ]
+    },
+    {
       "id": "hive-label-reserves-identifier",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-label-reserve-id",
