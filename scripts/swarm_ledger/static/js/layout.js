@@ -228,6 +228,13 @@ function saveLayout(delay) {
   }, delay);
 }
 
+function flushLayout() {
+  if (!layoutSave) return;
+  clearTimeout(layoutSave);
+  layoutSave = 0;
+  writeLayout(layout, true).catch(() => {});
+}
+
 function setLayout(next, delay = 300) {
   applyLayout(next);
   mirrorLayout();
@@ -276,6 +283,8 @@ export function startLayout() {
   wireColumns();
   wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
+  window.addEventListener("pagehide", flushLayout);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) flushLayout(); });
   readLayout()
     .then((resp) => (resp.ok ? resp.json().then((reply) => reply.data) : null))
     .then((saved) => {

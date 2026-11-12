@@ -10,7 +10,9 @@ import json
 import os
 import sys
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -36,22 +38,34 @@ def watch(page):
     return page
 
 
-def flush(folder: Path, pages) -> None:
+def script_source(session: Any, script_id: str) -> str | None:
+    """Return a script's source, or None when the page has left the document that ran it."""
+    from playwright.sync_api import Error
+
+    try:
+        return session.send("Debugger.getScriptSource", {"scriptId": script_id})["scriptSource"]
+    except Error as error:
+        if "No script for id" not in error.message:
+            raise
+        return None
+
+
+def flush(folder: Path, pages: Iterable[Any]) -> None:
     for page in list(pages):
         session, test = WATCHED.pop(page, (None, ""))
         if session is None or page.is_closed():
             continue
         coverage = session.send("Profiler.takePreciseCoverage")["result"]
         session.send("Debugger.enable")
-        result = [
-            {
-                "source": store(
-                    folder, session.send("Debugger.getScriptSource", {"scriptId": entry["scriptId"]})["scriptSource"]
-                ),
-                "functions": entry["functions"],
-            }
+        sources = {
+            entry["scriptId"]: script_source(session, entry["scriptId"])
             for entry in coverage
             if entry["url"].startswith("http")
+        }
+        result = [
+            {"source": store(folder, source), "functions": entry["functions"]}
+            for entry in coverage
+            if (source := sources.get(entry["scriptId"])) is not None
         ]
         folder.mkdir(parents=True, exist_ok=True)
         (folder / f"capture-browser-{uuid.uuid4().hex}.json").write_text(json.dumps({"result": result, "test": test}))
