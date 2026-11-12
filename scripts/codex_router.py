@@ -590,6 +590,8 @@ def select(
                     raise RoutingError(f"Codex account '{route}' is not signed in; run codex login")
                 if expired := expiry_refusal(account, environ or {}, now):
                     raise RoutingError(expired)
+                if (reading := quotas.get(route)) and reading.expired:
+                    raise RoutingError(f"Codex account '{route}' has an expired quota reading; refresh its login")
                 return account, "forced", None
         available = ", ".join(account.name for account in pool)
         raise RoutingError(f"Codex account '{route}' not found; available: {available}")

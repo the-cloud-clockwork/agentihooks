@@ -125,6 +125,7 @@ from scripts.swarm import (
     prerequisite_wait,
     priming_trace,
     prompt,
+    pull_head,
     queue_exit,
     queue_priority,
     queue_record,
@@ -154,6 +155,8 @@ from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
+from scripts.swarm.pull_head import PULL_SECONDS as PULL_SECONDS
+from scripts.swarm.pull_head import PullHead, pull_branch
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     agent_hive,
@@ -207,8 +210,6 @@ from scripts.tick.adapters.metrics import SpoolMetrics
 from scripts.tick.adapters.processes import PassProcesses
 from scripts.tick.adapters.runtime import RouterRuntime
 from scripts.tick.deadline import Deadline
-from scripts.tick.ports.contracts import SourceControl
-from scripts.tick.ports.source_control import ChangeRef
 from scripts.tick.ports.tools import PASS_TOOLS, Tools
 from scripts.tick.sites import TICK_HOOK_KEYS, TICK_SHUT_KEYS, TICK_SITES, TickSites, run_sites
 from scripts.tick.step import Domain
@@ -2006,22 +2007,6 @@ def _upstream(run: Callable[..., subprocess.CompletedProcess[str]]) -> str:
     return done.stdout.strip().partition("/")[2] if not done.returncode and done.stdout.startswith("origin/") else ""
 
 
-PULL_SECONDS = 20
-
-
-def pull_branch(
-    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
-) -> tuple[str, str]:
-    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
-    try:
-        provider, reference = ports(url)
-        change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
-    except stack.PORT_ERRORS:
-        return "", ""
-    host = url.split("/pull/")[0].rsplit("/", 2)[0]
-    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
-
-
 def origin_repo(run=subprocess.run):
     done = _git(run, "remote", "get-url", "origin")
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
@@ -2079,16 +2064,18 @@ def cmd_branch(store, args):
     print(json.dumps({"task": agent.task, **fields, **carried}))
 
 
-def cmd_pr(store, args):
+def cmd_pr(store: RedisStore, args: argparse.Namespace) -> None:
     agent = _worker(store, args)
     config = store.config(args.slug)
     awaiting = "approval" if config.autonomy == ASSIST else ""
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo = pull_branch(args.url)
+    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    pull_head.refuse_other_branch(row, args, PullHead(head, repo))
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
-    fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
+    confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
+    fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)
     row.update(scoped)
