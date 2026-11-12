@@ -322,14 +322,7 @@ def test_a_detached_spawn_returns_its_routed_account_model_and_profile(
     runtime._quota_accounts = []
     monkeypatch.setattr(runtime, "_quota_eligible", lambda harness, lane: True)
     monkeypatch.setattr(runtime, "_route_account", lambda *_: (None, SimpleNamespace(name="acct-a")))
-    config = SimpleNamespace(
-        slug="sw",
-        repo=str(tmp_path),
-        code="a1b2c3",
-        compact_limit=0,
-        lanes={"eng": {"agent": "claude"}},
-        autonomy="delegate",
-    )
+    config = SwarmConfig("sw", str(tmp_path), 1, 1, lanes={"eng": {"agent": "claude"}}, code="a1b2c3")
     placed = runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x", "detached_launch": True})
     assert placed.launch_job and placed.pane_id == ""
     assert (placed.harness, placed.account) == ("claude", "acct-a")
