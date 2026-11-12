@@ -109,7 +109,14 @@ def test_the_workflow_kind_round_trips_its_record() -> None:
     slot = slots.WorkflowSlot("tiny", "/case.md", "/project")
 
     assert slots.KINDS["workflow"] is slots.WorkflowSlot
-    assert slot.record() == {"kind": "workflow", "name": "tiny", "case": "/case.md", "project": "/project"}
+    assert slot.record() == {
+        "kind": "workflow",
+        "name": "tiny",
+        "case": "/case.md",
+        "project": "/project",
+        "placement": "local",
+        "needs": [],
+    }
     assert slots.restore(slot.record()) == slot
 
 

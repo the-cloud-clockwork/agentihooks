@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -217,8 +218,40 @@ def test_timer_add_reaches_a_workflow_with_its_case(capsys, scheduler, tmp_path,
     )
     assert (code, err) == (0, "")
     assert view is not None
-    assert view["targets"] == [{"kind": "workflow", "name": "nightly", "case": str(case), "project": str(tmp_path)}]
+    assert view["targets"] == [
+        {
+            "kind": "workflow",
+            "name": "nightly",
+            "case": str(case),
+            "project": str(tmp_path),
+            "placement": "local",
+            "needs": [],
+        }
+    ]
     assert (view["payload"], view["due"]) == ("run it", NOW + 3600)
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_cron_add_places_a_workflow_on_a_hive_with_its_needs(
+    capsys: pytest.CaptureFixture[str], scheduler: object, tmp_path: Path
+) -> None:
+    case = tmp_path / "case.json"
+    case.write_text("{}")
+    argv = ["add", "--expr", "0 9 * * *", "--workflow", "nightly", "--case", str(case)]
+    code, view, err = run(capsys, cli.cron, [*argv, "--placement", "hive", "--needs", "build,lint", "go"])
+    assert (code, err) == (0, "")
+    assert view is not None
+    assert (view["targets"][0]["placement"], view["targets"][0]["needs"]) == ("hive", ["build", "lint"])
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_cron_add_refuses_an_unknown_placement(
+    capsys: pytest.CaptureFixture[str], scheduler: object, tmp_path: Path
+) -> None:
+    case = tmp_path / "case.json"
+    case.write_text("{}")
+    argv = ["add", "--expr", "0 9 * * *", "--workflow", "nightly", "--case", str(case), "--placement", "cloud", "go"]
+    assert run(capsys, cli.cron, argv) == (1, None, "agentihooks cron: placement must be local or hive, not cloud\n")
 
 
 @pytest.mark.feature("scheduler-workflow-target-case")

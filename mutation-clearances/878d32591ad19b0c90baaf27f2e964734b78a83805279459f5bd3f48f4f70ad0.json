@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/masters.py:scripts.swarm_v2.masters.xǁMasterSeatsǁkeep_retired:3836898693535d5d41a4179566202746992dd0645afa2fb72733145985726d60": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: _save_retired.write reads fields only in if fields:, so {} and None both skip the hset and produce the same Redis writes and the same retired list."
+  }
+}

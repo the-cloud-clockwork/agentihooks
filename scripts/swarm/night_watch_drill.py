@@ -1,12 +1,13 @@
 """Night watch drill: run the night watch in enforcing mode against a scratch proof swarm whose front door master
 seat is empty, across the empty seat threshold through the tick's own night watch path, and record the recovery it
-took. A swarm that is not a running scratch proof swarm, or whose front door seat a live master holds, is refused
-untouched."""
+took. A paused scratch swarm stays paused while its passes read it as running. A swarm that is not a running or
+paused scratch proof swarm, or whose front door seat a live master holds, is refused untouched."""
 
 import argparse
+import copy
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from scripts.gates.enforcement import NIGHT_WATCH
@@ -21,7 +22,8 @@ KEY = "night-watch-drill"
 ENFORCE = "enforce"
 REFUSED = "front door respawn refused"
 NOT_SCRATCH = "{slug} is not a scratch proof swarm; the night watch drill never runs on a live swarm"
-NOT_RUNNING = "scratch swarm {slug} is {state}; start it before the night watch drill"
+NOT_RUNNING = "scratch swarm {slug} is {state}; the night watch drill runs on a running or paused scratch swarm"
+DRIVEN = ("running", "paused")
 SEAT_HELD = "a live master holds the front door seat of {slug}; the night watch drill needs an empty seat"
 
 night_watch: Any = night_watch_module
@@ -42,12 +44,43 @@ class Drill:
     watch_pass: WatchPass
 
 
+class Running:
+    """A store mixin that reads the drilled swarm as running, so a paused scratch swarm's night watch passes act while
+    its stored state stays paused."""
+
+    drilled: str = ""
+
+    def config(self, slug: str) -> Any:
+        """The stored config, with the drilled swarm's state read as running."""
+        base: Any = super()
+        config: Any = base.config(slug)
+        return replace(config, state="running") if slug == self.drilled else config
+
+
+def running(store: Any, slug: str) -> Any:
+    """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night
+    watch's Redis budget rebinds the copy as it rebinds the store. Its updates go through ``store``, so a write never
+    stores the running state the copy reads."""
+    base: Any = store.__class__
+    kind: Any = type(f"Running{base.__name__}", (Running, base), dict[str, Any]())
+    view: Any = kind.__new__(kind)
+    attributes: dict[str, Any] = store.__dict__
+    copied: dict[str, Any] = view.__dict__
+    copied.update(attributes, drilled=slug, update=store.update)
+    for name, value in attributes.items():
+        if getattr(value, "store", None) is store:
+            part: Any = copy.copy(value)
+            part.store = view
+            setattr(view, name, part)
+    return view
+
+
 def refusal(drill: Drill) -> str:
     """Why the drill may not run on this swarm, or an empty string when it may."""
     config: Any = drill.store.config(drill.slug)
     if not config.scratch or not naming.PROOF_RE.fullmatch(drill.slug):
         return NOT_SCRATCH.format(slug=drill.slug)
-    if config.state != "running":
+    if config.state not in DRIVEN:
         return NOT_RUNNING.format(slug=drill.slug, state=config.state)
     live: set[str] = drill.runtime.live_names()
     for agent in drill.store.agents(drill.slug):
@@ -79,9 +112,10 @@ def run(drill: Drill) -> dict[str, Any]:
     aged = [drill.now_ms - night_watch.SEAT_MS, drill.now_ms - night_watch.GAP_MS]
     passes = [drill.now_ms] if observed is not None else [*aged, drill.now_ms]
     rows = {task["id"]: task for task in drill.doc["tasks"]}
+    store = running(drill.store, drill.slug)
     for at in passes:
         asleep = lifetime.sleeping(drill.slug, drill.store, rows)
-        actions += drill.watch_pass(drill.slug, drill.store, drill.ledger, drill.runtime, drill.doc, at, asleep)
+        actions += drill.watch_pass(drill.slug, store, drill.ledger, drill.runtime, drill.doc, at, asleep)
     respawned: int | None = night_watch.read(drill.store, drill.slug).get(night_watch.SEAT, {}).get("respawned")
     record: dict[str, Any] = {
         "swarm": drill.slug,

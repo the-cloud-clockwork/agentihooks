@@ -118,9 +118,10 @@
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-readiness-key-ownership",
       "behaviour": "The hub's scoped event fan in skips a swarm whose scoped state stream cannot be created over a legacy key value bucket that still holds entries, prints one line naming that swarm and bucket, and keeps fetching every other swarm's events, so one unmigrated swarm cannot stop the readiness offer poll or any other reactor for the rest.",
-      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning",
+      "seam": "NatsBus.events fan in through RoutedLog to NatsBus._logs and ScopedStateStore provisioning, and readiness.publish, which stores no offer for a swarm whose legacy inbox state is unowned until migrate_state moves it",
       "tests": [
         "tests/events/test_nats_migration.py::test_hub_fan_in_keeps_other_swarms_while_one_swarm_state_is_unowned",
+        "tests/events/test_nats_migration.py::test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_migrated",
         "tests/events/test_nats_state.py::test_retained_legacy_state_requires_authoritative_key_ownership"
       ]
     },
@@ -312,6 +313,18 @@
         "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_retries_when_the_alias_moves_on_the_bus_during_its_write",
         "tests/inbox/test_alias_store_revision.py::test_a_seen_mark_refuses_when_the_alias_never_settles_on_the_bus",
         "tests/inbox/test_alias_store_revision.py::test_the_redis_backend_reads_no_store_revisions_because_its_watch_sees_them"
+      ]
+    },
+    {
+      "id": "inbox-young-connection-ramp",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-master-inbox-read-reset",
+      "behaviour": "When the swarm Redis path resets a pipeline of item rows, the inbox reads that batch again on the new connection in chunks that start at fifty rows and double up to the row batch, so a large history listing or open index rebuild returns whole instead of raising the reset.",
+      "seam": "InboxStore._batch and ramped, through InboxStore.inbox and InboxStore.open_items",
+      "tests": [
+        "tests/inbox/test_row_batches.py::test_a_large_history_lists_whole_when_a_new_connection_resets_large_first_pipelines",
+        "tests/inbox/test_row_batches.py::test_the_open_index_rebuilds_whole_when_a_new_connection_resets_large_first_pipelines",
+        "tests/inbox/test_row_batches.py::test_a_retried_batch_is_read_in_chunks_that_start_small_and_double_up_to_the_batch"
       ]
     },
     {
@@ -569,6 +582,31 @@
       "seam": "scripts.swarm.scheduled_tick.main and its inherited machine lock and delivery record",
       "tests": [
         "tests/features/test_scheduler_delivery.py::test_scheduler_delivers_once_under_the_machine_lock_and_records_completion"
+      ]
+    },
+    {
+      "id": "scheduled-run-hive-placement",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
+      "behaviour": "A scheduled workflow slot runs locally by default; a slot placed on a hive sends its run to a live, undrained hive that lists the project repository and declares every needed capability, fewest running runs first, and with no fitting hive records a named wait reason and sends nothing, never starting the run on the workstation.",
+      "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
+      "tests": [
+        "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
+        "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
+        "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
+        "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
+        "tests/hive/test_run_placement.py::test_a_placed_run_sends_one_run_order_to_the_chosen_hive",
+        "tests/hive/test_run_placement.py::test_a_run_with_no_fitting_hive_records_its_wait_and_sends_nothing",
+        "tests/hive/test_run_placement.py::test_a_later_placement_clears_the_recorded_wait",
+        "tests/hive/test_run_placement.py::test_dispatch_sends_a_run_order_on_the_chosen_hive_stream",
+        "tests/scheduler/test_commands.py::test_a_workflow_target_takes_a_hive_placement_with_its_needs",
+        "tests/scheduler/test_commands.py::test_a_stored_workflow_slot_without_a_placement_runs_locally",
+        "tests/scheduler/test_commands.py::test_a_placement_that_does_not_fit_is_refused",
+        "tests/scheduler/test_commands.py::test_a_hive_workflow_slot_places_its_run_and_never_starts_it_locally",
+        "tests/scheduler/test_cli.py::test_cron_add_places_a_workflow_on_a_hive_with_its_needs",
+        "tests/hive/test_run_placement.py::test_a_hive_declaring_exactly_the_needs_fits_and_one_declaring_none_does_not",
+        "tests/hive/test_run_placement.py::test_a_placed_run_carries_the_hive_path_of_its_repository",
+        "tests/scheduler/test_cli.py::test_cron_add_refuses_an_unknown_placement"
       ]
     },
     {
@@ -859,6 +897,18 @@
       ]
     },
     {
+      "id": "retired-master-seat-owns-no-hive",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t904",
+      "behaviour": "A master seat on the retired list is refused as a hive owner, checked in the same watched transaction that writes the owner, and a manual master count change rewrites the count and the retired list in one watched transaction, so a seat the tick retires while it runs stays retired.",
+      "seam": "scripts.swarm_v2.masters.MasterSeats own_hive, check_hives, set_count and keep_retired",
+      "tests": [
+        "tests/test_swarm_v2_master_seats.py::test_a_retired_master_seat_is_refused_as_a_hive_owner_and_nothing_is_written",
+        "tests/test_swarm_v2_master_seats.py::test_a_seat_the_tick_retires_during_a_manual_master_count_change_stays_retired",
+        "tests/test_swarm_v2_master_seats.py::test_a_seats_write_that_keeps_losing_its_race_names_what_was_not_saved"
+      ]
+    },
+    {
       "id": "swarm-tick-launch-cluster",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/tc-h11",
@@ -948,7 +998,7 @@
       "id": "swarm-night-watch-drill",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-nightwatch-fixture",
-      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record; a live swarm, a stopped one or a held seat is refused untouched.",
+      "behaviour": "agentihooks swarm SLUG night-watch-drill sets the night watch gate to enforce on a running or paused scratch proof swarm with an empty front door seat, passes the tick's night watch across the empty seat threshold, respawns the master and stores the drill record, leaving a paused swarm paused; a live swarm, a stopped one or a held seat is refused untouched.",
       "seam": "scripts.swarm.night_watch_drill.command through the swarm command parser",
       "tests": [
         "tests/swarm/test_night_watch_drill.py::test_the_drill_respawns_the_empty_front_door_seat_of_a_scratch_swarm_and_records_it",
@@ -963,6 +1013,10 @@
         "tests/swarm/test_night_watch_drill.py::test_the_drill_needs_both_the_scratch_flag_and_a_proof_swarm_name",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_live_swarm_and_leaves_it_untouched",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_that_is_not_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused",
+        "tests/swarm/test_night_watch_drill.py::test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running",
+        "tests/swarm/test_night_watch_drill.py::test_the_redis_budget_rebinds_every_part_of_the_running_view",
+        "tests/swarm/test_night_watch_drill.py::test_an_update_through_the_running_view_keeps_the_stored_state_paused",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
       ]
     },
@@ -3516,6 +3570,17 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
+      "id": "root-hive-github-user-login",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
+      "behaviour": "The hive join github check probes the installation endpoint only when the auth mode is app, or is unset on a joined hive member; a root hive session with no auth mode and no member id probes its user login, so a workstation launch on a user gh login passes the check.",
+      "seam": "scripts.hive.join_checks.github_ready",
+      "tests": [
+        "tests/hive/test_join_checks.py::test_root_hive_without_an_auth_mode_checks_github_as_its_user_login",
+        "tests/hive/test_join_checks.py::test_a_member_with_a_token_auth_mode_checks_github_as_its_user"
       ]
     },
     {

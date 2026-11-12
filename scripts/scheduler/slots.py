@@ -4,11 +4,15 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from importlib import import_module
 from types import FunctionType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from scripts.events.bus import StateStore
     from scripts.swarm.store import RedisStore
+
+LOCAL = "local"
+HIVE = "hive"
+PLACEMENTS = (LOCAL, HIVE)
 
 
 class Slot(Protocol):
@@ -121,11 +125,26 @@ class WorkflowSlot:
     name: str
     case: str
     project: str
+    placement: str = LOCAL
+    needs: tuple[str, ...] = ()
 
-    def record(self) -> dict[str, str]:
-        return {"kind": "workflow", "name": self.name, "case": self.case, "project": self.project}
+    def record(self) -> dict[str, object]:
+        return {
+            "kind": "workflow",
+            "name": self.name,
+            "case": self.case,
+            "project": self.project,
+            "placement": self.placement,
+            "needs": list(self.needs),
+        }
 
     def deliver(self, event: dict[str, object], delivery_id: str, state: "StateStore") -> None:
+        if self.placement == HIVE:
+            from scripts.hive import run_placement
+
+            run = run_placement.Run(delivery_id, self.name, self.case, self.project, str(event["owner"]), self.needs)
+            run_placement.dispatch(run, cast("object", swarm_store(state).redis))  # pragma: no mutate
+            return
         from scripts.workflows import scheduled
 
         scheduled.start(self.name, self.case, self.project, delivery_id, str(event["owner"]))
@@ -145,6 +164,7 @@ def restore(record: dict[str, Any]) -> Slot:
     kind = fields.pop("kind")
     if kind == "workflow":
         fields.setdefault("project", "")
+        fields["needs"] = tuple(fields.get("needs", ()))
     return KINDS[kind](**fields)
 
 
