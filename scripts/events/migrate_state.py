@@ -39,9 +39,10 @@ def _legacy(bus: Any, bucket: str, keys: list[str]) -> tuple[list[str], int]:
         return [], 0
     prefix = f"$KV.{bucket}."
     present: list[str] = []
-    for name in sorted(info.state.subjects or {}):
-        last = bus._loop.run(bus._js.get_last_msg(stream, name))
-        if (last.headers or {}).get("KV-Operation") not in ("DEL", "PURGE"):
+    subjects: dict[str, int] = info.state.subjects or {}
+    for name in sorted(subjects):
+        headers: dict[str, str] = bus._loop.run(bus._js.get_last_msg(stream, name)).headers or {}
+        if headers.get("KV-Operation") not in ("DEL", "PURGE"):
             present.append(name.removeprefix(prefix))
     store = NatsStateStore(bus._loop, bus._js, bucket, False)
     return present, sum(1 for key in keys for _ in store.watch(key))
