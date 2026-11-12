@@ -226,6 +226,26 @@ def test_the_detector_takes_over_a_stale_ci_budget_finding_in_task_hours(redis):
     assert [found.measure for found in standing.findings(redis, "sw", later)] == [0.4]
 
 
+def test_a_whole_run_overrun_after_detector_episodes_counts_on_its_own_measure(redis):
+    _detected(redis, 0.5, "d1", NOW)
+    _detected(redis, 0.6, "d2", NOW + 60_000)
+    _overran(redis, 17.4, "run-1", NOW + 120_000)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["fired"], row["episodes"], row["detector_fired"], row["detector_episodes"]) == (
+        1,
+        ["run-1"],
+        2,
+        ["d1", "d2"],
+    )
+    (found,) = standing.findings(redis, "sw", NOW + 120_000)
+    assert (found.evidence[0], found.evidence[-1]) == ("Fired 1 time", "Stage detector fired 2 times")
+    later = NOW + 120_000 + standing.STALE_MS
+    _detected(redis, 0.4, "d3", later)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["fired"], row["episodes"], row["unit"]) == (3, ["d1", "d2", "d3"], "task hours")
+    assert "detector_fired" not in row and "detector_episodes" not in row
+
+
 def _legacy(redis, fired):
     verdict = {"value": "established", "note": "known", "by": "master", "at": NOW, "measure": fired}
     evidence = [f"Fired {fired} times"]
