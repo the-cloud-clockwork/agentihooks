@@ -146,7 +146,7 @@ class InboxStore:
         self,
         redis: Any,
         *,
-        persist: Callable[[Any], None] | None = None,
+        persist: Any = None,
         session_id: str = "",
         world: str | None = None,
     ) -> None:
