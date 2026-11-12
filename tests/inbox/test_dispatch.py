@@ -49,7 +49,7 @@ def test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks(
     send(dispatcher, "bridge-1", done)
     held = store.send("operator", "bob", "second", ref="sw:3:b2")
     [open_delivery] = dispatcher.reserve("bob", "bridge-1")
-    keys, _ = store.keys_at(["alice", "bob"])
+    keys, _ = store.keys_at(["alice", "bob", "carol"])
     assert {
         store.key("deliveries", "bob"),
         store.key("seen", "bob"),

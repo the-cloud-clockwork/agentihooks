@@ -349,7 +349,8 @@
       "seam": "InboxStore.keys_at through RedisStore.export, snapshot.take and snapshot.restore",
       "tests": [
         "tests/inbox/test_dispatch.py::test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks",
-        "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore"
+        "tests/swarm/test_snapshot.py::test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore",
+        "tests/swarm/test_snapshot.py::test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore"
       ]
     },
     {
