@@ -497,7 +497,7 @@
   "scripts/scheduler/service.py": 9,
   "scripts/scheduler/slots.py": 35,
   "scripts/scout/cli.py": 4,
-  "scripts/scout/loop.py": 37,
+  "scripts/scout/loop.py": 21,
   "scripts/select_profile.py": 12,
   "scripts/serena_router_daemon.py": 18,
   "scripts/session_bands.py": 3,
