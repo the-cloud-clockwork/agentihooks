@@ -4346,7 +4346,7 @@ One tick pass reconciles one swarm with its agents, panes, ledger and hives. The
 groups, and every piece of work inside a group is a registered step. The step names, the group each belongs to and
 the place each group runs in the pass are listed in
 [Tick engine steps](../reference/tick-engine-steps.md#groups-and-their-sites); this section covers how the engine runs
-them, the two lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
+them, the three lanes, the declared budgets and intervals, the records a pass leaves, the ports steps reach outside
 systems through, and the cadence the passes run at.
 
 In the observe group the execution reconcile step ends any orphan execution still holding a seat (see
@@ -4380,17 +4380,19 @@ agentihooks swarm <slug> set tick-mode=sequential   # the default
 | `sequential` | One step at a time in group order. |
 | `parallel` | Eagerly: each step starts the moment every step it needs has ended, on at most 8 workers. Records keep group order. |
 
-A parallel pass has two lanes, each with its own deadline from the start of the pass:
+A parallel pass has three lanes, each with its own deadline:
 
 | Lane | Deadline | Steps |
 |---|---|---|
-| critical | 110 seconds | Every step whose lane is not `slow`. A step declares lane `tick` unless it names another. |
-| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps of the `wrapper events` and `wrapper metrics` groups, which run after the `tick call` step of the `wrapper reboot` group has spawned. |
+| critical | 110 seconds from the start of the pass | Every step whose lane is neither `slow` nor `closing`. A step declares lane `tick` unless it names another. |
+| slow | 400 seconds | Steps that declare lane `slow`: today the eleven report steps of the `wrapper events` and `wrapper metrics` groups, which run after the `tick call` step of the `wrapper reboot` group has spawned. Counted from the start of the pass. |
+| closing | 30 seconds from the start of the pass `finally` | Last tick, heartbeat and status publish, the `closing` group the pass runs from its `finally` on every ending. See [The closing lane](../reference/tick-engine-steps.md#the-closing-lane). |
 
 The slow lane holds the ledger event pass, done recheck, progress checks, waits end, merge pass, doc report,
 priorities sweep, health findings, findings pass, metrics record and bottleneck status. They call the ledger,
 GitHub, the findings checks and the metrics store. The command runner and quota notice run before spawn and stay
-critical, as do inbox wake, snapshot job, last tick, heartbeat and status publish.
+critical, as do inbox wake and snapshot job. Last tick, heartbeat and status publish run on the closing lane, so
+a pass whose critical lane ran out still writes its heartbeat and publishes its status.
 
 In a parallel pass a group runs its critical steps first and returns their records as soon as they end. Its slow
 lane steps, and every step that needs one of them, then start on a daemon thread of their own, which schedules
@@ -4399,7 +4401,7 @@ that needs a critical step recorded late or dropped is dropped too and recorded 
 of a group have all ended, the tick prints their actions, one line per failed step as
 `slow lane step <name> failed: <error>`, and `a slow lane step held <repr>` when the pass box holds a held
 exception, printed with its repr. When the pass ends it joins each handed off thread in turn for at most what is left of the slow lane
-deadline plus one second (`LATER_GRACE_S`), so every extra hung thread adds about one second. A need on a step of
+or closing lane deadline, whichever is later, plus one second (`LATER_GRACE_S`), so every extra hung thread adds about one second. A need on a step of
 another group is not waited for: a handed off step is ordered only against the steps of its own group. A
 sequential pass runs every step in group order, as before.
 
@@ -5113,12 +5115,15 @@ green runs, [39380496940](https://github.com/the-cloud-clockwork/agentihooks/act
 
 ### Tick heartbeat and stale watcher
 
-Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
-input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
-freshest account observation, and the ledger revision from the pass that last saw it change. The ledger probe
-writes the ledger every pass, so a revision that holds still is a write that never lands; a ledger the tick cannot
-read ends the pass early, which shows as no completed pass. An input never observed is recorded as unknown and
-never judged.
+Every tick pass that runs to its end, or ends early because no step stored a value a later step needed, writes the
+swarm's heartbeat and last tick to Redis from the closing group of its `finally`: when the pass ended, and when
+each input it decided on was last observed. Only a full pass clears the early end streak; a pass that raised or
+returned before its end writes neither (see
+[The closing lane](../reference/tick-engine-steps.md#the-closing-lane)). The host room counts from its last
+capacity decision, the quota from the freshest account observation, and the ledger revision from the pass that last
+saw it change. The ledger probe writes the ledger every pass, so a revision that holds still is a write that never
+lands; a ledger the tick cannot read ends the pass early, which shows as no completed pass. An input never observed
+is recorded as unknown and never judged.
 
 The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
 its last pass. The tick never judges itself: `agentihooks swarm tick-watch`, a process apart from the tick that

@@ -101,7 +101,14 @@ def classify(slug: str, task: dict, environ: dict) -> ProfileDecision:
     params = {"id": task.get("id"), "title": task.get("title", "")}
     try:
         output = runner.run(PURPOSE, state(slug, task), params, decider=decide, environ=environ)
-    except (ClassifierUnavailable, definitions.DefinitionError) as exc:
+    except ClassifierUnavailable as exc:
+        return ProfileDecision(
+            DEFAULT_PROFILES[CLASSIFIED_LANE],
+            "classifier unavailable",
+            f"{CLASSIFIED_LANE} lane default: profile classification is unavailable ({exc})",
+            anchors=anchors(task),
+        )
+    except definitions.DefinitionError as exc:
         raise ProfileUnresolved(
             f"task {task.get('id')} profile classification is unavailable ({exc}): {_remedy(slug, task)}"
         ) from exc

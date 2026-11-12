@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import json
 import multiprocessing
@@ -10,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 from time import process_time
 from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -24,20 +27,30 @@ from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import split_key, write_part
 from scripts.ci_mutation.stats_dependencies import records_within
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from libcst import Module
+    from libcst.metadata import MetadataWrapper
+    from mutmut.mutation.file_mutation import Mutation
+    from mutmut.mutation.pragma_handling import IgnoredCode
+
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
-    module, mutations, _ = created_mutations(filename, source)
-    return module, on_changed_lines(module, mutations, changed)
+def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[Module, list[Mutation]]:
+    wrapper, mutations, _ = created_mutations(filename, source)
+    return wrapper.module, on_changed_lines(wrapper, mutations, changed)
 
 
-def on_changed_lines(module, mutations: list, changed: set[int]) -> list:
-    from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
+def on_changed_lines(wrapper: MetadataWrapper, mutations: list[Mutation], changed: set[int]) -> list[Mutation]:
+    """Keep the mutations whose changed source lines meet changed, reusing the positions wrapper resolved before."""
+    from libcst.metadata import WhitespaceInclusivePositionProvider
 
-    positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
+    module = wrapper.module
+    positions = wrapper.resolve(WhitespaceInclusivePositionProvider)
     selected = []
     for mutation in mutations:
         position = positions[mutation.original_node]
@@ -53,7 +66,8 @@ def on_changed_lines(module, mutations: list, changed: set[int]) -> list:
     return selected
 
 
-def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
+def created_mutations(filename: str, source: str) -> tuple[MetadataWrapper, list[Mutation], list[Mutation]]:
+    """Parse source once and return its metadata wrapper with the graded and the possible mutations on it."""
     import libcst as cst
     from libcst.metadata import MetadataWrapper
     from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
@@ -61,9 +75,10 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
     from mutmut.mutation.pragma_handling import get_ignored_lines
 
     class Visitor(MutationVisitor):
-        def __init__(self, ignored, allowed) -> None:
+        def __init__(self, ignored: IgnoredCode, allowed: Callable[[cst.CSTNode], bool]) -> None:
             super().__init__(mutation_operators, ignored)
             self.allowed = allowed
+            self.refused: list[cst.CSTNode] = []
 
         # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
         def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
@@ -71,19 +86,22 @@ def created_mutations(filename: str, source: str) -> tuple[object, list, list]:
             if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
                 return skipped
             if not self.allowed(node):
+                self.refused.append(node)
                 return True
             return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
 
-    wrapper = MetadataWrapper(cst.parse_module(source))
+    wrapper = MetadataWrapper(cst.parse_module(source), unsafe_skip_copy=True)
     ignored = get_ignored_lines(filename, source, wrapper)
     graded = Visitor(
         ignored,
         lambda node: all(map(is_dataclass, node.decorators)) if isinstance(node, cst.ClassDef) else True,
     )
+    wrapper.visit(graded)
+    if not any(graded.refused):
+        return wrapper, graded.mutations, graded.mutations
     possible = Visitor(ignored, lambda node: True)
-    module = wrapper.visit(graded)
     wrapper.visit(possible)
-    return module, graded.mutations, possible.mutations
+    return wrapper, graded.mutations, possible.mutations
 
 
 def is_dataclass(decorator) -> bool:
@@ -136,24 +154,28 @@ def plain_copies(code: str) -> str:
 
 
 def mutation_counts(filename: str, source: str, changed: set[int]) -> tuple[int, list[str]]:
+    """Count the graded mutants on changed lines and name the changed functions only ungraded mutants reach."""
     from libcst import FunctionDef
-    from libcst.metadata import MetadataWrapper, PositionProvider
+    from libcst.metadata import PositionProvider
 
-    module, graded, possible = created_mutations(filename, source)
-    positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
+    wrapper, graded, possible = created_mutations(filename, source)
+    positions = wrapper.resolve(PositionProvider)
     found = [
         mutation.contained_by_top_level_function
-        for mutation in on_changed_lines(module, graded, changed)
+        for mutation in on_changed_lines(wrapper, graded, changed)
         if isinstance(mutation.contained_by_top_level_function, FunctionDef)
     ]
-    in_body = {
-        mutation.contained_by_top_level_function
-        for mutation in on_changed_lines(module, possible, changed)
+    reached = set(found)
+    outside = [
+        mutation
+        for mutation in possible
         if isinstance(mutation.contained_by_top_level_function, FunctionDef)
+        and mutation.contained_by_top_level_function not in reached
         and positions[mutation.original_node].start.line
         >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
-    }
-    ungraded = sorted(in_body.difference(found), key=lambda function: positions[function].start.line)
+    ]
+    in_body = {mutation.contained_by_top_level_function for mutation in on_changed_lines(wrapper, outside, changed)}
+    ungraded = sorted(in_body, key=lambda function: positions[function].start.line)
     return len(found), [function.name.value for function in ungraded]
 
 
