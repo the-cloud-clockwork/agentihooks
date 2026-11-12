@@ -47,6 +47,15 @@ def notify_without_checking(folder, seat, herdr):
     return "room" if _room_notice(folder, seat, herdr) else "idle"
 
 
+def tell_before_checking(folder, seat, herdr):
+    # ruleid: feature-quick-swarm-pane-typing
+    told = _room_notice(folder, seat, herdr)
+    why = _busy(seat, herdr)
+    if why:
+        return why
+    return "room" if told else "idle"
+
+
 def _nudge(folder, seat, herdr, now):
     # ok: feature-quick-swarm-pane-typing
     return herdr.prompt(seat.pane_id, NUDGE)

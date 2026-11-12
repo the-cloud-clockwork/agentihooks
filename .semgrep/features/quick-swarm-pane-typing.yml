@@ -37,12 +37,10 @@ rules:
                   - pattern: _room_notice(...)
                   - pattern: _nudge(...)
               - pattern-not-inside: |
-                  def $F(...):
-                    ...
-                    $WHY = _busy(...)
-                    if $WHY:
-                      return $WHY
-                    ...
+                  $WHY = _busy(...)
+                  if $WHY:
+                    return $WHY
+                  ...
     paths:
       include:
         - /scripts/quick/
