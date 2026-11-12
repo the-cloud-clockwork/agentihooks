@@ -4748,6 +4748,27 @@
       ]
     },
     {
+      "id": "hive-run-collect",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hive-run-collect-caller",
+      "behaviour": "A scheduler that sends a hive run order records the hive and owner in its own machine's sent run order index, and every runner pass collects each sent run the hive reported, restoring its folder and posting its owner one notice, then forgets the order once collected, noticed elsewhere, expired or refused.",
+      "seam": "scripts.hive.run_collect.remember and poll, scripts.scheduler.slots.WorkflowSlot.deliver, scripts.scheduler.core.Scheduler.collect_runs and scripts.scheduler.service.run",
+      "tests": [
+        "tests/hive/test_run_collect.py::test_remember_records_the_hive_and_owner_of_a_sent_run",
+        "tests/hive/test_run_collect.py::test_a_collected_run_is_returned_and_forgotten",
+        "tests/hive/test_run_collect.py::test_a_run_the_hive_has_not_reported_stays_for_the_next_pass",
+        "tests/hive/test_run_collect.py::test_an_expired_receipt_drops_its_run",
+        "tests/hive/test_run_collect.py::test_a_run_another_pass_already_noticed_is_dropped",
+        "tests/hive/test_run_collect.py::test_a_refused_run_folder_drops_only_that_run",
+        "tests/hive/test_run_collect.py::test_poll_defaults_to_the_scheduled_collect",
+        "tests/hive/test_run_collect.py::test_a_reported_hive_run_reaches_its_owner_from_the_sending_host",
+        "tests/hive/test_run_collect.py::test_a_hive_slot_remembers_the_run_order_it_sent",
+        "tests/hive/test_run_collect.py::test_a_hive_slot_with_no_fitting_hive_remembers_nothing",
+        "tests/hive/test_run_collect.py::test_collect_runs_polls_the_index_of_its_own_machine",
+        "tests/hive/test_run_collect.py::test_every_runner_pass_collects_after_dispatching"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
