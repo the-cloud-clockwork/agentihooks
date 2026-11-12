@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -1029,16 +1030,24 @@ def shared_units(tmp_path, monkeypatch):
     installed = tmp_path / "installed-agentihooks"
     monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", installed)
     monkeypatch.setattr(install, "install_root", lambda: installed)
+    tool = tmp_path / "tool" / "bin"
+    tool.mkdir(parents=True)
+    (tool / "agentihooks").write_text("#!/bin/sh\n")
+    link = tmp_path / "local" / "bin" / "agentihooks"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tool / "agentihooks")
+    monkeypatch.setattr(install, "_cli_link", lambda: link)
+    monkeypatch.setattr(sys, "executable", str(tool / "python"))
     shared = tmp_path / "systemd" / "user"
     monkeypatch.setattr(timer, "UNIT_DIR", shared)
-    return install, installed, shared
+    return install, installed, shared, str(link)
 
 
 def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, tmp_path, monkeypatch, capsys):
-    install, installed, shared = shared_units
+    install, installed, shared, binary = shared_units
     calls = []
     run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
-    assert timer.ensure("/installed/bin/agentihooks", run=run)
+    assert timer.ensure(binary, run=run)
     before = {path.name: path.read_text() for path in shared.iterdir()}
     calls.clear()
 
@@ -1048,7 +1057,7 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
     assert timer.ensure("/scratch/bin/agentihooks", shared, run=run) is False
 
     assert {path.name: path.read_text() for path in shared.iterdir()} == before
-    assert 'ExecStart="/installed/bin/agentihooks" swarm waker' in before["agentihooks-inbox-waker.service"]
+    assert f'ExecStart="{binary}" swarm waker' in before["agentihooks-inbox-waker.service"]
     assert calls == []
     refusal = (
         f"this run comes from {scratch}, not the installed agentihooks at {installed}, "
@@ -1065,14 +1074,10 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
 
 
 def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_units):
-    _, _, shared = shared_units
+    _, _, shared, binary = shared_units
     calls = []
-    assert timer.ensure(
-        "/installed/bin/agentihooks", run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
-    )
-    assert (
-        'ExecStart="/installed/bin/agentihooks" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
-    )
+    assert timer.ensure(binary, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0))
+    assert f'ExecStart="{binary}" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
