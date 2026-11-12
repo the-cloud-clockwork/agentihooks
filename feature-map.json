@@ -1567,6 +1567,16 @@
       ]
     },
     {
+      "id": "verify-binds-held-managed-launch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-verify-settles-held-launch",
+      "behaviour": "The tick verify step passes every managed app server agent to the runtime binding pass, including one whose launch check is held, so a held agent whose server died is settled in that pass and frees its seat; held agents are still skipped by the rest of the verify loop and a held agent that is not managed is not bound.",
+      "seam": "scripts.tick.steps.observe._verify and the runtime bindings it calls",
+      "tests": [
+        "tests/swarm/test_launch_check.py::test_verify_binds_a_managed_agent_whose_launch_check_is_held"
+      ]
+    },
+    {
       "id": "swarm-master-seat",
       "origin": "inventory",
       "behaviour": "A swarm whose master is down launches its master first and promotes one live engineer only when the forced launch fails.",

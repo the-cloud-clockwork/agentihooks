@@ -1,11 +1,13 @@
 import json
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from hooks.context import profile_chain
 from scripts.swarm import launch_check, master_start
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -896,6 +898,32 @@ def test_record_report_and_judged(store, launched):
     assert launch_check.judged(store, "sw") == {"pending-one"}
     launch_check.forget(store, "sw", "pending-one")
     assert launch_check.pending(store, "sw") == {}
+
+
+@pytest.mark.feature("verify-binds-held-managed-launch")
+@pytest.mark.parametrize(("transport", "bound"), [(APP_SERVER_TRANSPORT, True), ("", False)])
+def test_verify_binds_a_managed_agent_whose_launch_check_is_held(
+    store: RedisStore, transport: str, bound: bool
+) -> None:
+    from scripts.tick.steps import observe
+
+    agent = AgentRecord("engineer@sw-0001", "eng", "t1", harness="codex", transport=transport, started_at=LAUNCH)
+    store.put_agent("sw", agent)
+    launch_check.record(store, "sw", agent, {"joined": {"expected": "a", "actual": "b"}}, LAUNCH, 0, held=True)
+    seen: list[str] = []
+
+    def bindings(agents: list[AgentRecord]) -> dict:
+        seen.extend(agent.name for agent in agents)
+        return {name: {"process": False} for name in seen}
+
+    runtime = SimpleNamespace(bindings=bindings, live_names=set, retire=Mock(return_value=True))
+
+    actions = observe._verify("sw", store, Mock(), runtime, {"t1": {"state": "claimed"}}, LAUNCH + 60_000)
+
+    assert seen == ([agent.name] if bound else [])
+    assert actions == []
+    runtime.retire.assert_not_called()
+    assert store.agents("sw") == [agent]
 
 
 def test_relaunch_mark_is_set_and_cleared_per_task(store):
