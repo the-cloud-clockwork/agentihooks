@@ -913,7 +913,7 @@ def test_verify_binds_a_managed_agent_whose_launch_check_is_held(
     seen: list[str] = []
 
     def bindings(agents: list[AgentRecord]) -> dict:
-        seen.extend(agent.name for agent in agents)
+        seen.extend(bound.name for bound in agents)
         return {name: {"process": False} for name in seen}
 
     runtime = SimpleNamespace(bindings=bindings, live_names=set, retire=Mock(return_value=True))
