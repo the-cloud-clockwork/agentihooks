@@ -355,8 +355,8 @@ class TestRepositoryNamedAreas:
     def test_within_strips_only_the_edited_repository_name(self):
         assert within("k8s/charts/x", ["antoncore/k8s/charts"], "antoncore")
         assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "other")
-        assert not within("k8s/charts/x", ["antoncore/k8s/charts"])
-        assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"])
+        assert not within("k8s/charts/x", ["antoncore/k8s/charts"], "")
+        assert within("antoncore/k8s/charts/x", ["antoncore/k8s/charts"], "")
 
 
 class TestTerritory:

@@ -48,7 +48,7 @@ def _area(entry):
     return str(entry).strip().removeprefix("./").rstrip("/")
 
 
-def within(path: str, areas: list[str], repo: str = "") -> bool:
+def within(path: str, areas: list[str], repo: str) -> bool:
     """True when path, inside repository repo, falls under an area written plain or with repo as its first part."""
     forms = [form for area in map(_area, areas) if area for form in _forms(area, repo)]
     return any(path == form or path.startswith(form + "/") for form in forms)
@@ -172,7 +172,7 @@ class BuildGate:
         """(repository, path inside it) for each file the call edits or commits; Serena paths carry no repository."""
         if call.tool.startswith(SERENA):
             scope = call.tool_input.get("relative_path") or WHOLE_PROJECT
-            return [] if call.tool_input.get("dry_run") else [("", _area(scope))]
+            return [] if call.tool_input.get("dry_run") else [(NO_VALUE, _area(scope))]
         if call.tool == "Bash":
             commits = _git_commits(call.command, call.cwd)
             return sorted(
