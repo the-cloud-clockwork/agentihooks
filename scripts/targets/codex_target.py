@@ -27,11 +27,10 @@ import re
 import shlex
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
-from typing import Any, cast
+from typing import Any
 
 from scripts.targets._common import (
     LEGACY_MCP_SERVER_NAMES,
@@ -303,10 +302,11 @@ def _carry_native_keys(name: str, entry: dict[str, Any], spec: dict[str, Any]) -
     """Keep the keys a spec already writes in codex form; Claude-shaped values win, credential-shaped ones drop."""
     from hooks.secrets import scan as _scan_secrets
 
+    say: Callable[[str], None] = getattr(_install_module(), "_cprint")
     native = {key: spec[key] for key in _NATIVE_KEYS if spec.get(key) is not None}
     for key in list(native):
         if hits := _scan_secrets(json.dumps(native[key]), mode="strict"):
-            cast(ModuleType, _install_module())._cprint(  # pragma: no mutate
+            say(
                 f"  [!!] MCP '{name}' {key} looks like a credential ({', '.join(hits)}) — dropped from "
                 "config.toml. Name an environment variable instead of writing its value."
             )
