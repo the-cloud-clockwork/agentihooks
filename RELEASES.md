@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.823 · 2026-11-12
+
+### 2026-11-12 · eabff56d720b · #10833 · @agenticore-app
+
+**Report a night watch drill recovered only when a master is seated**
+
+The night watch drill was marking a run as recovered just because a respawn timestamp existed, even when the front door master seat was actually empty — three live incidents on paused scratch proof swarms slipped through this way. This change tightens the recovered check in scripts.swarm.night_watch_drill.run to also confirm a live master is seated on the front door seat after the recovery pass, either actively working or having written to the ledger since launch, so the drill's report now reflects whether the swarm truly came back, not just whether a respawn was attempted.
+
+### 2026-11-12 · f63887223740 · #10797 · @agenticore-app
+
+**Read account slots from an index instead of scanning the Redis keyspace**
+
+Account reconciliation used to find account keys by scanning the entire Redis keyspace with `SCAN MATCH`, costing 97 round trips over nearly a million keys and 0.85 s on the live swarm, enough to push the closing status-publish tick over its 2 s budget. Account slot writes now add entries to an index set, and reads use that index instead; a backfill walk runs once on an unindexed Redis and at most hourly afterward to catch older writers, with `reconstruct` always rewalking first. A Semgrep rule and feature map entry guard against reintroducing keyspace scans.
+
 ## v2.17.822 · 2026-11-12
 
 ### 2026-11-12 · d4a41f1e6d1a · #10827 · @nestorcolt
