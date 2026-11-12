@@ -412,7 +412,7 @@ def _foreign_run(unit_dir):
 
 
 def _scratch_binary(binary: str, unit_dir: Path) -> str:
-    """Why ``binary`` or this interpreter lies outside the installed CLI's environment, empty when both are inside it."""
+    """Why ``binary`` or this interpreter is outside the installed CLI's environment; empty when both are inside."""
     if unit_dir.resolve() != UNIT_DIR.resolve():
         return ""
     from scripts.targets._common import _install_module
