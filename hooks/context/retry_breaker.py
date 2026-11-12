@@ -18,6 +18,7 @@ Public API:
 
 import json
 import re
+from typing import Any
 
 from hooks._redis import get_redis, redis_key
 from hooks.common import log
@@ -240,7 +241,7 @@ def _failure_text(payload: dict, tool_result) -> str | None:
     return error_text if detected else None
 
 
-def on_post_tool_result(payload: dict) -> None:
+def on_post_tool_result(payload: dict[str, Any]) -> None:
     """PostToolUse handler: track failures, inject research instructions at threshold."""
     from hooks.config import RETRY_BREAKER_MAX
 
@@ -249,7 +250,7 @@ def on_post_tool_result(payload: dict) -> None:
     tool_result = payload.get("tool_response") or payload.get("tool_result")
     session_id = payload.get("session_id", "")
 
-    if not session_id or tool_result is None:
+    if not session_id or (tool_result is None and not payload.get("error")):
         return
 
     op_key = _payload_operation_key(payload)
