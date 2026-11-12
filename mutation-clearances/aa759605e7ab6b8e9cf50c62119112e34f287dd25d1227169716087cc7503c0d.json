@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/accounts.py:scripts.swarm_v2.accounts.x_stored_accounts:4420a60b66fe75f763ab25cf90bbc2e6f45357723a020460e7a2af9a1ee95bea": {
+    "reader": "standards_reader",
+    "reason": "typing.cast returns its value unchanged at runtime, so cast(None, store.redis) alters no output; the exists and smembers calls it wraps are killed by the paging and never walk tests."
+  }
+}

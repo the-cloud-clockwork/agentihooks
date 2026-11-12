@@ -82,11 +82,16 @@ def refusal(drill: Drill) -> str:
         return NOT_SCRATCH.format(slug=drill.slug)
     if config.state not in DRIVEN:
         return NOT_RUNNING.format(slug=drill.slug, state=config.state)
+    return SEAT_HELD.format(slug=drill.slug) if held(drill) else ""
+
+
+def held(drill: Drill) -> bool:
+    """Whether a live master holds the front door seat as seated: working, or starting with a ledger write."""
     live: set[str] = drill.runtime.live_names()
-    for agent in drill.store.agents(drill.slug):
-        if agent.lane == MASTER and seated(agent, live, drill.doc) and front_door.holds(drill.slug, agent.seat):
-            return SEAT_HELD.format(slug=drill.slug)
-    return ""
+    return any(
+        agent.lane == MASTER and seated(agent, live, drill.doc) and front_door.holds(drill.slug, agent.seat)
+        for agent in drill.store.agents(drill.slug)
+    )
 
 
 def _observed(drill: Drill) -> int | None:
@@ -124,7 +129,9 @@ def run(drill: Drill) -> dict[str, Any]:
         "observed_since": observed,
         "actions": actions,
         "respawned": respawned,
-        "recovered": respawned == drill.now_ms and not any(line.startswith(REFUSED) for line in actions),
+        "recovered": respawned == drill.now_ms
+        and not any(line.startswith(REFUSED) for line in actions)
+        and held(drill),
     }
     drill.store.redis.set(drill.store.key(drill.slug, KEY), json.dumps(record))
     return record

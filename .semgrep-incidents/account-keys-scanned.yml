@@ -1,0 +1,20 @@
+rules:
+  - id: account-keys-scanned
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Account slot hashes are found by walking the whole Redis keyspace with SCAN, which on the live swarm Redis took
+      97 round trips and 0.85 s over about 968 thousand keys on every status publish. List accounts with
+      stored_accounts, which reads the account index; only its one time backfill may walk the keyspace.
+    paths:
+      include:
+        - /scripts/
+        - account-keys-scanned.py
+    patterns:
+      - pattern-either:
+          - pattern: $R.scan_iter(..., match=account_key(...), ...)
+          - pattern: $R.scan(..., match=account_key(...), ...)
+          - pattern: $R.keys(account_key(...))
+      - pattern-not-inside: |
+          def _backfill_index(...):
+              ...

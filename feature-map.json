@@ -1,6 +1,20 @@
 {
   "features": [
     {
+      "id": "account-keys-indexed-not-scanned",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-budget",
+      "behaviour": "Listing and counting the fleet's provider account slots reads an index of account keys and never walks the whole Redis keyspace, which cost the closing status publish step about 0.85 s each pass over about 968 thousand keys; an account hash written without the index, by an older writer, is found by one backfill walk an hour at most.",
+      "seam": "scripts.swarm_v2.accounts.stored_accounts and fleet_held against the account index and Redis SCAN",
+      "tests": [
+        "tests/test_swarm_v2_accounts.py::test_listing_and_counting_accounts_never_walk_the_keyspace_once_its_index_exists",
+        "tests/test_swarm_v2_accounts.py::test_an_account_stored_before_the_index_existed_is_listed_by_one_backfill"
+      ],
+      "rules": [
+        "account-keys-scanned"
+      ]
+    },
+    {
       "id": "ci-select-markdown-glob-tests",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2484",
@@ -1011,6 +1025,19 @@
         "tests/swarm/test_night_watch_drill.py::test_the_redis_budget_rebinds_every_part_of_the_running_view",
         "tests/swarm/test_night_watch_drill.py::test_an_update_through_the_running_view_keeps_the_stored_state_paused",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
+      ]
+    },
+    {
+      "id": "swarm-night-watch-drill-needs-seat",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-drill-recovered-needs-seat",
+      "behaviour": "The night watch drill records recovered only when, after its passes, a live master holds the front door seat by the night watch's own seat test: seated, working or starting with a ledger write since launch, on the front door seat or on no seat as a master that predates seats; a respawn whose master never launches, is not live, stays starting without a ledger write or sits on another seat records recovered false.",
+      "seam": "scripts.swarm.night_watch_drill.run through the swarm command parser",
+      "tests": [
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_that_never_launches_leaves_the_drill_without_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_that_is_not_seated_on_the_front_door_leaves_the_drill_without_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_master_seated_on_the_front_door_is_a_recovery",
+        "tests/swarm/test_night_watch_drill.py::test_a_respawned_starting_master_counts_as_seated_once_it_wrote_the_ledger_since_launch"
       ]
     },
     {
