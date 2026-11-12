@@ -305,6 +305,72 @@ def test_a_relay_onto_a_note_is_his_comment_carrying_only_the_quoted_words():
     assert (comment["by"], comment["quote"]) == ("operator", "Keep the  Filters idea")
 
 
+@pytest.mark.feature("ledger-relay-note")
+def test_a_relay_to_the_notes_list_adds_a_new_operator_note_carrying_his_quoted_words() -> None:
+    make_ledger()
+    operator_words.record("master@a1-1", "Put this in notes: keep the Filters idea for later")
+    state, rejected = core.sync(
+        SLUG, ops=[relay(40, "notes", text="  Keep the filters idea.  ", quote="keep the filters idea")]
+    )
+    assert rejected == []
+    marks = {"relayed_by": "master@a1-1", "relayed_from": "master pane", "quote": "keep the Filters idea"}
+    note = state["notes"][-1]
+    assert note == {
+        "id": "rl-40",
+        "by": "operator",
+        "at": note["at"],
+        "text": "Keep the filters idea.",
+        "comments": [],
+        **marks,
+    }
+    assert note["at"]
+    event = state["_meta"]["events"][-1]
+    assert {k: event[k] for k in ("by", "kind", "target", "id", "text", *marks)} == {
+        "by": "operator",
+        "kind": "note added",
+        "target": "",
+        "id": "rl-40",
+        "text": "Keep the filters idea.",
+        **marks,
+    }
+    again, rejected = core.sync(
+        SLUG, ops=[relay(40, "notes", text="Keep the filters idea.", quote="keep the filters idea")]
+    )
+    assert rejected == []
+    assert [n["id"] for n in again["notes"]].count("rl-40") == 1
+
+
+@pytest.mark.feature("ledger-relay-note")
+def test_a_relay_to_the_notes_list_with_words_never_recorded_is_refused_and_adds_no_note() -> None:
+    make_ledger()
+    core.sync(SLUG, ops=[{"op": "join", "id": "j3", "by": "eng-1@a1-1", "role": "member"}])
+    operator_words.record("eng-1@a1-1", "keep the filters idea")
+    ops = [
+        relay(41, "notes", quote="drop every filter now"),
+        relay(42, "notes", by="eng-1@a1-1", quote="keep the filters idea"),
+    ]
+    state, rejected = core.sync(SLUG, ops=ops)
+    assert rejected == ["rl-41", "rl-42"]
+    assert [n["id"] for n in state["notes"]] == []
+
+
+@pytest.mark.feature("ledger-relay-note")
+def test_the_check_and_cli_take_the_notes_list_as_the_relay_item(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ledger_relay.check(relay(43, "notes"))
+    with pytest.raises(ValueError, match="relay needs item"):
+        ledger_relay.check(relay(44, "notes/"))
+    make_ledger()
+    operator_words.record("master@a1-1", WORDS)
+    _cli(monkeypatch, "notes", "use the queue")
+    assert json.loads(capsys.readouterr().out)["item"] == "notes"
+    state, _ = core.sync(SLUG)
+    assert [(n["by"], n["text"], n["quote"]) for n in state["notes"]] == [
+        ("operator", "Use the queue.", "Use the queue")
+    ]
+
+
 def test_a_quote_the_span_search_misses_is_refused_not_stored_as_the_whole_prompt():
     operator_words.record("master@a1-1", "İstanbul is the city")
     assert operator_words.matching("master@a1-1", "i̇stanbul is the", within=None)
