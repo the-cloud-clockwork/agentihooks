@@ -42,5 +42,5 @@ def accept(found: Member, document: Path | None) -> list[str]:
         return list(problems)
     if source != target:
         target.write_text(text)
-    registry.update(found.folder, found.seat.seat, state=registry.PENDING)
+    registry.set_state(found.folder, found.seat.seat, registry.PENDING)
     return []

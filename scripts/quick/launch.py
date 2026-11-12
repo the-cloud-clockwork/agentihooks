@@ -88,12 +88,12 @@ def relaunch(
     deadline = time.monotonic() + wait_s
     while not bare(taken.pane_id):
         if time.monotonic() >= deadline:
-            registry.update(folder, seat_name, state=registry.PENDING)
+            registry.set_state(folder, seat_name, registry.PENDING)
             return "pane-busy"
         sleep(POLL_S)
     code = 1
     try:
         code = start_seat(folder, swarm, taken, base, start)
     finally:
-        registry.update(folder, seat_name, state=registry.READY if code == 0 else registry.PENDING)
+        registry.set_state(folder, seat_name, registry.READY if code == 0 else registry.PENDING)
     return "started" if code == 0 else f"failed-{code}"

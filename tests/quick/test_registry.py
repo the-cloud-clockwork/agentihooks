@@ -35,18 +35,18 @@ def test_a_missing_or_broken_registry_loads_as_none(tmp_path):
 
 def test_update_changes_one_seat_and_keeps_the_rest(tmp_path):
     _swarm(tmp_path)
-    changed = registry.update(tmp_path, "eng-1", state=registry.PENDING)
+    changed = registry.set_state(tmp_path, "eng-1", registry.PENDING)
     assert changed is not None and changed.state == registry.PENDING
     loaded = registry.load(tmp_path)
     assert loaded is not None
     assert [seat.state for seat in loaded.seats] == [registry.READY, registry.PENDING, registry.READY]
-    assert registry.update(tmp_path, "eng-9", state=registry.PENDING) is None
+    assert registry.set_state(tmp_path, "eng-9", registry.PENDING) is None
 
 
 @pytest.mark.feature("quick-swarm")
 def test_a_pending_seat_is_taken_for_launch_only_once(tmp_path):
     _swarm(tmp_path)
-    registry.update(tmp_path, "eng-1", state=registry.PENDING)
+    registry.set_state(tmp_path, "eng-1", registry.PENDING)
     first = registry.take(tmp_path, "eng-1", registry.PENDING, registry.LAUNCHING)
     second = registry.take(tmp_path, "eng-1", registry.PENDING, registry.LAUNCHING)
     assert first is not None and first.state == registry.LAUNCHING

@@ -82,23 +82,23 @@ def locked(folder: Path) -> Generator[None, None, None]:
         yield
 
 
-def _change(folder: Path, name: str, want: str | None, changes: dict[str, str]) -> Seat | None:
+def _change(folder: Path, name: str, want: str | None, state: str) -> Seat | None:
     with locked(folder):
         swarm = load(folder)
         found = swarm.seat(name) if swarm else None
         if swarm is None or found is None or (want is not None and found.state != want):
             return None
-        changed = dataclasses.replace(found, **changes)
+        changed = dataclasses.replace(found, state=state)
         seats = tuple(changed if seat.seat == name else seat for seat in swarm.seats)
         save(folder, dataclasses.replace(swarm, seats=seats))
         return changed
 
 
-def update(folder: Path, name: str, **changes: str) -> Seat | None:
-    """Change fields of the seat called ``name``; None when the swarm or the seat is not there."""
-    return _change(folder, name, None, changes)
+def set_state(folder: Path, name: str, state: str) -> Seat | None:
+    """Set the state of the seat called ``name``; None when the swarm or the seat is not there."""
+    return _change(folder, name, None, state)
 
 
 def take(folder: Path, name: str, want: str, then: str) -> Seat | None:
     """Move the seat from state ``want`` to ``then`` under the lock; None when it was not in ``want``."""
-    return _change(folder, name, want, {"state": then})
+    return _change(folder, name, want, then)

@@ -89,7 +89,7 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     started = launch.start_all(folder, swarm, environ)
     failed = sorted(name for name, code in started.items() if code != 0)
     for name in failed:
-        registry.update(folder, name, state=registry.PENDING)
+        registry.set_state(folder, name, registry.PENDING)
     print(json.dumps({"quick_id": quick_id, "folder": str(folder), "started": started}))
     for seat in swarm.seats:
         print(json.dumps(dataclasses.asdict(seat)))
