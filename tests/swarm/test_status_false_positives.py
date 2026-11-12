@@ -16,7 +16,6 @@ def test_status_counts_each_detector_s_false_positive_verdicts(
     monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
     run("sw", "status")
     capsys.readouterr()
-    run("sw", "--as", "master@a1b2c3-0001", "verdict", "stale-claim/t1", "false-positive", "--note", "on checks")
-    capsys.readouterr()
+    cli.verdict_store(env[0], "sw").judge("stale-claim/t1", "false-positive", "on checks", "master@a1b2c3-0001", 1)
     run("sw", "status")
     assert "false positives  stale-claim 1 of 1 judged" in capsys.readouterr().out.splitlines()

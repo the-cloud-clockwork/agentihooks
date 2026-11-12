@@ -1812,7 +1812,7 @@
     },
     {
       "id": "swarm-health-corpus",
-      "origin": "t277",
+      "origin": "regression",
       "behaviour": "Each health detector (ceremony, scope inflation, proof loop, idle with claim, stale claim, over monitoring) keeps a corpus of recorded agent histories labelled finding or none, with at least one of each; the replay feeds every history through the health findings the way swarm status does and fails when a labelled case flips or a detector lacks either label. The two ninth of October ceremony histories are labelled none.",
       "seam": "scripts.swarm.health.corpus and python -m scripts.swarm.health.corpus",
       "tests": [
@@ -1828,7 +1828,7 @@
     },
     {
       "id": "swarm-health-false-positives",
-      "origin": "t277",
+      "origin": "regression",
       "behaviour": "Swarm status counts, per detector, the findings whose current verdict is false positive out of all judged findings and prints one false positives line when any finding is judged.",
       "seam": "agentihooks swarm status",
       "tests": [
