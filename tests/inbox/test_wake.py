@@ -358,8 +358,8 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
     herdr, ledger = FakeHerdr({"p1": "idle"}), StrictLedger()
     t = sent_at(second)
-    for n in range(10):
-        run(inbox, herdr, ledger, t + n * W)
+    actions = [a for n in range(10) for a in run(inbox, herdr, ledger, t + n * W)]
+    assert f"the ledger page refused message {first.id}, closed it" in actions
     assert [text for _, text in ledger.alerts if "second message" in text]
     closed = inbox.get(first.id)
     assert closed.state == "cancelled" and "refused" in closed.reason and "date" in closed.reason
