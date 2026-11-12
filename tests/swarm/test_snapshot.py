@@ -3,6 +3,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -191,21 +192,45 @@ def test_export_leaves_out_the_tick_lock_and_keeps_its_other_keys(store: RedisSt
 
 @pytest.mark.feature("swarm-snapshot-atomic-read")
 def test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_journal() -> None:
+    state, inbox, item_id, _ = close_mid_export(
+        lambda inbox, item_id, eng: (
+            lambda words: inbox.key("item", item_id) in words[1:] and words[0] not in ("TYPE", "EXISTS")
+        )
+    )
+    item_key, history_key = inbox.key("item", item_id), inbox.key("history", item_id)
+    keys, (before, after) = state["keys"], state["seen"]
+    assert before[item_key] != after[item_key]
+    pair = (keys[item_key]["value"], keys[history_key]["value"])
+    assert pair in ((before[item_key], before[history_key]), (after[item_key], after[history_key]))
+
+
+@pytest.mark.feature("swarm-snapshot-atomic-read")
+def test_a_delivery_closing_during_export_never_leaves_its_address_waiting_without_pending_mail() -> None:
+    state, inbox, _, eng = close_mid_export(
+        lambda inbox, item_id, eng: lambda words: words[:3] == ["SISMEMBER", inbox.key("waiting"), eng]
+    )
+    waiting = eng in state["members"].get(inbox.key("waiting"), [])
+    assert waiting == (inbox.key("pending", eng) in state["keys"])
+
+
+def close_mid_export(
+    trigger: Callable[[InboxStore, str, str], Callable[[list[str]], bool]],
+) -> tuple[dict[str, Any], InboxStore, str, str]:
+    """Export swarm sw while a delivery to its engineer closes right after the first command the trigger matches; the
+    export also carries what the item key and its history held before and after the close under seen."""
     import fakeredis
 
     server = fakeredis.FakeServer()
     other = fakeredis.FakeRedis(server=server, decode_responses=True)
 
-    class Closing(fakeredis.FakeRedis):
-        watched = ""
-        close: Callable[[], None] = staticmethod(lambda: None)
+    armed: list[Callable[[list[str]], bool]] = []
 
+    class Closing(fakeredis.FakeRedis):
         def execute_command(self, *args: object, **options: object) -> object:
             result = super().execute_command(*args, **options)
-            words = [str(arg) for arg in args]
-            if self.watched and self.watched in words[1:] and words[0].upper() not in ("TYPE", "EXISTS"):
-                Closing.watched = ""
-                Closing.close()
+            if armed and armed[0]([str(arg) for arg in args]):
+                armed.clear()
+                inbox.close(item.id, eng, "done")
             return result
 
     store = RedisStore(Closing(server=server, decode_responses=True))
@@ -213,14 +238,12 @@ def test_a_delivery_closing_during_export_never_pairs_an_old_item_with_a_newer_j
     eng = next(agent.name for agent in store.agents("sw") if agent.lane == "eng")
     inbox = InboxStore(other)
     item = inbox.send("operator", eng, "close me while the snapshot reads")
-    item_key, history_key = inbox.key("item", item.id), inbox.key("history", item.id)
-    before = (other.hgetall(item_key), other.lrange(history_key, 0, -1))
-    Closing.close = staticmethod(lambda: inbox.close(item.id, eng, "done"))
-    Closing.watched = item_key
-    keys = store.export("sw")["keys"]
-    after = (other.hgetall(item_key), other.lrange(history_key, 0, -1))
-    assert before != after
-    assert (keys[item_key]["value"], keys[history_key]["value"]) in (before, after)
+    read = [inbox.key("item", item.id), inbox.key("history", item.id)]
+    before = dict(zip(read, (other.hgetall(read[0]), other.lrange(read[1], 0, -1))))
+    armed.append(trigger(inbox, item.id, eng))
+    state = store.export("sw")
+    after = dict(zip(read, (other.hgetall(read[0]), other.lrange(read[1], 0, -1))))
+    return {**state, "seen": (before, after)}, inbox, item.id, eng
 
 
 def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_path, monkeypatch):

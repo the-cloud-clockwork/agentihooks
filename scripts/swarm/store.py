@@ -48,14 +48,24 @@ local read = {
   set = function(key) return redis.call('SMEMBERS', key) end,
   zset = function(key) return redis.call('ZRANGE', key, 0, -1, 'WITHSCORES') end,
 }
-local out = {}
-for index, key in ipairs(KEYS) do
+local values = tonumber(ARGV[1])
+local out, members, at = {}, {}, 2
+for index = 1, values do
+  local key = KEYS[index]
   local kind = redis.call('TYPE', key)['ok']
   local value = false
   if read[kind] then value = read[kind](key) end
   out[index] = {kind, value, redis.call('PTTL', key)}
 end
-return out
+for index = values + 1, #KEYS do
+  local count, found = tonumber(ARGV[at]), {}
+  for offset = 1, count do
+    if redis.call('SISMEMBER', KEYS[index], ARGV[at + offset]) == 1 then found[#found + 1] = ARGV[at + offset] end
+  end
+  members[#members + 1] = found
+  at = at + count + 1
+end
+return {out, members}
 """
 DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
@@ -879,10 +889,15 @@ class RedisStore:
         named |= {alias for name in list(named) for alias in self.names.aliases(name)}
         held = (key[len(self.seats.key("")) :].split(":")[0] for key in seats if key.startswith(self.seats.key("")))
         seated = {address for address in held if address.endswith(f"@{slug}")}
-        inbox, members = InboxStore(self.redis).keys_at(sorted(named | seated))
-        keys = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
+        mail, addresses = InboxStore(self.redis), cast(list[str], sorted(named | seated))
+        inbox, _ = mail.keys_at(addresses)
+        item = mail.key("item", "")
+        sets = {mail.key(shared): addresses for shared in ("waiting", "indexed", "open-indexed")}
+        sets[mail.key("wake-outbox")] = [key.removeprefix(item) for key in inbox if key.startswith(item)]
+        keys: list[str] = sorted(own) + seats + [self.culture.key(slug)] + inbox + self.names.swarm_keys(slug)
+        dumped, members = _dump(self.redis, keys, sets)
         return {
-            "keys": _dump(self.redis, keys),
+            "keys": dumped,
             "members": {f"{PREFIX}:index": [slug], **members},
             "fencing": fencing.read(self, slug),
             "names": self.names.export(slug),
@@ -918,7 +933,7 @@ def _whole(raw):
     return int(raw) if raw else None
 
 
-_DECODE = {
+_DECODE: dict[str, Callable[[Any], Any]] = {
     "string": lambda raw: raw,
     "hash": lambda raw: dict(zip(raw[::2], raw[1::2])),
     "list": lambda raw: raw,
@@ -934,13 +949,20 @@ _WRITE = {
 }
 
 
-def _dump(redis: Any, keys: list[str]) -> dict[str, dict[str, Any]]:
-    """Every key's type, value and time to live, read in one atomic script so no write lands between two keys."""
+def _dump(
+    redis: Any, keys: list[str], sets: dict[str, list[str]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[str]]]:
+    """Every key's type, value and time to live and which candidates each set holds, read in one atomic script so no
+    write lands between two reads."""
+    pairs = [(key, candidates) for key, candidates in sets.items() if candidates]
+    flat = [word for key, candidates in pairs for word in (str(len(candidates)), *candidates)]
+    rows, found = redis.eval(DUMP_KEYS, len(keys) + len(pairs), *keys, *(key for key, _ in pairs), len(keys), *flat)
     dumped = {}
-    for key, (kind, raw, ttl_ms) in zip(keys, redis.eval(DUMP_KEYS, len(keys), *keys)):
+    for key, (kind, raw, ttl_ms) in zip(keys, rows):
         if kind in _DECODE:
             dumped[key] = {"type": kind, "value": _DECODE[kind](raw), "ttl_ms": max(int(ttl_ms), 0)}
-    return dumped
+    members = {key: held for (key, _), held in zip(pairs, found) if held}
+    return dumped, members
 
 
 def redis_url(environ):
