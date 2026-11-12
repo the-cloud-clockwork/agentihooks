@@ -23,6 +23,13 @@ def gated(store: Any, slug: str, part: str) -> Any:
     return store.redis.scan_iter(match=store.key(slug, part, "*"))
 
 
+def other_guard(store: Any, slug: str, part: str, marker: Any) -> Any:
+    if not marker.exists():
+        return iter(())
+    # ruleid: swarm-part-scan-ungated
+    return store.redis.scan_iter(match=store.key(slug, part, "*"))
+
+
 def whole_swarm(store: Any, slug: str) -> Any:
     # ok: swarm-part-scan-ungated
     return store.redis.scan_iter(match=store.key(slug, "*"))

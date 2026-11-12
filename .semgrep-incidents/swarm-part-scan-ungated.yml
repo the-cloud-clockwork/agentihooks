@@ -17,6 +17,6 @@ rules:
           - pattern: $R.scan(..., match=$S.key($SLUG, $PART, "*"), ...)
           - pattern: $R.keys($S.key($SLUG, $PART, "*"))
       - pattern-not-inside: |
-          if not $G.exists(...):
+          if not $R.exists(...):
               return ...
           ...
