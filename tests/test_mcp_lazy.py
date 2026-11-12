@@ -261,7 +261,7 @@ def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, reque
             "serverInfo": {"name": expected.server_name, "version": expected.server_version},
         },
     }
-    assert len(replies[1]["result"]["tools"]) == 30
+    assert len(replies[1]["result"]["tools"]) == 35
 
 
 @pytest.mark.parametrize(
