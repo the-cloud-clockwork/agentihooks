@@ -9,6 +9,7 @@ from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
 
 GATED = ("code", "ci")
+DONE = {"state": "done", "awaiting": ""}
 WORKERS = ("eng", "ci")
 MERGED = "MERGED"
 MERGE = "merge it, then run swarm done again"

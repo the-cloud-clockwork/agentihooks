@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
 from scripts.inbox.store import InboxStore
-from scripts.swarm import capacity, dev_red, github_reads, naming, promotion_owner, release_wait
+from scripts.swarm import capacity, dev_red, done_gate, github_reads, naming, promotion_owner, release_wait
 from scripts.swarm.ledger_client import pass_state
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
@@ -349,7 +349,7 @@ def _lane(store, slug: str) -> str:
 def _green(slug, ledger, doc, last):
     run_id, actions = last["id"], []
     for task in [t for t in _promotion_tasks(doc) if t.get("state") in CLOSABLE]:
-        live = ledger.update_task(slug, task["id"], {"state": "done"}, by=SENDER, if_state=CLOSABLE)
+        live = ledger.update_task(slug, task["id"], done_gate.DONE, by=SENDER, if_state=CLOSABLE)
         if live.get("state") == "done":
             ledger.comment(slug, task["id"], CLEARED, by=SENDER)
             actions.append(f"closed {task['id']}, dev push run {run_id} passed")
