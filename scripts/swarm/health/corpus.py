@@ -14,6 +14,7 @@ from scripts.swarm.health import findings as health
 
 DETECTORS = ("ceremony", "scope inflation", "proof loop", "idle with claim", "stale claim", "over monitoring")
 LABELS = ("finding", "none")
+DEFAULT = Path(__file__).resolve().parents[3] / "tests" / "swarm" / "health_corpus"
 
 
 @dataclass(frozen=True)
@@ -70,8 +71,8 @@ def unproven(cases: list[Case]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """Replay the corpus directory given; exit 1 when a case flips or a detector is not proven both ways."""
-    cases = load(Path(argv[0]))
+    """Replay the corpus directory given, the repo corpus by default; exit 1 on a flip or a detector not proven."""
+    cases = load(Path(argv[0]) if argv else DEFAULT)
     flipped, missing = flips(cases, health.Limits()), unproven(cases)
     for case in flipped:
         print(f"flipped  {case.detector}  {case.name}: labelled {case.label}")

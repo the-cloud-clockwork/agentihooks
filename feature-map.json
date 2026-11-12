@@ -1821,7 +1821,9 @@
         "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_ceremony_histories_raise_no_finding",
         "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_histories_are_red_when_talk_counts_are_dropped",
         "tests/swarm/test_health_corpus.py::test_a_flipped_label_fails_the_replay",
-        "tests/swarm/test_health_corpus.py::test_a_detector_without_both_labels_fails_the_replay"
+        "tests/swarm/test_health_corpus.py::test_a_detector_without_both_labels_fails_the_replay",
+        "tests/swarm/test_status_talk_wiring.py::test_status_hands_the_detectors_talk_counts_as_the_corpus_replays_them",
+        "tests/swarm/test_status_talk_wiring.py::test_the_replay_reads_the_repo_corpus_when_no_directory_is_given"
       ]
     },
     {
