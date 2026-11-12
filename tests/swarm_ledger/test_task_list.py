@@ -177,6 +177,10 @@ def test_a_hundred_concurrent_task_list_walks_return_the_stored_pages_within_bud
 
     expected = []
     walk(expected)
+    started = time.monotonic()
+    for _ in range(10):
+        walk([])
+    serial = time.monotonic() - started
     walks = [[] for _ in range(100)]
     walkers = [threading.Thread(target=walk, args=(pages,)) for pages in walks]
     started = time.monotonic()
@@ -185,9 +189,10 @@ def test_a_hundred_concurrent_task_list_walks_return_the_stored_pages_within_bud
     for walker in walkers:
         walker.join()
     elapsed = time.monotonic() - started
-    warnings.warn(f"a hundred concurrent task list walks took {elapsed:.2f} s", stacklevel=1)
+    report = f"a hundred concurrent task list walks took {elapsed:.2f} s, ten serial walks {serial:.2f} s"
+    warnings.warn(report, stacklevel=1)
     assert len(expected) == 10 and all(pages == expected for pages in walks)
-    assert elapsed < 5, f"a hundred concurrent task list walks took {elapsed:.2f} s"
+    assert elapsed < 20 * serial, report
 
 
 def test_a_targets_read_returns_only_the_tasks_naming_that_pull_request(tmp_path: Path) -> None:

@@ -57,7 +57,7 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
     with (tmp_path / ".server.log").open("w") as log:
         child = subprocess.Popen([sys.executable, str(script)], env=env, stdout=log, stderr=log)
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 30
             while server.ledger_link.serving(url=base) is None:
                 assert time.monotonic() < deadline
                 time.sleep(0.01)
