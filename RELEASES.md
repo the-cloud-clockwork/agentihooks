@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.833 · 2026-11-12
+
+### 2026-11-12 · e529cc2768a9 · #10878 · @agenticore-app
+
+**Keep web links whole when reshaping swarm notices**
+
+`notice_text.plain` was mangling web links inside swarm notices, turning pull request and job links like `https://.../runs/.../job/...` into broken fragments such as `https: runs/ /job/` before they reached the ledger, even though the ledger's own check already strips links before applying its rules. This fix changes `plain` to reshape only the prose around links, leaving every link exactly as written, so follow-up comments like done gate and ready reopen notices keep working links to their gate jobs while still passing the ledger's plain words check.
+
+### 2026-11-12 · 0fe5e9a3eebd · #10879 · @agenticore-app
+
+**Close the writer lease lock file when writing the holder record fails**
+
+When WriterLease.acquire took the flock but then failed to write the holder record (pwrite, ftruncate, or fsync), it left the file descriptor open and unreachable, so release could never close it and the flock stayed held for the rest of the process, blocking any future acquire. This fix closes the descriptor before re-raising on any of those three failure paths, so the lock is properly released and a subsequent acquire succeeds. Tests plant each failure mode and verify the lease is freed and the descriptor closed exactly once.
+
 ## v2.17.832 · 2026-11-12
 
 ### 2026-11-12 · 336e8a6e2c52 · #10862 · @agenticore-app
