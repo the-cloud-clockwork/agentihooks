@@ -37,7 +37,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, An
     from scripts.hive import run_consumer, run_orders
     from scripts.workflows import loader
 
-    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path / "home")
     monkeypatch.setattr(loader.profile_chain, "read_state", lambda: {})
     root = tmp_path / "dev"
     project = root / "project"
