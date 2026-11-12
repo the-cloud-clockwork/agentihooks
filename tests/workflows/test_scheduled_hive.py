@@ -171,6 +171,7 @@ def test_collect_posts_one_notice_per_run_id(home: Path, redis: Any) -> None:
     assert scheduled.collect(redis, HIVE, RUN, "me", inbox=cast(Any, inbox)) is False
 
     assert len(inbox.sent) == 1
+    assert redis.hget(scheduled.receipt(HIVE, RUN), scheduled.NOTICED) == "1"
 
 
 @pytest.mark.feature("hive-run-result")

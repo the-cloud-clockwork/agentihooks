@@ -32,7 +32,7 @@ def delivery_folder(delivery_id: str) -> Path:
     return store.default_root().parent / DELIVERIES / cli.run_folder(delivery_id).name
 
 
-def command(name: str, case: Path, delivery_id: str, owner: str, hive: str = "") -> list[str]:
+def command(name: str, case: Path, delivery_id: str, owner: str, hive: str) -> list[str]:
     """The detached process line that runs one delivery and reports it to the owner, or to the receipt on a hive."""
     line = [sys.executable, "-P", "-m", "scripts.workflows.scheduled", owner, name, str(case), delivery_id]
     return [*line, hive] if hive else line
