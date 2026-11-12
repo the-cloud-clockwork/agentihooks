@@ -102,7 +102,7 @@ def tally(source: str, machines: list[tuple[str, str, dict | None]]) -> tuple[di
     merged: dict[str, dict | None] = {}
     for key, _, counts in machines:
         if counts is None:
-            merged.setdefault(key, None)
+            merged.setdefault(key)
             continue
         current = merged.get(key) or {}
         merged[key] = {harness: current.get(harness, 0) + counts.get(harness, 0) for harness in HARNESSES}
@@ -110,10 +110,7 @@ def tally(source: str, machines: list[tuple[str, str, dict | None]]) -> tuple[di
     totals = {harness: sum(counts.get(harness, 0) for counts in found) for harness in HARNESSES}
     agents = {"total": sum(totals.values()), "source": source, "reporting": len(found), "of": len(merged), **totals}
     ordered = sorted(merged.items(), key=lambda item: (names[item[0]] != LOCAL, names[item[0]], item[0]))
-    rows = [
-        {"name": names[key], "agents": None if counts is None else sum(counts.get(harness, 0) for harness in HARNESSES)}
-        for key, counts in ordered
-    ]
+    rows = [{"name": names[key], "agents": None if counts is None else sum(counts.values())} for key, counts in ordered]
     return agents, rows
 
 
