@@ -416,3 +416,11 @@ def test_origin_reads_the_public_origin_address_of_a_checkout() -> None:
     assert progress.origin("/repo", lambda argv, **options: CompletedProcess(argv, 2, "", "no remote")) == ""
     assert progress.origin("", run) == ""
     assert len(seen) == 1
+
+
+@pytest.mark.feature("tick-progress-origin-without-git")
+def test_origin_is_empty_where_git_is_not_installed() -> None:
+    def run(argv: list[str], **options: Any) -> Any:
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+
+    assert progress.origin("/repo", run) == ""

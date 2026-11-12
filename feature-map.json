@@ -5139,6 +5139,16 @@
       ]
     },
     {
+      "id": "tick-progress-origin-without-git",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2510",
+      "behaviour": "The swarm origin read by the tick step progress heads is empty where the git binary is not installed, as it is for a path with no origin, so a controller image without git passes the step instead of failing the whole tick pass.",
+      "seam": "scripts.gates.progress.origin, called by scripts.tick.steps.report._progress_heads",
+      "tests": [
+        "tests/gates/test_progress.py::test_origin_is_empty_where_git_is_not_installed"
+      ]
+    },
+    {
       "id": "swarm-auto-snapshot-size-budget",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2500",
