@@ -43,3 +43,41 @@ def test_the_projection_stops_at_a_slice_that_names_itself_as_its_phase() -> Non
         "tasks": [{"id": "t1", "slice": "slices/s1", "state": "open"}],
     }
     assert phase_projection.projected_phase_tasks(doc) == {"p1": []}
+
+
+def _tick_view_of_a_sliced_phase() -> dict[str, object]:
+    """A pass document as the tick view holds it, with no slices, for a phase whose planner sliced open tasks."""
+    return {
+        "phases": [{"id": "hiverun", "title": "Workflow runs on hives", "plan": "plans/a"}, {"id": "p2"}],
+        "tasks": [
+            {"id": "plan-hiverun", "phase": "hiverun", "state": "done"},
+            {"id": "hvr1", "phase": "hiverun", "slice": "slices/a.hvr1", "state": "open"},
+            {"id": "hvr2", "phase": "hiverun", "slice": "slices/a.hvr2", "state": "claimed"},
+            {"id": "t3", "phase": "missing", "slice": "slices/a.t3", "state": "open"},
+        ],
+    }
+
+
+@pytest.mark.feature("phase-pass-sliced-tasks")
+def test_a_task_whose_slice_the_pass_document_lacks_counts_under_the_phase_it_names() -> None:
+    assert phase_projection.projected_phase_tasks(_tick_view_of_a_sliced_phase()) == {
+        "hiverun": [("plan-hiverun", "done"), ("hvr1", "open"), ("hvr2", "claimed")],
+        "p2": [],
+    }
+
+
+@pytest.mark.feature("phase-pass-sliced-tasks")
+def test_a_task_whose_slice_the_document_holds_counts_under_the_slice_phase_not_its_own() -> None:
+    doc = {
+        "phases": [{"id": "p1"}, {"id": "p2"}],
+        "slices": [{"id": "s1", "phase": "phases/p1"}],
+        "tasks": [{"id": "t1", "phase": "p2", "slice": "slices/s1", "state": "open"}],
+    }
+    assert phase_projection.projected_phase_tasks(doc) == {"p1": [("t1", "open")], "p2": []}
+
+
+@pytest.mark.feature("phase-pass-sliced-tasks")
+def test_the_phase_pass_keeps_a_phase_open_while_its_sliced_tasks_are_open() -> None:
+    from scripts.swarm import phases
+
+    assert phases.phase_changes(_tick_view_of_a_sliced_phase()) == []

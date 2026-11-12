@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from scripts.inbox import store as inbox_store
-from scripts.swarm import dispatcher, freeze
+from scripts.swarm import dispatcher, freeze, hash_pages
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
@@ -120,10 +120,9 @@ def step(
     from scripts.hive import placement_waits
 
     graph, redis = hierarchy.project(doc)[0], store.redis
-    seen, asked = redis.smembers(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
-    refused = placement_waits.read(store, slug)
     holding = {a.name for _, holders in full.values() for a in holders}
-    asked = {name: entry for name, entry in asked.items() if name in holding}
+    seen, asked = redis.smembers(store.key(slug, WAITING)), hash_pages.picked(redis, store.key(slug, ASKED), holding)
+    refused = placement_waits.read(store, slug)
     waiting, actions = set(), []
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):

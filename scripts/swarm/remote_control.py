@@ -5,6 +5,7 @@ import os
 import time
 from collections.abc import Mapping
 
+from scripts.swarm import hash_pages
 from scripts.swarm.store import MASTER, RedisStore, connect
 
 FAILURES = "remote-control-failures"
@@ -77,7 +78,7 @@ def record(store: RedisStore, slug: str, name: str, message: str, at: int) -> No
 
 
 def failures(store: RedisStore, slug: str) -> dict[str, dict]:
-    return {name: json.loads(raw) for name, raw in store.redis.hgetall(store.key(slug, FAILURES)).items()}
+    return {name: json.loads(raw) for name, raw in hash_pages.fields(store.redis, store.key(slug, FAILURES)).items()}
 
 
 def on_notification(payload: Mapping, environ: Mapping[str, str] = os.environ) -> bool:
