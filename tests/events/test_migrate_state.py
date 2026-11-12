@@ -121,17 +121,18 @@ def test_interrupted_move_reports_failure_and_stays_pending(buses, command, monk
         copy(root, target, records[:1], plan)
         raise RuntimeError("interrupted during copy")
 
+    both = ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned", "--key", "foreign"]
     with monkeypatch.context() as broken:
         broken.setattr(nats_migration, "_copy_state", interrupted)
-        code, report = _run(command, capsys, APPLY)
+        code, report = _run(command, capsys, [*both, "--apply", "--quiescent"])
     assert code == 1
     assert report["failures"] == ["interrupted during copy"]
-    assert (report["would_move"], report["moved"]) == (2, 1)
-    code, dry = _run(command, capsys, ["--swarm", "rig", "--bucket", "spoke-work", "--key", "owned"])
+    assert (report["would_move"], report["moved"]) == (3, 1)
+    code, dry = _run(command, capsys, both)
     assert code == 0
-    assert (dry["imported"], dry["retained"], dry["would_move"]) == (False, 2, 1)
-    code, resumed = _run(command, capsys, APPLY)
-    assert (code, resumed["would_move"], resumed["moved"], resumed["failures"]) == (0, 1, 1, [])
+    assert (dry["imported"], dry["retained"], dry["would_move"]) == (False, 3, 2)
+    code, resumed = _run(command, capsys, [*both, "--apply", "--quiescent"])
+    assert (code, resumed["would_move"], resumed["moved"], resumed["failures"]) == (0, 2, 2, [])
     assert [entry.value for entry in scoped.for_swarm("rig").state("spoke-work").watch("owned")] == [
         b"first",
         b"second",

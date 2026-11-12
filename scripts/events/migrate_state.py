@@ -18,10 +18,9 @@ from .subjects import stream_name, subject
 
 def _target(bus: Any, swarm: str, bucket: str, keys: list[str]) -> tuple[int, bool]:
     """Owned revisions the swarm's scoped state stream holds and whether a completed import marks it."""
-    prefix = subject(swarm, "state", bucket)
     for name in (legacy_stream_name(swarm, f"STATE_{bucket}"), stream_name(swarm, f"STATE_{bucket}")):
         try:
-            info = bus._loop.run(bus._js.stream_info(name, subjects_filter=f"{prefix}.>"))
+            info = bus._loop.run(bus._js.stream_info(name, subjects_filter=">"))
         except NotFoundError:
             continue
         metadata: dict[str, str] = info.config.metadata or {}

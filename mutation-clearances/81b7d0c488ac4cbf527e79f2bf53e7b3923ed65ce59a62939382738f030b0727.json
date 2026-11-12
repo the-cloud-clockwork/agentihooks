@@ -1,0 +1,6 @@
+{
+  "scripts/events/migrate_state.py:scripts.events.migrate_state.x__legacy:df2f131233ade120123b707662ea2f7d8ff70b1fd3fd152c0ee84fd060dbab3d": {
+    "reader": "standards_reader",
+    "reason": "NatsStateStore.__init__ reads provision only in the ternary provision_state(...) if provision else js.key_value(bucket), never stores it or compares it with is, so None and False are both falsy and take the same branch."
+  }
+}
