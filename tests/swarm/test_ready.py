@@ -849,7 +849,7 @@ def test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_c
     fresh = {**stale, conflicting: pull_request({"state": "OPEN", "mergeable": "CONFLICTING"})}
     run = ready.Pass(merging.store, "sw", merging.ledger, stale.get, fresh.get, NOW)
     actions = ready.merge_pass(run, merging.rows)
-    assert merging.rows["t1"]["state"] == "done"
+    assert merging.rows["t1"]["state"] == merging.rows[prerequisite]["state"] == "done"
     told_line = f"task t3 {conflicting} has a merge conflict after task {prerequisite} merged, its owner was told"
     assert told_line in actions
     assert not [action for action in actions if "t4" in action]
@@ -861,9 +861,9 @@ def test_a_prerequisite_merge_tells_a_conflicting_dependent_owner_and_leaves_a_c
 
 
 @pytest.mark.feature("merge-pass-dependent-conflict-on-prerequisite-merge")
-@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("held", ["", "queue", "dependency"])
 def test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_already_failed(
-    merging: SimpleNamespace, held: bool
+    merging: SimpleNamespace, held: str
 ) -> None:
     from scripts.inbox.store import InboxStore
     from scripts.swarm.ledger_events import pull_request
@@ -877,7 +877,8 @@ def test_a_prerequisite_merge_tells_a_dependent_owner_once_when_its_cached_read_
         merging.rows["t3"]["awaiting"] = "merge"
         merging.rows["t5"] = {"id": "t5", "state": "open", "claimed_by": ""}
         found = ready.held_record(dependent, HEAD, TOP, owner, NOW)
-        found["dependency"] = {"kind": "task", "target": "t5"}
+        if held == "dependency":
+            found["dependency"] = {"kind": "task", "target": "t5"}
         ready.save(merging.store, "sw", "t3", found)
     queued = pull_request({"state": "OPEN", "mergeable": "MERGEABLE", "mergeQueueEntry": {"state": "UNMERGEABLE"}})
     stale = {URL: MERGED, dependent: queued}
