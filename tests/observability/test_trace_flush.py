@@ -694,7 +694,7 @@ def test_run_keeps_the_job_bound_armed_lowers_priority_and_logs_the_outcome(
     calls = []
     monkeypatch.setattr(trace_flush.os, "nice", lambda n: calls.append(("nice", n)))
     monkeypatch.setattr(
-        trace_flush, "supervise", lambda s: str(trace_flush.signal.getitimer(trace_flush.signal.ITIMER_REAL)[0] > 0)
+        trace_flush, "supervise", lambda s: f"{trace_flush.signal.getitimer(trace_flush.signal.ITIMER_REAL)[0]:.0f}"
     )
     trace_flush.signal.alarm(100)
     try:
@@ -702,7 +702,7 @@ def test_run_keeps_the_job_bound_armed_lowers_priority_and_logs_the_outcome(
     finally:
         trace_flush.signal.alarm(0)
     assert calls == [("nice", 10)]
-    assert capsys.readouterr().err == "trace_flush s: True\n"
+    assert capsys.readouterr().err == "trace_flush s: 100\n"
 
 
 def test_flush_once_reports_pending_work(monkeypatch, home):

@@ -35,7 +35,8 @@ def sleep_past(seconds):
 def record_pid(marker, seconds):
     import os
 
-    open(marker, "w").write(str(os.getpid()))
+    with open(marker, "w") as handle:
+        handle.write(str(os.getpid()))
     time.sleep(seconds)
 """
 
