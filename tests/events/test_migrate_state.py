@@ -149,6 +149,8 @@ def test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch(buses, comm
     legacy.state("spoke-work").create("gone", b"deleted later")
     kv = legacy._loop.run(legacy._js.key_value("spoke-work"))
     legacy._loop.run(kv.delete("gone"))
+    legacy.state("spoke-work").create("purged", b"purged later")
+    legacy._loop.run(kv.purge("purged"))
 
     async def refuse_watch(*args: object, **kwargs: object) -> None:
         raise AssertionError("listing opened a flow controlled key watch")
