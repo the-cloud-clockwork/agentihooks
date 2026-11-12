@@ -72,7 +72,7 @@ class Verdict:
     refusals: tuple[str, ...]
     matrix: dict[str, str]
     server: dict = field(default_factory=dict)
-    client: dict = field(default_factory=dict)
+    client: dict[str, object] = field(default_factory=dict[str, object])
 
     @property
     def compatible(self) -> bool:
@@ -142,8 +142,8 @@ def machine_status(run: Callable[[list[str]], subprocess.CompletedProcess]) -> C
     return status
 
 
-def machine_client(run: Callable[[list[str]], subprocess.CompletedProcess]) -> Callable[[], dict]:
-    def client() -> dict:
+def machine_client(run: Callable[[list[str]], subprocess.CompletedProcess[str]]) -> Callable[[], dict[str, object]]:
+    def client() -> dict[str, object]:
         return _json(run, ["herdr", *STATUS_CLIENT])
 
     return client
@@ -178,8 +178,8 @@ class Qualifier:
     def __init__(
         self,
         probe: Callable[[str], Observation],
-        status: Callable[[str], dict],
-        client: Callable[[], dict] | None = None,
+        status: Callable[[str], dict[str, object]],
+        client: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self.probe = probe
         self.status = status
@@ -199,7 +199,7 @@ class Qualifier:
             raise Incompatible(f"herdr server incarnation {incarnation} on {target} was replaced")
         cached = self.verdicts.get(target)
         same = cached is not None and cached.incarnation == incarnation
-        if same and self.status(target) == cached.server and (self.client is None or self.client() == cached.client):
+        if cached is not None and same and self.status(target) == cached.server and (self.client is None or self.client() == cached.client):
             return cached
         fresh = qualify(target, incarnation, self.probe(target))
         if cached is not None and not same:
