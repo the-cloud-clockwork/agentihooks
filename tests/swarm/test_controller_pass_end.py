@@ -166,7 +166,9 @@ def test_a_refused_closed_check_ends_the_pass_and_the_controller_runs_the_next_p
     output = capsys.readouterr()
     assert ledger.reads == ["proof", "proof"]
     assert ended(output.out) == [{"event": "controller_pass_end", "pass": 1, "outcome": "ledger_unreachable"}]
-    assert "controller: pass ended, next pass after one tick: ledger proof: connection refused reading proof" in output.err
+    assert (
+        "controller: pass ended, next pass after one tick: ledger proof: connection refused reading proof" in output.err
+    )
 
 
 @pytest.mark.feature("controller-survives-ledger-connection-failure")
