@@ -7,6 +7,8 @@ import time
 import unittest
 from pathlib import Path
 
+import pytest
+
 WT = Path(__file__).resolve().parents[1] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 BASH = shutil.which("bash")
 
@@ -465,6 +467,55 @@ class DoneOrigin(WtBase):
                 self.assertFalse(dest.exists())
                 self.assertFalse(self.branch_exists(name))
                 _git(self.origin, "merge-base", "--is-ancestor", head, f"refs/heads/{remote}", env=self.gitenv)
+
+
+UPSTREAM_GH = """#!{bash}
+head=""; state=all
+while (($#)); do
+  case "$1" in --head) head="$2"; shift ;; --state) state="$2"; shift ;; esac
+  shift
+done
+[[ "$head" == "{merged}" ]] || exit 0
+if [[ "$state" == merged ]]; then echo 7; else echo MERGED; fi
+"""
+
+
+class DoneUpstream(WtBase):
+    def _successor(self, name: str, remote: str) -> Path:
+        dest = Path(self.run_wt("new", name, "--repo", str(self.primary)).stdout.strip())
+        (dest / "continued.txt").write_text("continued\n")
+        _git(dest, "add", "continued.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "continued", env=self.gitenv)
+        _git(dest, "push", "--quiet", "-u", "origin", f"HEAD:refs/heads/{remote}", env=self.gitenv)
+        gh = self.bin / "gh"
+        gh.write_text(UPSTREAM_GH.format(bash=BASH, merged=remote))
+        gh.chmod(0o755)
+        return dest
+
+    def _on_origin(self, branch: str) -> bool:
+        listed = subprocess.run(
+            ["git", "-C", str(self.origin), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            env=self.gitenv,
+        )
+        return listed.returncode == 0
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_drops_a_successor_whose_upstream_branch_merged(self) -> None:
+        dest = self._successor("successor", "predecessor")
+        result = self.run_wt("done", "successor", "--repo", str(self.primary))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("successor"), result.stderr)
+        self.assertFalse(self._on_origin("predecessor"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin(self) -> None:
+        dest = self._successor("parked", "earlier")
+        _git(self.origin, "update-ref", "-d", "refs/heads/earlier", env=self.gitenv)
+        result = self.run_wt("done", "parked", "--repo", str(self.primary), "--pushed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("parked"))
 
 
 CONCURRENT_GIT = """#!{bash}
