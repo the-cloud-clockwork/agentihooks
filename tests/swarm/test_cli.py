@@ -1981,7 +1981,7 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
     ports, provider, reference = _pull_port("fork-owner/bundle", seen)
 
     head = cli.pull_branch("https://github.com/o/r/pull/3", ports)
-    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle")
+    assert head == ("engineer-a1b2c3-0001", "https://github.com/fork-owner/bundle", 3, "h")
     assert seen == ["https://github.com/o/r/pull/3"]
     [call] = provider.calls
     assert (call.operation, call.args) == ("change", (reference,))
@@ -1991,17 +1991,19 @@ def test_the_pull_request_head_branch_and_repository_are_read_through_the_port()
 def test_a_pull_request_without_a_head_repository_gives_the_branch_alone() -> None:
     ports, _, _ = _pull_port("")
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "")
+    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("engineer-a1b2c3-0001", "", 3, "h")
 
 
 @pytest.mark.parametrize(
     "error", [subprocess.CalledProcessError(1, []), subprocess.TimeoutExpired([], 20), *PULL_READ_ERRORS]
 )
-def test_an_unreadable_pull_request_gives_no_branch(error: Exception) -> None:
+def test_an_unreadable_pull_request_is_refused(error: Exception) -> None:
     def ports(url: str) -> tuple[FakeSourceControl, ChangeRef]:
         raise error
 
-    assert cli.pull_branch("https://github.com/o/r/pull/3", ports) == ("", "")
+    with pytest.raises(SwarmError) as refused:
+        cli.pull_branch("https://github.com/o/r/pull/3", ports)
+    assert str(refused.value) == f"GitHub does not confirm pull request https://github.com/o/r/pull/3: {error}"
 
 
 def test_the_pull_branch_reads_through_the_stack_source_control_port() -> None:

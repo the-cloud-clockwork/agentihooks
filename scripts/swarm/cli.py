@@ -67,7 +67,7 @@ from dataclasses import asdict, dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import scripts.tick.steps.report  # noqa: F401
@@ -2009,17 +2009,28 @@ def _tracks(run, recorded):
 PULL_SECONDS = 20
 
 
-def pull_branch(
-    url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control
-) -> tuple[str, str]:
-    """Read a pull request's head branch and the url of the repository holding it, both empty when unreadable."""
+class PullHead(NamedTuple):
+    """The head branch, its repository url, the number and the head commit of a pull request GitHub confirmed."""
+
+    branch: str
+    repo: str
+    number: int = 0
+    head: str = ""
+
+
+def pull_branch(url: str, ports: Callable[[str], tuple[SourceControl, ChangeRef]] = stack.source_control) -> PullHead:
+    """Read an open pull request's head branch, repository url, number and head, refusing one GitHub does not
+    confirm open."""
     try:
         provider, reference = ports(url)
         change = provider.change(reference, deadline=Deadline.after(PULL_SECONDS))
-    except stack.PORT_ERRORS:
-        return "", ""
+    except stack.PORT_ERRORS as exc:
+        raise SwarmError(f"GitHub does not confirm pull request {url}: {exc}") from exc
+    if change.state != "open":
+        raise SwarmError(f"pull request {url} is {change.state}, not open")
     host = url.split("/pull/")[0].rsplit("/", 2)[0]
-    return change.head_branch, f"{host}/{change.head_repository}" if change.head_repository else ""
+    repo = f"{host}/{change.head_repository}" if change.head_repository else ""
+    return PullHead(change.head_branch, repo, change.reference.number, change.head)
 
 
 def origin_repo(run=subprocess.run):
@@ -2086,9 +2097,11 @@ def cmd_pr(store, args):
     ledger = LedgerClient()
     doc, row = _stamp_scope(ledger, args.slug, agent.task)
     keeps_main = args.prerequisite is not None and (row.get("pr_url") or args.url) != args.url
-    head, repo = pull_branch(args.url)
+    head, repo, number, sha = PullHead(*pull_branch(args.url))
+    _refuse_other_branch(row, args, PullHead(head, repo), keeps_main)
     branch = {"branch": head, "branch_repo": repo} if head and not keeps_main else {}
-    fields = {"state": "pr", "awaiting": awaiting, **branch} | ({} if keeps_main else {"pr_url": args.url})
+    confirmed = {"pr_number": number, "pr_head": sha} if number and not keeps_main else {}
+    fields = {"state": "pr", "awaiting": awaiting, **branch, **confirmed} | ({} if keeps_main else {"pr_url": args.url})
     fields.update(_split_binding(row, args.url, args.half))
     scoped = _pull_scope(row, args)
     row.update(scoped)
@@ -2099,6 +2112,22 @@ def cmd_pr(store, args):
     if drop_lifts:
         lift.drop_task(args.slug, agent.task, store=store)
     print(json.dumps({"task": agent.task, "pr_url": args.url, **branch, "intent": checked}))
+
+
+def _refuse_other_branch(row: dict[str, Any], args: argparse.Namespace, pull: PullHead, keeps_main: bool) -> None:
+    """Refuse an undeclared pull request of the task's repository whose head is not the task's recorded branch."""
+    recorded = row.get("branch") or ""
+    declared = keeps_main or args.stage is not None or args.prerequisite is not None or bool(row.get("split"))
+    if declared or not pull.branch or not recorded or pull.branch == recorded:
+        return
+    if _repo_key(row.get("branch_repo") or "") not in ("", _repo_key(pull.repo)):
+        return
+    raise SwarmError(f"pull request {args.url} is on branch {pull.branch}, not this task's recorded branch {recorded}")
+
+
+def _repo_key(url: str) -> str:
+    """Return ``url`` lowercased without a trailing git suffix, so two spellings of one repository compare equal."""
+    return url.lower().removesuffix(".git")
 
 
 def _stamp_scope(ledger, slug, task_id):

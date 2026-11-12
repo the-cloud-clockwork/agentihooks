@@ -83,3 +83,95 @@ def test_intent_waits_for_the_pull_request_body_and_diff(body: str, files: list[
     answer = intent.judged(state, decide)
     reason = f"the pull request has no {missing} yet; the intent check judges it once it has both"
     assert answer == {"verdict": intent.UNCHECKED, "reason": reason, "stage": "delivered"}
+
+
+@pytest.mark.parametrize(
+    ("recorded", "recorded_repo", "pull"),
+    [
+        ("", "", cli.PullHead("someone-else", "https://github.com/o/r")),
+        (MINE, "", cli.PullHead("", "")),
+        (MINE, "https://github.com/O/R.git", cli.PullHead(MINE, "https://github.com/o/r")),
+        (MINE, "https://github.com/o/bundle", cli.PullHead("someone-else", "https://github.com/o/r")),
+    ],
+)
+def test_swarm_pr_keeps_a_pull_request_it_cannot_tell_apart_from_the_task_branch(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    recorded: str,
+    recorded_repo: str,
+    pull: cli.PullHead,
+) -> None:
+    row = _started(env, monkeypatch, pull)
+    row.update(branch=recorded, branch_repo=recorded_repo)
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
+    assert row["pr_url"] == URL
+
+
+@pytest.mark.parametrize(
+    "recorded_repo", ["", "https://github.com/o/r", "https://github.com/o/r.git", "https://github.com/O/R"]
+)
+def test_swarm_pr_refuses_another_branch_of_the_same_repository(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    recorded_repo: str,
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead("someone-else", "https://github.com/o/r", 3, "abc123"))
+    row["branch_repo"] = recorded_repo
+    capsys.readouterr()
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) != 0
+    refusal = f"pull request {URL} is on branch someone-else, not this task's recorded branch {MINE}"
+    assert capsys.readouterr().err.strip().endswith(refusal)
+    assert not row.get("pr_url")
+
+
+@pytest.mark.parametrize("declared", [["--stage", "the gate"], ["--prerequisite", "the tests"]])
+def test_a_declared_pull_request_may_sit_on_another_branch(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    declared: list[str],
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead("someone-else", "", 3, "abc123"))
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL, *declared) == 0
+    assert row["pr_url"] == URL
+
+
+def test_a_split_task_half_may_sit_on_another_branch(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    row = _started(env, monkeypatch, cli.PullHead("someone-else", "", 3, "abc123"))
+    row["split"] = [{"what": "first"}, {"what": "second"}]
+    env[1].state = lambda slug: {"overview": "", "phases": [], "tasks": [row]}
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL, "--half", "1") == 0
+    assert row["split_pulls"] == [URL]
+
+
+def test_a_prerequisite_after_the_main_pull_request_keeps_its_number_and_head(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead(MINE, "", 3, "abc123"))
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
+    monkeypatch.setattr(cli, "pull_branch", lambda url: cli.PullHead("someone-else", "", 9, "fff999"))
+    other = "https://github.com/o/r/pull/9"
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", other, "--prerequisite", "x") == 0
+    assert (row["pr_url"], row["branch"], row["pr_number"], row["pr_head"]) == (URL, MINE, 3, "abc123")
+
+
+def test_a_pull_request_without_a_number_stores_no_confirmation(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = _started(env, monkeypatch, cli.PullHead(MINE, ""))
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "pr", URL) == 0
+    assert "pr_number" not in row and "pr_head" not in row
+
+
+def test_the_pull_branch_keeps_the_fork_repository_url() -> None:
+    reference = ChangeRef("o/r", 3)
+    change = ChangeState(reference, "open", "abc123", "dev", False, "u", MINE, "", False, "fork/r")
+    found = cli.pull_branch(URL, lambda url: (FakeSourceControl({"change": change}), reference))
+    assert found == cli.PullHead(MINE, "https://github.com/fork/r", 3, "abc123")
+
+
+def test_intent_judges_a_pull_request_holding_a_body_and_a_diff() -> None:
+    assert intent.unready({"pull_request_body": "Closes 1", "changed_files": ["a.py"]}) == ""
+    assert intent.unready({"stage": "plan"}) == ""

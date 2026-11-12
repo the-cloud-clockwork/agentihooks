@@ -568,6 +568,12 @@ def _definition(state):
     return {"tests-first": TESTS_FIRST, "plan": PLAN}.get(_stage(state), PURPOSE)
 
 
+def unready(state: dict[str, Any]) -> str:
+    """Name what a pull request ``state`` lacks for a judgment, a body or a diff, empty when it holds both."""
+    parts = (("pull_request_body", "a body"), ("changed_files", "a diff"))
+    return " and ".join(name for key, name in parts if key in state and not state[key])
+
+
 def _questions(definition, state, params):
     if state.get("task_part") == "tests-first":
         return runner.questions_for(definition)
@@ -730,6 +736,10 @@ RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHE
 
 def judged(state, decide=decide):
     stage = _stage(state)
+    lacking = unready(state)
+    if lacking:
+        reason = f"the pull request has no {lacking} yet; the intent check judges it once it has both"
+        return {"verdict": UNCHECKED, "reason": reason, "stage": stage}
     if stage == "tests-first" and not isinstance(state.get("pull_request_diff"), str):
         reason = "the tests first part requires a complete pull request diff to judge gate behaviour"
         return {"verdict": FAIL, "reason": reason, "stage": stage, "criterion": "tests-first"}
