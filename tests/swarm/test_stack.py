@@ -1293,7 +1293,9 @@ def _task_repo(tmp_path, monkeypatch):
     return repo, _git(repo, "rev-parse", "dev")
 
 
-def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(tmp_path, monkeypatch):
+def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     other = tmp_path / "other"
     _git(tmp_path, "init", "-b", "eng-a", str(other))
     _git(other, "-c", "user.email=t@example.invalid", "-c", "user.name=T", "commit", "--allow-empty", "-m", "Other")
@@ -1301,7 +1303,8 @@ def test_the_stacked_base_of_another_repository_is_the_task_fork_from_dev(tmp_pa
     dep = {"id": "a", "branch": "eng-a", "branch_repo": str(other)}
     assert stack._foreign([dep]) == [dep]
     assert stack._stacked_base([dep], [dep]) == fork
-    assert _git(repo, "cat-file", "-t", _git(other, "rev-parse", "eng-a")) == "commit"
+    missing = ["git", "-C", str(repo), "cat-file", "-e", _git(other, "rev-parse", "eng-a")]
+    assert subprocess.run(missing, capture_output=True, check=False).returncode != 0
 
 
 def test_restack_of_a_task_parked_on_another_repository_rebases_onto_dev(parked, tmp_path, monkeypatch, capsys):
