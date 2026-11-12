@@ -3,10 +3,9 @@
 plan.md in the task work folder holds one piece per line, `- what | area, area | why`. A piece the classifier finds
 off intent is cut and, once the plan passes, filed as a ledger follow up. An area written `repo:path` belongs to that
 repository, any other to the task's own, and each repository's slice is sized on its own; a plan that grows into a
-new repository is traced whole. A plan with more than half
-its pieces cut, or a slice sized above one pull request, fails whole: it returns to the planner once, then the task
-is blocked. The verdict lands in plan-verdict.json beside the plan. With no classifier answer the verdict is
-unchecked, counted as fail-open.
+new repository is traced whole. A plan with more than half its pieces cut, or a slice sized above one pull request,
+fails whole: it returns to the planner once, then the task is blocked. The verdict lands in plan-verdict.json beside
+the plan. With no classifier answer the verdict is unchecked, counted as fail-open.
 """
 
 import hashlib

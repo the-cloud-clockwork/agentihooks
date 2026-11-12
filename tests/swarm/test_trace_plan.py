@@ -611,7 +611,8 @@ def test_a_plan_grown_into_a_new_repository_is_traced_and_sized_whole(monkeypatc
     own, other = trace_plan.parse(TWO_REPOS, "t1")
     monkeypatch.setattr(trace_plan, "decide", Recorder({"piece_0": needed(0.9), "size": size(1.0, 0.9)}))
     previous = trace_plan.trace([own], INTENT, None)
-    fake, record = _two_repo_trace(monkeypatch, (1.0, 0.9), (2.0, 0.9))
+    fake = Recorder({"piece_0": needed(0.9), "piece_1": needed(0.9), "size": size(1.0, 0.9), "size_1": size(2.0, 0.9)})
+    monkeypatch.setattr(trace_plan, "decide", fake)
     record = trace_plan.trace([own, other], INTENT, previous)
     assert sorted(fake.calls[-1][1]) == ["piece_0", "piece_1", "size", "size_1"]
     assert record["verdict"] == "fail"
