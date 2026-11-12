@@ -7,6 +7,7 @@ count survives restarts.
 
 import uuid
 from dataclasses import dataclass, replace
+from typing import Any
 
 from scripts.hive import reports
 from scripts.inbox import addresses, exits
@@ -145,7 +146,9 @@ class _Clock:
     quiet: int
 
 
-def _wake_world(inbox: InboxStore, slug, agents, herdr, ledger, clock: _Clock, items):
+def _wake_world(
+    inbox: InboxStore, slug: str, agents: list[Any], herdr: Any, ledger: Any, clock: _Clock, items: list[Item]
+) -> list[str]:
     now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
