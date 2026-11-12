@@ -253,7 +253,7 @@ operator home:
 | `skills/<name>` | `../claude/skills/<name>` |
 | `skills/<replacement>` | the Codex replacement of a Claude plugin the chain enables: the installed plugin's own skills, a skill fetched into `~/.agentihooks/codex-skills/`, or a chain layer's `.codex/skills/<name>`. A Claude skill of the same name wins over a plugin or fetched skill; a chain layer skill wins over both |
 | `skills/<command>/SKILL.md` | hardlink to each Claude command with frontmatter, invoked as `$<command>`; a skill of the same name wins |
-| `agents/<name>.toml` | generated: each `../claude/agents/<name>.md` with a description, as a Codex custom agent (`name`, `description`, and its body as `developer_instructions`); the Claude model and tools stay out, so the agent inherits the session's |
+| `agents/<name>.toml` | generated: each `../claude/agents/<name>.md` with a description, as a Codex custom agent (`name`, `description`, and its body as `developer_instructions`); an agent with no string description, or a link whose source is gone, is left out. The Claude model and tool list stay out: a custom agent file cannot narrow the session's sandbox, so a read only agent such as the scouter stays read only by its instructions alone |
 | `auth.json`, `sessions`, `history.jsonl`, `session_index.jsonl`, `hooks.json` | the operator `~/.codex` |
 | `config.toml` | generated: the profile's native settings, `sqlite_home` = operator home, the operator's hook trust rekeyed to this home's `hooks.json`, the operator's `[mcp_servers]` limited to the profile's servers, and `~/.agents/skills` switched off |
 

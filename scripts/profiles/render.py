@@ -556,16 +556,21 @@ def _link_codex_state(out: Path, operator: Path, login: bool, rollouts: Path | N
 
 
 def _codex_agents(claude_agents: Path, out: Path) -> None:
-    """Write each Claude home agent with a description and body as a Codex custom agent file in ``out``."""
+    """Write each Claude home agent with a string description and a body as a Codex custom agent file in ``out``."""
     import tomlkit
-
-    from scripts.targets.copilot_target import _split_frontmatter
+    import yaml
 
     out.mkdir()
-    for src in sorted(claude_agents.iterdir()):
-        front, body = _split_frontmatter(src.read_text())
-        if front.get("description") and body.strip():
-            doc = {"name": front.get("name", src.stem), "description": front["description"]}
+    for src in sorted(p for p in claude_agents.iterdir() if p.is_file()):
+        _, head, body = [*src.read_text().split("---", 2), "", ""][:3]
+        try:
+            front: object = yaml.safe_load(head)
+        except yaml.YAMLError:
+            front = None
+        meta: dict[str, object] = cast(dict[str, object], front) if isinstance(front, dict) else {}
+        name, description = meta.get("name"), meta.get("description")
+        if isinstance(description, str) and description.strip() and body.strip():
+            doc = {"name": name if isinstance(name, str) and name else src.stem, "description": description}
             _atomic_write(out / f"{src.stem}.toml", tomlkit.dumps({**doc, "developer_instructions": body.strip()}))
 
 
