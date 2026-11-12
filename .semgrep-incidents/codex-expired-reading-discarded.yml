@@ -1,0 +1,10 @@
+rules:
+  - id: codex-expired-reading-discarded
+    languages: [python]
+    severity: ERROR
+    message: Publish expired Codex observations with their timestamp and expiry flag instead of substituting an unknown reading.
+    paths:
+      include:
+        - /scripts/hive/daemon.py
+        - codex-expired-reading-discarded.py
+    pattern: $VALUE if $READING and not $READING.expired else $EMPTY
