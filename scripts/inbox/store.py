@@ -23,6 +23,7 @@ MOVE_ATTEMPTS = 3
 SETTLED_EXITS = "exits-settled"
 # The swarm Redis over TLS closes connections mid pipeline on reads of a thousand item rows or more.
 ROW_BATCH = 500
+RAMP_ROWS = 50
 STATES = ("pending", "delivered", "confirmed", "read", "done", "blocked", "handed_off", "cancelled")
 REDELIVER_ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 DEFAULT_REDELIVER_S = 300
@@ -123,6 +124,19 @@ def close_reason(kind: str, detail: str = "") -> tuple[str, str]:
     if kind == "blocked":
         return CLOSE_KINDS[kind], f"blocked on {detail}"
     return CLOSE_KINDS[kind], CLOSE_KINDS[kind] + (f": {detail}" if detail else "")
+
+
+def ramped(item_ids: list[str]) -> list[list[str]]:
+    """item_ids in order, in chunks of RAMP_ROWS that double up to ROW_BATCH."""
+    chunks: list[list[str]] = []
+    start = 0
+    for step in range(len(item_ids)):
+        if start >= len(item_ids):
+            break
+        size = min(RAMP_ROWS << step, ROW_BATCH)
+        chunks.append(item_ids[start : start + size])
+        start += size
+    return chunks
 
 
 class InboxStore:
@@ -406,13 +420,15 @@ class InboxStore:
             for row in self._batch(item_ids[start : start + ROW_BATCH])
         ]
 
-    def _batch(self, item_ids):
+    def _batch(self, item_ids: list[str]) -> list[dict[str, str]]:
+        """The rows of item_ids; after a connection reset the new connection reads them in ramped chunks, because
+        the swarm Redis path resets a young connection whose first replies are large."""
         from redis.exceptions import ConnectionError as RedisConnectionError
 
         try:
             return self._read_batch(item_ids)
         except RedisConnectionError:
-            return self._read_batch(item_ids)
+            return [row for chunk in ramped(item_ids) for row in self._read_batch(chunk)]
 
     def _read_batch(self, item_ids):
         with self.redis.pipeline(transaction=False) as pipe:
