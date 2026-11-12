@@ -199,7 +199,12 @@ class Qualifier:
             raise Incompatible(f"herdr server incarnation {incarnation} on {target} was replaced")
         cached = self.verdicts.get(target)
         same = cached is not None and cached.incarnation == incarnation
-        if cached is not None and same and self.status(target) == cached.server and (self.client is None or self.client() == cached.client):
+        if (
+            cached is not None
+            and same
+            and self.status(target) == cached.server
+            and (self.client is None or self.client() == cached.client)
+        ):
             return cached
         fresh = qualify(target, incarnation, self.probe(target))
         if cached is not None and not same:
