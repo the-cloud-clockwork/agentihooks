@@ -1318,7 +1318,7 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     assert seen["refresh"] is True
 
 
-def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
+def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path: Path) -> None:
     from scripts import agent_choice
     from scripts.swarm import capacity
 
@@ -1327,13 +1327,21 @@ def test_rotation_picks_the_fewest_session_seat_or_asks_choose(tmp_path):
         home=tmp_path, choose=lambda requested, environ: calls.append(requested) or ("codex", "requested")
     )
     assert runtime._rotation("", {}) == ("codex", "requested")
-    runtime._quota_accounts = [
-        capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
-        capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
-    ]
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        choose=runtime.choose,
+        accounts=[
+            capacity.Account("claude", "a", "OPEN", 2, 90, 90, 6),
+            capacity.Account("codex", "cx", "OPEN", 0, 90, 90, 6),
+        ],
+    )
     assert runtime._rotation("", {}) == ("codex", "rotation")
     assert runtime._rotation("claude", {}) == ("codex", "requested")
-    runtime._quota_accounts = [capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)]
+    runtime = HerdrRuntime(
+        home=tmp_path,
+        choose=runtime.choose,
+        accounts=[capacity.Account("codex", "cx", "CLOSED", 0, 90, 90, 0)],
+    )
     assert runtime._rotation("", {}) == ("codex", agent_choice.ALL_FULL)
     assert calls == ["", "claude"]
 
