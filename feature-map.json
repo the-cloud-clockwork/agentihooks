@@ -4779,6 +4779,7 @@
     {
       "id": "proof-master-launch-scratch-redis",
       "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-proof-master-scratch-redis",
       "behaviour": "A pane launched for a scratch proof swarm, its master included, exports that swarm's AGENTIHOOKS_SWARM_REDIS_URL after the operator env, so its hooks read the scratch Redis rather than the shared one; a pane of a live swarm keeps the operator env setting.",
       "seam": "scripts.init_agent._swarm_exports in the launcher script init-agent writes for a swarm pane",
       "tests": [
