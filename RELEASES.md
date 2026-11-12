@@ -2,6 +2,26 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.822 · 2026-11-12
+
+### 2026-11-12 · d4a41f1e6d1a · #10827 · @nestorcolt
+
+**List legacy state keys from stream subjects in the state migration command**
+
+This change fixes the state migration command so it lists legacy state keys by reading key subjects directly from stream info instead of calling `KeyValue.keys()`, which internally opens a flow-controlled watch. On large buckets like the 49121-key legacy `inbox`, this watch hung indefinitely because the hub controller credential lacks publish permission on flow control subjects, causing the migration to time out. Keys whose last entry is a delete or purge marker are now excluded, preserving correct behavior while avoiding the permissions violation.
+
+### 2026-11-12 · 6d07283dcbdd · #10825 · @agenticore-app
+
+**Check github as the user login on the root hive**
+
+This change fixes the root hive join check so it correctly detects github readiness for root sessions: previously, lacking HIVE_GITHUB_AUTH_MODE and AGENTIHOOKS_HIVE_ID, root sessions defaulted to app mode and probed gh api installation/repositories, which root always refused, falsely marking github false despite every other check passing. The join check now recognizes the user login mode for root, matching observed behavior from engineer launches 8254 and 8255. It ships with a regression test, a feature map entry, and a Semgrep rule to prevent this app-mode default from recurring in future join checks.
+
+### 2026-11-12 · 0044d40f5fc3 · #10799 · @agenticore-app
+
+**A retired master seat can never own a hive, and the retired seat list survives a manual master count racing the tick**
+
+This change fixes two race conditions in master seat handling: a retired seat could still be assigned ownership of a hive, and a manual change to the master count could race against the tick's retirement logic, leaving a seat that should be retired off the retired list. Now `own_hive` and `check_hives` reject retired seats within a single watched transaction, and `set_count` rewrites the count together with the retired list atomically, so the two operations can no longer interleave badly. Regression tests and a feature map entry cover both cases, keeping the swarm's seat bookkeeping correct without operator intervention.
+
 ## v2.17.819 · 2026-11-12
 
 ### 2026-11-12 · fc578f1734f0 · #10806 · @agenticore-app
