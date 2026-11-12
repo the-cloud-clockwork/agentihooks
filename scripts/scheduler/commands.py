@@ -40,7 +40,7 @@ def target_slot(target: str, name: str = "", case: str = "", placement: str = ""
         raise CommandError(f"target must be one of {', '.join(TARGETS)}, not {target}")
     if case and target != "workflow":
         raise CommandError("only the workflow target takes a case")
-    if placement and target != "workflow":
+    if (placement or needs) and target != "workflow":
         raise CommandError("only the workflow target takes a placement")
     if target == "fleet":
         if name:

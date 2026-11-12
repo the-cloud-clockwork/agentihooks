@@ -134,6 +134,7 @@ def test_a_stored_workflow_slot_without_a_placement_runs_locally(case):
         ("workflow", "nightly", "local", "build", "only a hive placement takes needs"),
         ("workflow", "nightly", "", "build", "only a hive placement takes needs"),
         ("swarm", "sw", "hive", "", "only the workflow target takes a placement"),
+        ("swarm", "sw", "", "build", "only the workflow target takes a placement"),
         ("fleet", "", "local", "", "only the workflow target takes a placement"),
     ],
 )

@@ -1,4 +1,4 @@
-"""Place a scheduled workflow run on a live hive that lists its project and declares its needs, or record why it waits."""
+"""Place a scheduled workflow run on a live hive that lists its project and declares its needs, or record its wait."""
 
 import json
 import time
@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from scripts.hive import run_orders
 from scripts.hive.placement import YES, Wait, repository
 from scripts.hive.registry import live
 from scripts.swarm.probe import ROOT
@@ -68,8 +69,6 @@ class RunOrderSender:
     """Orders over the hive run order store: running runs are the unfinished entries on a hive's stream."""
 
     def __init__(self, redis: Any, now_s: float) -> None:
-        from scripts.hive import run_orders
-
         self.redis = redis
         self.now_s = now_s
         self.store = run_orders.RunOrders(redis)
@@ -78,8 +77,6 @@ class RunOrderSender:
         return int(self.redis.xlen(self.store.stream(hive_id)))
 
     def send(self, hive_id: str, run: Run) -> object:
-        from scripts.hive import run_orders
-
         order = run_orders.RunOrder(
             run.delivery_id,
             run.workflow,

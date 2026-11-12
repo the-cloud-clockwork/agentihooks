@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -118,7 +119,7 @@ def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch):
     from scripts.hive import registry, run_orders
 
     redis = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(run_placement.time, "time", lambda: NOW / 1000)
+    monkeypatch.setattr(run_placement, "time", SimpleNamespace(time=lambda: NOW / 1000))
     monkeypatch.setattr(registry, "hives", lambda client: [hive("a"), hive("b")])
     store = run_orders.RunOrders(redis)
     first = run_placement.RunOrderSender(redis, NOW / 1000)
