@@ -4,6 +4,7 @@ import os
 import time
 from collections.abc import Mapping
 from contextlib import suppress
+from dataclasses import replace
 from functools import lru_cache
 from threading import Lock
 from typing import TYPE_CHECKING, Any
@@ -36,13 +37,14 @@ def backend(environ: Mapping[str, str] = os.environ) -> str:
 
 
 def open_scheduler_state(bucket: str) -> StateStore:
+    """The scheduler state store; a scoped bus with no swarm setting opens the unscoped state its supervisor reads."""
     if backend() == "bus":
         with _lock:
             config = BusConfig.from_environ()
-            bus = _bus(config)
-            if config.scoped:
-                bus = bus.for_swarm(os.environ["AGENTIHOOKS_SWARM"])
-            return bus.state(bucket)
+            swarm = os.environ.get("AGENTIHOOKS_SWARM")
+            if config.scoped and swarm:
+                return _bus(config).for_swarm(swarm).state(bucket)
+            return _bus(replace(config, scoped=False)).state(bucket)
     from scripts.swarm.store import redis_client
 
     from .redis_state import RedisStateStore

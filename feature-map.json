@@ -627,6 +627,17 @@
       ]
     },
     {
+      "id": "scheduler-runner-reload-on-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-scheduler-reload-on-revision",
+      "behaviour": "The scheduler supervisor stops its runner between passes and starts one on the new code when the checkout revision moves from the one it loaded, records the new revision, and keeps its runner when the revision cannot be read.",
+      "seam": "scripts.scheduler.service.supervise",
+      "tests": [
+        "tests/scheduler/test_service.py::test_supervisor_restarts_its_runner_when_the_checkout_revision_changes",
+        "tests/scheduler/test_service.py::test_supervisor_keeps_its_runner_when_the_revision_cannot_be_read"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
@@ -634,6 +645,7 @@
       "seam": "scripts.scheduler.commands.target_slot and WorkflowSlot.deliver through scripts.hive.run_placement.choose and deliver",
       "tests": [
         "tests/hive/test_run_placement.py::test_a_hive_run_goes_to_the_fitting_hive_with_fewest_running_runs",
+        "tests/hive/test_run_placement.py::test_a_sent_run_order_expires_an_hour_after_send_on_the_consumer_millisecond_clock",
         "tests/hive/test_run_placement.py::test_a_stale_draining_unhosting_or_unequipped_hive_is_never_chosen",
         "tests/hive/test_run_placement.py::test_no_live_hive_listing_the_repo_names_the_repo",
         "tests/hive/test_run_placement.py::test_no_hosting_hive_with_every_need_names_the_missing_needs",
@@ -3676,6 +3688,21 @@
       ],
       "rules": [
         "scheduler-legacy-history-materialization"
+      ]
+    },
+    {
+      "id": "controller-scoped-scheduler-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-scoped-scheduler-state",
+      "behaviour": "A process on a scoped bus with no swarm setting, such as the multi swarm controller, opens the unscoped scheduler state its scheduler supervisor reads, so its process timer fires and never raises on the missing swarm setting.",
+      "seam": "scripts.events.scheduler_state open_scheduler_state; scripts.scheduler.process_timer Timer",
+      "tests": [
+        "tests/events/test_scheduler_state.py::test_a_scoped_bus_without_a_swarm_setting_opens_the_unscoped_scheduler_state",
+        "tests/events/test_scheduler_state.py::test_the_controller_process_timer_fires_on_a_scoped_bus_without_a_swarm_setting",
+        "tests/events/test_scheduler_state.py::test_the_supervisor_a_scoped_controller_spawns_opens_the_same_scheduler_state"
+      ],
+      "rules": [
+        "bus-scope-swarm-setting-indexed"
       ]
     },
     {

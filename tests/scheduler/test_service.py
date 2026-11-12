@@ -205,6 +205,64 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     stop.wait.assert_called_once_with(1)
 
 
+@pytest.mark.feature("scheduler-runner-reload-on-revision")
+def test_supervisor_restarts_its_runner_when_the_checkout_revision_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    revisions = iter(["loaded", "moved"])
+    roots = []
+
+    def revision(root: Path) -> str:
+        roots.append(root)
+        return next(revisions)
+
+    monkeypatch.setattr(service, "revision", revision)
+    old, new = Mock(pid=11), Mock(pid=12)
+    old.poll.side_effect = [None, 0]
+    old.returncode = 0
+    new.poll.side_effect = [None]
+    spawn = Mock(side_effect=[old, new])
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.side_effect = [False, False, True]
+    service.supervise(stop)
+    assert spawn.call_count == 2
+    old.terminate.assert_called_once_with()
+    old.wait.assert_called_once_with()
+    new.terminate.assert_called_once_with()
+    assert roots == [service.ROOT, service.ROOT]
+    assert json.loads((tmp_path / "supervisor.json").read_text())["revision"] == "moved"
+    assert capsys.readouterr().err.splitlines()[0] == (
+        f"the scheduler supervisor {os.getpid()} restarts its runner 11: the checkout moved from loaded to moved"
+    )
+
+
+@pytest.mark.feature("scheduler-runner-reload-on-revision")
+def test_supervisor_keeps_its_runner_when_the_revision_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    revisions = iter(["loaded", "", "loaded"])
+    monkeypatch.setattr(service, "revision", lambda root: next(revisions))
+    child = Mock(pid=11)
+    child.poll.return_value = None
+    spawn = Mock(return_value=child)
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.side_effect = [False, False, True]
+    service.supervise(stop)
+    assert spawn.call_count == 1
+    child.terminate.assert_called_once_with()
+    assert json.loads((tmp_path / "supervisor.json").read_text())["revision"] == "loaded"
+
+
 @pytest.mark.parametrize("variable", ["REDIS_URL", "AGENTIHOOKS_HIVE_REDIS_URL", "AGENTIHOOKS_SWARM_REDIS_URL"])
 @pytest.mark.parametrize("inherited", [False, True])
 def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(

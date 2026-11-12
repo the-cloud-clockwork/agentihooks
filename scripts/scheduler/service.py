@@ -147,6 +147,17 @@ def supervise(stop: Event | None = None) -> None:
                     child.terminate()
                     child.wait()
                     return
+                current = revision(ROOT)
+                if current and current != loaded:
+                    print(
+                        f"the scheduler supervisor {os.getpid()} restarts its runner {child.pid}: "
+                        f"the checkout moved from {loaded} to {current}",
+                        file=sys.stderr,
+                    )
+                    child.terminate()
+                    child.wait()
+                    loaded = current
+                    _identify(loaded)
             print(f"the scheduler runner {child.pid} exited with code {child.returncode}", file=sys.stderr)
             if child.returncode == UNREACHABLE:
                 print(f"the scheduler supervisor {os.getpid()} stops: its state store did not answer", file=sys.stderr)

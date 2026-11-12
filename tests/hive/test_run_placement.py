@@ -146,5 +146,20 @@ def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch: pytes
     assert run_placement.dispatch(RUN, redis) == "b"
     [(_, fields)] = cast("list[tuple[str, dict[str, str]]]", redis.xrange(store.stream("b")))
     assert run_orders.RunOrder.decode(fields["order"]) == run_orders.RunOrder(
-        "delivery-1", "grade", "/cases/grade.json", REPO, "owner@fixture", ("build", "lint"), "b", NOW // 1000 + 3600
+        "delivery-1", "grade", "/cases/grade.json", REPO, "owner@fixture", ("build", "lint"), "b", NOW + 3_600_000
     )
+
+
+@pytest.mark.feature("scheduled-run-hive-placement")
+def test_a_sent_run_order_expires_an_hour_after_send_on_the_consumer_millisecond_clock() -> None:
+    import fakeredis
+
+    from scripts.hive import run_orders
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    store = run_orders.RunOrders(redis)
+    run_placement.RunOrderSender(redis, NOW / 1000).send("b", RUN)
+    [(_, fields)] = cast("list[tuple[str, dict[str, str]]]", redis.xrange(store.stream("b")))
+    expires_at = run_orders.RunOrder.decode(fields["order"]).expires_at
+    assert expires_at > NOW
+    assert expires_at - NOW == run_placement.EXPIRY_S * 1000
