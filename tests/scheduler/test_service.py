@@ -1003,6 +1003,22 @@ async def test_a_runner_outside_a_proof_swarm_keeps_waiting_for_its_state_store(
 
 
 @pytest.mark.feature("scheduler-unreachable-endpoint-stop")
+def test_only_a_refused_or_timed_out_call_counts_as_an_unanswered_state_store() -> None:
+    from nats import errors
+    from redis import exceptions
+
+    from scripts.events import state
+
+    assert state.unanswered({}) == (exceptions.ConnectionError, exceptions.TimeoutError, OSError)
+    assert state.unanswered({"AGENTIHOOKS_STATE_BACKEND": "bus"}) == (
+        errors.ConnectionClosedError,
+        errors.NoServersError,
+        errors.TimeoutError,
+        OSError,
+    )
+
+
+@pytest.mark.feature("scheduler-unreachable-endpoint-stop")
 @pytest.mark.parametrize(("silent", "code"), [(True, 3), (False, 0)])
 def test_the_runner_entrypoint_exits_with_the_unreachable_code_only_when_it_stopped_on_silence(
     monkeypatch: pytest.MonkeyPatch, silent: bool, code: int

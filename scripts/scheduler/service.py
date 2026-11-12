@@ -83,18 +83,15 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
 
     Returns True when a proof swarm's runner stopped because its state store stayed silent for UNREACHABLE_S seconds.
     """
-    from redis.exceptions import ConnectionError as Refused
-    from redis.exceptions import TimeoutError as Unanswered
-
     from scripts.events import state
     from scripts.scheduler.lease import Busy, LostLock
     from scripts.swarm.naming import PROOF_RE
 
     transient = state.unavailable()
-    silence = (Refused, Unanswered, OSError)
+    silence = state.unanswered()
     stopped = stop if stop is not None else _on_signals()
     silent_since: float | None = None
-    scratch = PROOF_RE.fullmatch(os.environ.get("AGENTIHOOKS_SWARM") or "") is not None
+    scratch = PROOF_RE.fullmatch(str(os.environ.get("AGENTIHOOKS_SWARM"))) is not None
     with machine_lock("runner"):
         while not stopped.is_set():
             try:
