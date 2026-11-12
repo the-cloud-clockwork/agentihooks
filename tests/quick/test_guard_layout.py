@@ -38,7 +38,7 @@ class FakePanes:
 
     def split(self, pane_id: str) -> str:
         x, width = self.rects[pane_id]
-        new = f"w1:p{len(self.rects) + 1}"
+        new = f"w1:p{len(self.splits) + 2}"
         self.rects[pane_id] = (x, width // 2)
         self.rects[new] = (x + width // 2, width - width // 2)
         self.splits.append(pane_id)

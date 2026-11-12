@@ -8,7 +8,7 @@ from scripts.quick.member import Member
 from scripts.quick.registry import Seat
 
 MAX_CHARS = 1500
-CHECKBOX = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(.*)$", re.MULTILINE)
+CHECKBOX = re.compile(r"^[ \t]*[-*][ \t]+\[([ xX])\](.*)$", re.MULTILINE)
 SEND = 'agentihooks quick send {to} "<text>"'
 HANDOFF = (
     "Near your context limit write your Handoff v2 to {handoff}, put any lesson for the seat in {learned}, "

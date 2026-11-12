@@ -65,6 +65,8 @@ def test_a_claude_engineer_reaches_a_codex_master_through_the_room(tmp_path):
         ("- [x] build\n- [ ] test it\n- [ ] ship\n", (1, 3, "test it")),
         ("- [X] build\n* [x] test\n", (2, 2, "")),
         ("notes only\n", (0, 0, "")),
+        ("  - [ ]   indented stage  \n-[ ] no space\n", (0, 1, "indented stage")),
+        ("-" + " " * 5000 + "[\n", (0, 0, "")),
     ],
 )
 def test_plan_state_counts_checkbox_stages(plan, expected):
