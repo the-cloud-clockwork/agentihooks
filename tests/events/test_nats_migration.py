@@ -156,6 +156,7 @@ def test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_mi
     with pytest.raises(RuntimeError, match="swarm 'rig' bucket 'inbox'"):
         readiness.publish(hub, view, 0)
     hub.migrate_state("rig", "inbox", [])
+    assert hub.for_swarm("rig").queue("eng", QueuePolicy()).take(20) is None
     assert readiness.publish(hub, view, 0) == ["ready:rig:work:0"]
     delivery = hub.for_swarm("rig").queue("eng", QueuePolicy()).take(1000)
     assert delivery is not None
