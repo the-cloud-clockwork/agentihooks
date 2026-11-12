@@ -220,9 +220,7 @@ def test_a_first_push_of_a_new_branch_is_an_outcome(store):
 def test_an_opened_pull_request_is_an_outcome(store):
     read, _ = facts(("a", ""), ("a", URL))
     heads(store, [branch_task()], 100, read)
-    assert heads(store, [branch_task()], 100 + LATER, read) == [
-        f"pull request opened a on {URL}, an outcome for {ME}"
-    ]
+    assert heads(store, [branch_task()], 100 + LATER, read) == [f"pull request opened a on {URL}, an outcome for {ME}"]
     assert store.read(ME) == progress.Mark(outcome_at=100 + LATER, outcome="pull request opened", talk=0)
 
 
