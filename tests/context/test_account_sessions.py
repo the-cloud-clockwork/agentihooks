@@ -431,14 +431,15 @@ def test_no_redis_holds_nothing(monkeypatch):
 
 
 @pytest.mark.feature("host-room-counts-reserved-executions")
-def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_live_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import socket
     from dataclasses import replace
 
+    from scripts.codex_session import supervisor
     from scripts.codex_session.binding import BindingStore, TransportRecord
     from scripts.swarm.store import RedisStore
-
-    from scripts.codex_session import supervisor
 
     monkeypatch.setattr(supervisor, "start_time", lambda pid: 7 if pid == 70 else None)
     bindings = BindingStore(RedisStore(_held_store(monkeypatch)))
