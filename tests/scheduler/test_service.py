@@ -30,7 +30,7 @@ async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, t
         calls.append("drained")
         stop.set()
 
-    scheduler = SimpleNamespace(run_due=drain)
+    scheduler = SimpleNamespace(run_due=drain, collect_runs=Mock())
     monkeypatch.setattr(
         service,
         "asyncio",
@@ -65,7 +65,7 @@ async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
         stop.set()
 
     monkeypatch.setattr(service, "asyncio", SimpleNamespace(to_thread=asyncio.to_thread, wait_for=wait_for))
-    await service.run(SimpleNamespace(run_due=drain), stop)
+    await service.run(SimpleNamespace(run_due=drain, collect_runs=Mock()), stop)
     assert timeouts == [1, 1]
     assert drain.call_count == 2
 
@@ -85,7 +85,7 @@ async def test_runner_survives_a_redis_that_does_not_answer_yet(monkeypatch, tmp
             raise getattr(exceptions, failure)("Timeout reading from socket")
         stop.set()
 
-    await service.run(SimpleNamespace(run_due=drain), stop)
+    await service.run(SimpleNamespace(run_due=drain, collect_runs=Mock()), stop)
     assert passes == [1, 1]
     assert capsys.readouterr().err == "scheduler pass skipped: the state store did not answer\n"
 
@@ -99,7 +99,7 @@ async def test_runner_still_stops_on_any_other_error(monkeypatch, tmp_path):
         raise KeyError("pending")
 
     with pytest.raises(KeyError):
-        await service.run(SimpleNamespace(run_due=drain), asyncio.Event())
+        await service.run(SimpleNamespace(run_due=drain, collect_runs=Mock()), asyncio.Event())
 
 
 async def test_a_pass_that_loses_its_dispatch_lock_ends_and_the_next_pass_reacquires_it(monkeypatch, tmp_path, capsys):
@@ -151,7 +151,7 @@ async def test_runner_keeps_dispatching_after_a_pass_without_the_dispatch_lock(m
             raise getattr(lease, lost)("the lock moved")
         stop.set()
 
-    await service.run(cast("Scheduler", SimpleNamespace(run_due=drain)), stop)
+    await service.run(cast("Scheduler", SimpleNamespace(run_due=drain, collect_runs=Mock())), stop)
     assert passes == [1, 1]
     assert capsys.readouterr().err == "scheduler pass ended: the lock moved\n"
 
@@ -570,7 +570,7 @@ def test_a_signalled_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch,
 
     previous = signal.signal(number, unhandled)
     try:
-        asyncio.run(service.run(SimpleNamespace(run_due=run_due)))
+        asyncio.run(service.run(SimpleNamespace(run_due=run_due, collect_runs=Mock())))
     finally:
         signal.signal(number, previous)
     assert dispatched == ["finished"]
