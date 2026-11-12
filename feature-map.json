@@ -4115,6 +4115,25 @@
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
         "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
       ]
+    },
+    {
+      "id": "hive-headless-run-consumer",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr2",
+      "behaviour": "Each hive daemon beat on a hive neither fenced nor draining reads its run order stream, claims each order once by its receipt, writes the case file and starts the run detached through the scheduled workflow start in the hive checkout of the project repository with no herdr pane, and acks expired orders, unknown repositories, missing workflows and failed starts with their reason.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.poll through scripts.hive.daemon.beat",
+      "tests": [
+        "tests/hive/test_run_consumer.py::test_a_run_order_starts_one_detached_run_in_the_project_checkout",
+        "tests/hive/test_run_consumer.py::test_a_poll_starts_one_batch_of_run_orders",
+        "tests/hive/test_run_consumer.py::test_a_run_order_is_claimed_once_by_its_receipt",
+        "tests/hive/test_run_consumer.py::test_a_run_order_that_cannot_start_acks_failed_with_its_reason",
+        "tests/hive/test_run_consumer.py::test_a_claimed_run_order_past_its_expiry_acks_expired",
+        "tests/hive/test_run_consumer.py::test_a_run_order_whose_start_fails_acks_start_failed",
+        "tests/hive/test_run_consumer.py::test_an_unreadable_run_order_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_for_another_hive_starts_nothing",
+        "tests/hive/test_run_consumer.py::test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining"
+      ]
     }
   ],
   "unmapped_rules": [

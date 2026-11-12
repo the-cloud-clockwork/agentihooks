@@ -17,7 +17,7 @@ __all__ = ["RunConsumer", "case_file"]
 BATCH = 32
 CASES = "run-cases"
 EXPIRED, REPOSITORY, WORKFLOW = "expired", "unknown_repository", "missing_workflow"
-INVALID, IDENTITY = "invalid_order", "identity"
+INVALID, IDENTITY, START = "invalid_order", "identity", "start_failed"
 
 
 def case_file(run_id: str) -> Path:
@@ -64,9 +64,12 @@ class RunConsumer:
             return Ack(FAILED, {}, REPOSITORY)
         if order.workflow not in loader.resolve(checkout)[0]:
             return Ack(FAILED, {}, WORKFLOW)
-        case.parent.mkdir(parents=True, exist_ok=True)
-        case.write_text(order.case)
-        scheduled.start(order.workflow, str(case), checkout, order.run_id, order.owner)
+        try:
+            case.parent.mkdir(parents=True, exist_ok=True)
+            case.write_text(order.case)
+            scheduled.start(order.workflow, str(case), checkout, order.run_id, order.owner)
+        except OSError:
+            return Ack(FAILED, {}, START)
         return Ack(DONE, {"host_id": self.hive})
 
     def _drop(self, item: str, failure: str) -> None:
