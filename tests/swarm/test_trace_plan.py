@@ -554,6 +554,65 @@ def test_both_failure_reasons_are_given_together(ask):
     ]
 
 
+BUNDLE = "agentihooks-bundle"
+TWO_REPOS = (
+    "- a light | src/light | it lights\n- a profile | agentihooks-bundle:profiles/x, agentihooks-bundle:rules | b\n"
+)
+
+
+def test_parse_reads_a_repository_prefix_on_a_piece():
+    own, other = trace_plan.parse(TWO_REPOS, "t1")
+    assert own == trace_plan.Piece("a light", ("src/light",), "it lights")
+    assert other == trace_plan.Piece("a profile", ("profiles/x", "rules"), "b", BUNDLE)
+    assert other.key == "a profile | agentihooks-bundle:profiles/x, agentihooks-bundle:rules | b"
+    assert trace_plan.repositories([own, other]) == ["", BUNDLE]
+
+
+@pytest.mark.parametrize("areas", ["src, agentihooks-bundle:rules", "a:src, b:rules"])
+def test_parse_refuses_a_piece_naming_two_repositories(areas):
+    with pytest.raises(ValueError) as refused:
+        trace_plan.parse(f"- fine | a | ok\n- what | {areas} | why", "t1")
+    assert str(refused.value) == "plan line 2 names more than one repository; give each repository its own pieces"
+
+
+def _two_repo_trace(monkeypatch, own, other):
+    fake = Recorder({"piece_0": needed(0.9), "piece_1": needed(0.9), "size": size(*own), "size_1": size(*other)})
+    monkeypatch.setattr(trace_plan, "decide", fake)
+    return fake, trace_plan.trace(trace_plan.parse(TWO_REPOS, "t1"), INTENT, None)
+
+
+def test_a_two_repository_plan_with_one_pull_request_each_is_accepted(monkeypatch):
+    fake, record = _two_repo_trace(monkeypatch, (1.0, 0.9), (1.0, 0.95))
+    assert (record["verdict"], record["reasons"]) == ("pass", [])
+    one = {"level": 1, "name": "one pull request"}
+    assert record["sizes"] == [
+        {"repo": "the task's own repository", **one, "confidence": 0.9},
+        {"repo": BUNDLE, **one, "confidence": 0.95},
+    ]
+    assert record["pieces"][1]["repo"] == BUNDLE and "repo" not in record["pieces"][0]
+    state, questions, _ = fake.calls[0]
+    assert [p.get("repo") for p in state["pieces"]] == [None, BUNDLE]
+    assert BUNDLE in questions["size_1"].instructions
+    assert "the task's own repository" in questions["size"].instructions
+
+
+def test_a_two_repository_plan_names_the_repository_whose_slice_is_too_big(monkeypatch):
+    _, record = _two_repo_trace(monkeypatch, (1.0, 0.9), (2.0, 0.8))
+    assert record["verdict"] == "fail"
+    assert record["reasons"] == [
+        f"the slice in {BUNDLE} is sized several pull requests at confidence 0.80, above one pull request"
+    ]
+    assert record["size"] == {"level": 2, "name": "several pull requests", "confidence": 0.8}
+
+
+def test_a_single_repository_plan_sized_above_one_pull_request_is_refused(ask):
+    ask(0.9, 0.9, score=2.0, confidence=0.9)
+    record = trace_plan.trace(trace_plan.parse("- a | src | b\n- c | lib | d\n", "t1"), INTENT, None)
+    assert record["verdict"] == "fail"
+    assert record["reasons"] == ["the plan is sized several pull requests at confidence 0.90, above one pull request"]
+    assert "sizes" not in record
+
+
 def test_failures_add_up_across_plans_and_filed_pieces_carry(ask):
     ask(0.1)
     previous = {"verdict": "fail", "plan_hash": "old", "failures": 1, "filed": ["x"], "accepted": ["y"], "pieces": []}
