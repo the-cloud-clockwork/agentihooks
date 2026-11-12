@@ -401,6 +401,8 @@ TESTS_RUNNING = [{"status": "IN_PROGRESS", "workflowRun": {"databaseId": 1}}]
         {**NEVER_STARTED, "mergeable": "CONFLICTING"},
         {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": LINT_EXPECTED},
         {**NEVER_STARTED, "mergeable": "MERGEABLE"},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
+        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
     ],
 )
 def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_path, raw):
@@ -412,15 +414,64 @@ def test_a_required_workflow_that_never_started_lets_the_push_pass(tree, tmp_pat
 @pytest.mark.parametrize(
     "raw",
     [
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "checkSuites": TESTS_RUNNING},
-        {**NEVER_STARTED, "mergeable": "CONFLICTING", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "checkSuites": TESTS_RUNNING},
+        {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": [{"context": "lint", "state": "PENDING"}]},
         {**NEVER_STARTED, "mergeable": "MERGEABLE", "statusCheckRollup": LINT_EXPECTED},
+        {**NEVER_STARTED, "mergeable": "UNKNOWN", "checkSuites": TESTS_RUNNING},
     ],
 )
 def test_a_real_running_check_or_a_pending_placeholder_on_a_mergeable_head_still_holds_the_push(tree, tmp_path, raw):
     decision = gate(pull_request(raw)).decide(bash("git push", tree), ME, state(tmp_path))
     assert not decision.allowed
     assert decision.reason == push_refusal("demo", URL)
+
+
+TESTS_RUN = {"databaseId": 9, "event": "pull_request", "workflow": {"id": 3, "resourcePath": "/o/r/test.yml"}}
+PASSED_GATE_STATUS = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+
+
+def running_tests(lint):
+    return {
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "gated": False,
+        "gate_workflows": [],
+        "statusCheckRollup": [
+            PASSED_GATE_STATUS,
+            {"name": "lint", "conclusion": lint, "isRequired": False, "checkSuite": {"workflowRun": TESTS_RUN}},
+            {
+                "name": "mutation-shard (0)",
+                "conclusion": None,
+                "isRequired": False,
+                "checkSuite": {"workflowRun": TESTS_RUN},
+            },
+        ],
+        "checkSuites": [{"status": "IN_PROGRESS", "conclusion": None, "workflowRun": TESTS_RUN}],
+    }
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize("lint", ["FAILURE", "TIMED_OUT"])
+def test_a_failed_job_in_a_running_suite_lets_the_push_pass_though_the_required_status_passed(tree, tmp_path, lint):
+    found = pull_request(running_tests(lint))
+    assert (found.red, found.running, found.head_red) == (False, True, True)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+@pytest.mark.parametrize("lint", ["SUCCESS", "CANCELLED", None])
+def test_a_running_suite_with_no_failed_job_still_holds_the_push(tree, tmp_path, lint):
+    found = pull_request(running_tests(lint))
+    assert found.head_red is False
+    decision = gate(found).decide(bash("git push", tree), ME, state(tmp_path))
+    assert decision.reason == push_refusal("demo", URL)
+
+
+@pytest.mark.feature("one-push-failed-or-conflicting-head")
+def test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs(tree, tmp_path):
+    found = pull_request({**running_tests("SUCCESS"), "mergeable": "CONFLICTING"})
+    assert (found.red, found.running, found.head_red) == (False, True, False)
+    assert gate(found).decide(bash("git push", tree), ME, state(tmp_path)).allowed
 
 
 def test_a_reader_counts_when_either_its_name_or_its_type_names_it(tree, tmp_path):
