@@ -135,7 +135,8 @@
         "tests/events/test_migrate_state.py::test_dry_run_reports_what_it_would_move_and_writes_nothing",
         "tests/events/test_migrate_state.py::test_move_copies_owned_history_and_a_rerun_moves_nothing",
         "tests/events/test_migrate_state.py::test_no_keys_claim_clears_the_hub_skip_without_copying",
-        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending"
+        "tests/events/test_migrate_state.py::test_interrupted_move_reports_failure_and_stays_pending",
+        "tests/events/test_migrate_state.py::test_dry_run_lists_keys_from_stream_subjects_without_a_key_watch"
       ]
     },
     {
