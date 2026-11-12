@@ -190,9 +190,17 @@ function commandAction(command) {
   if (command.command === "quota") return "quota_refresh";
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
-  if (action === "set" && command.argv.some((pair) => pair.startsWith("autonomy="))) return "autonomy";
-  if (action === "set" && command.argv.some((pair) => pair.startsWith("scaling="))) return "scaling";
+  if (action === "set") return setAction(command.argv);
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
+}
+
+function setAction(argv) {
+  const has = (test) => argv.some(test);
+  if (has((pair) => pair.startsWith("autonomy="))) return "autonomy";
+  if (has((pair) => pair.startsWith("scaling="))) return "scaling";
+  if (has((pair) => /^[^=]+-gate=/.test(pair))) return "gate";
+  if (has((pair) => pair.startsWith("overlays-"))) return "overlays";
+  return "apply";
 }
 
 export function renderGates(sw) {
@@ -214,8 +222,10 @@ export async function refreshQuota() {
   btn.setAttribute("aria-busy", "true");
   try {
     const resp = await writeSwarm({ action: "quota_refresh" });
-    if (resp.ok) renderSwarm(await resp.json());
-    else showNote("error", "quota_refresh", (await resp.text()) || `server answered ${resp.status}`);
+    if (resp.ok) {
+      showNote("done", "quota_refresh");
+      renderSwarm(await resp.json());
+    } else showNote("error", "quota_refresh", (await resp.text()) || `server answered ${resp.status}`);
   } catch (e) {
     showNote("error", "quota_refresh", "ledger server unreachable");
   }

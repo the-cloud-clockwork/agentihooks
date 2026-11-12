@@ -102,3 +102,22 @@ def test_a_dismissed_command_row_stays_dismissed_after_a_reload(open_page: OpenP
     page.tab.reload()
     page.tab.locator("#swarm-agents tr").first.wait_for(timeout=3000)
     assert note(page) == ""
+
+
+def test_a_failed_quota_refresh_clears_when_the_refresh_succeeds(open_page: OpenPage) -> None:
+    page = open_page(status(), width=1920)
+    fail_controls(page, "quota reader timed out")
+    page.tab.locator("#quota-refresh").click()
+    wait_note(page, "text.includes('Could not refresh quota')")
+    page.tab.unroute("**/swarm/controls")
+    page.tab.locator("#quota-refresh").click()
+    wait_note(page, "text === ''")
+
+
+def test_a_failed_capacity_row_is_named_apply_and_survives_an_accepted_autonomy_set(open_page: OpenPage) -> None:
+    rows = [
+        {"id": "a", "command": "swarm", "argv": ["set", "max-eng=4"], "state": "failed", "error": "lease is stale"},
+        {"id": "b", "command": "swarm", "argv": ["set", "autonomy=full"], "state": "acknowledged", "error": ""},
+    ]
+    page = open_page(status(commands=rows), width=1920)
+    assert note(page) == "Could not apply capacity: lease is stale. Try again or ask the master."
