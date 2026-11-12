@@ -1190,6 +1190,27 @@ def _merge_target(words):
     return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
 
 
+def _done_target(words: list[str]) -> str | None:
+    """The pull request a `swarm done --pr` command names, or None."""
+    index = program_index(words)
+    if index is None or PurePosixPath(words[index]).name != "agentihooks":
+        return None
+    rest = words[index + 1 :]
+    if rest[:1] != ["swarm"] or rest[2:3] != ["done"]:
+        return None
+    operands = rest[3:]
+    for at, word in enumerate(operands):
+        if word.startswith("--pr="):
+            return word.removeprefix("--pr=") or None
+        if word == "--pr":
+            return next(iter(operands[at + 1 :]), None)
+    return None
+
+
+def _named_target(words: list[str]) -> str | None:
+    return _merge_target(words) or _done_target(words)
+
+
 def _unnamed_merge(words):
     index = program_index(words)
     return (
@@ -1200,7 +1221,7 @@ def _unnamed_merge(words):
     )
 
 
-def _pull_view(words):
+def _pull_view(words: list[str], number: str | None = None) -> list[str]:
     rest, branch, repo = iter(words[program_index(words) + 3 :]), [], []
     for word in rest:
         if word in REPO_FLAGS:
@@ -1211,7 +1232,7 @@ def _pull_view(words):
             next(rest, None)
         elif not word.startswith("-") and not branch:
             branch = [word]
-    return ["gh", "pr", "view", *branch, *repo, "--json", "url", "--jq", ".url"]
+    return ["gh", "pr", "view", *([number] if number else branch), *repo, "--json", "url", "--jq", ".url"]
 
 
 def _same_pull(target, url):
@@ -1260,7 +1281,7 @@ def _other_half(command, record):
     judged = record and record.get("split") and PULL.search(record["url"])
     if not judged:
         return False
-    for target in filter(None, map(_merge_target, simple_commands(command))):
+    for target in filter(None, map(_named_target, simple_commands(command))):
         named = PULL.search(target)
         if (named.groups() if named else target) != (judged.groups() if named else judged[3]):
             return True
@@ -1307,7 +1328,7 @@ class IntentGate:
                 if not decision.allowed:
                     return decision
                 continue
-            target = _merge_target(words)
+            target = _named_target(words)
             saved = record
             if target:
                 urls = [url for url in bound["pulls"] if _same_pull(target, url)]
@@ -1345,14 +1366,24 @@ class IntentGate:
             return None
         return replace(call, tool_input={**call.tool_input, "command": " && ".join(map(shlex.join, named))})
 
-    def _named(self, words, cwd):
-        if not _unnamed_merge(words):
+    def _named(self, words: list[str], cwd: str | None) -> list[str] | None:
+        target = _merge_target(words)
+        number = target if target and target.isdigit() else None
+        if not (number or _unnamed_merge(words)):
             return words
         try:
-            done = self.run(_pull_view(words), capture_output=True, text=True, timeout=GH_TIMEOUT_SEC, cwd=cwd or None)
+            done = self.run(
+                _pull_view(words, number), capture_output=True, text=True, timeout=GH_TIMEOUT_SEC, cwd=cwd or None
+            )
         except (OSError, subprocess.SubprocessError):
             return None
-        return [*words, done.stdout.strip()] if done.returncode == 0 and PULL.search(done.stdout) else None
+        url = done.stdout.strip()
+        if done.returncode != 0 or not PULL.search(url):
+            return None
+        if not number:
+            return [*words, url]
+        at = words.index(number, program_index(words))
+        return [*words[:at], url, *words[at + 1 :]]
 
     def _decide_record(self, call, who, state, mode, record, bound=False):
         if not bound and _other_half(call.command, record):
