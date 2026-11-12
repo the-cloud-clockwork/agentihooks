@@ -85,7 +85,7 @@ class RunOrderSender:
             run.owner,
             run.needs,
             hive_id,
-            int(self.now_s) + EXPIRY_S,
+            int(self.now_s * 1000) + EXPIRY_S * 1000,
         )
         return self.store.send(hive_id, order)
 
