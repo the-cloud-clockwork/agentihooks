@@ -139,7 +139,13 @@ def test_repository_folder_records_match_the_combined_loader():
 
 
 SURVIVORS = [
-    {"name": "hooks.example.x_f__mutmut_1", "status": "survived", "lines": [3], "fingerprint": "fp1", "identity": "id1"},
+    {
+        "name": "hooks.example.x_f__mutmut_1",
+        "status": "survived",
+        "lines": [3],
+        "fingerprint": "fp1",
+        "identity": "id1",
+    },
     {"name": "hooks.example.x_g__mutmut_2", "status": "no tests", "lines": [4], "fingerprint": "fp2"},
 ]
 SURVIVOR_KEYS = {
