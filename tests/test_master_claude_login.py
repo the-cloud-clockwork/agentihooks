@@ -779,7 +779,7 @@ def test_launch_turns_a_refusal_into_a_routing_error(ah, rendered, tmp_path, mon
 
 @pytest.mark.feature("master-login-launch-folder-trust")
 def test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home(
-    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from scripts.routing import native_login
 
@@ -796,7 +796,8 @@ def test_a_master_launch_into_a_new_folder_trusts_it_in_a_shared_login_home(
     login.launch_claude("/opt/claude", [], _environ(rendered), "")
     assert executed[0]["CLAUDE_CONFIG_DIR"] == str(login.home())
     projects = json.loads((login.home() / login.CONFIG).read_text())["projects"]
-    assert projects[str(scratch)] == {"hasTrustDialogAccepted": True}
+    assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.feature("master-login-launch-folder-trust")
@@ -818,7 +819,7 @@ def test_a_master_launch_with_folder_trust_off_reports_the_wait_and_marks_nothin
     assert len(executed) == 1
     assert "projects" not in json.loads((login.home() / login.CONFIG).read_text())
     assert capsys.readouterr().err == (
-        f"[agenti] Claude does not trust {scratch} (AGENTIHOOKS_TRUST_LAUNCH_DIR is off); {WAIT_NOTICE}\n"
+        f"[agenti] Claude does not trust {scratch.resolve()} (AGENTIHOOKS_TRUST_LAUNCH_DIR is off); {WAIT_NOTICE}\n"
     )
 
 
@@ -1701,3 +1702,40 @@ def test_the_master_token_route_reports_routed_only_inside_the_admitted_callback
     monkeypatch.setattr(login.os, "execvpe", launch)
     login.launch_token("/opt/claude", [], _environ(rendered), str(report))
     assert executed == ["yes"]
+
+
+@pytest.mark.feature("master-login-launch-folder-trust")
+def test_a_master_token_launch_into_a_new_folder_trusts_it_in_the_token_home(
+    ah: Path, rendered: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from collections.abc import Callable, Mapping
+
+    from scripts import claude_quota_balancer as router
+    from scripts.hive import account_slots
+
+    monkeypatch.setattr(openbao_kv, "from_env", lambda _: None)
+    scratch = tmp_path / "scratch"
+    (scratch / ".git").mkdir(parents=True)
+    monkeypatch.chdir(scratch)
+    credential = router.Credential("AH_CC_TOKEN_workeratexample_com", "routed")
+    decision = router.RouteDecision(credential, None, "master overflow", 6, 6)
+    monkeypatch.setattr(router, "select_master_credential", lambda *args, **kwargs: decision)
+    homes = []
+
+    def admit(
+        harness: str,
+        account: str,
+        environ: Mapping[str, str],
+        invoke: Callable[[dict[str, str]], object],
+        *,
+        master: bool = False,
+    ) -> None:
+        homes.append(environ["CLAUDE_CONFIG_DIR"])
+
+    monkeypatch.setattr(account_slots, "execute", admit)
+    environ = _environ(rendered)
+    login.launch_token("/opt/claude", [], environ, str(tmp_path / "route"))
+    assert homes == [str(login._token_folder(environ) / "claude")]
+    projects = json.loads((Path(homes[0]) / login.CONFIG).read_text())["projects"]
+    assert projects[str(scratch.resolve())] == {"hasTrustDialogAccepted": True}
+    assert capsys.readouterr().err == ""
