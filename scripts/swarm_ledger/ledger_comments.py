@@ -57,8 +57,8 @@ def problems(text, kind, long=False, task_ids=()):
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
-        if text.count(mark) > most:
-            found.append(f"{text.count(mark)} {name}, at most {most}")
+        if prose.count(mark) > most:
+            found.append(f"{prose.count(mark)} {name}, at most {most}")
     words = len(text.split())
     if words > LIMITS[kind] and not (kind == "chat" and long):
         found.append(f"{words} words, at most {LIMITS[kind]}")
