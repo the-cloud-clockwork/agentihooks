@@ -287,6 +287,17 @@ def _codex_http(name: str, spec: dict) -> dict:
     return entry
 
 
+def _carry_native_keys(entry: dict[str, Any], spec: dict[str, Any]) -> None:
+    """Keep the keys a spec already writes in codex form; values derived from Claude-shaped fields win."""
+    if spec.get("env_vars"):
+        entry["env_vars"] = sorted({*spec["env_vars"], *entry.get("env_vars", [])})
+    if spec.get("env_http_headers"):
+        entry["env_http_headers"] = {**spec["env_http_headers"], **entry.get("env_http_headers", {})}
+    for key in ("bearer_token_env_var", "cwd", "startup_timeout_sec", "tool_timeout_sec", "enabled"):
+        if key in spec:
+            entry.setdefault(key, spec[key])
+
+
 def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """A declared (Claude-shaped) MCP server as its codex entry, or None and why it cannot mount."""
     if drop_if_credentialed(name, spec, "config.toml"):
@@ -297,6 +308,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
             "Expose a streamable-HTTP endpoint and re-run init."
         )
         return None, "codex has no SSE transport"
+    entry: dict[str, Any]
     if spec.get("command"):
         entry = _codex_stdio(name, spec)
     elif spec.get("url"):
@@ -306,6 +318,7 @@ def codex_mcp_entry(name: str, spec: dict[str, Any]) -> tuple[dict[str, Any] | N
     entry.update({key: list(spec[key]) for key in _TOOL_FILTERS if spec.get(key)})
     if spec.get("default_tools_approval_mode"):
         entry["default_tools_approval_mode"] = spec["default_tools_approval_mode"]
+    _carry_native_keys(entry, spec)
     return entry, ""
 
 
