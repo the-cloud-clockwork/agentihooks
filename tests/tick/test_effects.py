@@ -117,6 +117,7 @@ def test_only_the_reap_and_spawn_steps_declare_their_effects_yet() -> None:
         "knowledge warm": frozenset({"host"}),
         "doc items map": frozenset({"ledger", "coordination"}),
         "step starvation": frozenset({"inbox"}),
+        "progress heads": frozenset({"source_control"}),
     }
 
 
