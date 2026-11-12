@@ -1,6 +1,7 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 import json
+from typing import Any
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
@@ -617,7 +618,7 @@ def resumed_steps(steps: list[str], name: str, branch: str) -> list[str]:
     return [head, *(step.replace(cut, origin) for step in steps)]
 
 
-def task_steps(task, me, led, name, phase, autonomy):
+def task_steps(task: dict[str, Any], me: str, led: str, name: str, phase: str, autonomy: str) -> list[str]:
     kind = ledger_kinds.kind(task)
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
     if kind not in STACKED_KINDS and task.get("parked_on") and task.get("branch"):
