@@ -1,6 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -408,7 +409,7 @@ def test_controller_completion_clears_awaiting_and_replays(monkeypatch: pytest.M
     assert repository.get_document(outcomes.authority.slug) == completed
 
 
-def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture):
+def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture: tuple[Any, ...]) -> None:
     outcomes, authority, token, proposal, provider, task, *_ = fixture
     outcomes.propose(token, proposal)
     outcomes.integrate(token, proposal.generation)
@@ -423,7 +424,7 @@ def test_ledger_completion_rejects_changed_revision_without_overwriting(fixture)
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": authority.current(proposal.task_id).holder,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     before = json.loads(json.dumps(doc))
     assert not ledger_tasks.complete_outcome(doc, op, ctx, authority.current(proposal.task_id).result, op["by"])
@@ -469,7 +470,7 @@ def test_ledger_transaction_rolls_back_when_ownership_changes_at_the_final_check
     assert outcomes.authority.current(proposal.task_id).generation == 2
 
 
-def test_ledger_completion_refuses_tampered_payload(monkeypatch, tmp_path):
+def test_ledger_completion_refuses_tampered_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.swarm_v2.outcomes import CompletionGate
     from tests import sv2_ctl05_cases
 
@@ -483,7 +484,7 @@ def test_ledger_completion_refuses_tampered_payload(monkeypatch, tmp_path):
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": actor,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": {"run": "success"}},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": {"run": "success"}},
     }
     _, rejected = repository.apply_ops(
         outcomes.authority.slug, ops=[operation], gate=CompletionGate(outcomes, token, proposal.generation, result)
@@ -749,7 +750,9 @@ def test_committed_outcome_allows_an_unprotected_description_update(monkeypatch,
     assert state["tasks"][0]["description"] == "verified result"
 
 
-def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(monkeypatch, tmp_path):
+def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from copy import deepcopy
 
     from scripts.swarm_ledger import ledger_tasks
@@ -768,7 +771,7 @@ def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(monkeypatch, t
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": outcomes.authority.current(proposal.task_id).holder,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     before = deepcopy(doc)
     assert not ledger_tasks.complete_outcome(doc, operation, ctx, changed, operation["by"])
@@ -777,7 +780,9 @@ def test_changed_committed_effect_cannot_reuse_its_ledger_receipt(monkeypatch, t
 
 
 @pytest.mark.parametrize("field,value", [("op", "task_add"), ("item", "tasks/other"), ("by", "forged")])
-def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path, field, value):
+def test_completion_refuses_an_operation_of_another_kind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, field: str, value: str
+) -> None:
     from copy import deepcopy
 
     from scripts.swarm_ledger import ledger_tasks
@@ -794,7 +799,7 @@ def test_completion_refuses_an_operation_of_another_kind(monkeypatch, tmp_path, 
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": outcomes.authority.current(proposal.task_id).holder,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     operation[field] = value
     before = deepcopy(doc)
@@ -974,7 +979,9 @@ def test_reconciliation_after_ledger_completion_checks_the_current_revision(monk
         {"missing_task": True},
     ],
 )
-def test_authoritative_completion_refuses_incomplete_or_mismatched_effects(monkeypatch, tmp_path, change):
+def test_authoritative_completion_refuses_incomplete_or_mismatched_effects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, change: dict[str, str | bool]
+) -> None:
     from copy import deepcopy
 
     from scripts.swarm_ledger import ledger_tasks
@@ -1004,7 +1011,7 @@ def test_authoritative_completion_refuses_incomplete_or_mismatched_effects(monke
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": actor,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     before = deepcopy(doc)
     assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
@@ -1027,7 +1034,9 @@ def test_committed_outcome_refusal_reports_the_exact_controller_requirement(monk
     )
 
 
-def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(monkeypatch, tmp_path):
+def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from scripts.swarm_ledger import ledger_tasks
     from scripts.swarm_ledger.api.resources import revision
     from tests import sv2_ctl05_cases
@@ -1039,7 +1048,7 @@ def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(monk
     doc = repository.get_document(outcomes.authority.slug)
     ctx = core.Context(doc.pop("_meta"), 0)
     actor = outcomes.authority.current(proposal.task_id).holder
-    fields = {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof}
+    fields = {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof}
     doc["tasks"][0].update(fields)
     doc["tasks"][0]["done"] = True
     result["proposal"]["task_revision"] = revision(doc["tasks"][0])
@@ -1055,7 +1064,9 @@ def test_outcome_receipt_is_dirty_even_when_done_fields_are_already_present(monk
     assert ctx.meta["outcomes"][proposal.task_id]["operation_id"] == result["operation_id"]
 
 
-def test_ledger_proof_contract_refusal_is_not_committed_as_an_outcome(monkeypatch, tmp_path):
+def test_ledger_proof_contract_refusal_is_not_committed_as_an_outcome(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     from copy import deepcopy
 
     from scripts.swarm_ledger import ledger_tasks
@@ -1076,7 +1087,7 @@ def test_ledger_proof_contract_refusal_is_not_committed_as_an_outcome(monkeypatc
         "op": "task_update",
         "item": f"tasks/{proposal.task_id}",
         "by": actor,
-        "fields": {"state": "done", "pr_url": proposal.pr_url, "proof": proposal.proof},
+        "fields": {"state": "done", "awaiting": "", "pr_url": proposal.pr_url, "proof": proposal.proof},
     }
     before = deepcopy(doc)
     assert not ledger_tasks.complete_outcome(doc, operation, ctx, result, actor)
