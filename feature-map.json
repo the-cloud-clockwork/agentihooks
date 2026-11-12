@@ -3664,6 +3664,21 @@
       ]
     },
     {
+      "id": "controller-scoped-scheduler-state",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-scoped-scheduler-state",
+      "behaviour": "A process on a scoped bus with no swarm setting, such as the multi swarm controller, opens the unscoped scheduler state its scheduler supervisor reads, so its process timer fires and never raises on the missing swarm setting.",
+      "seam": "scripts.events.scheduler_state open_scheduler_state; scripts.scheduler.process_timer Timer",
+      "tests": [
+        "tests/events/test_scheduler_state.py::test_a_scoped_bus_without_a_swarm_setting_opens_the_unscoped_scheduler_state",
+        "tests/events/test_scheduler_state.py::test_the_controller_process_timer_fires_on_a_scoped_bus_without_a_swarm_setting",
+        "tests/events/test_scheduler_state.py::test_the_supervisor_a_scoped_controller_spawns_opens_the_same_scheduler_state"
+      ],
+      "rules": [
+        "bus-scope-swarm-setting-indexed"
+      ]
+    },
+    {
       "id": "independent-ci-records",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2436",
