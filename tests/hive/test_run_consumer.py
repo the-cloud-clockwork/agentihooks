@@ -37,7 +37,7 @@ def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, An
     from scripts.hive import run_consumer, run_orders
     from scripts.workflows import loader
 
-    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path / "home")
     monkeypatch.setattr(loader.profile_chain, "read_state", lambda: {})
     root = tmp_path / "dev"
     project = root / "project"
@@ -68,7 +68,8 @@ def order(run_orders: Any, **fields: Any) -> Any:
     return run_orders.RunOrder(**chosen)
 
 
-def test_a_run_order_starts_one_detached_run_in_the_project_checkout(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_starts_one_detached_run_in_the_project_checkout(setup: tuple[Any, ...]) -> None:
     from scripts.hive.orders import Ack
 
     redis, run_consumer, run_orders, start, project = setup
@@ -84,7 +85,8 @@ def test_a_run_order_starts_one_detached_run_in_the_project_checkout(setup):
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_poll_starts_one_batch_of_run_orders(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_poll_starts_one_batch_of_run_orders(setup: tuple[Any, ...]) -> None:
     redis, run_consumer, run_orders, start, _ = setup
     store = run_orders.RunOrders(redis)
     for index in range(run_consumer.BATCH + 1):
@@ -94,7 +96,8 @@ def test_a_poll_starts_one_batch_of_run_orders(setup):
     assert redis.xlen(store.stream("host")) == 1
 
 
-def test_a_run_order_is_claimed_once_by_its_receipt(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_is_claimed_once_by_its_receipt(setup: tuple[Any, ...]) -> None:
     redis, run_consumer, run_orders, start, _ = setup
     store = run_orders.RunOrders(redis)
     sent = order(run_orders)
@@ -120,7 +123,10 @@ def test_a_run_order_is_claimed_once_by_its_receipt(setup):
         ({"workflow": "absent"}, "missing_workflow"),
     ],
 )
-def test_a_run_order_that_cannot_start_acks_failed_with_its_reason(setup, fields, failure):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_that_cannot_start_acks_failed_with_its_reason(
+    setup: tuple[Any, ...], fields: dict[str, Any], failure: str
+) -> None:
     from scripts.hive.orders import Ack
 
     redis, run_consumer, run_orders, start, _ = setup
@@ -133,7 +139,8 @@ def test_a_run_order_that_cannot_start_acks_failed_with_its_reason(setup, fields
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_claimed_run_order_past_its_expiry_acks_expired(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_claimed_run_order_past_its_expiry_acks_expired(setup: tuple[Any, ...]) -> None:
     from scripts.hive.orders import Ack
 
     redis, run_consumer, run_orders, start, _ = setup
@@ -146,11 +153,37 @@ def test_a_claimed_run_order_past_its_expiry_acks_expired(setup):
     assert store.ack(sent) == Ack("failed", {}, "expired")
 
 
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_whose_start_fails_acks_start_failed(
+    setup: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.hive.orders import Ack
+
+    redis, run_consumer, run_orders, _, _ = setup
+
+    def broken(name: str, case: str, project: str, delivery_id: str, owner: str) -> bool:
+        raise OSError("spawn failed")
+
+    monkeypatch.setattr(run_consumer.scheduled, "start", broken)
+    store = run_orders.RunOrders(redis)
+    sent = order(run_orders)
+    store.send("host", sent)
+    assert run_consumer.RunConsumer(redis, "host").poll() == 1
+    assert store.ack(sent) == Ack("failed", {}, "start_failed")
+    assert redis.xlen(store.stream("host")) == 0
+
+
 @pytest.mark.parametrize(
     ("raw", "failure"),
-    [("not json", "invalid_order"), ('{"run_id": "run-1"}', "invalid_order")],
+    [
+        ("not json", "invalid_order"),
+        ('{"run_id": "run-1"}', "invalid_order"),
+        ('"x"', "invalid_order"),
+        ("null", "invalid_order"),
+    ],
 )
-def test_an_unreadable_run_order_is_dropped_as_invalid(setup, raw, failure):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_an_unreadable_run_order_is_dropped_as_invalid(setup: tuple[Any, ...], raw: str, failure: str) -> None:
     from scripts.hive.orders import Ack
 
     redis, run_consumer, run_orders, start, _ = setup
@@ -162,7 +195,8 @@ def test_an_unreadable_run_order_is_dropped_as_invalid(setup, raw, failure):
     assert redis.xlen(store.stream("host")) == 0
 
 
-def test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid(setup: tuple[Any, ...]) -> None:
     redis, run_consumer, run_orders, start, _ = setup
     store = run_orders.RunOrders(redis)
     item = redis.xadd(store.stream("host"), {"order": order(run_orders, run_id="../escape").encode()})
@@ -171,7 +205,8 @@ def test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid(setup):
     assert "invalid_order" in redis.hget(f"{store.stream('host')}:acks", item)
 
 
-def test_a_run_order_for_another_hive_starts_nothing(setup):
+@pytest.mark.feature("hive-headless-run-consumer")
+def test_a_run_order_for_another_hive_starts_nothing(setup: tuple[Any, ...]) -> None:
     redis, run_consumer, run_orders, start, _ = setup
     store = run_orders.RunOrders(redis)
     item = redis.xadd(store.stream("host"), {"order": order(run_orders, hive="other").encode()})
@@ -182,9 +217,10 @@ def test_a_run_order_for_another_hive_starts_nothing(setup):
 
 
 @pytest.mark.parametrize(("fenced", "draining", "polled"), [(False, False, 1), (True, False, 0), (False, True, 0)])
+@pytest.mark.feature("hive-headless-run-consumer")
 def test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining(
-    setup, monkeypatch, fenced, draining, polled
-):
+    setup: tuple[Any, ...], monkeypatch: pytest.MonkeyPatch, fenced: bool, draining: bool, polled: int
+) -> None:
     from scripts.hive import daemon, registry
 
     redis, run_consumer, _, _, _ = setup

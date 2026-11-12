@@ -130,7 +130,7 @@ def test_promotion_template_refuses_superseded_head(tmp_path, monkeypatch, order
 
 def test_delivery_example_and_adoption_instructions():
     delivery = yaml.safe_load((TEMPLATES / "delivery.yaml").read_text())
-    assert set(delivery) == {"pull_request", "queue", "promotion", "promote"}
+    assert set(delivery) == {"pull_request", "queue", "promotion", "promote", "lab"}
     assert delivery["queue"] == ["./ci/unit"]
     assert delivery["promote"] == ['./ci/promote "$GITHUB_SHA"']
     readme = (TEMPLATES / "README.md").read_text()
