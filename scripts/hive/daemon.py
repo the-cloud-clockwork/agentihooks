@@ -45,6 +45,7 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
     from scripts.hive.orders import Consumer, alive
+    from scripts.hive.run_consumer import RunConsumer
 
     alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
@@ -83,6 +84,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     adopt_capabilities(redis, local_id)
     if not fenced and not registry.member_draining(redis, local_id, registry.member_name()):
         dispatch.poll(consumer)
+        RunConsumer(redis, local_id).poll()
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -243,6 +245,27 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
             refresh_ready()
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+            continue
+        try:
+            emit_presence(redis, local_id, now_ms)
+        except Exception as exc:
+            print(f"hive presence emit failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def emit_presence(redis: "Redis", local_id: str, now_ms: int) -> None:
+    """Marks this hive seen over OpenTelemetry with its name, headed flag, release and agent processes by harness."""
+    from hooks.observability import presence
+
+    shown = registry.show(redis, local_id) or {}
+    agents = {harness: len(pids) for harness, pids in account_sessions.local_processes().items()}
+    presence.hive(
+        local_id,
+        str(shown.get("name") or local_id),
+        shown.get("ui") == "yes",
+        updater.installed_version(),
+        agents,
+        now_ms / 1000,
+    )
 
 
 def _headroom_wait_failed(exc: Exception, stop: threading.Event) -> None:

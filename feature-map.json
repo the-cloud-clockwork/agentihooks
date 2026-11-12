@@ -3513,6 +3513,16 @@
       ]
     },
     {
+      "id": "root-hive-join-report",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-root-hive-launch-ack",
+      "behaviour": "A swarm session on a hive that carries no member id, such as the workstation root hive, writes its hive join report under the hive id its hive runner acknowledges launches with, so a controller running off that hive grades the launch from the report instead of retiring it as missing.",
+      "seam": "hooks.context.hive_join.run",
+      "tests": [
+        "tests/test_hive_join_hook.py::test_root_hive_session_writes_its_join_report_without_a_member_id"
+      ]
+    },
+    {
       "id": "scheduler-bounded-history",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-headed-hive-oom",
@@ -3587,6 +3597,17 @@
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_an_ambiguous_receipt_releases_its_admission_reservation",
         "tests/hive/test_controller_launch.py::test_a_live_acknowledgement_that_fails_its_identity_check_releases_its_admission_reservation"
+      ]
+    },
+    {
+      "id": "hive-run-order-receipt-outlives-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
+      "behaviour": "A hive run consumer that claims a run order refreshes its receipt to live a day past the order's own expiry, so an order left on the stream by a crash before its ack is never claimed and started a second time once the one day send receipt would have expired.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.apply",
+      "tests": [
+        "tests/hive/test_run_consumer.py::test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack",
+        "tests/hive/test_run_consumer.py::test_a_run_order_claimed_past_its_expiry_keeps_its_receipt_one_receipt_lifetime"
       ]
     },
     {
@@ -4080,7 +4101,7 @@
         "tests/hive/test_join_headed.py::test_git_identity_needs_both_a_global_name_and_email",
         "tests/hive/test_join_headed.py::test_startup_runs_the_headed_checks_only_on_a_headed_hive",
         "tests/hive/test_join_headed.py::test_a_hive_is_headed_when_its_registry_record_carries_the_interface",
-        "tests/hive/test_join_headed.py::test_the_join_hook_skips_an_agent_missing_its_hive_swarm_or_name"
+        "tests/hive/test_join_headed.py::test_the_join_hook_skips_an_agent_missing_its_swarm_or_name"
       ]
     },
     {
@@ -4143,7 +4164,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
@@ -4624,6 +4645,34 @@
         "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_pass_document_lacks_counts_under_the_phase_it_names",
         "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_document_holds_counts_under_the_slice_phase_not_its_own",
         "tests/swarm/test_phase_projection.py::test_the_phase_pass_keeps_a_phase_open_while_its_sliced_tasks_are_open"
+      ]
+    },
+    {
+      "id": "hive-headless-run-consumer",
+      "origin": "inventory",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/hvr2",
+      "behaviour": "Each hive daemon beat on a hive neither fenced nor draining reads its run order stream, claims each order once by its receipt, writes the case file and starts the run detached through the scheduled workflow start in the hive checkout of the project repository with no herdr pane, and acks expired orders, unknown repositories, missing workflows and failed starts with their reason.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.poll through scripts.hive.daemon.beat",
+      "tests": [
+        "tests/hive/test_run_consumer.py::test_a_run_order_starts_one_detached_run_in_the_project_checkout",
+        "tests/hive/test_run_consumer.py::test_a_poll_starts_one_batch_of_run_orders",
+        "tests/hive/test_run_consumer.py::test_a_run_order_is_claimed_once_by_its_receipt",
+        "tests/hive/test_run_consumer.py::test_a_run_order_that_cannot_start_acks_failed_with_its_reason",
+        "tests/hive/test_run_consumer.py::test_a_claimed_run_order_past_its_expiry_acks_expired",
+        "tests/hive/test_run_consumer.py::test_a_run_order_whose_start_fails_acks_start_failed",
+        "tests/hive/test_run_consumer.py::test_an_unreadable_run_order_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_naming_an_unsafe_run_id_is_dropped_as_invalid",
+        "tests/hive/test_run_consumer.py::test_a_run_order_for_another_hive_starts_nothing",
+        "tests/hive/test_run_consumer.py::test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draining"
+      ]
+    },
+    {
+      "id": "launch-order-receipt-outlives-order",
+      "origin": "inventory",
+      "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
+      "seam": "scripts.hive.orders.Consumer.poll through apply and resumed, against the expiry carried by the launch receipt, which today has none",
+      "tests": [
+        "tests/hive/test_orders.py::test_a_launch_order_outliving_a_day_starts_once_after_a_crash_before_its_ack_and_an_aged_receipt"
       ]
     }
   ],

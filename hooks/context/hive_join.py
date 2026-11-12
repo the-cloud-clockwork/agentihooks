@@ -4,15 +4,16 @@ from pathlib import Path
 
 
 def run(payload: dict, event: str) -> None:
-    hive = os.environ.get("AGENTIHOOKS_HIVE_ID")
     slug = os.environ.get("AGENTIHOOKS_SWARM")
     name = os.environ.get("AGENTIHOOKS_AGENT_NAME")
-    if not (hive and slug and name):
+    if not (slug and name):
         return
     from scripts.hive import join_checks, join_report
     from scripts.profiles.binding import HOMES
+    from scripts.swarm.commands import hive_id
     from scripts.swarm.store import connect
 
+    hive = os.environ.get("AGENTIHOOKS_HIVE_ID") or hive_id()
     store = connect()
     session = payload.get("session_id", "")
     at = int(time.time() * 1000)

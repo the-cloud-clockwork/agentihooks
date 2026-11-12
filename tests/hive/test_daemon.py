@@ -23,6 +23,11 @@ def timer_state(monkeypatch):
     monkeypatch.setattr(daemon, "timer_state", lambda waiter: waiter)
 
 
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon, "emit_presence", lambda redis, hive, now_ms: None)
+
+
 @pytest.fixture
 def redis():
     import fakeredis
@@ -532,6 +537,41 @@ def test_headroom_keeps_its_cadence_through_a_failed_publish(monkeypatch, capsys
     assert calls == [1_000, 1_000]
     assert len(beats) == 1
     assert capsys.readouterr().err == f"hive headroom publish failed ({error}: {failure})\n"
+
+
+def test_headroom_emits_presence_after_each_liveness_touch(monkeypatch):
+    from scripts.hive import headroom
+
+    order = []
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: order.append(("headroom", hive, now_ms)))
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: order.append(("touch", hive, now_ms)))
+    monkeypatch.setattr(
+        daemon, "emit_presence", lambda client, hive, now_ms: order.append(("presence", client, hive, now_ms))
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: 3)
+    stop, _, _ = _paced(monkeypatch, 2)
+    client: Any = object()
+    PUBLISH_HEADROOM(client, client, "local", stop)
+    assert order == [("headroom", "local", 3_000), ("touch", "local", 3_000), ("presence", client, "local", 3_000)]
+
+
+def test_a_failed_presence_emit_is_logged_and_keeps_the_cadence(monkeypatch, capsys):
+    from scripts.hive import headroom
+
+    touched = []
+
+    def fail(client, hive, now_ms):
+        raise OSError("proc gone")
+
+    monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
+    monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: touched.append(now_ms))
+    monkeypatch.setattr(daemon, "emit_presence", fail)
+    monkeypatch.setattr(daemon.time, "time", lambda: 1)
+    stop, _, _ = _paced(monkeypatch, 3)
+    client: Any = object()
+    PUBLISH_HEADROOM(client, client, "local", stop)
+    assert touched == [1_000, 1_000]
+    assert capsys.readouterr().err == "hive presence emit failed (OSError: proc gone)\n" * 2
 
 
 @pytest.mark.feature("hive-ready-through-launch")

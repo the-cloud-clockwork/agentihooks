@@ -23,6 +23,22 @@ POD = {
 }
 
 
+PRESENCE = SimpleNamespace(read=lambda environ, now_s: None)
+
+
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(monitor.ports, "presence", lambda: PRESENCE)
+
+
+def presence_of(monkeypatch: pytest.MonkeyPatch, present: list[dict]) -> None:
+    monkeypatch.setattr(
+        PRESENCE,
+        "read",
+        lambda environ, now_s: present if environ is monitor.os.environ and now_s == NOW / 1000 else None,
+    )
+
+
 class Redis:
     def __init__(self, sessions):
         self.sessions = sessions
@@ -367,3 +383,35 @@ def test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives(
     data = viewed(Store({}), *ports_for(hives, {}, bridges=bridges))
     assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 5}]
     assert data["agents"] == {"total": 5, "source": "herdr", "reporting": 1, "of": 1, "claude": 5, "codex": 0}
+
+
+PRESENT = [
+    {"id": "anton-1", "name": "swarm-hive-001", "headed": False, "release": "9", "agents": {"claude": 3}},
+    {"id": "auto", "name": "automation", "headed": True, "release": "9", "agents": {"claude": 4, "codex": 1}},
+    {"id": "dark", "name": "dark-hive", "headed": False, "release": "9", "agents": {}},
+]
+
+
+def test_presence_lists_every_hive_it_saw_with_its_agents_over_herdr_and_the_registry(monkeypatch):
+    presence_of(monkeypatch, PRESENT)
+    published = {"machines": {"master": {"claude": 99}}, "silent": [], "measured_at": NOW}
+    readings = {"anton-1": {**POD, "agents": {"claude": 50}}}
+    hives = [ROOT, {**POD_HIVE, "id": "anton-1"}, {"id": "gone", "name": "gone", "live": False}]
+    data = viewed(Store({}), *ports_for(hives, readings, published=published))
+    assert data["agents"] == {"total": 8, "source": "otel", "reporting": 3, "of": 4, "claude": 7, "codex": 1}
+    assert data["hives"]["rows"] == [
+        {"name": "automation", "agents": 5},
+        {"name": "dark-hive", "agents": 0},
+        {"name": "root", "agents": None},
+        {"name": "swarm-hive-001", "agents": 3},
+    ]
+    assert data["hives"]["live"] == 4
+    assert data["hives"]["measured"] == 1
+
+
+def test_no_presence_falls_back_to_the_herdr_count(monkeypatch):
+    presence_of(monkeypatch, [])
+    published = {"machines": {"master": {"claude": 6}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([ROOT], {}, published=published))
+    assert data["agents"]["source"] == "herdr"
+    assert data["hives"]["rows"] == [{"name": "swarm-master", "agents": 6}]
