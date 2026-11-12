@@ -567,10 +567,10 @@ def _codex_agents(claude_agents: Path, out: Path) -> None:
         if len(parts) != 3 or parts[0]:
             continue
         try:
-            front: object = yaml.safe_load(parts[1])
+            front: dict[str, object] | None = yaml.safe_load(parts[1])
         except yaml.YAMLError:
             continue
-        meta: dict[str, object] = cast(dict[str, object], front) if isinstance(front, dict) else {}
+        meta: dict[str, object] = front if isinstance(front, dict) else {}
         name, description, body = meta.get("name"), meta.get("description"), parts[2].strip()
         if isinstance(description, str) and description.strip() and body:
             named = name.strip() if isinstance(name, str) and name.strip() else src.stem
