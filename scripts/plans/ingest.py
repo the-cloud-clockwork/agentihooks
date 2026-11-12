@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import socket
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
@@ -140,7 +141,10 @@ def source(env: Mapping[str, str], path: str, markdown: str) -> dict[str, Any]:
     """The provenance an operator-authored plan row records."""
     return {
         "harness": env.get("AGENTIHOOKS_TARGET", "claude"),
-        "session": env.get("CLAUDE_SESSION_ID", ""),
+        "session": env.get("CLAUDE_CODE_SESSION_ID")
+        or env.get("CLAUDE_SESSION_ID")
+        or env.get("CODEX_THREAD_ID")
+        or f"shell@{socket.gethostname()}:{os.getppid()}",
         "path": "" if path == "-" else str(Path(path).resolve()),
         "sha256": hashlib.sha256(markdown.encode()).hexdigest(),
     }

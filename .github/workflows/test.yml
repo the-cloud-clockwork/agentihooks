@@ -287,9 +287,7 @@ jobs:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
           repositories: ${{ github.event.repository.name }}
-          permission-checks: read
           permission-contents: read
-          permission-issues: read
           permission-pull-requests: read
 
       - uses: actions/setup-python@v5
@@ -2778,7 +2776,10 @@ jobs:
         run: |
           scanner="$RUNNER_TEMP/grader/scripts/docs_sanity.py"
           if [[ ! -f "$scanner" ]]; then scanner=scripts/docs_sanity.py; fi
-          python -I "$scanner" --keywords-env DOCS_SANITY_KEYWORDS docs evidence changelog.d README.md
+          baseline="$RUNNER_TEMP/grader/tests/DOCS_SANITY_BASELINE.json"
+          args=(--keywords-env DOCS_SANITY_KEYWORDS)
+          if [[ -f "$baseline" ]] && grep -q -- '--baseline' "$scanner"; then args+=(--baseline "$baseline"); fi
+          python -I "$scanner" "${args[@]}" docs evidence changelog.d README.md
 
       - name: Require wall clock markers on elapsed bounds
         if: ${{ !cancelled() }}

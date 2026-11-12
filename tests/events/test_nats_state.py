@@ -145,6 +145,7 @@ def test_new_state_stream_records_history_and_import_barrier(importing):
     )
 
 
+@pytest.mark.feature("hub-fan-in-unowned-state")
 def test_retained_legacy_state_requires_authoritative_key_ownership():
     backend = root(provision=True)
     backend._js.stream_info.side_effect = [
@@ -155,7 +156,7 @@ def test_retained_legacy_state_requires_authoritative_key_ownership():
     ]
     with pytest.raises(RuntimeError) as caught:
         ScopedStateStore(backend, "rig", "work")
-    assert str(caught.value) == "legacy state requires explicit key ownership"
+    assert str(caught.value) == "legacy state requires explicit key ownership: swarm 'rig' bucket 'work'"
     backend._js.add_stream.assert_not_awaited()
 
 

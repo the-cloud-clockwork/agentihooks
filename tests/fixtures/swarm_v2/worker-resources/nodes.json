@@ -6,7 +6,7 @@
   },
   "nodes": [
     {
-      "name": "anton-ec2-0396dfd54e94477e5",
+      "name": "redacted-node-1",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -17,7 +17,7 @@
       "colocated_pods": 4
     },
     {
-      "name": "anton-ec2-0447e2769b1a3084a",
+      "name": "redacted-node-2",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -28,7 +28,7 @@
       "colocated_pods": 9
     },
     {
-      "name": "anton-ec2-0af3a8fe7769581ef",
+      "name": "redacted-node-4",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,
@@ -39,7 +39,7 @@
       "colocated_pods": 10
     },
     {
-      "name": "anton-ec2-0c9b3493a0ef846f4",
+      "name": "redacted-node-5",
       "pool": "",
       "instance_type": "k3s",
       "allocatable_memory_mib": 15701,

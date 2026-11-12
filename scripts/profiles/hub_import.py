@@ -32,7 +32,6 @@ from hooks import secrets
 PROFILE_KEYS = ("description", "capabilities")
 CLAUDE_KEYS = ("model", "effort")
 SETTINGS = ".claude/settings.json"
-MCP = ".mcp.json"
 CONVERTED = frozenset({"command.yml", SETTINGS, ".claude/settings.local.json"})
 SKIPPED_DIRS = frozenset({"node_modules", ".git"})
 AGENT_HOOKS = "hooks"
@@ -107,7 +106,7 @@ def import_hub(src: Path, out: Path, dry_run: bool, data: Path | None = None) ->
             raise ValueError(f"profile name taken: {name}")
         if (data / "profiles" / name).exists():
             raise ValueError(f"profile data taken: {name}")
-        plans[name] = _localize(_merge(_plan(package, name, command), _cases(package.parent / CASES), package), agents)
+        plans[name] = _localize(_merge(_plan(package, name, command), _cases(package.parent / CASES)), agents)
         stores[name] = _collect(package, DATA)
         deps.extend(_deps(package, name))
     manifest = _manifest(out / DEPS, deps)
@@ -210,10 +209,7 @@ def _is_list(value: object) -> TypeGuard[list[object]]:
 
 def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, bytes]:
     """Return each profile file's relative path and content."""
-    files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package), package)
-    mcp_path = package / MCP
-    if mcp_path.is_file():
-        _refuse_literal_credentials(json.loads(mcp_path.read_text()), mcp_path)
+    files = _merge({"profile.yml": yaml.safe_dump(_profile(command, name)).encode()}, _assets(package))
     settings_path = package / SETTINGS
     if settings_path.is_file():
         settings: object = json.loads(settings_path.read_text())
@@ -222,7 +218,7 @@ def _plan(package: Path, name: str, command: dict[str, object]) -> dict[str, byt
         _refuse_literal_credentials(settings, settings_path)
         portable = _portable(settings)
         if portable is not _DROP:
-            files = _merge(files, {OVERRIDES: (json.dumps(portable, indent=2) + "\n").encode()}, package)
+            files = _merge(files, {OVERRIDES: (json.dumps(portable, indent=2) + "\n").encode()})
     return files
 
 
@@ -305,11 +301,11 @@ def _home_form(rest: str, agents: dict[str, str]) -> str | None:
     return f"$HOME{rest}"
 
 
-def _merge(files: dict[str, bytes], added: dict[str, bytes], package: Path) -> dict[str, bytes]:
+def _merge(files: dict[str, bytes], added: dict[str, bytes]) -> dict[str, bytes]:
     """Return both file sets together, refusing a profile path that both of them write."""
     taken = sorted(files.keys() & added.keys())
     if taken:
-        raise ValueError(f"profile file taken twice: {taken[0]} in {package}")
+        raise ValueError(f"profile file taken twice: {taken[0]}")
     return files | added
 
 
