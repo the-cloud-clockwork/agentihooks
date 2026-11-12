@@ -117,6 +117,7 @@ TOKEN_OFF = {"state": "off", "detail": "subscription token fallback"}
 
 
 @pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_a_front_door_master_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
     passed, placed = _spawn(tmp_path, "master", "claude", "interactive", reported=f"placement={placement}\n")
     assert passed[:6] == ["--route", "claude-ai", *RC]
@@ -124,6 +125,7 @@ def test_a_front_door_master_records_remote_control_by_where_its_login_landed(tm
 
 
 @pytest.mark.parametrize(("placement", "decided"), [("fallback", TOKEN_OFF), ("forced", ON)])
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_a_front_door_resume_records_remote_control_by_where_its_login_landed(tmp_path, placement, decided):
     runtime, config, agent, _ = _resuming(tmp_path, "c0ffee", "claude")
     config.slug = "proof"
@@ -142,18 +144,21 @@ def replace_stdout(proc, extra):
     return SimpleNamespace(returncode=proc.returncode, stdout=proc.stdout + extra, stderr=proc.stderr)
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_a_master_on_the_token_fallback_reports_phone_access_unavailable_with_the_reason():
     assert remote_control.line({"remote_control": TOKEN_OFF}) == (
         "Remote Control: off (subscription token fallback), phone access unavailable"
     )
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_a_master_on_its_native_login_reports_phone_access_available():
     assert remote_control.line({"remote_control": ON}) == (
         "Remote Control: on (master 1 · proof), phone access available"
     )
 
 
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_swarm_status_prints_phone_access_for_each_master():
     from scripts.swarm.cli import _remote_control_text
 
@@ -285,6 +290,7 @@ def test_only_an_on_decision_produces_launch_arguments():
         (None, ""),
     ],
 )
+@pytest.mark.feature("remote-control-phone-access-wording")
 def test_status_line_reads_the_recorded_decision(decided, text):
     assert remote_control.line({"remote_control": decided}) == text
 

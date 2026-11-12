@@ -2098,6 +2098,32 @@
       ]
     },
     {
+      "id": "swarm-launch-bounded-reads",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-bounded-reads-launch",
+      "behaviour": "The launch path reads its Redis hashes by named field or page by page with a counted hash scan, never in one whole hash read: placement, launch checks, launch jobs, local slots, preemption, prerequisite waits, failed panes, run window marks, the dispatcher red dev hold and sent triggers and remote control failures.",
+      "seam": "hash_pages.fields and hash_pages.picked through each launch path reader on a store that refuses a whole hash read",
+      "tests": [
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_reads_every_field_across_pages",
+        "tests/swarm/test_launch_bounded_reads.py::test_fields_stops_after_its_page_bound",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_returns_only_the_named_fields_that_are_set",
+        "tests/swarm/test_launch_bounded_reads.py::test_place_holds_spawns_for_another_swarms_waiting_master",
+        "tests/swarm/test_launch_bounded_reads.py::test_launch_check_reads_pending_checks_and_reports_paged",
+        "tests/swarm/test_launch_bounded_reads.py::test_launch_job_collect_drops_a_job_whose_agent_is_gone",
+        "tests/swarm/test_launch_bounded_reads.py::test_local_slots_count_and_claim_held_slots_paged",
+        "tests/swarm/test_launch_bounded_reads.py::test_preempt_keeps_only_asks_of_live_holders",
+        "tests/swarm/test_launch_bounded_reads.py::test_prerequisite_wait_reopen_pass_drops_a_stale_blocked_record",
+        "tests/swarm/test_launch_bounded_reads.py::test_failed_panes_held_reads_every_pane",
+        "tests/swarm/test_launch_bounded_reads.py::test_remote_control_failures_reads_every_master",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_red_dev_reads_only_blocked_tasks",
+        "tests/swarm/test_launch_bounded_reads.py::test_run_window_reads_its_marks_by_field",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_wake_reads_sent_triggers_by_id",
+        "tests/swarm/test_launch_bounded_reads.py::test_dispatch_seat_departed_seat_holds_only_sent_triggers",
+        "tests/swarm/test_launch_bounded_reads.py::test_picked_refuses_a_reply_that_misses_a_named_field",
+        "tests/swarm/test_launch_bounded_reads.py::test_failed_panes_report_pages_the_launches_hash"
+      ]
+    },
+    {
       "id": "inbox-outage-hold",
       "origin": "inventory",
       "behaviour": "A Redis or provider outage pauses the wake and escalation ladder, which resumes where it stopped once the outage ends.",
@@ -4088,6 +4114,400 @@
       ]
     },
     {
+      "id": "controller-drain-state-test-isolation",
+      "origin": "inventory",
+      "behaviour": "The controller stop tests' autouse fixture gives scripts.swarm.controller.RUNNING and controller.DRAINING fresh threading.Event instances for every test, so a SIGTERM delivered mid pass leaves no drain state for a later test on the same xdist worker.",
+      "seam": "the stop autouse fixture in tests/swarm/test_controller_stop.py against scripts.swarm.controller.RUNNING and DRAINING",
+      "tests": [
+        "tests/swarm/test_controller_stop.py::test_a_sigterm_run_leaves_the_controller_drain_state_clear_for_later_tests"
+      ]
+    },
+    {
+      "id": "scheduled-workflow-run-in-scheduling-project",
+      "origin": "inventory",
+      "behaviour": "A scheduled workflow slot records the folder the schedule command ran in, and a fired delivery spawns the detached run with that folder as its working directory, so the run resolves project layer workflow definitions from the project that scheduled it; a slot stored before the project field restores with an empty project and runs in the scheduler folder as before.",
+      "seam": "scripts.scheduler.slots.WorkflowSlot.record/deliver through scripts.workflows.scheduled.start",
+      "tests": [
+        "tests/workflows/test_scheduled.py::test_a_fired_schedule_starts_a_workflow_defined_only_in_its_scheduling_project",
+        "tests/workflows/test_scheduled.py::test_a_workflow_record_stored_without_a_project_runs_in_the_scheduler_folder",
+        "tests/workflows/test_scheduled.py::test_the_workflow_kind_round_trips_its_record"
+      ]
+    },
+    {
+      "id": "tick-scale-gate-step-floors",
+      "origin": "inventory",
+      "behaviour": "The tick scale gate reports a miss for a gated launch path step, every step in scripts.tick.steps.budgets.SPAWN_NEEDS plus spawn and tick view, whose wall time outruns its floor, that is cut off or abandoned, that ends outside success, or that only rested and never ran, ignores steps outside the gate, and its CLI refuses a --redis URL that is not loopback before flushing it.",
+      "seam": "tests.tick_scale.gate.misses and gate.main against scripts.tick.steps.budgets.floor_of",
+      "tests": [
+        "tests/tick_scale/test_gate.py::test_the_gate_covers_the_spawn_chain_reap_and_the_tick_view",
+        "tests/tick_scale/test_gate.py::test_every_gated_step_inside_its_floor_passes",
+        "tests/tick_scale/test_gate.py::test_a_wall_over_the_floor_is_a_miss",
+        "tests/tick_scale/test_gate.py::test_a_wall_at_the_floor_passes",
+        "tests/tick_scale/test_gate.py::test_a_cut_or_abandoned_step_is_a_miss",
+        "tests/tick_scale/test_gate.py::test_a_step_that_did_not_end_ok_is_a_miss",
+        "tests/tick_scale/test_gate.py::test_a_gated_step_that_only_rested_never_ran",
+        "tests/tick_scale/test_gate.py::test_steps_outside_the_gate_are_ignored",
+        "tests/tick_scale/test_gate.py::test_the_gate_refuses_a_redis_that_is_not_loopback_before_flushing_it"
+      ]
+    },
+    {
+      "id": "tick-scale-gate-wiring",
+      "origin": "inventory",
+      "behaviour": "The tick-scale job on the Tests workflow runs the tick-scale action only on a dev push, never on a pull request, merge queue or manual dispatch, is required by promotion-ready and promote without blocking the pull request gate, and the tick-scale workflow plants the whole hash fault only on its diffcheck plant branch.",
+      "seam": "tests/contracts/promotion/test_workflow.py reading .github/workflows/test.yml, .github/actions/tick-scale/action.yml and .github/workflows/tick-scale.yml",
+      "tests": [
+        "tests/contracts/promotion/test_workflow.py::test_each_dev_push_runs_the_tick_scale_gate_before_promotion_and_never_on_pull_requests_or_the_queue"
+      ]
+    },
+    {
+      "id": "scheduled-run-notifies-owner",
+      "origin": "inventory",
+      "behaviour": "A scheduled workflow delivery spawns through its own module as a wrapper that runs the workflow then always sends the owner an inbox notice naming the run's status, read as failed when the run never finished, saved no status, or the state file is unreadable, with the notice queued in the outbox while the inbox is unreachable and a duplicate resend of the same run dropped silently.",
+      "seam": "scripts.workflows.scheduled.start, main and notify against scripts.workflows.store and scripts.inbox.outbox/store",
+      "tests": [
+        "tests/workflows/test_scheduled.py::test_start_spawns_one_detached_run_named_by_the_delivery_id",
+        "tests/workflows/test_scheduled.py::test_the_workflow_slot_delivers_through_start",
+        "tests/workflows/test_scheduled.py::test_a_finished_run_sends_its_status_and_folder_to_the_owner",
+        "tests/workflows/test_scheduled.py::test_a_run_that_saved_no_state_reports_failed",
+        "tests/workflows/test_scheduled.py::test_a_run_that_did_not_finish_reads_failed",
+        "tests/workflows/test_scheduled.py::test_an_unreadable_run_state_reads_failed",
+        "tests/workflows/test_scheduled.py::test_a_finished_status_reads_as_saved",
+        "tests/workflows/test_scheduled.py::test_a_second_notice_for_the_same_run_is_dropped",
+        "tests/workflows/test_scheduled.py::test_notify_connects_to_the_inbox_by_default",
+        "tests/workflows/test_scheduled.py::test_a_notice_waits_in_the_outbox_while_redis_is_unreachable",
+        "tests/workflows/test_scheduled.py::test_main_runs_the_workflow_then_notifies_the_owner",
+        "tests/workflows/test_scheduled.py::test_main_notifies_the_owner_when_the_run_crashes"
+      ]
+    },
+    {
+      "id": "scheduler-workflow-target-case",
+      "origin": "inventory",
+      "behaviour": "The scheduler timer, stopwatch and cron commands accept a --workflow target with a --case file, refuse a case on any other target, and refuse a workflow target with no name, no case, or a case that is not a file.",
+      "seam": "scripts.scheduler.cli._slot and commands.target_slot against WorkflowSlot",
+      "tests": [
+        "tests/scheduler/test_cli.py::test_timer_add_reaches_a_workflow_with_its_case",
+        "tests/scheduler/test_cli.py::test_a_case_on_another_target_is_refused",
+        "tests/scheduler/test_commands.py::test_a_case_fits_only_a_named_workflow_target",
+        "tests/scheduler/test_commands.py::test_the_workflow_target_needs_a_case",
+        "tests/scheduler/test_commands.py::test_a_case_that_is_not_a_file_is_refused",
+        "tests/scheduler/test_commands.py::test_the_workflow_target_names_its_slot_with_the_case",
+        "tests/scheduler/test_commands.py::test_a_relative_case_is_kept_as_its_absolute_path"
+      ]
+    },
+    {
+      "id": "tick-unbounded-read-rule",
+      "origin": "inventory",
+      "behaviour": "A Semgrep rule refuses an unbounded whole hash read or unpaged key scan, hgetall, hscan_iter, unpaged hscan, scan, scan_iter or keys, in scripts/swarm or scripts/tick code unless the same function calls the expiry or archive that bounds the read key, and the CI step that grades every .semgrep/*-allowlist.json against its base now covers tick-unbounded-read-allowlist.json alongside the source control allowlist, each entry naming the task that removes it.",
+      "seam": ".semgrep/tick-unbounded-read.yml rule and tests/test_ci_semgrep.py against the Semgrep scan workflow",
+      "tests": [
+        "tests/test_ci_semgrep.py::test_source_control_allowlist_is_graded_against_the_caller_base",
+        "tests/test_ci_semgrep.py::test_unbounded_read_rule_covers_tick_code_and_lists_each_exception_with_a_task"
+      ]
+    },
+    {
+      "id": "restore-wait-health-finding",
+      "origin": "inventory",
+      "behaviour": "A health finding for the master names a seat whose restore decision, resume or fresh, has waited past one tick window, counted from its first restore record even on a retried decision, naming the restore outcome and task, and a wait within the window or a decided restore raises no finding without hiding a later seat's finding.",
+      "seam": "scripts.swarm.health.restore_wait.findings through scripts.swarm.status.findings and the tick's master notice",
+      "tests": [
+        "tests/swarm/test_restore_wait.py::test_a_first_restore_wait_counts_from_its_restore_and_is_a_finding_for_the_master",
+        "tests/swarm/test_restore_wait.py::test_a_seatless_taskless_wait_names_the_agent_and_no_task",
+        "tests/swarm/test_restore_wait.py::test_a_seat_waiting_within_one_tick_window_raises_no_finding",
+        "tests/swarm/test_restore_wait.py::test_a_wait_of_exactly_one_tick_window_raises_no_finding",
+        "tests/swarm/test_restore_wait.py::test_a_wait_within_the_window_never_hides_a_later_seat_past_it",
+        "tests/swarm/test_restore_wait.py::test_a_decided_restore_raises_no_finding_and_never_hides_a_later_wait",
+        "tests/swarm/test_restore_wait.py::test_the_wait_counts_from_when_a_retried_decision_first_awaited",
+        "tests/swarm/test_restore_wait.py::test_swarm_status_reports_a_restore_wait_at_the_current_time",
+        "tests/swarm/test_restore_wait.py::test_the_tick_sends_a_restore_wait_finding_to_the_master"
+      ]
+    },
+    {
+      "id": "restore-refuses-second-waiting-seat-agent",
+      "origin": "inventory",
+      "behaviour": "A restore pass and a reboot resume refuse a second agent of a seat whose current occupant already waits on a restore decision, marking the refused agent finished and recording a refused outcome naming the waiting peer, while the seat's current occupant is judged before an older record of the same seat and a stale waiting record that no longer holds the seat never blocks its current occupant.",
+      "seam": "scripts.swarm.resume.occupants_first, waiting_peer and reopen/_attempt through scripts.swarm.reboot._await_decision",
+      "tests": [
+        "tests/swarm/test_restore_wait.py::test_the_seats_current_occupant_is_judged_before_an_older_record_of_the_same_seat",
+        "tests/swarm/test_restore_wait.py::test_restore_refuses_a_second_waiting_agent_of_a_seat_that_already_waits",
+        "tests/swarm/test_restore_wait.py::test_restore_lets_the_seats_current_occupant_wait_before_an_older_record",
+        "tests/swarm/test_restore_wait.py::test_a_reboot_refuses_a_second_waiting_agent_of_a_seat_that_already_waits",
+        "tests/swarm/test_restore_wait.py::test_a_stale_waiting_record_that_no_longer_holds_the_seat_never_refuses_its_occupant",
+        "tests/swarm/test_restore_wait.py::test_restore_refuses_a_second_agent_of_a_waiting_seat_even_when_its_own_conversation_could_reopen",
+        "tests/swarm/test_restore_wait.py::test_a_seatless_agent_has_no_waiting_peer",
+        "tests/swarm/test_restore_wait.py::test_another_seat_waiting_never_makes_a_working_occupant_a_waiting_peer"
+      ]
+    },
+    {
+      "id": "swarm-quota-room-primary-reserve-above-floor",
+      "origin": "inventory",
+      "behaviour": "The swarm quota room check refuses admission and caps room at zero for the primary claude.ai login once its week used reaches the configured reserve percentage, even when the account sits above the routing floor rather than below it.",
+      "seam": "scripts.swarm_v2.quota.QuotaObservations._room against scripts.routing.reservation.primary_reserved",
+      "tests": [
+        "tests/test_swarm_v2_quota.py::test_the_primary_login_is_refused_above_the_routing_floor_by_its_reserve"
+      ]
+    },
+    {
+      "id": "tick-registry-loads-steps-on-module-import",
+      "origin": "inventory",
+      "behaviour": "Importing scripts.tick.registry loads the scripts.tick.steps package itself, so a fresh process whose first registry read happens before any step module import, or whose steps load under a swapped registry such as the catalogue check does, still holds every registered step.",
+      "seam": "scripts.tick.registry module import against registry.require('scripts.tick.steps')",
+      "tests": [
+        "tests/tick/test_registry.py::test_a_first_read_keeps_every_step_when_the_step_modules_load_under_a_swapped_registry"
+      ]
+    },
+    {
+      "id": "ledger-events-fresh-reader-batches-rereads",
+      "origin": "inventory",
+      "behaviour": "ledger_events.fresh_reader wraps an earlier pull request lookup so its first call in a tick pass rereads every still-open pull request of that lookup in one batched request and serves later calls from that batch, reads a pull request the batch did not return or any pull request when the earlier lookup holds none open on its own, makes no request during a rate limit backoff, and forwards its cache and a zero ttl to the batch read.",
+      "seam": "scripts.swarm.ledger_events.fresh_reader through views, and scripts.tick.steps.report._reread wiring it into waits.end_pass, ready.merge_pass and stall_watch.Watch",
+      "tests": [
+        "tests/swarm/test_fresh_reader.py::test_a_pass_rereads_every_open_pull_request_in_one_batched_request",
+        "tests/swarm/test_fresh_reader.py::test_a_pull_request_the_batch_did_not_return_is_read_on_its_own",
+        "tests/swarm/test_fresh_reader.py::test_a_view_holding_no_open_pull_request_reads_each_reread_on_its_own",
+        "tests/swarm/test_fresh_reader.py::test_a_reread_during_a_rate_limit_backoff_makes_no_request",
+        "tests/swarm/test_fresh_reader.py::test_each_pass_reads_fresh_past_the_shared_snapshot",
+        "tests/swarm/test_fresh_reader.py::test_the_batch_forwards_its_cache_and_a_zero_ttl",
+        "tests/swarm/test_stall_watch.py::test_the_tick_rereads_a_stall_from_github_before_acting"
+      ]
+    },
+    {
+      "id": "docs-tick-journal-user-unit-utc",
+      "origin": "inventory",
+      "behaviour": "Every tick journal journalctl example in the repository markdown selects the user unit agentihooks-swarm.service instead of the old -t agentihooks-swarm tag or SYSLOG_IDENTIFIER filter, and passes UTC bounded --since and --until, so no example misses or double counts lines against local time.",
+      "seam": "tests/test_docs_tick_journal.py scanning every repository markdown file for journalctl lines",
+      "tests": [
+        "tests/test_docs_tick_journal.py::test_tick_journal_reads_exist_in_the_docs",
+        "tests/test_docs_tick_journal.py::test_no_tick_journal_read_selects_the_old_tag",
+        "tests/test_docs_tick_journal.py::test_every_tick_journal_read_selects_the_user_unit",
+        "tests/test_docs_tick_journal.py::test_every_tick_journal_read_passes_utc_bounds"
+      ]
+    },
+    {
+      "id": "tick-pattern-rule-role-list-from-roles-folder",
+      "origin": "inventory",
+      "behaviour": "The tick pattern rule's test ROLES list is derived from every package roles folder that carries a profile.yml instead of a fixed tuple, and a test checks that list against the live roles folder listing, so a new or removed role is caught without a stale hardcoded list.",
+      "seam": "tests/test_skill_frontmatter.py ROLES against the package roles folder and test_tick_pattern_rule_folds_into_every_role_persona",
+      "tests": [
+        "tests/test_skill_frontmatter.py::test_role_list_covers_every_package_role_folder"
+      ]
+    },
+    {
+      "id": "scratch-ledger-folder-skips-shared-database",
+      "origin": "inventory",
+      "behaviour": "A ledger folder under ~/scratchpad ignores an inherited shared database URL and writes only to its own sqlite file unless AGENTIHOOKS_SCRATCH_SHARED_DATABASE is set to 1, and the swarm lease's ledger address follows the same url() check so a scratch ledger's lease never routes through the shared server; a ledger folder outside the scratchpad, including one that resolves outside it through .. or a tilde home, keeps the shared database.",
+      "seam": "scripts.swarm_ledger.repository.postgres.url and scratch against scripts.swarm.lease._address and scripts.swarm_ledger.storage.build",
+      "tests": [
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder",
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_ignores_the_shared_database_url",
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_uses_the_shared_database_only_when_asked",
+        "tests/swarm_ledger/test_scratch_store.py::test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database",
+        "tests/swarm_ledger/test_scratch_store.py::test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder",
+        "tests/swarm/test_lease.py::test_the_lease_keeps_a_scratch_ledger_route_when_the_shared_database_is_inherited"
+      ]
+    },
+    {
+      "id": "redis-command-map-caller-argument-typing",
+      "origin": "inventory",
+      "behaviour": "The Redis command map types an unannotated function, method, staticmethod or constructor parameter as a Redis client when a caller inside the program passes it one, by position or keyword, keeping that typing local to the callee so the same parameter name is not treated as a client everywhere, and a getattr call naming its method with a literal string maps to the Redis command it sends; the receiver fixpoint pass stops once a pass changes nothing.",
+      "seam": "scripts.swarm.code_reach.Program._typed, _spread and _arguments against Program.commands",
+      "tests": [
+        "tests/swarm/test_redis_commands.py::test_an_unannotated_parameter_is_typed_from_the_argument_its_caller_passes",
+        "tests/swarm/test_redis_commands.py::test_a_getattr_call_with_a_literal_redis_method_name_shows_up_in_the_map",
+        "tests/swarm/test_redis_commands.py::test_receiver_typing_stops_once_a_pass_changes_nothing"
+      ]
+    },
+    {
+      "id": "remote-control-phone-access-wording",
+      "origin": "inventory",
+      "behaviour": "The Remote Control status line and master card say phone access available or unavailable alongside the state and detail for every reason, flag, fallback auth, gateway, subscription token fallback, or a live login, both in the swarm CLI text and the ledger front end's agent row tooltip and label.",
+      "seam": "scripts.swarm.remote_control.line and cli._remote_control_text against scripts/swarm_ledger/static/js/swarm.js agentRow",
+      "tests": [
+        "tests/swarm/test_remote_control.py::test_a_master_on_the_token_fallback_reports_phone_access_unavailable_with_the_reason",
+        "tests/swarm/test_remote_control.py::test_a_master_on_its_native_login_reports_phone_access_available",
+        "tests/swarm/test_remote_control.py::test_swarm_status_prints_phone_access_for_each_master",
+        "tests/swarm/test_remote_control.py::test_status_line_reads_the_recorded_decision",
+        "tests/swarm/test_remote_control_notice.py::test_status_text_and_json_show_the_master_remote_control_line",
+        "tests/swarm_ledger/test_master_remote_control.py::test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell",
+        "tests/swarm_ledger/test_master_remote_control.py::test_an_off_master_without_transport_shows_phone_access_unavailable_with_the_reason",
+        "tests/swarm_ledger/test_master_remote_control.py::test_a_master_on_the_token_fallback_card_says_phone_access_unavailable"
+      ]
+    },
+    {
+      "id": "remote-control-token-fallback-reason",
+      "origin": "inventory",
+      "behaviour": "When a front door master asks for its native claude.ai login but the login chain lands on the subscription token fallback, its recorded Remote Control decision downgrades to off with reason subscription token fallback instead of staying on, both for a fresh launch and a resume, and a hive worker's acknowledgement carries the landed remote_control decision back to the controller's execution record.",
+      "seam": "scripts.swarm.remote_control.landed through scripts.swarm.runtime.HerdrRuntime.spawn/resume and scripts.hive.orders.Ack/HiveLaunch",
+      "tests": [
+        "tests/swarm/test_remote_control.py::test_a_front_door_master_records_remote_control_by_where_its_login_landed",
+        "tests/swarm/test_remote_control.py::test_a_front_door_resume_records_remote_control_by_where_its_login_landed",
+        "tests/hive/test_controller_launch.py::test_controller_records_the_remote_control_a_joined_hive_acknowledged",
+        "tests/hive/test_orders.py::test_a_hive_ack_carries_the_remote_control_its_launch_recorded"
+      ]
+    },
+    {
+      "id": "memory-search-skips-deleted-session",
+      "origin": "inventory",
+      "behaviour": "Hybrid memory search, through session_search and its search_semantic alias, returns no hit or context neighbour belonging to a session marked deleted, even while its search_chunk and chunk_vector rows are still stored and have not yet reached the retention sweep.",
+      "seam": "the memory search engine and the records API session_search/search_semantic against a deleted session's catalog state",
+      "tests": [
+        "tests/test_memory_search.py::test_a_deleted_session_is_not_searched_before_the_sweep",
+        "tests/test_memory_session_tools.py::test_search_through_every_name_skips_a_deleted_session_before_the_sweep"
+      ]
+    },
+    {
+      "id": "init-agent-launcher-python-safe-path",
+      "origin": "inventory",
+      "behaviour": "Every Python invocation the init-agent launcher script writes runs with the -P safe path flag, across every agent, transport and hive combination the launcher builds.",
+      "seam": "scripts.init_agent._write_launcher's generated launcher script lines",
+      "tests": [
+        "tests/test_init_agent_isolated_python.py::test_every_python_line_in_the_launcher_runs_with_the_safe_path_flag"
+      ]
+    },
+    {
+      "id": "ci-minutes-small-job-page-fallback",
+      "origin": "inventory",
+      "behaviour": "A run whose full 100 per page job read fails falls back to a 30 per page read, since GitHub answers 502 for a full page of a run whose jobs carry many steps.",
+      "seam": "scripts.ci_minutes.jobs_of through read_jobs",
+      "tests": [
+        "tests/test_ci_minutes.py::test_a_run_whose_full_job_page_fails_is_read_in_small_pages"
+      ]
+    },
+    {
+      "id": "workstation-agent-count-by-headed-hive",
+      "origin": "inventory",
+      "behaviour": "Host metrics count an agent as a workstation agent when it runs on a hive marked headed, ui=yes, rather than the sampler's own hive id, and fall back to the sampler's own hive when no hive is headed.",
+      "seam": "scripts.swarm.metrics_swarm.placement_counts against scripts.hive.registry.hives",
+      "tests": [
+        "tests/swarm/test_metrics_swarm.py::test_host_sample_counts_agents_on_headed_hives_wherever_the_sampler_runs"
+      ]
+    },
+    {
+      "id": "tick-step-profiler",
+      "origin": "inventory",
+      "behaviour": "Naming a step in AGENTIHOOKS_TICK_PROFILE_STEPS, comma separated, runs it under cProfile and emits one swarm_tick_step_profile line with its wall time, the running pass id when a pass is open, and its top functions by cumulative and by own time; an unnamed step or an unset env var never calls the profiler.",
+      "seam": "scripts.swarm.timing.within through _profiled_steps and _profile_call",
+      "tests": [
+        "tests/swarm/test_timing.py::test_within_profiles_a_step_named_in_the_env_var",
+        "tests/swarm/test_timing.py::test_within_without_the_env_var_never_calls_the_profiler",
+        "tests/swarm/test_timing.py::test_profiled_steps_is_empty_when_the_env_var_is_unset",
+        "tests/swarm/test_timing.py::test_profiled_steps_splits_several_names_on_commas",
+        "tests/swarm/test_timing.py::test_within_profiles_carry_the_running_pass_id"
+      ]
+    },
+    {
+      "id": "runner-trust-hosted-only-docs-sanity",
+      "origin": "inventory",
+      "behaviour": "The runner trust gate admits a job that calls the hosted only agentihooks docs-sanity reusable workflow at its exact owner, repository, path and ref with no runner input required, including under a pull_request_target event, while a lookalike call with a different ref, path, owner, or case anywhere but the ref itself is still red.",
+      "seam": "scripts.ci_runner_trust._hosted_shared and _trusted_runner through check",
+      "tests": [
+        "tests/test_ci_runner_trust.py::test_hosted_only_docs_sanity_call_passes_without_a_runner_input",
+        "tests/test_ci_runner_trust.py::test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event",
+        "tests/test_ci_runner_trust.py::test_docs_sanity_lookalike_calls_are_red"
+      ]
+    },
+    {
+      "id": "mutation-replan-all-killed-plan",
+      "origin": "inventory",
+      "behaviour": "The mutation replan's budget_overrun check passes a plan the probe killed whole, whose slowest shard needs zero worker seconds, even when the budget left after setup time is negative, instead of flagging it as overrunning a negative shard capacity.",
+      "seam": "scripts.ci_mutation.measured.budget_overrun",
+      "tests": [
+        "tests/test_ci_mutation_plan.py::test_a_plan_the_probe_killed_whole_passes_even_when_the_probe_left_less_budget_than_setup"
+      ]
+    },
+    {
+      "id": "admission-outcome-totals",
+      "origin": "inventory",
+      "behaviour": "Placement waits count each hive admission refusal category once per task until it changes or clears, count each successful admission once, and metrics_service.admission_rows sums both the pending admission gate's totals and these hive outcome totals into one admission_samples row per outcome.",
+      "seam": "scripts.hive.placement_waits.observe/admitted against scripts.swarm.metrics_service.admission_rows",
+      "tests": [
+        "tests/swarm/test_admission_outcome_totals.py::test_a_new_refusal_counts_its_category_once",
+        "tests/swarm/test_admission_outcome_totals.py::test_a_changed_refusal_counts_the_new_category",
+        "tests/swarm/test_admission_outcome_totals.py::test_a_lane_change_counts_the_same_refusal_again",
+        "tests/swarm/test_admission_outcome_totals.py::test_a_selected_placement_clears_the_wait_and_counts_nothing",
+        "tests/swarm/test_admission_outcome_totals.py::test_each_admitted_launch_counts_once",
+        "tests/swarm/test_admission_outcome_totals.py::test_admission_rows_sum_hive_outcomes_with_pending_totals",
+        "tests/swarm/test_admission_outcome_totals.py::test_a_hive_refusal_alone_yields_admission_rows"
+      ]
+    },
+    {
+      "id": "hive-launch-admission-count-once",
+      "origin": "inventory",
+      "behaviour": "A hive launch counts an admission only once its order is placed, a workstation or local launch counts it where the controller records workstation admission, and a failed local or hive runtime spawn counts no admission.",
+      "seam": "scripts.hive.launch.HiveLaunch.spawn and scripts.swarm.controller.FencedRuntime.spawn against scripts.hive.placement_waits.admitted",
+      "tests": [
+        "tests/swarm/test_admission_outcome_totals.py::test_a_hive_launch_counts_admitted_for_its_swarm",
+        "tests/swarm/test_admission_outcome_totals.py::test_a_local_launch_counts_admitted_only_without_a_hive_runtime",
+        "tests/hive/test_local_overflow.py::test_a_spawn_no_hive_takes_falls_back_to_the_local_machine",
+        "tests/hive/test_local_overflow.py::test_a_failed_local_spawn_counts_no_admission",
+        "tests/hive/test_local_overflow.py::test_a_failed_hive_runtime_spawn_takes_back_no_admission"
+      ]
+    },
+    {
+      "id": "tick-view-pull-batch-cache-ttl",
+      "origin": "inventory",
+      "behaviour": "github_reads.snapshot, ledger_events.views and tick_view accept an optional ttl longer than the default run ttl, so tick_view's pull request batch cache survives across tick passes spaced further apart than the default 60 second snapshot ttl instead of refetching cold every pass.",
+      "seam": "scripts.swarm.github_reads.snapshot and scripts.swarm.ledger_events.views/tick_view ttl parameter",
+      "tests": [
+        "tests/swarm/test_github_reads.py::test_snapshot_serves_a_caller_given_ttl_past_the_default_run_ttl",
+        "tests/swarm/test_ledger_events.py::test_views_batch_cache_outlives_the_default_run_ttl_on_the_given_ttl",
+        "tests/swarm/test_pull_views.py::test_tick_view_batches_claimed_pull_requests_with_the_tick_view_ttl"
+      ]
+    },
+    {
+      "id": "hive-registry-unique-name-suffix",
+      "origin": "inventory",
+      "behaviour": "A hive registry update that sets a name or ui setting derives a unique name with the first free numeric suffix when the settled name collides with another registered hive's name, so a second headed hive reads as swarm-master-2 instead of also reading as swarm-master, a derived name survives a restart or a later setting that does not rename it, and a headless hive renamed to a held name takes the next free suffix.",
+      "seam": "scripts.hive.registry.update through _settle, _read_name, _held and _unique",
+      "tests": [
+        "tests/hive/test_registry.py::test_two_headed_hives_joining_take_unique_names",
+        "tests/hive/test_registry.py::test_a_restarted_headed_hive_keeps_its_derived_name",
+        "tests/hive/test_registry.py::test_a_headless_hive_renamed_to_a_held_name_takes_the_next_free_suffix",
+        "tests/hive/test_registry.py::test_a_second_seeded_headed_hive_gets_a_unique_name_on_its_next_named_set"
+      ]
+    },
+    {
+      "id": "automated-gc-resolves-inbox-store-at-call-time",
+      "origin": "inventory",
+      "behaviour": "Automated agent collection resolves the inbox store module at call time inside run() instead of binding InboxStore at import time, so a worker whose first import happened under a patched InboxStore still sweeps with the real store on a later import of the module.",
+      "seam": "scripts.swarm.automated_gc.run against scripts.inbox.store.InboxStore",
+      "tests": [
+        "tests/swarm/test_automated_gc.py::test_a_first_import_under_a_patched_inbox_store_sweeps_with_the_real_store"
+      ]
+    },
+    {
+      "id": "hive-create-name-reservation",
+      "origin": "inventory",
+      "behaviour": "A real hive create run reserves its chosen name in Redis with SET NX and an expiry before the manifests pull request opens, skips or refuses a name another run reserved, an unnamed create skips it for the next free name and an explicit --name is refused, reclaims its own reservation on resume until its pull request exists, releases it by compare and delete on failure or completion while leaving a reservation another run took, and a dry run reserves nothing.",
+      "seam": "scripts.hive.create._reserve, _release, _reclaimed and _named through create()",
+      "tests": [
+        "tests/hive/test_create.py::test_two_concurrent_creates_reserve_different_names",
+        "tests/hive/test_create.py::test_a_name_another_create_reserved_is_skipped",
+        "tests/hive/test_create.py::test_an_explicit_name_another_create_reserved_is_refused",
+        "tests/hive/test_create.py::test_a_failed_create_releases_its_reservation",
+        "tests/hive/test_create.py::test_a_finished_create_releases_its_reservation",
+        "tests/hive/test_create.py::test_a_failed_service_read_releases_the_reservation",
+        "tests/hive/test_create.py::test_a_release_leaves_a_reservation_another_run_took",
+        "tests/hive/test_create.py::test_a_resumed_create_takes_its_reservation_back",
+        "tests/hive/test_create.py::test_a_resumed_create_refuses_a_name_another_run_reserved",
+        "tests/hive/test_create.py::test_a_resumed_create_with_its_pull_request_reserves_nothing",
+        "tests/hive/test_create.py::test_the_dry_run_reserves_nothing",
+        "tests/hive/test_create.py::test_a_dry_run_of_an_unfinished_create_leaves_its_reservation",
+        "tests/hive/test_create.py::test_a_failed_port_choice_releases_the_reservation",
+        "tests/hive/test_create.py::test_a_resumed_create_killed_before_its_release_keeps_its_own_reservation",
+        "tests/hive/test_create.py::test_a_resumed_create_saved_without_a_reservation_reserves_and_releases_one",
+        "tests/hive/test_create.py::test_an_explicit_name_lost_to_a_racing_create_is_refused"
+      ]
+    },
+    {
+      "id": "stall-route-first-focused-urgent-task",
+      "origin": "inventory",
+      "behaviour": "The stall queue route finds the first urgent task inside the open focus even when an earlier urgent task in the ledger's targeting rows sits outside that focus, instead of stopping at the first urgent task regardless of whether it is admitted.",
+      "seam": "scripts.swarm.stall_queue.route against ledger.tasks_targeting and freeze.admitted",
+      "tests": [
+        "tests/swarm/test_merge_queue.py::test_the_stall_route_skips_an_earlier_urgent_task_outside_the_focus"
+      ]
+    },
+    {
       "id": "hub-withdraws-stale-offers",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-withdraw-stale-offers",
@@ -4114,6 +4534,18 @@
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_two_readings_count_is_counted_once_from_its_own_reading",
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
         "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
+      ]
+    },
+    {
+      "id": "phase-pass-sliced-tasks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-tick-sliced-tasks",
+      "behaviour": "The phase pass counts every task of a phase, the tasks a planner sliced included, when its pass document carries no slices, so a phase whose sliced tasks are open is never ticked done; a task whose slice the document holds still counts under that slice's phase.",
+      "seam": "scripts.swarm.phase_projection.projected_phase_tasks through scripts.swarm.phases.phase_changes",
+      "tests": [
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_pass_document_lacks_counts_under_the_phase_it_names",
+        "tests/swarm/test_phase_projection.py::test_a_task_whose_slice_the_document_holds_counts_under_the_slice_phase_not_its_own",
+        "tests/swarm/test_phase_projection.py::test_the_phase_pass_keeps_a_phase_open_while_its_sliced_tasks_are_open"
       ]
     },
     {

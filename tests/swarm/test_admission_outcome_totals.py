@@ -29,24 +29,28 @@ def _totals(store: RedisStore) -> dict[str, str]:
     return store.redis.hgetall(store.key("sw", placement_waits.TOTALS))
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_a_new_refusal_counts_its_category_once(store: RedisStore) -> None:
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW + 1)
     assert _totals(store) == {admission.CPU: "1"}
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_a_changed_refusal_counts_the_new_category(store: RedisStore) -> None:
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
     placement_waits.observe(store, "sw", "eng", "t1", "no live hive takes ui", NOW + 1)
     assert _totals(store) == {admission.CPU: "1", admission.PLACEMENT: "1"}
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_a_lane_change_counts_the_same_refusal_again(store: RedisStore) -> None:
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
     placement_waits.observe(store, "sw", "ci", "t1", CPU_REFUSAL, NOW + 1)
     assert _totals(store) == {admission.CPU: "2"}
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_a_selected_placement_clears_the_wait_and_counts_nothing(store: RedisStore) -> None:
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
     placement_waits.observe(store, "sw", "eng", "t1", "", NOW + 1)
@@ -55,12 +59,14 @@ def test_a_selected_placement_clears_the_wait_and_counts_nothing(store: RedisSto
     assert placement_waits.read(store, "sw") == {}
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_each_admitted_launch_counts_once(store: RedisStore) -> None:
     placement_waits.admitted(store, "sw")
     placement_waits.admitted(store, "sw")
     assert _totals(store) == {placement_waits.ADMITTED: "2"}
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_admission_rows_sum_hive_outcomes_with_pending_totals(store: RedisStore) -> None:
     store.redis.hset(store.key("sw", "pending-admission-total"), mapping={"admitted": "5", "deferred": "2"})
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
@@ -72,12 +78,14 @@ def test_admission_rows_sum_hive_outcomes_with_pending_totals(store: RedisStore)
         metrics_service.ADMISSION.check(row)
 
 
+@pytest.mark.feature("admission-outcome-totals")
 def test_a_hive_refusal_alone_yields_admission_rows(store: RedisStore) -> None:
     placement_waits.observe(store, "sw", "eng", "t1", CPU_REFUSAL, NOW)
     rows = metrics_service.admission_rows(store, "sw", NOW)
     assert [(row["outcome"], row["total"]) for row in rows] == [(admission.CPU, 1)]
 
 
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_hive_launch_counts_admitted_for_its_swarm(setup: SimpleNamespace) -> None:  # noqa: F811
     assert isinstance(setup.launcher, launch.HiveLaunch)
     write_hive(setup)
@@ -91,6 +99,7 @@ def test_a_hive_launch_counts_admitted_for_its_swarm(setup: SimpleNamespace) -> 
 
 
 @pytest.mark.parametrize(("runtime", "counted"), [(Mock(), False), (Mock(spec=["spawn"]), True)])
+@pytest.mark.feature("hive-launch-admission-count-once")
 def test_a_local_launch_counts_admitted_only_without_a_hive_runtime(
     setup: SimpleNamespace,  # noqa: F811
     monkeypatch: pytest.MonkeyPatch,

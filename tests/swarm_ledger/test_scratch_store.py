@@ -35,6 +35,7 @@ def scratch(monkeypatch: pytest.MonkeyPatch) -> Path:
     return folder
 
 
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_folder(scratch: Path) -> None:
     assert type(storage.default.__wrapped__()) is sqlite.SQLiteLedgerRepository
     repository = storage.build()
@@ -48,6 +49,7 @@ def test_a_scratch_launch_with_inherited_database_settings_writes_only_to_its_fo
     assert storage.read_slugs(scratch) == [SLUG]
 
 
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_a_scratch_folder_ignores_the_shared_database_url() -> None:
     folder = Path.home() / "scratchpad" / "agentihooks" / "proof"
 
@@ -55,6 +57,7 @@ def test_a_scratch_folder_ignores_the_shared_database_url() -> None:
     assert postgres.url({postgres.URL: DATABASE_URL, "LEDGER_DIR": str(Path.home() / "scratchpad")}) is None
 
 
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_a_scratch_folder_uses_the_shared_database_only_when_asked() -> None:
     folder = str(Path.home() / "scratchpad" / "agentihooks" / "proof")
     asked = {postgres.URL: DATABASE_URL, "LEDGER_DIR": folder, postgres.SCRATCH_SHARED: "1"}
@@ -69,6 +72,7 @@ def test_a_scratch_folder_uses_the_shared_database_only_when_asked() -> None:
     "folder",
     ["/data", "~/development-ledger", "~/scratchpad-ledger", "~/scratchpad/x/../../development-ledger", None],
 )
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database(folder: str | None) -> None:
     env = {postgres.URL: DATABASE_URL}
     if folder is not None:
@@ -77,5 +81,6 @@ def test_a_ledger_folder_outside_the_scratchpad_keeps_the_shared_database(folder
     assert postgres.url(env) == DATABASE_URL
 
 
+@pytest.mark.feature("scratch-ledger-folder-skips-shared-database")
 def test_a_scratch_folder_given_with_a_home_tilde_is_a_scratch_folder() -> None:
     assert postgres.url({postgres.URL: DATABASE_URL, "LEDGER_DIR": "~/scratchpad/agentihooks/proof"}) is None

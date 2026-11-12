@@ -72,6 +72,7 @@ def test_controller_run_releases_held_tick_locks_on_sigterm_before_exiting(monke
         tick_stop.check()
 
 
+@pytest.mark.feature("controller-drain-state-test-isolation")
 def test_a_sigterm_run_leaves_the_controller_drain_state_clear_for_later_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     test_controller_run_turns_sigterm_into_exit_so_its_cleanup_runs(monkeypatch)
     monkeypatch.undo()
