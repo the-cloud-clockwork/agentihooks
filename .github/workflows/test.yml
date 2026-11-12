@@ -2737,6 +2737,19 @@ jobs:
       - name: Install the comment gate grammars
         run: python -m pip install --constraint .github/test-requirements.lock tree-sitter tree-sitter-bash tree-sitter-javascript tree-sitter-css
 
+      - name: Check out kernel marker vector authority
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/agentibrain-kernel
+          ref: dev
+          path: .marker-kernel
+          persist-credentials: false
+
+      - name: Refuse marker key vector drift from kernel dev
+        if: ${{ !cancelled() }}
+        run: python -m scripts.ci_marker_vectors .marker-kernel/tests/fixtures/marker-idempotency-vectors.json
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
