@@ -51,7 +51,7 @@ def mark(payload: Mapping[str, object]) -> None:
     """Marks the session a hook payload names seen now, under this process's environment; never raises."""
     try:
         agent(str(payload.get("session_id") or ""), os.environ, time.time())
-    except Exception:
+    except (OSError, ValueError):
         return
 
 

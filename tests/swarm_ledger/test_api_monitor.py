@@ -26,6 +26,11 @@ POD = {
 PRESENCE = SimpleNamespace(read=lambda environ, now_s: None)
 
 
+@pytest.fixture(autouse=True)
+def no_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(monitor.ports, "presence", lambda: PRESENCE)
+
+
 def presence_of(monkeypatch: pytest.MonkeyPatch, present: list[dict]) -> None:
     monkeypatch.setattr(
         PRESENCE,
@@ -86,9 +91,7 @@ def ports_for(
         mock.patch.object(
             monitor.ports,
             "hive",
-            return_value=SimpleNamespace(
-                registry=registry, headroom=headroom, herdr_stats=herdr_stats, presence=PRESENCE
-            ),
+            return_value=SimpleNamespace(registry=registry, headroom=headroom, herdr_stats=herdr_stats),
         ),
         mock.patch.object(monitor.ports, "hooks", return_value=hooks),
         mock.patch.object(monitor.ports, "swarm", return_value=swarm),

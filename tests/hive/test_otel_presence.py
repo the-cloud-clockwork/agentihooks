@@ -60,8 +60,9 @@ def test_read_fetches_the_configured_url_once_within_the_cache_window():
         return EXPOSITION
 
     env = {otel_presence.URL_ENV: "http://c/metrics"}
-    assert [hive["id"] for hive in otel_presence.read(env, NOW, get=get)] == ["anton-1", "auto"]
-    assert [hive["id"] for hive in otel_presence.read(env, NOW, get=get)] == ["anton-1", "auto"]
+    first, second = otel_presence.read(env, NOW, get=get), otel_presence.read(env, NOW, get=get)
+    assert first is not None and second is not None
+    assert [hive["id"] for hive in first] == [hive["id"] for hive in second] == ["anton-1", "auto"]
     assert fetched == ["http://c/metrics"]
 
 

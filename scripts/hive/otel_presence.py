@@ -5,6 +5,7 @@ import re
 import time
 import urllib.request
 from collections.abc import Callable, Mapping
+from typing import TypedDict
 
 URL_ENV = "AGENTIHOOKS_PRESENCE_URL"
 FRESH_S = 180
@@ -17,9 +18,17 @@ LABEL = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"')
 _cache: dict[str, tuple[float, str | None]] = {}
 
 
+class Hive(TypedDict):
+    id: str
+    name: str
+    headed: bool
+    release: str
+    agents: dict[str, int]
+
+
 def samples(text: str) -> list[tuple[str, dict[str, str], float]]:
     """Every labelled sample in a Prometheus text exposition, skipping comments and unparsable values."""
-    found = []
+    found: list[tuple[str, dict[str, str], float]] = []
     for line in text.splitlines():
         match = SAMPLE.fullmatch(line.strip())
         if match is None:
@@ -28,21 +37,22 @@ def samples(text: str) -> list[tuple[str, dict[str, str], float]]:
             value = float(match["value"])
         except ValueError:
             continue
-        found.append((match["name"], dict(LABEL.findall(match["labels"])), value))
+        labels: dict[str, str] = dict(LABEL.findall(match["labels"]))
+        found.append((match["name"], labels, value))
     return found
 
 
-def hives(text: str, now_s: float) -> list[dict]:
+def hives(text: str, now_s: float) -> list[Hive]:
     """One record per hive whose seen gauge is within FRESH_S of now, with its agents summed per harness."""
     parsed = samples(text)
-    fresh = {
-        labels["hive_id"]: {
-            "id": labels["hive_id"],
-            "name": labels.get("hive_name") or labels["hive_id"],
-            "headed": labels.get("hive_headed") == "yes",
-            "release": labels.get("hive_release", ""),
-            "agents": {},
-        }
+    fresh: dict[str, Hive] = {
+        labels["hive_id"]: Hive(
+            id=labels["hive_id"],
+            name=labels.get("hive_name") or labels["hive_id"],
+            headed=labels.get("hive_headed") == "yes",
+            release=labels.get("hive_release", ""),
+            agents={},
+        )
         for name, labels, value in parsed
         if name == HIVE and "hive_id" in labels and now_s - value <= FRESH_S
     }
@@ -62,7 +72,7 @@ def fetch(url: str) -> str | None:
         return None
 
 
-def read(environ: Mapping[str, str], now_s: float, get: Callable[[str], str | None] = fetch) -> list[dict] | None:
+def read(environ: Mapping[str, str], now_s: float, get: Callable[[str], str | None] = fetch) -> list[Hive] | None:
     """Fresh hives from the configured exposition, fetched at most once per CACHE_S; None when unset or silent."""
     url = environ.get(URL_ENV, "")
     if not url:

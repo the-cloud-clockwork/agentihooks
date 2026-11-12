@@ -1,6 +1,3 @@
-from types import ModuleType
-
-
 class Hive:
     @property
     def auth(self):
@@ -37,9 +34,3 @@ class Hive:
         from scripts.hive import headroom
 
         return headroom
-
-    @property
-    def presence(self) -> ModuleType:
-        from scripts.hive import otel_presence
-
-        return otel_presence

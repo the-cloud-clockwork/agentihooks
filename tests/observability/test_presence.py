@@ -62,7 +62,7 @@ def test_a_hook_payload_marks_its_session_under_the_process_environment(monkeypa
 
 def test_a_failing_mark_never_raises_into_the_hook(monkeypatch):
     def fail(*args):
-        raise RuntimeError("seat unreadable")
+        raise OSError("seat unreadable")
 
     monkeypatch.setattr(presence, "agent", fail)
     assert presence.mark({"session_id": "sess-4"}) is None

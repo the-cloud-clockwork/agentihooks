@@ -44,7 +44,6 @@ class Hive(Protocol):
     reports: Any
     headroom: Any
     herdr_stats: Any
-    presence: Any
 
 
 @runtime_checkable
@@ -87,3 +86,7 @@ def hive() -> Hive:
 
 def hooks() -> Hooks:
     return _port("hooks")
+
+
+def presence() -> Any:
+    return _port("presence")

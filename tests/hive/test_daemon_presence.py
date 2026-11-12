@@ -1,12 +1,15 @@
 from types import SimpleNamespace
+from typing import Any
 
 from hooks.observability import presence
 from scripts.hive import daemon
 
+REDIS: Any = object()
+
 
 def emitted(monkeypatch, shown):
     calls = []
-    redis = object()
+    redis: Any = object()
 
     def show(client, hive):
         assert client is redis and hive == "hive-9"
@@ -44,7 +47,7 @@ def test_the_headroom_thread_emits_presence_after_each_reading(monkeypatch):
     monkeypatch.setattr(daemon.registry, "touch", lambda redis, hive, now: stop.set())
     monkeypatch.setattr(orders, "alive", lambda redis, hive: None)
     monkeypatch.setattr(daemon, "refresh_ready", lambda: None)
-    daemon.publish_headroom(object(), object(), "hive-9", stop)
+    daemon.publish_headroom(REDIS, REDIS, "hive-9", stop)
     assert order == [("headroom", "hive-9", 3000), ("presence", "hive-9", 3000)]
 
 
@@ -66,6 +69,6 @@ def test_a_failed_presence_emit_is_logged_after_the_liveness_touch(monkeypatch, 
     monkeypatch.setattr(daemon.registry, "touch", lambda redis, hive, now: touched.append(hive))
     monkeypatch.setattr(orders, "alive", lambda redis, hive: None)
     monkeypatch.setattr(daemon, "refresh_ready", lambda: None)
-    daemon.publish_headroom(object(), object(), "hive-9", stop)
+    daemon.publish_headroom(REDIS, REDIS, "hive-9", stop)
     assert touched == ["hive-9"]
     assert capsys.readouterr().err == "hive presence emit failed (OSError: proc gone)\n"

@@ -117,7 +117,7 @@ def view(store: object, now_ms: int) -> dict:
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
     machines = herdr_machines(store.redis, hives, live, now_ms)
-    present = ports.hive().presence.read(os.environ, now_ms / 1000)
+    present = ports.presence().read(os.environ, now_ms / 1000)
     if present:
         seen = {hive["id"] for hive in present}
         silent = [(hive["name"], None) for hive in live if hive["id"] not in seen]
