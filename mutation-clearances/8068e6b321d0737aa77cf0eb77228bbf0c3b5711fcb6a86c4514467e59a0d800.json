@@ -1,0 +1,6 @@
+{
+  "scripts/events/migrate_state.py:scripts.events.migrate_state.x__envelope_keys:df2f131233ade120123b707662ea2f7d8ff70b1fd3fd152c0ee84fd060dbab3d": {
+    "reader": "standards_reader",
+    "reason": "NatsStateStore.__init__ tests provision only for truthiness in provision_state(...) if provision else js.key_value(bucket); None and False are both falsy, so the same branch runs and the output is unchanged."
+  }
+}
