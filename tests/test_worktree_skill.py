@@ -470,13 +470,13 @@ class DoneOrigin(WtBase):
 
 
 UPSTREAM_GH = """#!{bash}
-head=""; state=all
+head=""; fields=""
 while (($#)); do
-  case "$1" in --head) head="$2"; shift ;; --state) state="$2"; shift ;; esac
+  case "$1" in --head) head="$2"; shift ;; --json) fields="$2"; shift ;; esac
   shift
 done
 [[ "$head" == "{merged}" ]] || exit 0
-if [[ "$state" == merged ]]; then echo 7; else echo MERGED; fi
+case "$fields" in number) echo 7 ;; headRefOid) echo {oid} ;; *) echo MERGED ;; esac
 """
 
 
@@ -487,8 +487,9 @@ class DoneUpstream(WtBase):
         _git(dest, "add", "continued.txt", env=self.gitenv)
         _git(dest, "commit", "--quiet", "-m", "continued", env=self.gitenv)
         _git(dest, "push", "--quiet", "-u", "origin", f"HEAD:refs/heads/{remote}", env=self.gitenv)
+        oid = subprocess.check_output(["git", "-C", str(dest), "rev-parse", "HEAD"], env=self.gitenv, text=True)
         gh = self.bin / "gh"
-        gh.write_text(UPSTREAM_GH.format(bash=BASH, merged=remote))
+        gh.write_text(UPSTREAM_GH.format(bash=BASH, merged=remote, oid=oid.strip()))
         gh.chmod(0o755)
         return dest
 
@@ -516,6 +517,19 @@ class DoneUpstream(WtBase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(dest.exists())
         self.assertFalse(self.branch_exists("parked"))
+
+    @pytest.mark.feature("successor-upstream-branch")
+    def test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head(self) -> None:
+        dest = self._successor("later", "merged-earlier")
+        _git(self.origin, "update-ref", "-d", "refs/heads/merged-earlier", env=self.gitenv)
+        (dest / "unpushed.txt").write_text("unpushed\n")
+        _git(dest, "add", "unpushed.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
+        result = self.run_wt("done", "later", "--repo", str(self.primary), "--pushed")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not contained in an origin branch", result.stderr)
+        self.assertTrue(dest.exists())
+        self.assertTrue(self.branch_exists("later"))
 
 
 CONCURRENT_GIT = """#!{bash}

@@ -1986,7 +1986,8 @@ def _git(run, *args):
         raise SwarmError(f"git {args[0]} could not run: {exc}") from exc
 
 
-def worktree_branch(recorded, run=subprocess.run):
+def worktree_branch(recorded: str | None, run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> str:
+    """Return the origin branch this worktree publishes to, refusing one origin does not hold."""
     current = _git(run, "branch", "--show-current")
     branch = current.stdout.strip() if current.returncode == 0 else ""
     if not branch:
@@ -1996,14 +1997,29 @@ def worktree_branch(recorded, run=subprocess.run):
         target = f"HEAD:{recorded}"
         if _tracks(run, recorded):
             branch = recorded
-    if _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode != 0:
-        raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
-    return branch
+    if _on_origin(run, branch):
+        return branch
+    upstream = "" if recorded else _upstream(run)
+    if upstream and _on_origin(run, upstream):
+        return upstream
+    raise SwarmError(f"branch {branch} is not on origin; push it first with git push -u origin {target}")
 
 
-def _tracks(run, recorded):
+def _on_origin(run: Callable[..., subprocess.CompletedProcess[str]], branch: str) -> bool:
+    """Tell whether origin holds a branch of this name."""
+    return _git(run, "ls-remote", "--exit-code", "--heads", "origin", branch).returncode == 0
+
+
+def _upstream(run: Callable[..., subprocess.CompletedProcess[str]]) -> str:
+    """Return the origin branch the checkout tracks, empty when it tracks none there."""
     done = _git(run, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-    return done.returncode == 0 and done.stdout.strip() == f"origin/{recorded}"
+    tracked = done.stdout.strip() if done.returncode == 0 else ""
+    return tracked.removeprefix("origin/") if tracked.startswith("origin/") else ""
+
+
+def _tracks(run: Callable[..., subprocess.CompletedProcess[str]], recorded: str) -> bool:
+    """Tell whether the checkout tracks the recorded branch on origin."""
+    return _upstream(run) == recorded
 
 
 PULL_SECONDS = 20
