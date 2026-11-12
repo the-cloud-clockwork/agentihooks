@@ -611,6 +611,17 @@
       ]
     },
     {
+      "id": "scheduler-runner-reload-on-revision",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-scheduler-reload-on-revision",
+      "behaviour": "The scheduler supervisor stops its runner between passes and starts one on the new code when the checkout revision moves from the one it loaded, records the new revision, and keeps its runner when the revision cannot be read.",
+      "seam": "scripts.scheduler.service.supervise",
+      "tests": [
+        "tests/scheduler/test_service.py::test_supervisor_restarts_its_runner_when_the_checkout_revision_changes",
+        "tests/scheduler/test_service.py::test_supervisor_keeps_its_runner_when_the_revision_cannot_be_read"
+      ]
+    },
+    {
       "id": "scheduled-run-hive-placement",
       "origin": "inventory",
       "ledger_item": "ledger:rig-grade-swarm/tasks/hvr4",
