@@ -5,7 +5,9 @@ unless the proof files the fix instead.
 done in the last day and reopens one whose pull request is not merged; a done from the master or operator stands.
 """
 
+from collections.abc import Callable
 from types import MappingProxyType
+from typing import Any
 
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
@@ -27,7 +29,7 @@ REOPENED = (
 )
 
 
-def refusal(task, url, github):
+def refusal(task: dict, url: str | None, github: Callable[[str], Any]) -> str:
     """Why `swarm done` must refuse this task, or '' when it may close."""
     kind = ledger_kinds.kind(task)
     if url and url in (task.get("merged_pulls") or []):
@@ -91,7 +93,7 @@ def _targets(task):
     return [*_pulls(task), *(url for url, scope in scopes.items() if scope.get("kind") == "prerequisite")]
 
 
-def recheck_pass(store, slug, doc, ledger, now_ms, github):
+def recheck_pass(store: Any, slug: str, doc: dict, ledger: Any, now_ms: int, github: Callable[[str], Any]) -> list[str]:
     tasks = {t["id"]: t for t in doc.get("tasks", [])}
     actions = []
     for task_id in _done_by_workers(doc.get("_meta", {}).get("events", []), now_ms):
