@@ -198,14 +198,14 @@ def test_up_names_the_engineers_whose_agent_exited_at_launch(tmp_path):
         seen.append(pane_id)
         return len(seen) > 2
 
-    assert launch.exited(swarm, bare, wait_s=3.0, sleep=naps.append) == ["eng-1"]
+    assert launch.exited(swarm.seats[1:], bare, wait_s=3.0, sleep=naps.append) == ["eng-1"]
     assert seen == ["w1:p2", "w1:p2", "w1:p2"] and naps == [launch.POLL_S, launch.POLL_S]
 
 
 def test_up_waits_the_whole_window_for_engineers_that_keep_running(tmp_path):
     swarm = _swarm(tmp_path)
     naps: list[float] = []
-    assert launch.exited(swarm, lambda pane_id: False, wait_s=3.0, sleep=naps.append) == []
+    assert launch.exited(swarm.seats[1:], lambda pane_id: False, wait_s=3.0, sleep=naps.append) == []
     assert naps == [launch.POLL_S] * 3
 
 
@@ -254,8 +254,11 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path):
         started.append(argv)
         return 0
 
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=start) == "started"
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=start) == "not-pending"
+    def bare(pane: str) -> bool:
+        return not started
+
+    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None) == "started"
+    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None) == "not-pending"
     assert len(started) == 1 and "the body" in paths.opening(tmp_path, "eng-1").read_text()
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
@@ -285,3 +288,12 @@ def test_a_failed_relaunch_or_a_pane_that_never_frees_leaves_the_seat_pending(tm
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
     assert seat is not None and seat.state == registry.PENDING
+
+
+@pytest.mark.feature("quick-swarm")
+def test_a_successor_whose_agent_exits_at_once_leaves_the_seat_pending(tmp_path):
+    _swarm(tmp_path, eng_state=registry.PENDING)
+    outcome = launch.relaunch(tmp_path, "eng-1", {}, bare=lambda pane: True, start=lambda a, e: 0, sleep=lambda s: None)
+    loaded = registry.load(tmp_path)
+    seat = loaded.seat("eng-1") if loaded else None
+    assert outcome == "exited" and seat is not None and seat.state == registry.PENDING

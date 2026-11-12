@@ -56,7 +56,7 @@ def quick_env(monkeypatch, tmp_path, launched) -> dict[str, str]:
     monkeypatch.setattr(cli.guard, "require", lambda environ: "w1:p1")
     monkeypatch.setattr(cli.layout, "HerdrPanes", FakePanes)
     monkeypatch.setattr(cli.launch, "start_all", start_all)
-    monkeypatch.setattr(cli.launch, "exited", lambda swarm, bare: [])
+    monkeypatch.setattr(cli.launch, "exited", lambda seats, bare: [])
     monkeypatch.setattr(cli.safety_nudge, "install", lambda environ: launched.append("cron") or "line")
     monkeypatch.setattr(cli.tick, "LiveHerdr", lambda environ: IdleHerdr())
     monkeypatch.setattr(cli.paths.herdr_host, "repo_label", lambda directory: "repo")
@@ -124,8 +124,8 @@ def test_an_engineer_whose_agent_exits_at_launch_fails_up_and_waits_for_a_relaun
 ):
     watched: list[str] = []
 
-    def exited(swarm: registry.Swarm, bare: Callable[[str], bool]) -> list[str]:
-        watched.extend(seat.seat for seat in swarm.seats[1:] if not bare(seat.pane_id))
+    def exited(seats: list[registry.Seat], bare: Callable[[str], bool]) -> list[str]:
+        watched.extend(seat.seat for seat in seats if not bare(seat.pane_id))
         return ["eng-3"]
 
     monkeypatch.setattr(cli.launch, "exited", exited)

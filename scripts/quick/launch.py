@@ -3,7 +3,7 @@
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from scripts.quick import paths, registry, seeds
@@ -72,14 +72,14 @@ def start_all(folder: Path, swarm: registry.Swarm, base: Mapping[str, str]) -> d
 
 
 def exited(
-    swarm: registry.Swarm,
+    seats: Sequence[registry.Seat],
     bare: Callable[[str], bool],
     *,
     wait_s: float = SETTLE_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[str]:
-    """The engineers whose agent exited back to a bare shell within ``wait_s`` of their launch."""
-    watching = {seat.seat: seat.pane_id for seat in swarm.seats[1:]}
+    """The seats whose agent exited back to a bare shell within ``wait_s`` of their launch."""
+    watching = {seat.seat: seat.pane_id for seat in seats}
     gone: list[str] = []
     for _ in range(round(wait_s / POLL_S)):
         gone += [name for name, pane in watching.items() if bare(pane)]
@@ -100,7 +100,10 @@ def relaunch(
     wait_s: float = WAIT_BARE_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
-    """Start the successor of a pending seat once its pane is back at a bare shell; the outcome."""
+    """Start the successor of a pending seat once its pane is back at a bare shell; the outcome.
+
+    A successor whose agent exits back to a bare shell within the settle window leaves the seat pending.
+    """
     taken = registry.take(folder, seat_name, registry.PENDING, registry.LAUNCHING)
     swarm = registry.load(folder)
     if taken is None or swarm is None:
@@ -116,4 +119,9 @@ def relaunch(
         code = start_seat(folder, swarm, taken, base, start)
     finally:
         registry.set_state(folder, seat_name, registry.READY if code == 0 else registry.PENDING)
-    return "started" if code == 0 else f"failed-{code}"
+    if code != 0:
+        return f"failed-{code}"
+    if exited([taken], bare, sleep=sleep):
+        registry.set_state(folder, seat_name, registry.PENDING)
+        return "exited"
+    return "started"
