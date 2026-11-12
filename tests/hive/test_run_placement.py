@@ -8,7 +8,7 @@ from scripts.hive.placement import Wait
 
 pytestmark = pytest.mark.unit
 
-NOW = 1_000_000
+NOW = 1_794_000_000_000
 REPO = "/home/worker/dev/agentihooks"
 RUN = run_placement.Run("delivery-1", "grade", "/cases/grade.json", REPO, "owner@fixture", ("build", "lint"))
 
@@ -138,7 +138,7 @@ def test_dispatch_sends_a_run_order_on_the_chosen_hive_stream(monkeypatch: pytes
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(run_placement, "time", SimpleNamespace(time=lambda: NOW / 1000))
     stale = hive("a", heartbeat_at=NOW - 100_000, beat_at=NOW - 100_000)
-    monkeypatch.setattr(registry, "hives", lambda client: [stale, hive("b"), hive("c")])
+    monkeypatch.setattr(registry, "hives", lambda client: [stale, hive("b"), hive("c")] if client is redis else [])
     store = run_orders.RunOrders(redis)
     first = run_placement.RunOrderSender(redis, NOW / 1000)
     first.send("c", run_placement.Run("other", "grade", "/c", REPO, "o", ()))
