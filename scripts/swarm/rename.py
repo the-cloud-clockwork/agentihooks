@@ -1,6 +1,6 @@
 import json
 from dataclasses import asdict, replace
-from typing import Any
+from typing import Any, cast
 
 from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
@@ -84,10 +84,11 @@ def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> 
         return
     name = supervisor.thread_title(slug, replace(agent, name=new))
     key = store.key(slug, "session-name", agent.pane_id)
-    if store.redis.get(key) == name:
+    redis = cast(Any, store).redis
+    if redis.get(key) == name:
         return
     try:
-        connection, _ = protocol.connect(record.endpoint_ref.removeprefix(supervisor.UNIX), CONNECT_S)
+        connection = protocol.connect(record.endpoint_ref.removeprefix(supervisor.UNIX), CONNECT_S)[0]
         try:
             protocol.set_thread_name(connection, record.thread_id, name)
         finally:
@@ -96,7 +97,7 @@ def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> 
         return
     except (OSError, TimeoutError, protocol.ProtocolError) as exc:
         raise SwarmError(f"cannot name the thread of {agent.name}: {exc}") from exc
-    store.redis.set(key, name)
+    redis.set(key, name)
 
 
 def _check_pane(names, agent, pane, reserved=""):
