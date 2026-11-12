@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.831 · 2026-11-12
+
+### 2026-11-12 · 71157ae8f253 · #10860 · @agenticore-app
+
+**Stop a scheduler whose state store stays silent past a bound**
+
+This change fixes schedulers that kept running forever against a dead scratch Redis after a proof finished. Now a runner that gets no answer from its state store for 300 straight seconds exits with code 3, and its supervisor stops instead of spawning a replacement, so the bound scheduler actually ends rather than logging failures indefinitely. Any successful response resets the counter. Callers of `ensure_running` and the systemd unit will start a fresh supervisor the next time the scheduler is actually needed, closing the orphan-process gap on the workstation.
+
 ## v2.17.830 · 2026-11-12
 
 ### 2026-11-12 · aba036f8e1d6 · #10854 · @agenticore-app
