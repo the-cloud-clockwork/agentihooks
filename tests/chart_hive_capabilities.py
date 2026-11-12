@@ -8,7 +8,7 @@ import yaml
 
 HIVE = ["--set", "workers.replicas=1", "--set", "workers.credentialSecret.name=m"]
 HIVE += ["--set", "workers.credentialSecret.key=c"]
-EXTRA = {"name": "b", "credentialSecret": {"name": "n", "key": "c"}, "capabilities": ["gpu"]}
+EXTRA = {"name": "b", "credentialSecret": {"name": "member-b", "key": "credential"}, "capabilities": ["gpu"]}
 START = '"capabilities=${HIVE_CAPABILITIES}"'
 REFUSAL = "each workers.capabilities entry must be a capability name"
 
