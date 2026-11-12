@@ -7356,6 +7356,88 @@ turn; a later one is delivered like any message. An agent on a long command decl
 The master, an agent the operator is typing to, a swarm with an open outage and an agent in provider recovery get
 no nudge.
 
+### Overrun report
+
+The [stale nudge](#stale-nudge) and the [stall watchdog](#stall-watchdog) notice an agent that goes silent. The
+overrun report notices the opposite case: an agent that keeps working on one task but never finishes it. Every tick,
+the `overrun pass` step (group `wrapper events`, after the stall watch) measures how long each live agent has held its
+task. At **90 minutes** it sends one inbox item, so a master sees the task while there is still time to unblock it.
+
+The item reads:
+
+```text
+Overrun on swarm rig-grade-swarm: engineer@323133-8301 has run 90 minutes on task t270 without finishing it. Last
+steps: pushed the red test; fixed the push guard; waiting on the queue. Only its context limit hands it off. Close
+this item once you have looked.
+```
+
+It comes from sender `swarm`, carries the ref `<slug>:overrun:<task>` and is tagged with the task. It goes to the
+master seat that owns the task's phase. When that seat is not live it goes to the lead master, or to the lowest
+numbered live master when the lead seat is not live either. The last steps are the last three non empty lines of
+the task's `progress.md`. For a task running on a hive, they come from the copy the hive
+published, so they match the task's progress on the ledger page. A task with no progress lines reads
+`no steps recorded in progress.md`.
+
+The report changes nothing else. Wall time never asks an agent to hand off, never ends it and never reopens its
+task: only the agent's [context recycle](#context-recycle) at its compact limit hands it off. The master
+decides what to do with the item: send the agent a hint by inbox, fix the blocker, or leave it to finish. Pull
+request 4858 first added a second limit that asked the agent to push and hand off at 150 minutes and ended it 15
+minutes later. Pull request 9725 added the Semgrep rule `feature-overrun-no-wall-time-handoff`, which refuses any
+message of either shape, and pull request 9793 removed both steps from the overrun pass.
+
+#### What counts toward the age
+
+The age runs from the agent's launch (`started_at` on its swarm agent record), not from the task's claim. Time
+during an open [outage](#outage-holds-and-recovery) is subtracted. Declared waits still count: an agent waiting on
+checks or on the merge queue for an hour has still run that hour on the task.
+
+An agent is watched only while all of these hold:
+
+| Condition | Agents left out |
+|---|---|
+| Lane `eng`, `ci` or `plan` | Masters and other seats |
+| A recorded launch time | Records with no `started_at` |
+| Its pane is live this tick | Dead or missing panes |
+| Its task is `claimed` or `pr` and `claimed_by` names it | Agents off their claim, tasks open, done or blocked |
+| Its record is not `finished` | Agents that released through `ready` or handed off |
+| No outage holds it | Agents in provider or Redis outage recovery |
+
+An agent is reported once for each task it holds in each life. The pass keeps a mark per agent in the Redis hash
+`agentihooks:swarm:<slug>:overrun` (the prefix follows `AGENTIHOOKS_SWARM_KEY_PREFIX` when set), holding the report
+time and the task. The mark is dropped when the agent's record finishes or is removed. An agent still in the swarm
+but off its claim keeps its mark, so it is not reported again if it reclaims the same task. When an agent moves
+to another task, or a successor takes the same task, the new task or the new agent starts its own 90 minute clock.
+
+#### Configuration
+
+There is no setting. The limit is the constant `REPORT_MINUTES` in `scripts.swarm.overrun`, and
+`test_the_limits_are_set_in_code` pins it. Changing it takes a pull request. The step's timing budget is the
+`overrun pass` row in the tick step budgets.
+
+#### Check a report
+
+```bash
+agentihooks msg inbox --of master@<slug>
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" HGETALL agentihooks:swarm:<slug>:overrun
+```
+
+The first command lists the master's open items. The second shows which agents were already reported, with the time
+in milliseconds. A tick that sends a report lists it among its actions as
+`overrun: told <master seat> that <agent> has run 90 minutes on task <id>`, naming the seat the item went to.
+`agentihooks swarm <slug> tick-report`
+shows the step's wall time against its budget.
+
+| Symptom | Cause |
+|---|---|
+| No report for an agent past 90 minutes | It falls under a row of the table above, or an outage added paused time. Check its task state, `claimed_by` and pane |
+| A second report for the same task | A new agent took the task, or the agent's record finished and it came back. Each life gets one report |
+| `Last steps` is `no steps recorded in progress.md` | The agent appended nothing to `progress.md`, or its hive has not published its folder yet |
+| The agent kept running after the report | Expected. Only its context limit or the master ends it |
+
+Tests: `tests/swarm/test_overrun.py`, including
+`test_a_live_agent_at_two_hundred_minutes_gets_one_report_and_no_ask_or_end` and
+`test_remote_overrun_quotes_the_same_progress_as_the_ledger`.
+
 ### Safe retire
 
 The tick retires an agent for idleness after nineteen eligible idle minutes since its first observation,
