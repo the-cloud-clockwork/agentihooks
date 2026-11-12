@@ -39,11 +39,11 @@ def problems(chart: str) -> list[str]:
         return [f"the default release fails to render: {default.stderr.strip()}"]
     if (declared := capabilities(default.stdout, "-worker-hive")) != "":
         found.append(f"the default hive declares {declared!r}, not an empty list")
-    listed = render(chart, {"workers": {"capabilities": ["anton", "keep"], "hives": [EXTRA]}})
+    listed = render(chart, {"workers": {"capabilities": ["anton", "arm"], "hives": [EXTRA]}})
     if listed.returncode:
         return [*found, f"charted capabilities fail to render: {listed.stderr.strip()}"]
-    if (declared := capabilities(listed.stdout, "-worker-hive")) != "anton,keep":
-        found.append(f"the hive declares {declared!r}, not 'anton,keep'")
+    if (declared := capabilities(listed.stdout, "-worker-hive")) != "anton,arm":
+        found.append(f"the hive declares {declared!r}, not 'anton,arm'")
     if (declared := capabilities(listed.stdout, "-worker-hive-b")) != "gpu":
         found.append(f"the extra hive declares {declared!r}, not 'gpu'")
     refused = render(chart, {"workers": {"capabilities": ["a,b"]}})
