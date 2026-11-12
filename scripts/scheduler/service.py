@@ -101,7 +101,9 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> bool:
                 now = time.monotonic()
                 silent_since = now if silent_since is None else silent_since
                 if now - silent_since >= UNREACHABLE_S:
-                    print(f"scheduler stops: the state store did not answer for {UNREACHABLE_S} seconds", file=sys.stderr)
+                    print(
+                        f"scheduler stops: the state store did not answer for {UNREACHABLE_S} seconds", file=sys.stderr
+                    )
                     return True
                 print("scheduler pass skipped: the state store did not answer", file=sys.stderr)
             try:
