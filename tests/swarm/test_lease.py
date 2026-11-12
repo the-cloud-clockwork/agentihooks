@@ -230,7 +230,7 @@ def test_controller_entrypoint_runs_once_and_reports_actions(store, monkeypatch,
         install.main()
     assert result.value.code == 0
     assert calls == [store]
-    assert capsys.readouterr().out == "sw: worked\n"
+    assert capsys.readouterr().out == 'sw: worked\n{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n'
 
 
 def test_the_lease_expires_on_the_host_wall_clock(store, monkeypatch):
@@ -347,7 +347,7 @@ def test_controller_loop_waits_one_tick_between_runs(
         controller.main(["run"])
     assert calls == [store]
     assert sleeps == [60.0]
-    assert capsys.readouterr().out == "sw: worked\n"
+    assert capsys.readouterr().out == 'sw: worked\n{"event": "controller_pass_end", "pass": 1, "outcome": "ok"}\n'
 
 
 def test_controller_reports_a_lease_error(store, monkeypatch, capsys):

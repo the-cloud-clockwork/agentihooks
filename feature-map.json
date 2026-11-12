@@ -3175,6 +3175,19 @@
       ]
     },
     {
+      "id": "controller-pass-end-line",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-pass-end-log",
+      "behaviour": "Every controller pass that ends, whether it completed, ended on an unreachable ledger or ended on a Redis error inside the grace window, writes exactly one JSON line to standard output with event controller_pass_end, the pass number counted from one and its outcome ok, ledger_unreachable or redis_grace, so a start check can wait on pass end lines instead of fixed cadence sleeps.",
+      "seam": "scripts.swarm.controller._passes run loop standard output",
+      "tests": [
+        "tests/swarm/test_controller_pass_end.py::test_each_pass_writes_one_end_line_naming_its_number_and_outcome",
+        "tests/swarm/test_controller_pass_end.py::test_a_single_pass_writes_its_end_line_before_returning",
+        "tests/swarm/test_controller_pass_end.py::test_a_single_failed_pass_names_its_failure_in_the_end_line",
+        "tests/swarm/test_controller_pass_end.py::test_the_end_line_is_flushed_so_a_piped_log_reader_sees_it_at_once"
+      ]
+    },
+    {
       "id": "swarm-tick-database-ledger",
       "origin": "operator",
       "operator_words": "Isnt the tick or controller to be reading the db instead of the ledger? We had work for decoupling this, it is the main reason why we did the tick rework the ledger should be a presentation layer only no more.",
