@@ -1,6 +1,19 @@
 {
   "features": [
     {
+      "id": "controller-done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2488",
+      "behaviour": "The swarm v2 controller clears awaiting when committing a verified done outcome, and the ledger accepts the matching fields and receipt replay.",
+      "seam": "Outcomes.complete through ledger_tasks.complete_outcome and SQLiteLedgerRepository",
+      "tests": [
+        "tests/test_swarm_v2_outcomes.py::test_controller_completion_clears_awaiting_and_replays"
+      ],
+      "rules": [
+        "controller-done-keeps-awaiting"
+      ]
+    },
+    {
       "id": "codex-expired-routing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
@@ -1484,6 +1497,19 @@
         "tests/swarm/test_tick_lock.py::test_a_released_lock_that_redis_brings_back_is_replaced_by_the_next_pass",
         "tests/swarm/test_tick_lock.py::test_a_lock_naming_this_process_with_another_start_is_judged_by_its_process",
         "tests/swarm/test_tick_lock_release.py::test_a_pass_whose_lock_release_fails_leaves_a_lock_the_next_pass_of_this_process_takes"
+      ]
+    },
+    {
+      "id": "swarm-tick-abandoned-renewal",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2494",
+      "behaviour": "A step worker its pass abandoned at the step budget never renews the tick lock once that pass released it: the late renewal returns quietly, raises no stale lock error and leaves a successor pass's lock and the activity mark untouched.",
+      "seam": "The pass step hook scripts.swarm.tick_activity.Renewal, revoked by run_tick before it releases the tick lock",
+      "tests": [
+        "tests/swarm/test_abandoned_tick_renewal.py::test_an_abandoned_step_worker_never_renews_the_lock_its_pass_released"
+      ],
+      "rules": [
+        "pass-step-hook-unrevoked"
       ]
     },
     {
@@ -4438,7 +4464,7 @@
       "id": "launch-hotfix-promotion",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-stall-hotfix-route",
-      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate — Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
+      "behaviour": "A dev push of a pull request labelled launch hotfix when it entered the merge queue, whose own Gate \u2014 Required passed on its head promotes once the unit suite passes, even when unrelated promotion checks are red, and the red run still files its fixer tasks; an unlabelled pull request, a pull request whose own grade did not pass or a red unit suite never takes the route.",
       "seam": "the Tests workflow launch-hotfix job through scripts.ci_launch_hotfix, the promote job condition, and promotion_watch.refresh",
       "tests": [
         "tests/contracts/promotion/test_workflow.py::test_a_launch_hotfix_promotes_past_a_red_promotion_dependency_in_hotfix_mode",
