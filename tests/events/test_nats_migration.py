@@ -1,6 +1,9 @@
+from typing import cast
+
 import pytest
 
 from scripts.events import nats
+from scripts.events.bus import Bus
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.swarm import readiness
@@ -153,11 +156,12 @@ def test_hub_offers_nothing_for_a_swarm_with_unowned_legacy_inbox_until_it_is_mi
     view = readiness.Snapshot(
         "rig", {"work": work}, found, hierarchy.project(found)[0], "", lambda task_id: False, lambda task: True
     )
+    bus = cast(Bus, hub)
     with pytest.raises(RuntimeError, match="swarm 'rig' bucket 'inbox'"):
-        readiness.publish(hub, view, 0)
+        readiness.publish(bus, view, 0)
     hub.migrate_state("rig", "inbox", [])
     assert hub.for_swarm("rig").queue("eng", QueuePolicy()).take(20) is None
-    assert readiness.publish(hub, view, 0) == ["ready:rig:work:0"]
+    assert readiness.publish(bus, view, 0) == ["ready:rig:work:0"]
     delivery = hub.for_swarm("rig").queue("eng", QueuePolicy()).take(1000)
     assert delivery is not None
     assert delivery.event.id == "ready:rig:work:0"
