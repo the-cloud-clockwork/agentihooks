@@ -32,8 +32,8 @@ REOPENED = (
 def refusal(task: dict, url: str | None, github: Callable[[str], Any]) -> str:
     """Why `swarm done` must refuse this task, or '' when it may close."""
     kind = ledger_kinds.kind(task)
-    if url and url in (task.get("merged_pulls") or []):
-        return f"pull request {url} merged before this task reopened; give the new pull request with --pr <url>"
+    if url and url in (task.get("past_pulls") or []):
+        return f"pull request {url} belongs to this task before it reopened; give the new pull request with --pr <url>"
     if kind not in GATED:
         return _unmerged(url, github, READY) if url and gated(task) else ""
     if task.get("split"):

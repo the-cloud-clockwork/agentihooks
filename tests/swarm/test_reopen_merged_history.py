@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,13 +41,13 @@ def read(pulls: dict) -> object:
 @pytest.mark.feature(FEATURE)
 def test_reopening_a_done_task_moves_its_merged_pull_request_to_history() -> None:
     task = update(done_ledger(), {"state": "open", "claimed_by": ""})
-    assert (task["state"], task["pr_url"], task["merged_pulls"]) == ("open", "", [OLD])
+    assert (task["state"], task["pr_url"], task["past_pulls"]) == ("open", "", [OLD])
 
 
 @pytest.mark.feature(FEATURE)
 def test_a_reopen_naming_its_pull_request_keeps_it_current() -> None:
     task = update(done_ledger(), {"state": "open", "claimed_by": "", "pr_url": OLD})
-    assert (task["pr_url"], task.get("merged_pulls", [])) == (OLD, [])
+    assert (task["pr_url"], task.get("past_pulls", [])) == (OLD, [])
 
 
 @pytest.mark.feature(FEATURE)
@@ -70,11 +71,11 @@ def test_the_swarm_reopens_an_unmerged_done_task_with_its_pull_request_kept() ->
     doc = {"tasks": [dict(ledger.doc["tasks"][0])], "_meta": {"events": events}}
     done_gate.recheck_pass(store, SLUG, doc, ledger, 2, read({OLD: "CLOSED"}))
     task = ledger.doc["tasks"][0]
-    assert (task["state"], task["pr_url"], task.get("merged_pulls", [])) == ("open", OLD, [])
+    assert (task["state"], task["pr_url"], task.get("past_pulls", [])) == ("open", OLD, [])
 
 
 @pytest.mark.feature(FEATURE)
-def test_a_reopened_task_stops_on_a_wait_and_done_refuses_until_the_new_pull_request_merges(rig) -> None:  # noqa: F811
+def test_a_reopened_task_stops_on_a_wait_and_done_refuses_until_the_new_pull_request_merges(rig: Any) -> None:  # noqa: F811
     reopened = update(done_ledger(), {"state": "open", "claimed_by": ""})
     rig.task.clear()
     rig.task.update(reopened, state="claimed", claimed_by=ME)
@@ -86,7 +87,7 @@ def test_a_reopened_task_stops_on_a_wait_and_done_refuses_until_the_new_pull_req
         "a code task is done only with its merged pull request: give --pr <url>"
     )
     assert done_gate.refusal(task, OLD, read({OLD: "MERGED"})) == (
-        f"pull request {OLD} merged before this task reopened; give the new pull request with --pr <url>"
+        f"pull request {OLD} belongs to this task before it reopened; give the new pull request with --pr <url>"
     )
     assert "is open, not merged" in done_gate.refusal(task, NEW, read({NEW: "OPEN"}))
     assert done_gate.refusal(task, NEW, read({NEW: "MERGED"})) == ""
