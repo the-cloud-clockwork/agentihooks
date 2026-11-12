@@ -4915,6 +4915,7 @@
       "tests": [
         "tests/swarm/test_cli.py::test_an_unrecorded_continuation_records_the_origin_branch_its_checkout_tracks",
         "tests/test_worktree_skill.py::DoneUpstream::test_done_drops_a_successor_whose_upstream_branch_merged",
+        "tests/test_worktree_skill.py::DoneUpstream::test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head",
         "tests/test_worktree_skill.py::DoneUpstream::test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin",
         "tests/test_worktree_skill.py::DoneUpstream::test_done_pushed_keeps_a_successor_with_commits_past_its_merged_upstream_head"
       ]

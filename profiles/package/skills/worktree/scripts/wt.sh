@@ -244,6 +244,10 @@ case "${cmd}" in
         else
           [[ -z "${PR_STATE}" || "${PR_STATE}" == MERGED ]] \
             || die "pull request ${PR_STATE} is not merged — wait for it to land before worktree teardown"
+          if [[ "${PR_STATE}" == MERGED && "${HEAD_BR}" != "${BR}" ]]; then
+            [[ "$(cd "${REPO}" && gh pr list --head "${HEAD_BR}" --base "${BASE}" --state merged --json headRefOid --jq '.[0].headRefOid')" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
+              || die "branch '${BR}' has commits past the merged pull request of '${HEAD_BR}' — worktree kept"
+          fi
           REMOTE_BRANCH="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${HEAD_BR}")" \
             || die "cannot read remote branch '${HEAD_BR}' — worktree kept"
           if [[ -n "${REMOTE_BRANCH}" ]]; then

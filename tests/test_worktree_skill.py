@@ -510,6 +510,19 @@ class DoneUpstream(WtBase):
         self.assertFalse(self._on_origin("predecessor"))
 
     @pytest.mark.feature("successor-upstream-branch")
+    def test_done_keeps_a_successor_with_commits_past_its_merged_upstream_head(self) -> None:
+        dest = self._successor("ahead", "merged-before")
+        (dest / "unpushed.txt").write_text("unpushed\n")
+        _git(dest, "add", "unpushed.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
+        result = self.run_wt("done", "ahead", "--repo", str(self.primary))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("has commits past the merged pull request", result.stderr)
+        self.assertTrue(dest.exists())
+        self.assertTrue(self.branch_exists("ahead"))
+        self.assertTrue(self._on_origin("merged-before"))
+
+    @pytest.mark.feature("successor-upstream-branch")
     def test_done_pushed_drops_a_successor_whose_merged_upstream_branch_left_origin(self) -> None:
         dest = self._successor("parked", "earlier")
         _git(self.origin, "update-ref", "-d", "refs/heads/earlier", env=self.gitenv)
