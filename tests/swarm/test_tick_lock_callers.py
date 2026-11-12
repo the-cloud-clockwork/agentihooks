@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from scripts.swarm import cli, controller, tick_stop, timing
+from scripts.swarm import cli, controller, tick_activity, tick_stop, timing
 from scripts.swarm.rename import LOCK_MS, rename_swarm
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run
@@ -76,7 +76,9 @@ def test_the_pass_names_itself_on_take_step_keep_release_and_stop_release(
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert taken[0] == (cli.TICK_LOCK_MS, "pass")
     kept.clear()
-    hook.hooks[0]()
+    renewal = hook.hooks[0]
+    assert isinstance(renewal, tick_activity.Renewal)
+    renewal.renew()
     assert kept == [(cli.TICK_LOCK_MS, "pass step")]
     held[0]()
     assert journal(capsys, "pass", "pass stop") == [
