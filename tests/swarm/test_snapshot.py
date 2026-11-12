@@ -6,6 +6,7 @@ from typing import TextIO, cast
 
 import pytest
 
+from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, name_state, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -248,6 +249,71 @@ def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
     assert [i.id for i in inbox.pending_items("master@sw")] == pending
     assert item.id in {i.id for i in inbox.pending()}
     assert [h["state"] for h in inbox.history(item.id)] == ["pending"]
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore(store: RedisStore) -> None:
+    item = seed(store, "sw")
+    dispatcher = Dispatcher(InboxStore(store.redis))
+    dispatcher.own("master@sw", "bridge-1")
+    deliveries = dispatcher.reserve("master@sw", "bridge-1")
+    assert item.id in {delivery.item for delivery in deliveries}
+    for delivery in deliveries:
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = Dispatcher(InboxStore(store.redis))
+    restored.own("master@sw", "bridge-1")
+    assert restored.reserve("master@sw", "bridge-1") == []
+    recovered = restored.receipts.recover("master@sw", "bridge-1")
+    assert sorted((d.id, d.state) for d in recovered) == sorted((d.id, "unknown") for d in deliveries)
+    for delivery in deliveries:
+        assert restored.receipts.accept(delivery.id, "bridge-1", delivery.digest).committed
+    assert restored.reserve("master@sw", "bridge-1") == []
+    states = [h["state"] for h in InboxStore(store.redis).history(item.id)]
+    assert states.count("delivered") == 1
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_ref_shown_before_redis_is_lost_is_not_delivered_again_after_restore(store: RedisStore) -> None:
+    seed(store, "sw")
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "a comment on the parser", ref="sw:1:c1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("master@sw", "bridge-1")
+    for delivery in dispatcher.reserve("master@sw", "bridge-1"):
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+        dispatcher.receipts.accept(delivery.id, "bridge-1", delivery.digest)
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = InboxStore(store.redis)
+    again = restored.send("operator", "master@sw", "the same comment relayed again", ref="sw:1:c1")
+    redelivery = Dispatcher(restored)
+    redelivery.own("master@sw", "bridge-1")
+    assert redelivery.reserve("master@sw", "bridge-1") == []
+    assert restored.get(again.id).state == "done"
+
+
+@pytest.mark.feature("swarm-snapshot-inbox-receipts")
+def test_a_ref_in_flight_when_redis_is_lost_still_holds_its_ref_after_restore(store: RedisStore) -> None:
+    seed(store, "sw")
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "a comment on the parser", ref="sw:1:c1")
+    dispatcher = Dispatcher(inbox)
+    dispatcher.own("master@sw", "bridge-1")
+    for delivery in dispatcher.reserve("master@sw", "bridge-1"):
+        dispatcher.receipts.submitting(delivery.id, "bridge-1")
+    snapshot.take(store, "sw", 99, run=_no_git)
+    store.redis.flushall()
+    snapshot.restore(store, "sw", live=set())
+    restored = InboxStore(store.redis)
+    again = restored.send("operator", "master@sw", "the same comment relayed again", ref="sw:1:c1")
+    redelivery = Dispatcher(restored)
+    redelivery.own("master@sw", "bridge-1")
+    assert redelivery.reserve("master@sw", "bridge-1") == []
+    assert restored.get(again.id).state == "pending"
 
 
 def test_a_restored_swarm_starts_paused_and_only_the_master_comes_up(store):
