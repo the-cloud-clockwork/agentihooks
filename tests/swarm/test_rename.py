@@ -209,6 +209,12 @@ def test_rename_names_a_managed_codex_thread_and_its_pane(store: RedisStore, mon
         return {}
 
     ledger = SimpleNamespace(tasks=lambda slug: [], rename_agent=lambda slug, old, new: None)
+    connection.request.side_effect = protocol.Refused("thread/name/set refused")
+    rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 5)
+    assert store.redis.get(store.key("sw", "session-name", "w1:p1")) is None
+    connection.reset_mock()
+    connection.request.side_effect = None
+    pane["name"] = old
     rename_swarm(store, "sw", ledger, HerdrRuntime(herdr=herdr), 10)
     new = store.agents("sw")[0].name
     assert pane["name"] == herdr_target(new) != old

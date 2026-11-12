@@ -76,7 +76,7 @@ def _name_session(store, slug, runtime, pane_id, new):
 
 
 def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> None:
-    """Name a managed Codex agent's app server thread with the title launch gives it."""
+    """Name a managed Codex agent's app server thread with the title launch gives it; a refusal retries next rename."""
     from scripts.codex_session import protocol, supervisor
 
     record = live_binding.transport(store, agent)
@@ -89,9 +89,11 @@ def _name_thread(store: RedisStore, slug: str, agent: AgentRecord, new: str) -> 
     try:
         connection, _ = protocol.connect(record.endpoint_ref.removeprefix(supervisor.UNIX), CONNECT_S)
         try:
-            supervisor.name_thread(connection, record.thread_id, name)
+            protocol.set_thread_name(connection, record.thread_id, name)
         finally:
             connection.close()
+    except protocol.Refused:
+        return
     except (OSError, TimeoutError, protocol.ProtocolError) as exc:
         raise SwarmError(f"cannot name the thread of {agent.name}: {exc}") from exc
     store.redis.set(key, name)
