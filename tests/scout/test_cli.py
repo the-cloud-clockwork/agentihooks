@@ -159,6 +159,32 @@ def test_duplicate_items_are_merged_by_source_and_excerpt(wired, capsys):
     assert [item["id"] for item in items] == ["e1", "e2"]
 
 
+@pytest.mark.feature("scout-sources-repo-relative")
+def test_a_source_inside_a_worker_checkout_is_cited_relative_to_its_repository_root(wired, tmp_path, capsys):
+    checkout = tmp_path / "home" / "worker" / "dev" / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    module = checkout / "scripts" / "hive" / "daemon.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("from scripts.hive.run_consumer import RunConsumer\n")
+    wired(FakeRunner([PEP, _found(str(module), "from scripts.hive.run_consumer import RunConsumer")]), FakeClassifier(1.0))
+
+    assert cli.main([QUESTION, "--rounds", "1"]) == 0
+
+    items = schema.validate("evidence", _printed(capsys))["items"]
+    assert [item["source"] for item in items] == [PEP["source"], "scripts/hive/daemon.py"]
+
+
+@pytest.mark.feature("scout-sources-repo-relative")
+def test_an_absolute_source_outside_any_checkout_is_still_refused(wired, tmp_path, capsys):
+    loose = tmp_path / "notes.txt"
+    loose.write_text("loose\n")
+    wired(FakeRunner([_found(str(loose), "loose")]), FakeClassifier(1.0))
+
+    assert cli.main([QUESTION, "--rounds", "1"]) == 1
+
+    assert "does not match" in capsys.readouterr().err
+
+
 def test_the_out_file_receives_the_evidence_set(wired, tmp_path, capsys):
     wired(FakeRunner([PEP]), FakeClassifier(1.0))
     out = tmp_path / "evidence.json"
