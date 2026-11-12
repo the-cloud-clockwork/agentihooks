@@ -45,6 +45,7 @@ ORDER += (
     "context",
     "hives",
     "architecture",
+    "status_note",
     "controls",
     "events",
     "main",

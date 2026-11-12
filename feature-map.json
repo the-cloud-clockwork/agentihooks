@@ -2742,6 +2742,18 @@
       ]
     },
     {
+      "id": "ledger-layout-unload-save",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t230",
+      "behaviour": "A layout save still pending when the ledger page hides or closes is sent at once as a keepalive request, so the server keeps the newest layout.",
+      "seam": "The layout save of the ledger page on pagehide and on a hidden visibilitychange",
+      "tests": [
+        "tests/swarm_ledger/test_layout_unload.py::test_a_resize_followed_at_once_by_leaving_the_page_still_saves_the_new_layout",
+        "tests/swarm_ledger/test_layout_unload.py::test_page_hide_sends_a_pending_layout_save_at_once_as_a_keepalive_request",
+        "tests/swarm_ledger/test_layout_unload.py::test_a_hidden_page_sends_a_pending_layout_save_at_once_as_a_keepalive_request"
+      ]
+    },
+    {
       "id": "ledger-tabs",
       "origin": "inventory",
       "behaviour": "The ledger page tabs keep the shell fixed, scroll only the active body, and keep the tab choice and scroll positions across switches.",
@@ -4914,6 +4926,19 @@
       ]
     },
     {
+      "id": "done-clears-awaiting",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t913",
+      "behaviour": "Every task done writer clears the task's awaiting field, so a done task that reopens shows no stale approval, verify or fix wait.",
+      "seam": "scripts.swarm.cli.cmd_done with its group members and scripts.swarm.promotion_watch green closing, against the ledger task update that merges fields",
+      "tests": [
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_clears_awaiting_and_a_reopened_task_shows_no_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_swarm_done_on_a_group_lead_clears_awaiting_on_its_members",
+        "tests/swarm/test_done_awaiting.py::test_the_tick_reopens_a_done_task_without_a_stale_wait",
+        "tests/swarm/test_done_awaiting.py::test_a_green_promotion_run_clears_awaiting_and_a_reopened_task_shows_no_stale_wait"
+      ]
+    },
+    {
       "id": "launch-order-receipt-outlives-order",
       "origin": "inventory",
       "behaviour": "A hive launch order whose expiry outlives the one day receipt window starts its agent exactly once when the member crashes after the spawn and before the order's finish and polls the order again after a day has passed; a launch receipt that would age out within a day of the claim is treated as lost, so any change that gives it a one day expiry starts the agent twice and fails the guard.",
@@ -4973,6 +4998,17 @@
       "seam": "WriterLease.acquire in the swarm v2 ledger writer",
       "tests": [
         "tests/test_swarm_v2_ledger_writer.py::test_a_failed_holder_record_write_releases_the_lock"
+      ]
+    },
+    {
+      "id": "swarm-park-foreign-dependency-no-fetch",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t550",
+      "behaviour": "Swarm park records a park on a dependency whose recorded branch lives in another repository without fetching that branch, so a fetch that would fail cannot refuse the park; the stacked base is the task's own fork from origin dev.",
+      "seam": "swarm park in scripts.swarm.stack",
+      "tests": [
+        "tests/swarm/test_stack.py::test_park_records_a_dependency_in_another_repository_without_fetching_its_branch",
+        "tests/swarm/test_stack.py::test_park_on_an_antoncore_dependency_fetches_nothing_through_its_checkout_or_url"
       ]
     }
   ],

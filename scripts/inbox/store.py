@@ -142,7 +142,14 @@ def ramped(item_ids: list[str]) -> list[list[str]]:
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id="", world=None):
+    def __init__(
+        self,
+        redis: Any,
+        *,
+        persist: Any = None,
+        session_id: str = "",
+        world: str | None = None,
+    ) -> None:
         """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
         own member."""
         from scripts.hive import scope
