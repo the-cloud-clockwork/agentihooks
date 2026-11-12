@@ -122,25 +122,27 @@ def _facts(
     if url:
         pull = github(url)
         return (pull.head, url) if pull is not None and pull.head else None
-    where = task.get("branch_repo") or repo
-    looked = marks.redis.hget(marks.key(owner), LOOKED)
+    where, stamp = task.get("branch_repo") or repo, f"{LOOKED}:{task['id']}"
+    looked = marks.redis.hget(marks.key(owner), stamp)
     if not where or (looked and now_ms - int(looked) < LOOKUP_MS):
         return None
-    marks.redis.hset(marks.key(owner), LOOKED, now_ms)
+    marks.redis.hset(marks.key(owner), stamp, now_ms)
     from scripts.swarm import naming
 
     return branch(where, task.get("branch") or naming.plain(owner))
 
 
-def _change(seen: str, task_id: str, head: str, url: str) -> str:
-    """The outcome a move from the recorded ``seen`` fact to this head and pull request is, empty for none."""
+def _change(seen: str, task_id: str, head: str, url: str) -> list[str]:
+    """The outcomes a move from the recorded ``seen`` fact to this head and pull request is, a push last."""
     known, _, rest = seen.partition(" ")
     if known != task_id:
-        return ""
+        return []
     before, _, opened = rest.partition(" ")
-    if url and not opened:
-        return "pull request opened"
-    return "pushed" if head != before else ""
+    return [
+        kind
+        for kind, moved in (("pull request opened", url and not opened), ("pushed", head and head != before))
+        if moved
+    ]
 
 
 def heads_pass(
@@ -163,12 +165,9 @@ def heads_pass(
         if found is None:
             continue
         head, url = found
-        fact, seen = f"{task['id']} {head} {url}", redis.hget(marks.key(owner), HEAD) or ""
-        if fact == seen:
-            continue
-        redis.hset(marks.key(owner), HEAD, fact)
-        kind = _change(seen, task["id"], head, url)
-        if kind:
+        seen = redis.hget(marks.key(owner), HEAD) or ""
+        redis.hset(marks.key(owner), HEAD, f"{task['id']} {head} {url}")
+        for kind in _change(seen, task["id"], head, url):
             marks.outcome(owner, kind, now_ms)
             stamped.append(
                 f"{kind} {head} on {url or task.get('branch') or 'its worktree branch'}, an outcome for {owner}"
