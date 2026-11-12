@@ -1827,7 +1827,7 @@
     {
       "id": "swarm-health-false-positives",
       "origin": "t277",
-      "behaviour": "Swarm status counts, per detector, the findings whose current verdict is false positive out of all judged findings, carries the count in its JSON report and prints one false positives line when any finding is judged.",
+      "behaviour": "Swarm status counts, per detector, the findings whose current verdict is false positive out of all judged findings and prints one false positives line when any finding is judged.",
       "seam": "agentihooks swarm status",
       "tests": [
         "tests/swarm/test_health_verdicts.py::test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings",

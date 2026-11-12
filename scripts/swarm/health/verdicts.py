@@ -103,3 +103,15 @@ class VerdictStore:
         if since >= until or until > now_ms:
             raise SwarmError("verdict log needs --since before --until and --until no later than now")
         return [json.loads(raw)[1] for raw in self.redis.zrangebyscore(self.event_key, since, f"({until}")]
+
+    def false_positives(self) -> dict[str, dict[str, int]]:
+        """Per detector, the findings whose current verdict is false-positive out of all judged findings."""
+        counts: dict[str, dict[str, int]] = {}
+        for finding_id, raw in sorted(self.redis.hgetall(self.key).items()):
+            verdict = json.loads(raw).get("verdict")
+            if not verdict:
+                continue
+            row = counts.setdefault(finding_id.split("/", 1)[0], {"false_positive": 0, "judged": 0})
+            row["judged"] += 1
+            row["false_positive"] += verdict["value"] == "false-positive"
+        return counts

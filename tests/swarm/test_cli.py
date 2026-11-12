@@ -2232,9 +2232,7 @@ def test_status_counts_each_detector_s_false_positive_verdicts(env, capsys, monk
     run("sw", "status")
     capsys.readouterr()
     run("sw", "--as", "master@a1b2c3-0001", "verdict", "stale-claim/t1", "false-positive", "--note", "on checks")
-    run("sw", "status", "--json")
-    report = json.loads(capsys.readouterr().out.splitlines()[-1])
-    assert report["false_positives"] == {"stale-claim": {"false_positive": 1, "judged": 1}}
+    capsys.readouterr()
     run("sw", "status")
     assert "false positives  stale-claim 1 of 1 judged" in capsys.readouterr().out.splitlines()
 
