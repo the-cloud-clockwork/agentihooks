@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.826 · 2026-11-12
+
+### 2026-11-12 · bb262302eb29 · #10840 · @agenticore-app
+
+**Export a proof swarm's scratch Redis setting into its panes**
+
+This change fixes a bug where masters launched for scratch proof swarms inherited the operator's shared Redis setting instead of their own, causing SessionStart hive-join checks to scan the wrong Redis and time out past the 270 second launch deadline. The launcher script now exports a proof swarm's scratch Redis URL after the operator env, so its pane correctly points at the scratch Redis, while live swarm panes keep using the operator env setting unchanged.
+
 ## v2.17.823 · 2026-11-12
 
 ### 2026-11-12 · eabff56d720b · #10833 · @agenticore-app
