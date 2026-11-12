@@ -152,7 +152,9 @@ def test_a_merged_pull_request_past_the_limit_never_rejudges(tmp_path):
     pulls = {**{url: {**PULLS[THERE]} for url in others}, HERE: PULLS[HERE]}
     seen = []
     for _ in range(2):
-        _, record = judged(tmp_path, task(description=" ".join(others)), body="", pulls=pulls, seen=seen)
+        _, record = judged(
+            tmp_path, task(description=" ".join(others)), body="Delivers the task.", pulls=pulls, seen=seen
+        )
     assert len(seen) == 1
     assert "named_pending" not in record
     assert record["reason"].endswith(f"; could not read {others[-1]}")
@@ -274,7 +276,7 @@ def test_one_task_failing_in_the_intent_check_never_ends_the_tick_run(tmp_path):
             raise RuntimeError("boom")
         return intent.judge(state, classifier(0.9))
 
-    view = {"title": PULLS[HERE]["title"], "body": "", "files": [".github/workflows/sonar.yml"]}
+    view = {"title": PULLS[HERE]["title"], "body": "Delivers the task.", "files": [".github/workflows/sonar.yml"]}
     actions = intent.Check(SLUG, "enforce", NOW, Ledger(), Mail(), lambda url: view, ask, home=tmp_path).run(
         {**DOC, "tasks": [broken, task()]}
     )
@@ -294,7 +296,7 @@ def test_one_task_failing_before_it_is_judged_never_ends_the_tick_run(tmp_path, 
         return bind(verdicts, task, url, doc)
 
     monkeypatch.setattr(intent, "_bind_pulls", bound)
-    view = {"title": PULLS[HERE]["title"], "body": "", "files": [".github/workflows/sonar.yml"]}
+    view = {"title": PULLS[HERE]["title"], "body": "Delivers the task.", "files": [".github/workflows/sonar.yml"]}
 
     def ask(state):
         return intent.judge(state, classifier(0.9))

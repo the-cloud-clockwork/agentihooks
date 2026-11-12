@@ -136,3 +136,113 @@ def test_repository_folder_records_match_the_combined_loader():
     for path in (root / "mutation-clearances").glob("*.json"):
         key, ruling = next(iter(json.loads(path.read_text()).items()))
         assert cleared[key] == ruling
+
+
+SURVIVORS = [
+    {
+        "name": "hooks.example.x_f__mutmut_1",
+        "status": "survived",
+        "lines": [3],
+        "fingerprint": "fp1",
+        "identity": "id1",
+    },
+    {"name": "hooks.example.x_g__mutmut_2", "status": "no tests", "lines": [4], "fingerprint": "fp2"},
+    {"name": "hooks.example.x_h__mutmut_3", "status": "killed", "lines": [], "fingerprint": ""},
+]
+SURVIVOR_KEYS = {
+    "hooks.example.x_f__mutmut_1": "hooks/example.py:hooks.example.x_f:id1",
+    "hooks.example.x_g__mutmut_2": "hooks/example.py:hooks.example.x_g__mutmut_2:fp2",
+}
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        {"files": [{"path": "hooks/example.py", "failures": SURVIVORS}], "not_mutated": [], "failed": True},
+        {"hooks/example.py": SURVIVORS},
+    ],
+)
+def test_write_command_records_each_named_survivor_under_its_report_key(
+    tmp_path: Path, report: dict, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps(report))
+    names = list(SURVIVOR_KEYS)
+    argv = ["write", str(source), *names, "--reader", RULING["reader"], "--reason", RULING["reason"]]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["clearances", *argv])
+    assert main() == 0
+    assert load_clearances(tmp_path) == {key: RULING for key in SURVIVOR_KEYS.values()}
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [clearance_path(tmp_path, SURVIVOR_KEYS[name]).as_posix() for name in names]
+
+
+def test_write_command_refuses_killed_or_absent_names_and_writes_nothing(tmp_path: Path) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    names = ["hooks.example.x_f__mutmut_1", "hooks.example.x_h__mutmut_3", "hooks.example.absent__mutmut_9"]
+    message = "^Mutants not surviving in the report: hooks.example.x_h__mutmut_3, hooks.example.absent__mutmut_9$"
+    with pytest.raises(ValueError, match=message):
+        main(["write", str(source), *names, "--reader", "Standards", "--reason", "Equivalent", "--root", str(tmp_path)])
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+@pytest.mark.parametrize("missing", ["--reader", "--reason"])
+def test_write_command_requires_a_reader_and_a_reason(tmp_path: Path, missing: str) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    options = {"--reader": "Standards", "--reason": "Equivalent"}
+    del options[missing]
+    argv = ["write", str(source), "hooks.example.x_f__mutmut_1", *[part for item in options.items() for part in item]]
+    with pytest.raises(SystemExit) as stopped:
+        main([*argv, "--root", str(tmp_path)])
+    assert stopped.value.code == 2
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+def test_write_command_refuses_an_unknown_command_by_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    argv = ["erase", str(source), "hooks.example.x_f__mutmut_1", "--reader", "Standards", "--reason", "Equivalent"]
+    with pytest.raises(SystemExit) as stopped:
+        main([*argv, "--root", str(tmp_path)])
+    assert stopped.value.code == 2
+    assert "argument command: invalid choice: 'erase'" in capsys.readouterr().err
+    assert not (tmp_path / "mutation-clearances").exists()
+
+
+def test_write_command_writes_under_the_given_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"hooks/example.py": SURVIVORS}))
+    root = tmp_path / "repository"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    name = "hooks.example.x_f__mutmut_1"
+    argv = ["write", str(source), name, "--reader", RULING["reader"], "--reason", RULING["reason"]]
+    assert main([*argv, "--root", str(root)]) == 0
+    assert load_clearances(root) == {SURVIVOR_KEYS[name]: RULING}
+    assert not (elsewhere / "mutation-clearances").exists()
+
+
+def test_bare_command_still_migrates_the_legacy_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.ci_mutation.clearances import main
+
+    (tmp_path / "mutation-cleared.txt").write_text(json.dumps({KEY: RULING}))
+    monkeypatch.chdir(tmp_path)
+    assert main([]) == 0
+    assert capsys.readouterr().out == "Migrated 1 mutation clearances\n"
+    assert load_clearances(tmp_path) == {KEY: RULING}
