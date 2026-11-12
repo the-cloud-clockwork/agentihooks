@@ -188,6 +188,17 @@ def test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running(rig: dic
 
 
 @pytest.mark.feature("swarm-night-watch-drill")
+def test_an_update_through_the_running_view_keeps_the_stored_state_paused(rig: dict[str, Any]) -> None:
+    store = rig["store"]
+    store.update(SCRATCH, state="paused")
+    view = night_watch_drill.running(store, SCRATCH)
+    written = view.update(SCRATCH, gates={"nightwatch": "enforce"})
+    assert written.state == "paused" and written.gates == {"nightwatch": "enforce"}
+    assert store.config(SCRATCH).state == "paused" and store.config(SCRATCH).gates == {"nightwatch": "enforce"}
+    assert view.config(SCRATCH).state == "running"
+
+
+@pytest.mark.feature("swarm-night-watch-drill")
 def test_the_redis_budget_rebinds_every_part_of_the_running_view(rig: dict[str, Any]) -> None:
     store = rig["store"]
     store.update(SCRATCH, state="paused")

@@ -55,6 +55,14 @@ class Running:
         config: Any = super().config(slug)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         return replace(config, state="running") if slug == self.drilled else config
 
+    def update(self, slug: str, **changes: Any) -> Any:
+        """Write ``changes`` over the stored config, so an update never writes the running state it reads."""
+        drilled, self.drilled = self.drilled, ""
+        try:
+            return super().update(slug, **changes)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        finally:
+            self.drilled = drilled
+
 
 def running(store: Any, slug: str) -> Any:
     """A copy of ``store`` that reads ``slug`` as running; its parts that hold the store hold the copy, so the night

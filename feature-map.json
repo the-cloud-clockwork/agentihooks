@@ -958,6 +958,7 @@
         "tests/swarm/test_night_watch_drill.py::test_the_drill_drives_the_recovery_of_a_paused_scratch_swarm_and_leaves_it_paused",
         "tests/swarm/test_night_watch_drill.py::test_the_night_watch_passes_of_a_paused_drill_see_the_swarm_running",
         "tests/swarm/test_night_watch_drill.py::test_the_redis_budget_rebinds_every_part_of_the_running_view",
+        "tests/swarm/test_night_watch_drill.py::test_an_update_through_the_running_view_keeps_the_stored_state_paused",
         "tests/swarm/test_night_watch_drill.py::test_the_drill_refuses_a_scratch_swarm_whose_master_seat_a_live_master_holds"
       ]
     },
