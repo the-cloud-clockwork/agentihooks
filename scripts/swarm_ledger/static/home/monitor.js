@@ -53,9 +53,8 @@ function paint(box, d) {
 function hiveRows(head, rows) {
   for (const old of head.parentElement.querySelectorAll(".fm[data-hive]")) old.remove();
   const made = rows.map((row, i) => {
-    const el = h("div", { class: `fm sub${i === rows.length - 1 ? " end" : ""}`, "data-hive": row.name, "data-silent": row.agents === null ? "yes" : "no" },
-      h("dt", {}, row.name), h("dd", {}, row.agents === null ? "—" : String(row.agents)));
-    if (row.agents === null) el.title = `${row.name} did not answer; its agents are not counted`;
+    const el = h("div", { class: `fm sub${i === rows.length - 1 ? " end" : ""}`, "data-hive": row.name },
+      h("dt", {}, row.name), h("dd", {}, String(row.agents)));
     return el;
   });
   head.after(...made);
