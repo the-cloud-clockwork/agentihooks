@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, name_state, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -251,8 +252,6 @@ def test_pending_inbox_items_survive_a_lost_redis(store: RedisStore) -> None:
 
 @pytest.mark.feature("swarm-snapshot-inbox-receipts")
 def test_a_delivery_in_flight_when_redis_is_lost_is_delivered_once_after_restore(store: RedisStore) -> None:
-    from scripts.inbox.dispatch import Dispatcher
-
     item = seed(store, "sw")
     dispatcher = Dispatcher(InboxStore(store.redis))
     dispatcher.own("master@sw", "bridge-1")

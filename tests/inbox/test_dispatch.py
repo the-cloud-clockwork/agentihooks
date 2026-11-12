@@ -41,13 +41,15 @@ def send(dispatcher, bridge, delivery):
 
 
 @pytest.mark.feature("swarm-snapshot-inbox-receipts")
-def test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks(store, dispatcher):
-    shown = store.send("operator", "bob", "first", ref="sw:3:a1")
+def test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks(
+    store: InboxStore, dispatcher: Dispatcher
+) -> None:
+    store.send("operator", "bob", "first", ref="sw:3:a1")
     [done] = dispatcher.reserve("bob", "bridge-1")
     send(dispatcher, "bridge-1", done)
     held = store.send("operator", "bob", "second", ref="sw:3:b2")
     [open_delivery] = dispatcher.reserve("bob", "bridge-1")
-    keys, _ = store.keys_at(["bob"])
+    keys, _ = store.keys_at(["alice", "bob"])
     assert {
         store.key("deliveries", "bob"),
         store.key("seen", "bob"),
@@ -56,7 +58,7 @@ def test_the_export_keys_hold_the_open_receipts_journal_and_the_seen_marks(store
         store.key("ref-reservation", "bob", "sw:3:b2"),
     } <= set(keys)
     assert store.key("delivery", done.id) not in keys
-    assert store.key("reservation", shown.id) not in keys
+    assert store.key("seen", "bob") == SeenMarks.key("bob")
 
 
 def states(store, item_id):
