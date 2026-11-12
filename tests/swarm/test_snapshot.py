@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TextIO, cast
 from unittest.mock import patch
 
 import pytest
@@ -594,3 +595,92 @@ def test_status_shows_when_the_last_automatic_snapshot_was_taken(env, capsys):
 
 def test_the_ledger_source_names_the_show_command_for_its_slug():
     assert snapshot.ledger_source("sw") == "agentihooks ledger --slug sw show"
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_snapshot_is_written_one_entry_at_a_time_never_as_one_whole_string(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    for n in range(20):
+        store.redis.set(store.key("sw", f"bulk-{n}"), "x" * 50_000)
+    real, longest = json.dumps, [0]
+
+    def measured(value: object, *args: object, **kwargs: object) -> str:
+        text = real(value, *args, **kwargs)
+        longest[0] = max(longest[0], len(text))
+        return text
+
+    monkeypatch.setattr(json, "dumps", measured)
+    taken = snapshot.take(store, "sw", 99, run=_no_git, environ={})
+    monkeypatch.setattr(json, "dumps", real)
+    written = taken.read_text()
+    assert json.loads(written)["state"]["keys"][store.key("sw", "bulk-3")]["value"] == "x" * 50_000
+    assert longest[0] < len(written) / 10
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_pruning_reads_each_kept_snapshot_refs_without_parsing_the_snapshot(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    taken = snapshot.auto(store, "sw", 0, {}, run=_no_git)
+    assert taken is not None
+    assert json.loads(taken.with_name(taken.name + ".refs").read_text()) == []
+    taken.write_text("{")
+    assert snapshot.referenced("sw") == set()
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_an_automatic_snapshot_dropped_from_the_ten_takes_its_refs_with_it(store: RedisStore) -> None:
+    _running(store, snapshot_minutes=1)
+    for n in range(12):
+        snapshot.auto(store, "sw", n * MINUTE, {}, run=_no_git)
+    kept = sorted(p.name for p in snapshot.auto_dir("sw").glob("*.refs"))
+    assert kept == sorted(f"auto-{n * MINUTE}.json.refs" for n in range(2, 12))
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_a_take_that_dies_before_its_snapshot_lands_leaves_no_refs_naming_the_old_snapshot(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _running(store)
+    target = snapshot.take(store, "sw", 1, run=_no_git, environ={})
+    held = {"sources": {"a": {"inventory": {"x": {"sha256": "kept-by-old"}}}}}
+    target.write_text(json.dumps(held))
+    real = Path.replace
+
+    def dies(self: Path, other: Path) -> Path:
+        if self.suffix == ".partial":
+            raise OSError("killed")
+        return real(self, other)
+
+    monkeypatch.setattr(Path, "replace", dies)
+    with pytest.raises(OSError):
+        snapshot.take(store, "sw", 2, run=_no_git, environ={})
+    assert snapshot.referenced("sw") == {"kept-by-old"}
+
+
+@pytest.mark.feature("snapshot-job-bounded-memory")
+def test_each_entry_down_to_the_split_depth_is_written_as_its_own_string() -> None:
+    chunks: list[str] = []
+
+    class Out:
+        def write(self, text: str) -> int:
+            chunks.append(text)
+            return len(text)
+
+    value = {"keys": {"a": {"type": "hash", "value": {"f": "1"}}, "b": [1]}, "names": None}
+    snapshot._write(cast("TextIO", Out()), value, 2)
+    assert chunks == [
+        "{",
+        '"keys": ',
+        "{",
+        '"a": ',
+        '{"type": "hash", "value": {"f": "1"}}',
+        ', "b": ',
+        "[1]",
+        "}",
+        ', "names": ',
+        "null",
+        "}",
+    ]
+    assert json.loads("".join(chunks)) == value

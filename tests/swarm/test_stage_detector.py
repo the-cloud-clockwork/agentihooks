@@ -47,6 +47,32 @@ def test_eleventh_replay_counts_three_overruns_in_one_standing_finding(store):
     assert len(report["top"]) <= 3
 
 
+MINUTES = "minutes from push to Gate Required"
+
+
+def test_whole_run_overruns_and_stage_episodes_count_under_separate_measures(store):
+    for episode in ("101", "102"):
+        reading = standing.Reading(19.0, 15.0, MINUTES, episode, "slow run")
+        standing.fire(store.redis, "scratch", "ci_overrun", reading, NOW)
+    source, tasks = replay()
+    stage_detector.update_findings(store, "scratch", stage_detector.report(source, tasks, NOW), NOW)
+    standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(21.0, 15.0, MINUTES, "1", "slow run"), NOW)
+    row = standing.read(store.redis, "scratch")["ci_overrun"]
+    assert (row["fired"], row["episodes"], row["detector_fired"], row["detector_episodes"]) == (
+        3,
+        ["101", "102", "1"],
+        3,
+        ["1", "2", "3"],
+    )
+    (found,) = standing.findings(store.redis, "scratch", NOW)
+    assert found.evidence == (
+        "Fired 3 times",
+        "slow run",
+        "Current 0.635833 task hours, rising, previously 0 task hours",
+        "Stage detector fired 3 times",
+    )
+
+
 def test_the_detector_measures_claim_wait_against_claimable_tasks_only():
     from scripts.swarm import stages
     from tests.swarm.test_stages import ledger
@@ -282,11 +308,12 @@ def test_detector_update_keeps_existing_alert_units_threshold_and_detail(store):
     source, tasks = replay()
     stage_detector.update_findings(store, "scratch", stage_detector.report(source, tasks, NOW), NOW)
     row = standing.read(store.redis, "scratch")["ci_overrun"]
-    assert (row["value"], row["threshold"], row["unit"], row["detail"], row["fired"]) == (
+    assert (row["value"], row["threshold"], row["unit"], row["detail"], row["fired"], row["detector_fired"]) == (
         19.0,
         15.0,
         "minutes",
         "slow run",
+        1,
         3,
     )
 
@@ -315,16 +342,17 @@ def test_alert_and_detector_updates_do_not_lose_an_interleaved_episode(store, mo
     monkeypatch.setattr(store.redis, "pipeline", pipeline)
     stage_detector.update_findings(store, "scratch", report, NOW)
     row = standing.read(store.redis, "scratch")["ci_overrun"]
-    assert (row["fired"], row["value"], row["threshold"], row["unit"], row["detail"]) == (
-        4,
+    assert (row["fired"], row["detector_fired"], row["value"], row["threshold"], row["unit"], row["detail"]) == (
+        1,
+        3,
         20,
         15,
         "minutes",
         "new run",
     )
     assert row["detector"]["seconds"] == 2289.0
-    standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(21, 15, "minutes", "1", "same run"), NOW)
-    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 4
+    standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(21, 15, "minutes", "4", "same run"), NOW)
+    assert standing.read(store.redis, "scratch")["ci_overrun"]["fired"] == 1
     assert standing.read(store.redis, "scratch")["ci_overrun"]["detector"] == row["detector"]
 
 
@@ -392,16 +420,16 @@ def test_standing_detector_retains_episode_counts_when_recent_history_rolls_over
         "updated_at": NOW,
     }
     same = standing.fire(store.redis, "scratch", "ci_overrun", standing.Reading(19, 15, "minutes", "0", "old run"), NOW)
-    assert same["fired"] == 30
+    assert (same["fired"], same["episodes"], same["detector_fired"]) == (1, ["0"], 30)
     changed = {**reading, "seconds": 7200.0, "episodes": [*reading["episodes"], "30"]}
     row = standing.update_detector(store.redis, "scratch", changed, NOW + 60_000, 0.25)
-    assert row["fired"] == 31
-    assert row["episodes"] == [str(n) for n in range(11, 31)]
+    assert (row["fired"], row["detector_fired"]) == (1, 31)
+    assert row["detector_episodes"] == [str(n) for n in range(11, 31)]
     assert row["first_at"] == NOW
     assert row["updated_at"] == NOW
     assert (row["value"], row["threshold"], row["unit"], row["detail"]) == (19, 15, "minutes", "old run")
     row = standing.update_detector(store.redis, "scratch", {**changed, "seconds": 10800}, NOW + 120_000, 0.25)
-    assert row["fired"] == 31
+    assert row["detector_fired"] == 31
 
 
 @pytest.mark.parametrize("ticks,hours", [("0", "4"), ("1", "0"), ("1", "12.5"), ("-1", "13")])

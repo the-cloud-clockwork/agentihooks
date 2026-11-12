@@ -195,13 +195,49 @@ def _machine_gate(runner: cases.Runner) -> Qualifier:
     return Qualifier.machine(runner)
 
 
-def test_an_unchanged_server_reuses_its_verdict_after_one_status_read():
+def test_an_unchanged_server_and_client_reuse_the_verdict_after_one_read_of_each() -> None:
     runner = cases.Runner(cases.fixture()["server"])
     gate = _machine_gate(runner)
     first = gate.verdict(cases.TARGET, "attempt/1")
     runner.commands.clear()
     assert gate.verdict(cases.TARGET, "attempt/1") is first
-    assert runner.commands == [["herdr", "--machine", cases.TARGET, *capabilities.STATUS_SERVER]]
+    assert runner.commands == [
+        ["herdr", "--machine", cases.TARGET, *capabilities.STATUS_SERVER],
+        ["herdr", *capabilities.STATUS_CLIENT],
+    ]
+    assert first.client == cases.fixture()["client"]
+
+
+def test_a_client_change_under_one_attempt_rechecks_the_verdict() -> None:
+    runner = cases.Runner(cases.fixture()["server"])
+    gate = _machine_gate(runner)
+    first = gate.verdict(cases.TARGET, "attempt/1")
+    assert first.compatible
+    runner.client = copy.deepcopy(cases.fixture()["client"]) | {"version": "0.9.2"}
+    runner.commands.clear()
+    second = gate.verdict(cases.TARGET, "attempt/1")
+    assert second is not first
+    assert second.refusals == (
+        "herdr server 0.9.1 is not the client build 0.9.2, so its socket methods are unverified",
+    )
+    assert second.client["version"] == "0.9.2"
+    assert runner.commands == [
+        ["herdr", "--machine", cases.TARGET, *capabilities.STATUS_SERVER],
+        ["herdr", *capabilities.STATUS_CLIENT],
+        ["herdr", "--machine", cases.TARGET, *capabilities.STATUS_SERVER],
+        ["herdr", *capabilities.STATUS_CLIENT],
+    ]
+    assert gate.verdicts[cases.TARGET] is second
+    assert gate.retired == {}
+
+
+def test_a_gate_without_a_client_reader_reuses_on_the_server_status_alone() -> None:
+    probes: list[str] = []
+    gate = gate_of(lambda target: probes.append(target) or observed())
+    first = gate.verdict("t", "one")
+    assert gate.client is None
+    assert gate.verdict("t", "one") is first
+    assert probes == ["t"]
 
 
 def test_a_server_restart_under_one_attempt_rechecks_the_verdict():
