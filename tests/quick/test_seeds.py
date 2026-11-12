@@ -28,6 +28,7 @@ def test_the_master_seed_makes_it_the_front_door_over_its_own_panes(tmp_path):
     assert "eng-2 in pane 3 (codex, session quick-abc-eng-2)" in text
     assert "wait for the operator" in text and "only" in text
     assert "SendMessage" in text and "agentihooks quick send <seat>" in text and "agentihooks quick room" in text
+    assert "Reach a Claude engineer with SendMessage to its session" in text and "session quick-abc-eng-1" in text
     assert str(paths.seat_dir(tmp_path, "eng-1")) in text
     assert "agentihooks quick handoff" in text and str(paths.handoff(tmp_path, "master")) in text
 
