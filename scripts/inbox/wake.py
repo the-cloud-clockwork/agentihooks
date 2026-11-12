@@ -13,7 +13,7 @@ from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import CLOSED, Item, redelivery_ms
+from scripts.inbox.store import CLOSED, InboxStore, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
@@ -145,7 +145,7 @@ class _Clock:
     quiet: int
 
 
-def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
+def _wake_world(inbox: InboxStore, slug, agents, herdr, ledger, clock: _Clock, items):
     now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
