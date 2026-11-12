@@ -517,7 +517,10 @@ def test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_i
 
     from hooks.context import account_sessions
 
-    rig.bindings.put(SLUG, replace(rig.record, state=CONNECTED, host_id=socket.gethostname(), account="alpha"))
+    rig.bindings.put(
+        SLUG,
+        replace(rig.record, state=CONNECTED, host_id=socket.gethostname(), account="alpha", active_turn_id="turn-1"),
+    )
     monkeypatch.setattr("hooks._redis.get_redis", lambda: rig.store.redis)
     assert account_sessions.managed_held() == {(rig.agent.execution_id, "alpha")}
     monkeypatch.setattr(supervisor, "start_time", lambda pid: 999)
@@ -525,7 +528,7 @@ def test_the_binding_pass_fails_a_connected_record_whose_server_died_and_frees_i
     assert rig.runner.bindings([rig.agent]) == {rig.agent.name: {"process": False}}
 
     ended = rig.bindings.get(SLUG, rig.agent.execution_id)
-    assert (ended.state, ended.last_error_class) == ("failed", "server_died")
+    assert (ended.state, ended.last_error_class, ended.active_turn_id) == ("failed", "server_died", "")
     assert not rig.store.redis.hget(rig.store.key(SLUG, "codex-endpoints"), rig.record.endpoint_ref)
     assert account_sessions.managed_held() == set()
 
@@ -544,3 +547,7 @@ def test_the_binding_pass_keeps_a_record_from_another_host_or_with_unknown_liven
     rig.bindings.put(SLUG, replace(rig.record, state=CONNECTED, host_id=socket.gethostname(), server_start_identity=0))
     rig.runner.bindings([rig.agent])
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+    from scripts.swarm import live_binding
+
+    assert live_binding.settle(rig.store, rig.agent, None) is None

@@ -450,13 +450,16 @@ def test_reserved_executions_count_only_unstarted_records_on_this_host_with_a_li
         ("exe-g003", here, "connected", 0, f"{here}:70"),
         ("exe-g004", there, "starting", 0, f"{there}:70"),
         ("exe-g005", here, "starting", 0, f"{here}:71"),
+        ("exe-g006", here, "starting", 0, f"{here}:70"),
+        ("exe-g007", here, "starting", 0, f"{here}:x:71"),
+        ("exe-g008", here, "starting", 0, f"{here}:x:70"),
     ):
         record = TransportRecord(
             execution, 1, "eng-1@sw", "engineer@1", "t1", _endpoint(execution), host_id=host, bridge_owner=bridge
         )
         bindings.reserve("sw", record)
         bindings.put("sw", replace(record, state=state, server_pid=pid))
-    assert acc.reserved_executions() == 1
+    assert acc.reserved_executions() == 3
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
     assert acc.reserved_executions() == 0
 
