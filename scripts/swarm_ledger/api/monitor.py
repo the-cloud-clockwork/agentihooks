@@ -58,20 +58,12 @@ def seats(
 
 
 def tally(machines: list[tuple[str, str, dict[str, int]]]) -> tuple[dict, list[dict]]:
-    """Agent totals and one row per distinct machine key, under its name, with its agents summed across every entry
-    sharing that key. Totals and rows count every harness; the split names claude and codex only."""
-    names = {key: name for key, name, _ in machines}
-    merged: dict[str, dict[str, int]] = {}
-    for key, _, counts in machines:
-        current = merged.setdefault(key, {})
-        for harness, count in counts.items():
-            current[harness] = current.get(harness, 0) + count
-    totals = {harness: sum(counts.get(harness, 0) for counts in merged.values()) for harness in HARNESSES}
-    total = sum(sum(counts.values()) for counts in merged.values())
-    agents = {"total": total, "of": len(merged), **totals}
-    ordered = sorted(merged.items(), key=lambda item: (names[item[0]] != LOCAL, names[item[0]], item[0]))
-    rows = [{"name": names[key], "agents": sum(counts.values())} for key, counts in ordered]
-    return agents, rows
+    """Agent totals and one row per machine under its name, swarm-master first. Totals and rows count every harness;
+    the split names claude and codex only."""
+    totals = {harness: sum(counts.get(harness, 0) for _, _, counts in machines) for harness in HARNESSES}
+    agents = {"total": sum(sum(counts.values()) for _, _, counts in machines), "of": len(machines), **totals}
+    ordered = sorted(machines, key=lambda machine: (machine[1] != LOCAL, machine[1], machine[0]))
+    return agents, [{"name": name, "agents": sum(counts.values())} for _, name, counts in ordered]
 
 
 def view(store: object, now_ms: int) -> dict:
