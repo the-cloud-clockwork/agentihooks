@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import URLError
 
@@ -478,7 +479,9 @@ def test_record_pass_appends_through_outbox_and_deduplicates(tmp_path, monkeypat
 
 
 @pytest.mark.feature("metrics-gate-rows-span-the-window")
-def test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail(tmp_path, monkeypatch):
+def test_record_pass_counts_gate_denies_and_reruns_older_than_the_log_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fakeredis
 
     from scripts.gates import log as gate_log
