@@ -204,3 +204,17 @@ def test_the_ledger_op_check_accepts_an_agent_outcome_on_a_comment_add(comments)
 
     op = {"op": "add", "id": "o1", "thread": "tasks/t/comments", "by": AGENT, "text": "Pull request merged"}
     ledger_core.check_op({**op, "outcome": "blocked"})
+
+
+@pytest.mark.feature("ledger-plain-words-skip-links")
+def test_parentheses_and_semicolons_inside_a_web_link_are_not_counted(comments):
+    link = "https://example.test/search?q=a;b;c&f=(x)(y)"
+
+    assert comments.problems(f"Notice posted, see {link} for the run", "comment") == []
+
+
+@pytest.mark.feature("ledger-plain-words-skip-links")
+def test_parentheses_and_semicolons_in_prose_beside_a_link_are_still_counted(comments):
+    text = "Done (one) and (two); then three; see https://example.test/a;b"
+
+    assert comments.problems(text, "comment") == ["2 parentheses, at most 1", "2 semicolons, at most 1"]
