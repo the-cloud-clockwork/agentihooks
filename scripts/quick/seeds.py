@@ -25,7 +25,7 @@ def plan_state(text: str) -> tuple[int, int, str]:
 
 
 def _reach(sender: Seat, receiver: Seat) -> str:
-    if sender.harness == receiver.harness == "claude":
+    if receiver.seat != MASTER and sender.harness == receiver.harness == "claude":
         return f"SendMessage to {receiver.name}"
     return f"`{SEND.format(to=receiver.seat)}`"
 

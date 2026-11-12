@@ -40,7 +40,7 @@ def test_an_engineer_seed_plans_first_and_reports_to_the_master_before_starting(
     assert str(paths.plan(tmp_path, "eng-1")) in text and "- [ ]" in text
     assert "report the plan to the master before you start" in text
     assert "one plan at a time" in text
-    assert "SendMessage to quick-abc-master" in text
+    assert 'agentihooks quick send master "<text>"' in text and "SendMessage to quick-abc-master" not in text
     assert str(paths.handoff(tmp_path, "eng-1")) in text and "agentihooks quick handoff" in text
 
 

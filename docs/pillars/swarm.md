@@ -53,8 +53,10 @@ plan state, culture) on the first prompt, after compaction, when it changes and 
   at the start to wait for the operator, and tracks each seat folder.
 - An engineer is briefed by the operator, writes its plan as checkbox stages, reports it to the master before it
   starts and works one plan at a time.
-- Claude seats reach each other with Claude Code's own session messaging; any pair with a Codex seat uses
-  `agentihooks quick send <seat> "<text>"` and `agentihooks quick room`.
+- The master reaches a Claude engineer with Claude Code's own session messaging, addressed by the session name
+  every launched seat gets (`quick-<id>-<seat>`). Every seat reaches the master, the operator's own session, with
+  `agentihooks quick send master "<text>"`, and any pair with a Codex seat uses `agentihooks quick send <seat>
+  "<text>"`; `agentihooks quick room` reads what was sent.
 - At the compaction limit a quick seat writes its Handoff v2 to its seat folder (Read first takes `seat:<seat>`)
   and runs `agentihooks quick handoff`. At its next stop the session ends with its pane kept and the successor
   opens in the same pane with the seed and the handoff as its opening prompt.

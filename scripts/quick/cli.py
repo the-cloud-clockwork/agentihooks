@@ -78,7 +78,10 @@ def _up(args: argparse.Namespace, environ: dict[str, str]) -> int:
     with paths.host_locked(environ):
         if registry.load(folder) is not None:
             raise QuickError(f"quick swarm {quick_id} is already up; see agentihooks quick status")
-        safety_nudge.install(environ)
+        try:
+            safety_nudge.install(environ)
+        except RuntimeError as error:
+            raise QuickError(str(error)) from error
         swarm = _swarm_for(args, environ, caller, quick_id, directory)
         paths.create(folder, [seat.seat for seat in swarm.seats])
         registry.save(folder, swarm)
@@ -174,7 +177,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     args = parser().parse_args(argv)
     try:
         return _run(args, dict(os.environ if environ is None else environ))
-    except RuntimeError as error:
+    except QuickError as error:
         print(f"agentihooks quick: {error}", file=sys.stderr)
         return 2
 
