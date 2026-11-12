@@ -175,7 +175,12 @@ def test_a_run_order_whose_start_fails_acks_start_failed(
 
 @pytest.mark.parametrize(
     ("raw", "failure"),
-    [("not json", "invalid_order"), ('{"run_id": "run-1"}', "invalid_order")],
+    [
+        ("not json", "invalid_order"),
+        ('{"run_id": "run-1"}', "invalid_order"),
+        ('"x"', "invalid_order"),
+        ("null", "invalid_order"),
+    ],
 )
 @pytest.mark.feature("hive-headless-run-consumer")
 def test_an_unreadable_run_order_is_dropped_as_invalid(setup: tuple[Any, ...], raw: str, failure: str) -> None:

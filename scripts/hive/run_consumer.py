@@ -41,7 +41,7 @@ class RunConsumer:
         try:
             order = RunOrder.decode(fields["order"])
             case = case_file(order.run_id)
-        except (KeyError, TypeError, ValueError):
+        except (AttributeError, KeyError, TypeError, ValueError):
             self._drop(item, INVALID)
             return
         if order.hive != self.hive:
