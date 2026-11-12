@@ -202,6 +202,7 @@ def test_a_daemon_beat_polls_run_orders_only_on_a_hive_neither_fenced_nor_draini
     assert polls == ["machine"] * polled
 
 
+@pytest.mark.feature("hive-run-order-receipt-outlives-order")
 def test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack(
     setup: tuple[Any, Any, Any, Start, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -226,6 +227,8 @@ def test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_
         run_consumer.RunConsumer(redis, "host").poll()
     assert len(start.calls) == 1
     left = redis.pttl(store.receipt(sent))
+    lifetime = sent.expires_at - 1_000_000 + RECEIPT_SECONDS * 1000
+    assert lifetime - 1000 < left <= lifetime
     clock[0] += RECEIPT_SECONDS + 1
     assert clock[0] * 1000 < sent.expires_at
     if left < (RECEIPT_SECONDS + 1) * 1000:

@@ -4115,6 +4115,16 @@
         "tests/swarm_ledger/test_api_monitor.py::test_a_hive_silent_on_its_own_reading_keeps_the_count_another_reading_gives",
         "tests/swarm_ledger/test_api_monitor.py::test_a_herdr_name_of_a_hive_no_longer_live_is_skipped_and_the_next_machine_still_counts"
       ]
+    },
+    {
+      "id": "hive-run-order-receipt-outlives-order",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-run-order-receipt-expiry",
+      "behaviour": "A hive run consumer that claims a run order refreshes its receipt to live a day past the order's own expiry, so an order left on the stream by a crash before its ack is never claimed and started a second time once the one day send receipt would have expired.",
+      "seam": "scripts.hive.run_consumer.RunConsumer.apply",
+      "tests": [
+        "tests/hive/test_run_consumer.py::test_a_run_order_outliving_its_receipt_starts_once_after_a_crash_before_its_ack"
+      ]
     }
   ],
   "unmapped_rules": [
