@@ -1475,7 +1475,7 @@ def test_a_codex_resume_passes_its_prompt_to_codex_instead_of_typing_it(tmp_path
     monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda d, t, env, *rest: opened.update(env) or placed)
     monkeypatch.setattr(init_agent.herdr_host, "run", lambda *args: None)
     monkeypatch.setattr(init_agent.herdr_panes, "record", lambda *args: None)
-    args = SimpleNamespace(title="", placement=None, workspace=None, resume=resume)
+    args = SimpleNamespace(title="", placement=None, workspace=None, resume=resume, pane="")
     init_agent._start_herdr(launcher, tmp_path, "eng-a", args, "codex", {})
     assert (init_agent.PROMPT_AFTER_START in opened) is held
 
