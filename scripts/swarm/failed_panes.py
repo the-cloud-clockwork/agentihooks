@@ -4,6 +4,8 @@ so operator panes and pairing sessions outside the swarm are never touched."""
 import json
 from typing import Any
 
+from scripts.swarm import hash_pages
+
 CLOSE_AFTER_MS = 2 * 60 * 1000
 TAIL_LINES = 20
 HELD = "failed-panes"
@@ -17,7 +19,7 @@ def hold(store, slug, agent, now_ms, reason=""):
 
 
 def held(store, slug):
-    return {pane: json.loads(raw) for pane, raw in store.redis.hgetall(store.key(slug, HELD)).items()}
+    return {pane: json.loads(raw) for pane, raw in hash_pages.fields(store.redis, store.key(slug, HELD)).items()}
 
 
 def lines(text, count):
@@ -67,7 +69,7 @@ def sweep(slug, store, runtime, now_ms):
 
 def report(store: Any, slug: str) -> list[dict[str, Any]]:
     """Return the launch rows of swarm ``slug`` that carry pane lines, read from the launches hash."""
-    rows = (json.loads(raw) for raw in store.redis.hgetall(store.key(slug, "launches")).values())
+    rows = (json.loads(raw) for raw in hash_pages.fields(store.redis, store.key(slug, "launches")).values())
     return [row for row in rows if row.get("pane_lines")]
 
 

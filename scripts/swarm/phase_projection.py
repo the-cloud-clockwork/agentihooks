@@ -26,6 +26,15 @@ def _phase_of(node: str | None, nodes: Nodes) -> str | None:
     return None
 
 
+def _parent(task: dict[str, Any], node: str, nodes: Nodes) -> str | None:
+    """The hierarchy parent of ``task``, or the phase it names when its parent is no node of the document, as when
+    the pass document carries no slices."""
+    found = nodes[node][1]
+    if found not in nodes and task.get("phase"):
+        return f"phases/{task['phase']}"
+    return found
+
+
 def projected_phase_tasks(doc: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
     """Each phase's tasks with the states the ledger hierarchy reports, projected from ``doc`` with no ledger read."""
     projected: tuple[Nodes, set[tuple[str, str]]] = hierarchy.project(doc)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -36,6 +45,6 @@ def projected_phase_tasks(doc: dict[str, Any]) -> dict[str, list[tuple[str, str]
     }
     for task in tasks:
         node = f"tasks/{task.get('id')}"
-        if node in nodes and (phase := _phase_of(nodes[node][1], nodes)) is not None:
+        if node in nodes and (phase := _phase_of(_parent(task, node, nodes), nodes)) is not None:
             found[phase.removeprefix("phases/")].append((task["id"], _task_state(task)))
     return found

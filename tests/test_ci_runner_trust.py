@@ -492,12 +492,14 @@ def test_other_remote_calls_and_untrusted_runner_inputs_are_red(uses, runner):
 DOCS_SANITY = "The-Cloud-Clockwork/agentihooks/.github/workflows/docs-sanity.yml@main"
 
 
+@pytest.mark.feature("runner-trust-hosted-only-docs-sanity")
 def test_hosted_only_docs_sanity_call_passes_without_a_runner_input() -> None:
     job = {"uses": DOCS_SANITY, "with": {"paths": "docs"}, "secrets": "inherit"}
     candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": job}}
     assert ci_runner_trust.check({"ci.yml": candidate}, POLICY) == []
 
 
+@pytest.mark.feature("runner-trust-hosted-only-docs-sanity")
 def test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event() -> None:
     candidate = {"on": {"pull_request_target": {}}, "jobs": {"docs-sanity": {"uses": DOCS_SANITY}}}
     hosted = {"on": {"pull_request_target": {}}, "jobs": {"plain": {"runs-on": "ubuntu-latest"}}}
@@ -517,6 +519,7 @@ def test_hosted_only_docs_sanity_call_follows_hosted_policy_under_a_target_event
         "The-Cloud-Clockwork/agentihooks",
     ],
 )
+@pytest.mark.feature("runner-trust-hosted-only-docs-sanity")
 def test_docs_sanity_lookalike_calls_are_red(uses: str) -> None:
     candidate = {"on": {"pull_request": {}}, "jobs": {"docs-sanity": {"uses": uses}}}
     problems = ci_runner_trust.check({"ci.yml": candidate}, POLICY)

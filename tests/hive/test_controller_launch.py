@@ -2640,6 +2640,7 @@ def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
     assert result.value.execution == live
 
 
+@pytest.mark.feature("remote-control-token-fallback-reason")
 def test_controller_records_the_remote_control_a_joined_hive_acknowledged(setup):
     from scripts.hive.orders import Ack
     from scripts.swarm import lease

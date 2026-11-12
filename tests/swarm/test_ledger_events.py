@@ -1089,6 +1089,7 @@ def test_the_view_records_whether_the_required_gate_passed_beside_a_red_job(gate
     assert ledger_events.pull_request(raw).gate_passed is False
 
 
+@pytest.mark.feature("tick-view-pull-batch-cache-ttl")
 def test_views_batch_cache_outlives_the_default_run_ttl_on_the_given_ttl(monkeypatch, tmp_path):
     import fakeredis
 
