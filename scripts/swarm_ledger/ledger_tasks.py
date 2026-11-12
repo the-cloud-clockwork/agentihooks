@@ -579,7 +579,7 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
 
 def _reopened(task: dict, fields: dict) -> dict:
     """Move a done task's pull request to its past pull requests when a reopen leaves the pull request unnamed."""
-    if task.get("state") != "done" or fields.get("state", "done") == "done" or "pr_url" in fields:
+    if task.get("state") != "done" or fields.get("state", "done") == "done" or fields.get("pr_url"):
         return fields
     if not task.get("pr_url"):
         return fields

@@ -13,6 +13,7 @@ from scripts.swarm.ledger_events import PullRequest  # noqa: E402
 from scripts.swarm_ledger import ledger_tasks  # noqa: E402
 from scripts.swarm_ledger.ledger_core import Context  # noqa: E402
 from tests.gates.test_claim_stop import ME, MERGED, SLUG, rig  # noqa: E402, F401
+from tests.swarm.test_cli import env, run  # noqa: E402, F401
 
 OLD = "https://github.com/o/r/pull/7"
 NEW = "https://github.com/o/r/pull/8"
@@ -42,6 +43,36 @@ def read(pulls: dict) -> object:
 def test_reopening_a_done_task_moves_its_merged_pull_request_to_history() -> None:
     task = update(done_ledger(), {"state": "open", "claimed_by": ""})
     assert (task["state"], task["pr_url"], task["past_pulls"]) == ("open", "", [OLD])
+
+
+@pytest.mark.feature(FEATURE)
+def test_a_reopen_clearing_its_pull_request_still_keeps_it_in_history() -> None:
+    task = update(done_ledger(), {"state": "open", "claimed_by": "", "pr_url": ""})
+    assert (task["pr_url"], task["past_pulls"]) == ("", [OLD])
+
+
+@pytest.mark.feature(FEATURE)
+def test_swarm_done_on_a_reopened_task_refuses_until_its_new_pull_request_merges(
+    env: Any,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, ledger, _ = env
+    ledger.rows["t1"].update(update(done_ledger(), {"state": "open", "claimed_by": ""}))
+    ledger.pulls[OLD], ledger.pulls[NEW] = MERGED, PullRequest("OPEN", None, 1, False)
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    capsys.readouterr()
+    assert run("sw", "done") == 1
+    assert run("sw", "done", "--pr", OLD) == 1
+    assert run("sw", "done", "--pr", NEW) == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "swarm: a code task is done only with its merged pull request: give --pr <url>",
+        f"swarm: pull request {OLD} belongs to this task before it reopened; give the new pull request with --pr <url>",
+        f"swarm: pull request {NEW} is open, not merged; merge it, then run swarm done again",
+    ]
+    assert ledger.rows["t1"]["state"] != "done"
 
 
 @pytest.mark.feature(FEATURE)
