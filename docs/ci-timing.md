@@ -1373,7 +1373,7 @@ Pull request unit runner pods prefer nodes that run no batch runner pod. The
 `anton`, `anton-oss` and `anton-oss-queue` runner scale sets carry a preferred
 pod anti affinity, weight 100 per node, against pods of the `anton-oss-batch`
 and `anton-batch` scale sets. Batch runners are never refused a node by it, and
-the batch lane keeps its limits: `anton-oss-batch` still has `maxRunners` 30
+the batch lane keeps its limits: `anton-oss-batch` still has `maxRunners` 12
 and a three CPU runner limit. [antoncore pull request 973](https://github.com/the-cloud-clockwork/antoncore/pull/973)
 delivered the rule; ArgoCD applied it at 01:23:52 UTC on 20 October 2026.
 
@@ -1425,7 +1425,7 @@ of the three ArgoCD applications and asserts:
 |---|---|
 | `test_unit_runners_prefer_nodes_without_batch_runners` | each unit set has a weight 100 preferred term per hostname against both batch sets in their namespaces |
 | `test_batch_runners_are_never_refused_a_unit_runner_node` | no unit set has a required term that names a batch set |
-| `test_batch_lane_keeps_its_limits` | `anton-oss-batch` keeps `maxRunners` 30 and a CPU limit of `"3"` |
+| `test_batch_lane_keeps_its_limits` | `anton-oss-batch` keeps `maxRunners` 12 and a CPU limit of `"3"` |
 
 ### Why the rule is preferred, not required
 
@@ -1947,7 +1947,7 @@ A dispatch whose first job starts within seconds of its `created_at` did not que
 
 ## Mutation preflight legs on the batch pool
 
-The `stats` and `mutation-shard` legs of the Mutation preflight workflow hold no lane. Each leg's concurrency group names its own run id and matrix index, `mutation-preflight-job-<run id>-stats-<part>` or `mutation-preflight-job-<run id>-shard-<shard>`, so no other run ever shares it. A ready leg waits only for a free runner on the `anton-oss-batch` runner scale set, whose ceiling of 30 runners caps how many legs run at once across every branch. The ceiling is the `maxRunners` value in antoncore's `arc-runners-oss` chart, `values-oss-batch.yaml`. Every planned mutant and every covering test still runs; only the queueing changed.
+The `stats` and `mutation-shard` legs of the Mutation preflight workflow hold no lane. Each leg's concurrency group names its own run id and matrix index, `mutation-preflight-job-<run id>-stats-<part>` or `mutation-preflight-job-<run id>-shard-<shard>`, so no other run ever shares it. A ready leg waits only for a free runner on the `anton-oss-batch` runner scale set, whose ceiling of 12 runners caps how many legs run at once across every branch. The ceiling is the `maxRunners` value in antoncore's `arc-runners-oss` chart, `values-oss-batch.yaml`. Every planned mutant and every covering test still runs; only the queueing changed.
 
 Grouping per branch stays at the workflow level. A branch push run joins `mutation-preflight-refs/heads/<branch>` with `cancel-in-progress`, so a newer push to the same branch cancels the older run, and a push to another branch never waits on it. When Tests or Proofs calls the workflow, the legs take the caller's run id in the same per run form.
 
