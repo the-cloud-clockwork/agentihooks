@@ -50,6 +50,7 @@ PROBE_ARGS = ["exec", "--json", "--skip-git-repo-check", "Reply with the single 
 PROBE_TIMEOUT_S = 90
 CODEX_BIN = "codex"
 ATTEMPTS_FILE = "codex-probe-attempts.json"
+RECHECK_SECONDS = 5 * 60
 READING_MAX_AGE_ENV = "AGENTIHOOKS_CODEX_READING_MAX_AGE_H"
 READING_MAX_AGE_H = 6.0
 HOUR_S = 3600
@@ -103,7 +104,7 @@ class RoutingError(RuntimeError):
     pass
 
 
-def _claims(token: str) -> dict:
+def _claims(token: str) -> dict[str, object]:
     parts = token.split(".")
     if len(parts) != 3:
         return {}
@@ -179,6 +180,19 @@ def expires_at(account: CodexAccount, environ: Mapping[str, str]) -> float | Non
     token = environ.get(account.env_name)
     exp = _claims(token).get("exp") if token else None
     return exp if isinstance(exp, int | float) else None
+
+
+def recheck_expired(account: CodexAccount, quota: CodexQuota | None, environ: Mapping[str, str], now: float) -> bool:
+    """An expired reading whose bearer token exp is still ahead: one refused usage read is not a dead login."""
+    if quota is None or not quota.expired:
+        return False
+    try:
+        bearer = _bearer(account, environ)
+    except RoutingError:
+        return False
+    claims = _claims(bearer[0]) if bearer else {}
+    exp = claims.get("exp")
+    return isinstance(exp, int | float) and exp > now
 
 
 def bearer_overrides() -> list[str]:
@@ -481,8 +495,9 @@ def fresh_quotas(
     run: Callable = subprocess.run,
     force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
-    ``force`` probes every signed in account."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window,
+    or when it is expired while its token exp is ahead, at most once per recheck window; ``force`` probes every
+    signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
@@ -490,7 +505,10 @@ def fresh_quotas(
         stale = seen is None or quota_freshness.stale(
             seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
         )
-        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        recheck = recheck_expired(account, seen, environ, now)
+        last = attempts.get(account.name)
+        retry = recheck and (last is None or now - last >= RECHECK_SECONDS)
+        due = force or retry or (stale and not session_bands.fresh(attempts.get(account.name), now))
         if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
