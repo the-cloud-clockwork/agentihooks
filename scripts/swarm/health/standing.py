@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import PREFIX
@@ -51,7 +51,7 @@ def _update(redis, slug, stage, transform):
     return redis.transaction(apply, key(slug), value_from_callable=True)
 
 
-def _fire(old: dict, stage: str, reading: Reading, now_ms: int) -> dict:
+def _fire(old: dict[str, Any], stage: str, reading: Reading, now_ms: int) -> dict[str, Any]:
     owned = _owned(reading.unit)
     old = _measure(old, owned)
     episodes = old.get("episodes", [])
@@ -78,7 +78,7 @@ def _owned(unit):
     return SAME_MEASURE.get(unit, unit) == DETECTOR_UNIT
 
 
-def _measure(old: dict, owned: bool) -> dict:
+def _measure(old: dict[str, Any], owned: bool) -> dict[str, Any]:
     """Return the row with fired and episodes counting the detector's measure when owned, else whole runs."""
     if not old or _owned(old["unit"]) == owned:
         return old
@@ -88,7 +88,7 @@ def _measure(old: dict, owned: bool) -> dict:
     return {**row, "fired": 0, "episodes": [], "detector_fired": old["fired"], "detector_episodes": old["episodes"]}
 
 
-def _detector(old: dict, reading: dict, now_ms: int, threshold: float) -> dict:
+def _detector(old: dict[str, Any], reading: dict[str, Any], now_ms: int, threshold: float) -> dict[str, Any]:
     if old.get("detector") == reading and (old.get("unit") != DETECTOR_UNIT or old.get("threshold") == threshold):
         return old
     unit = old.get("unit", DETECTOR_UNIT)
