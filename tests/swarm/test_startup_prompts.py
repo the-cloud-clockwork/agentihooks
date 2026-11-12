@@ -471,6 +471,8 @@ def test_stacked_steps_apply_only_to_code_work():
     assert "park <doc>" not in "\n".join(lines)
 
 
+@pytest.mark.feature("swarm-park-resume-branch")
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
 def test_a_resumed_parked_task_of_every_kind_names_its_recorded_branch(kind: str) -> None:
     lines = _steps({"kind": kind, "branch": "eng-parked", "parked_on": ["t1"]})
     text = "\n".join(lines)
