@@ -33,6 +33,7 @@ REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
 RECLAIMED = "returned to the master pool: its master is gone"
 ANSWER_REFUSED = "reopened: its answer was refused by the ledger page"
+LEDGER_REFUSAL = "cancelled: refused by the ledger page"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 OPEN = tuple(state for state in STATES if state not in CLOSED)
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
@@ -863,9 +864,15 @@ class InboxStore:
         field = f"reply:{replier}"
         self.redis.hsetnx(key, field, answer_id or new_item_id())
         reply_id = self.redis.hget(key, field)
-        if self.redis.hget(self.key("item", reply_id), "state") != "cancelled":
+        state, reason = self.redis.hmget(self.key("item", reply_id), "state", "reason")
+        if state != "cancelled":
             return reply_id
-        if answer_id == reply_id or self.reopen(self.get(reply_id), replier, ANSWER_REFUSED) is None:
+        ledger_refused = str(reason).startswith(LEDGER_REFUSAL)
+        if (
+            answer_id == reply_id
+            or not ledger_refused
+            or self.reopen(self.get(reply_id), replier, ANSWER_REFUSED) is None
+        ):
             raise InboxError(f"answer {reply_id} to message {item_id} was refused")
         self.redis.hsetnx(key, field, answer_id or new_item_id())
         return self.redis.hget(key, field)

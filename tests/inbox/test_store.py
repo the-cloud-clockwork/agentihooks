@@ -275,6 +275,19 @@ def test_a_new_reply_operation_after_a_refused_chat_answer_sends_its_new_text(st
 
 
 @pytest.mark.feature("inbox-refused-answer-resend")
+def test_a_fresh_reply_on_an_answer_its_recipient_cancelled_reopens_nothing(store: InboxStore) -> None:
+    item = store.send("operator", "master", "how far along are we")
+    answer = store.reply(item.id, "master", "two tasks left")
+    store.close(answer.id, "operator", "cancel", "not needed")
+    before, history = store.get(item.id), store.history(item.id)
+    with pytest.raises(InboxError) as refused:
+        store.reply(item.id, "master", "one task left", answer_id="op-new")
+    assert str(refused.value) == f"answer {answer.id} to message {item.id} was refused"
+    assert (store.get(item.id), store.history(item.id)) == (before, history)
+    assert not store.redis.exists(store.key("item", "op-new"))
+
+
+@pytest.mark.feature("inbox-refused-answer-resend")
 def test_a_fresh_reply_on_a_refused_slot_the_item_no_longer_names_says_it_was_refused(store: InboxStore) -> None:
     item, answer = refused_answer(store)
     store.redis.hset(store.key("item", item.id), "reason", "closed elsewhere")
