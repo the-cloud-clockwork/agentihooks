@@ -5012,6 +5012,7 @@
         "tests/gates/test_progress.py::test_a_first_push_of_a_new_branch_is_an_outcome",
         "tests/gates/test_progress.py::test_a_deleted_branch_is_no_outcome",
         "tests/gates/test_progress.py::test_each_task_keeps_its_own_lookup_window",
+        "tests/gates/test_progress.py::test_each_task_keeps_its_own_head",
         "tests/gates/test_progress.py::test_an_opened_pull_request_is_an_outcome",
         "tests/gates/test_progress.py::test_a_push_and_an_opened_pull_request_in_one_pass_end_on_the_push",
         "tests/gates/test_progress.py::test_a_new_head_on_a_recorded_pull_request_is_a_push_once",

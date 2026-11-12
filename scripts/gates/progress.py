@@ -165,8 +165,9 @@ def heads_pass(
         if found is None:
             continue
         head, url = found
-        seen = redis.hget(marks.key(owner), HEAD) or ""
-        redis.hset(marks.key(owner), HEAD, f"{task['id']} {head} {url}")
+        field = f"{HEAD}:{task['id']}"
+        seen = redis.hget(marks.key(owner), field) or ""
+        redis.hset(marks.key(owner), field, f"{task['id']} {head} {url}")
         for kind in _change(seen, task["id"], head, url):
             marks.outcome(owner, kind, now_ms)
             stamped.append(

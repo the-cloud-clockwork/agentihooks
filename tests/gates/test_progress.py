@@ -283,14 +283,14 @@ def test_a_recorded_pull_request_after_a_branch_read_is_an_opened_pull_request(s
 def test_an_unread_pull_request_records_nothing(store: Any, found: Any) -> None:
     read, _ = facts()
     assert heads(store, [branch_task(pr_url=URL)], 100, read, github=lambda url: found) == []
-    assert store.redis.hget(store.key(ME), progress.HEAD) is None
+    assert store.redis.hget(store.key(ME), f"{progress.HEAD}:t2") is None
 
 
 @pytest.mark.feature("tick-progress-heads")
 def test_a_failed_branch_read_keeps_no_baseline(store: Any) -> None:
     read, _ = facts(None, ("a", ""), ("b", ""))
     assert heads(store, [branch_task()], 100, read) == []
-    assert store.redis.hget(store.key(ME), progress.HEAD) is None
+    assert store.redis.hget(store.key(ME), f"{progress.HEAD}:t2") is None
     assert heads(store, [branch_task()], 100 + LATER, read) == []
     assert heads(store, [branch_task()], 100 + 2 * LATER, read) == [f"pushed b on {BRANCH}, an outcome for {ME}"]
 
@@ -311,6 +311,14 @@ def test_each_task_keeps_its_own_lookup_window(store: Any) -> None:
     tasks = [branch_task(id="t1", branch="one"), branch_task(id="t3", branch="two")]
     heads(store, tasks, 100, read)
     assert calls == [(REPO, "one"), (REPO, "two")]
+
+
+@pytest.mark.feature("tick-progress-heads")
+def test_each_task_keeps_its_own_head(store: Any) -> None:
+    read, _ = facts(("a", ""), ("c", ""), ("b", ""), ("c", ""))
+    tasks = [branch_task(id="t1", branch="one"), branch_task(id="t3", branch="two")]
+    assert heads(store, tasks, 100, read) == []
+    assert heads(store, tasks, 100 + LATER, read) == [f"pushed b on one, an outcome for {ME}"]
 
 
 @pytest.mark.feature("tick-progress-heads")
