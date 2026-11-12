@@ -892,7 +892,7 @@ def test_a_supervisor_that_raises_names_the_exception_it_exits_on(monkeypatch, c
     )
 
 
-def _clock(service: ModuleType, monkeypatch: pytest.MonkeyPatch, readings: list[int]) -> None:
+def _monotonic(service: ModuleType, monkeypatch: pytest.MonkeyPatch, readings: list[int]) -> None:
     ticks = iter(readings)
     monkeypatch.setattr(service, "time", SimpleNamespace(monotonic=lambda: next(ticks), time=service.time.time))
 
@@ -907,7 +907,7 @@ async def test_a_runner_stops_once_its_state_store_stays_silent_past_the_bound(
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
-    _clock(service, monkeypatch, [0, 100, 300, 400])
+    _monotonic(service, monkeypatch, [0, 100, 300, 400])
     stop, passes = asyncio.Event(), []
 
     def drain() -> None:
@@ -933,7 +933,7 @@ async def test_an_answer_restarts_the_silence_bound(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
-    _clock(service, monkeypatch, [0, 299, 598])
+    _monotonic(service, monkeypatch, [0, 299, 598])
     stop, passes = asyncio.Event(), []
 
     def drain() -> None:
@@ -962,7 +962,7 @@ async def test_a_store_that_answers_with_an_error_restarts_the_silence_bound(
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-323133-t1749-2")
-    _clock(service, monkeypatch, [0, 300])
+    _monotonic(service, monkeypatch, [0, 300])
     stop, passes = asyncio.Event(), []
 
     def drain() -> None:
@@ -989,7 +989,7 @@ async def test_a_runner_outside_a_proof_swarm_keeps_waiting_for_its_state_store(
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
-    _clock(service, monkeypatch, [0, 300, 600, 900])
+    _monotonic(service, monkeypatch, [0, 300, 600, 900])
     stop, passes = asyncio.Event(), []
 
     def drain() -> None:
