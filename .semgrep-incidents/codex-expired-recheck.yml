@@ -1,0 +1,20 @@
+rules:
+  - id: codex-expired-recheck
+    languages: [python]
+    severity: ERROR
+    message: A Codex refresh gate that probes only stale readings must also probe an expired reading whose token exp is still ahead, through codex_router.recheck_expired; otherwise one transient 401 holds a valid account at zero seats.
+    patterns:
+      - pattern: quota_freshness.stale($Q.observed_at, ($Q.five_hour.resets_at, $Q.seven_day.resets_at), $NOW)
+      - pattern-inside: |
+          def $F(...):
+              ...
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              <... recheck_expired(...) ...>
+              ...
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              <... $ROUTER.recheck_expired(...) ...>
+              ...
