@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.829 · 2026-11-12
+
+### 2026-11-12 · 30ac392deb9f · #10859 · @agenticore-app
+
+**Restart the scheduler runner when the checkout revision changes**
+
+The scheduler supervisor now watches the checkout revision every second and restarts the runner whenever it changes, sending SIGTERM so the in-flight pass finishes before the old runner exits and a fresh one starts on the new code; an unreadable revision simply skips the restart rather than crashing it. This fixes the root cause of the workstation outage, where a stale runner missing the workflow slot kind kept failing hive timer deliveries with KeyError until someone restarted it by hand, and adds regression tests plus a feature map entry so future revision bumps pick up automatically without manual intervention.
+
 ## v2.17.827 · 2026-11-12
 
 ### 2026-11-12 · d2c225bec1ed · #10857 · @agenticore-app
