@@ -49,12 +49,16 @@ class Redis:
 
 
 class Store:
-    def __init__(self, swarms, sessions=None):
+    def __init__(self, swarms, sessions=None, agents=None):
         self.swarms = swarms
         self.redis = Redis(sessions or {})
+        self.registered = agents or {}
 
     def slugs(self):
         return list(self.swarms)
+
+    def agents(self, slug):
+        return self.registered.get(slug, [])
 
     def config(self, slug):
         return SimpleNamespace(state=self.swarms[slug])
@@ -91,7 +95,12 @@ def ports_for(
         mock.patch.object(
             monitor.ports,
             "hive",
-            return_value=SimpleNamespace(registry=registry, headroom=headroom, herdr_stats=herdr_stats),
+            return_value=SimpleNamespace(
+                registry=registry,
+                headroom=headroom,
+                herdr_stats=herdr_stats,
+                reports=SimpleNamespace(host=lambda agent: agent.runtime_target.get("host_id", "")),
+            ),
         ),
         mock.patch.object(monitor.ports, "hooks", return_value=hooks),
         mock.patch.object(monitor.ports, "swarm", return_value=swarm),
@@ -509,3 +518,36 @@ def test_only_a_hive_whose_name_another_shares_is_shown_by_its_sorted_member_nam
         {"id": "d", "name": "desk", "ui": "yes"},
     ]
     assert monitor.labels(live) == {"a": "vm-a, vm-b", "b": "twin", "c": "solo", "d": "swarm-master"}
+
+
+def seat(name: str, lane: str, harness: str, hive: str, state: str = "working") -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name, lane=lane, harness=harness, hive=hive, state=state, runtime_backend="local", runtime_target={}
+    )
+
+
+@pytest.mark.feature("monitor-counts-registered-seats")
+def test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    presence_of(monkeypatch, [{"id": "root", "name": "swarm-master", "agents": {"claude": 5}}])
+    published = {"machines": {"master": {"claude": 4, "codex": 1}}, "silent": [], "measured_at": NOW}
+    readings = {"root": {**HOST, "agents": {"claude": 5}}, AUTOMATION["id"]: {**HOST, "agents": {"claude": 9}}}
+    registered = {
+        "one": [
+            seat("master@one", "master", "claude", "root"),
+            seat("engineer@1", "eng", "claude", "root"),
+            seat("ci@1", "ci", "codex", "root"),
+            seat("engineer@2", "eng", "claude", AUTOMATION["id"]),
+            seat("engineer@3", "eng", "claude", "root", state="finished"),
+        ],
+        "two": [seat("master@two", "master", "claude", ""), seat("engineer@4", "eng", "codex", "pod")],
+    }
+    store = Store({"one": "running", "two": "running"}, agents=registered)
+    data = viewed(store, *ports_for([WORKSTATION, AUTOMATION, POD_HIVE], readings, here="root", published=published))
+    assert data["hives"]["rows"] == [
+        {"name": "swarm-master", "agents": 4},
+        {"name": "automation-vm", "agents": 1},
+        {"name": "swarm-hive-001", "agents": 1},
+    ]
+    assert data["agents"] == {"total": 6, "source": "seats", "reporting": 3, "of": 3, "claude": 4, "codex": 2}

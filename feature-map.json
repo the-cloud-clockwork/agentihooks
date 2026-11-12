@@ -4895,6 +4895,16 @@
       ]
     },
     {
+      "id": "monitor-counts-registered-seats",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",
+      "behaviour": "The HOME resource monitor counts every row and the total from the registered swarm seats of every swarm, masters included, split by each seat's recorded harness, so an operator's own Claude or Codex pane outside the registry never adds to the count.",
+      "seam": "scripts.swarm_ledger.api.monitor.view",
+      "tests": [
+        "tests/swarm_ledger/test_api_monitor.py::test_every_row_counts_registered_seats_masters_included_never_an_unregistered_pane"
+      ]
+    },
+    {
       "id": "phase-pass-sliced-tasks",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-phase-tick-sliced-tasks",
