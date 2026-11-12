@@ -25,6 +25,8 @@ class VerdictStore:
             record.update(evidence=list(finding.evidence), measure=finding.measure, metrics=list(finding.metrics))
             if finding.basis:
                 record["basis"] = finding.basis
+            if finding.last_outcome:
+                record.update(rows=[dict(row) for row in finding.rows], last_outcome=finding.last_outcome)
             verdict = record["verdict"]
             if finding.evidence_identity is not None:
                 record["evidence_identity"] = list(finding.evidence_identity)

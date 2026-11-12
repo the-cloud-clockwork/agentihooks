@@ -153,6 +153,7 @@ from scripts.swarm import refresh_job as refresh_job
 from scripts.swarm import snapshot_job as snapshot_job
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
+from scripts.swarm.health import rows as finding_rows
 from scripts.swarm.ledger_client import FreezeWords, LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
@@ -1646,12 +1647,7 @@ def cmd_status(store: Any, args: Any) -> None:
         for field, values in launch["misses"].items():
             mode = "report only" if field in launch_check.REPORT_ONLY else "enforced"
             print(f"  {field}  {mode}  expected {values['expected']}; observed {values['actual']}")
-    for f in found:
-        print(f"finding  {f['kind']}  {f['subject']}: {f['summary']}")
-        for entry in f["evidence"]:
-            print(f"  - {entry}")
-        print(f"  threshold {f['threshold']}")
-        print(f"  id {f['id']}" + (f"  earlier verdict {f['verdict']['value']}" if f["verdict"] else ""))
+    sys.stdout.write("".join(finding_rows.text(f) for f in found))
     for row in gate_log.decisions(args.slug):
         print(
             f"gate  {modes.label(row['kind'])}  {row.get('gate')}  {row.get('agent')}  {row.get('task')}  {row.get('reason')}"

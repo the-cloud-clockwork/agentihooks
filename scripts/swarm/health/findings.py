@@ -66,18 +66,26 @@ class Finding:
     links: tuple = ()
     evidence_identity: tuple | None = None
     metrics: tuple = ()
+    rows: tuple = dataclasses.field(default=(), compare=False)
+    rows_total: int = dataclasses.field(default=0, compare=False)
+    last_outcome: str = dataclasses.field(default="", compare=False)
 
     @property
     def id(self):
         return f"{self.kind.replace(' ', '-')}/{self.subject}"
 
-    def as_dict(self):
+    def as_dict(self) -> dict:
+        """The finding as status and the page read it; rows appear once attached."""
         found = asdict(self)
         del found["measure"], found["basis"], found["evidence_identity"], found["metrics"]
         if not self.links:
             del found["links"]
         else:
             found["links"] = list(self.links)
+        if not self.last_outcome:
+            del found["rows"], found["rows_total"], found["last_outcome"]
+        else:
+            found["rows"] = [dict(row) for row in self.rows]
         return {**found, "evidence": list(self.evidence)}
 
 

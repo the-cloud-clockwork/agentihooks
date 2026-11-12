@@ -109,6 +109,19 @@ function staleClaims(sw) {
   return openFindings(sw).filter((f) => f.kind === "stale claim").map((f) => [f.subject, ...f.evidence.slice(1)].join(" · "));
 }
 
+function findingRow(row) {
+  const mark = { doctrine: "required by doctrine", task: "required by the task" }[row.required];
+  const text = [clock(row.at), row.kind, row.target, row.text, mark].filter(Boolean).join(" · ");
+  return h("li", { class: mark ? "sw-required" : false, text });
+}
+
+function findingRows(f) {
+  const total = f.rows_total || 0, shown = (f.rows || []).length;
+  const count = !total ? "no ledger rows" : total > shown ? `latest ${shown} of ${total} rows` : `${total} rows`;
+  const head = [`${f.kind} ${f.subject}`, `last outcome ${f.last_outcome}`, count].join(" · ");
+  return h("li", {}, h("span", { text: head }), h("ul", {}, ...(f.rows || []).map(findingRow)));
+}
+
 function liveCaps(sw) {
   const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length, caps = laneCeilings(sw);
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${caps[key]}`);
@@ -338,6 +351,7 @@ export function renderSwarm(sw) {
   $("alert-kinds").textContent = [...new Set(open.map((f) => f.kind))].join(" · ");
   $("alert-stale").replaceChildren(...staleClaims(sw).map((text) => h("span", { text })));
   $("alert-live").replaceChildren(...liveCaps(sw).map((text) => h("span", { text })));
+  $("alert-findings").replaceChildren(...open.filter((f) => f.last_outcome).map(findingRows));
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);

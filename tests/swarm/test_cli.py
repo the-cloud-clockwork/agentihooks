@@ -2198,12 +2198,15 @@ def test_status_carries_health_findings_for_the_master_to_read(env, capsys, monk
         ("idle with claim", "engineer@a1b2c3-0001", ["task Fold the chat panel (claimed)"])
     ]
     run("sw", "status")
-    assert capsys.readouterr().out.splitlines()[-4:] == [
-        "finding  idle with claim  engineer@a1b2c3-0001: idle for 4 ticks while holding a task",
+    out = capsys.readouterr().out.splitlines()
+    start = out.index("finding  idle with claim  engineer@a1b2c3-0001: idle for 4 ticks while holding a task")
+    assert out[start + 1 : start + 5] == [
         "  - task Fold the chat panel (claimed)",
         "  threshold 3 idle ticks",
         "  id idle-with-claim/engineer@a1b2c3-0001",
+        "  last outcome none recorded",
     ]
+    assert out[start + 5].startswith("  rows ")
 
 
 def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypatch):
@@ -2214,13 +2217,15 @@ def test_status_prints_each_evidence_entry_on_its_own_line(env, capsys, monkeypa
     )
     monkeypatch.setattr(cli.health, "findings", lambda *a: [finding])
     run("sw", "status")
-    assert capsys.readouterr().out.splitlines()[-6:] == [
-        "finding  scope inflation  engineer@a1b2c3-0001: queued 3 tasks for its own lane",
+    out = capsys.readouterr().out.splitlines()
+    start = out.index("finding  scope inflation  engineer@a1b2c3-0001: queued 3 tasks for its own lane")
+    assert out[start + 1 : start + 7] == [
         "  - Split the parser, gain 4",
         "  - Cache the index, gain 1.5",
         "  - q2, no gain stated",
         "  threshold 3 tasks",
         "  id scope-inflation/engineer@a1b2c3-0001",
+        "  last outcome none recorded",
     ]
 
 
