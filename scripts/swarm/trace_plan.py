@@ -1,14 +1,17 @@
 """Trace plan: the classifier traces each piece of a task's plan to the task, its phase and the project intent.
 
 plan.md in the task work folder holds one piece per line, `- what | area, area | why`. A piece the classifier finds
-off intent is cut and, once the plan passes, filed as a ledger follow up. A plan with more than half its pieces cut,
-or sized above one pull request, fails whole: it returns to the planner once, then the task is blocked. The verdict
-lands in plan-verdict.json beside the plan. With no classifier answer the verdict is unchecked, counted as fail-open.
+off intent is cut and, once the plan passes, filed as a ledger follow up. An area written `repo:path` belongs to that
+repository, any other to the task's own, and each repository's slice is sized on its own. A plan with more than half
+its pieces cut, or a slice sized above one pull request, fails whole: it returns to the planner once, then the task
+is blocked. The verdict lands in plan-verdict.json beside the plan. With no classifier answer the verdict is
+unchecked, counted as fail-open.
 """
 
 import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -31,6 +34,8 @@ NO_ANSWER = "the classifier did not answer"
 FAIL_KINDS = {"enforce": "deny", "observe": "observe"}
 CLEARANCE = PurePosixPath("mutation-cleared.txt")
 CLEARANCE_FOLDER = PurePosixPath("mutation-clearances")
+REPO_AREA = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*):(.+)$")
+OWN_REPO = "the task's own repository"
 
 
 @dataclass(frozen=True)
@@ -47,28 +52,44 @@ class Piece:
     what: str
     areas: tuple
     why: str
+    repo: str = ""
 
     @property
-    def key(self):
-        return " | ".join((self.what, ", ".join(self.areas), self.why))
+    def key(self) -> str:
+        areas = [f"{self.repo}:{area}" if self.repo else area for area in self.areas]
+        return " | ".join((self.what, ", ".join(areas), self.why))
 
 
 def followup_text(task_id, what):
     return f"Cut from the plan: {what}"
 
 
-def _piece(line, number, task_id, task_ids):
+def _piece(line: str, number: int, task_id: str, task_ids: tuple | list) -> Piece:
     parts = [part.strip() for part in line[2:].split("|")]
     areas = tuple(area for area in (a.strip() for a in parts[1].split(",")) if area) if len(parts) == 3 else ()
     if len(parts) != 3 or not (parts[0] and areas and parts[2]):
         raise ValueError(f"plan line {number} is not a piece; write {FORMAT}")
-    piece = Piece(parts[0], areas, parts[2])
+    named = [_repository(area) for area in areas]
+    repos = {repo for repo, _ in named}
+    if len(repos) > 1:
+        raise ValueError(f"plan line {number} names more than one repository; give each repository its own pieces")
+    piece = Piece(parts[0], tuple(path for _, path in named), parts[2], repos.pop())
     found = ledger_comments.problems(followup_text(task_id, piece.what), "item", task_ids=task_ids)
     if found:
         raise ValueError(
             f"plan line {number}: the ledger would refuse its follow up, write what in plain words: {'; '.join(found)}"
         )
     return piece
+
+
+def _repository(area: str) -> tuple[str, str]:
+    named = REPO_AREA.match(area)
+    return (named[1], named[2]) if named else ("", area)
+
+
+def repositories(pieces: list[Piece]) -> list[str]:
+    """The repositories the pieces name, the task's own as an empty name, in order of first appearance."""
+    return list(dict.fromkeys(piece.repo for piece in pieces))
 
 
 def parse(text, task_id, task_ids=()):
@@ -126,10 +147,10 @@ def _covering(answers, covers, slot, covered):
     )
 
 
-def _row(piece, probability, off_intent, authorized=None):
+def _row(piece: Piece, probability: float | None, off_intent: float | None, authorized: str | None = None) -> dict:
     kept = _kept(_ruling(piece.areas) or authorized is not None, probability, off_intent)
     row = {"what": piece.what, "areas": list(piece.areas), "why": piece.why, "probability": probability, "kept": kept}
-    return row | ({"authorized": authorized} if authorized else {})
+    return row | ({"repo": piece.repo} if piece.repo else {}) | ({"authorized": authorized} if authorized else {})
 
 
 def _ruling(areas) -> bool:
@@ -140,8 +161,8 @@ def _kept(ruling, probability, off_intent) -> bool:
     return ruling or probability is None or probability >= off_intent
 
 
-def _row_key(row):
-    return Piece(row["what"], tuple(row["areas"]), row["why"]).key
+def _row_key(row: dict) -> str:
+    return Piece(row["what"], tuple(row["areas"]), row["why"], row.get("repo", "")).key
 
 
 def _known(previous, pieces, ids, state):
@@ -155,7 +176,7 @@ def _known(previous, pieces, ids, state):
     return list(rows)
 
 
-def _params(fresh, start, sized, ids):
+def _params(fresh: list[Piece], start: int, sized: bool, ids: list[str]) -> dict:
     return {
         "pieces": [
             {"slot": start + i, "number": start + i + 1, "what": piece.what, "ruling": _ruling(piece.areas)}
@@ -167,7 +188,11 @@ def _params(fresh, start, sized, ids):
             if not _ruling(piece.areas)
             for g, auth in enumerate(ids)
         ],
-        "sized": [{}] if sized else [],
+        "sized": [
+            {"repo": repo or OWN_REPO, "suffix": f"_{i}" if i else ""} for i, repo in enumerate(repositories(fresh))
+        ]
+        if sized
+        else [],
     }
 
 
@@ -176,19 +201,29 @@ def _size(answer, sizes):
     return {"level": level, "name": sizes[level], "confidence": answer.confidence}
 
 
-def failures(rows, size, too_big):
+def failures(rows: list[dict], sizes: list[tuple[str, dict]], too_big: float) -> list[str]:
     reasons = []
     cut = sum(1 for row in rows if not row["kept"])
     if cut * 2 > len(rows):
         reasons.append(f"{cut} of {len(rows)} pieces are off the task intent, more than half")
-    if size["level"] > ONE_PR and size["confidence"] >= too_big:
-        reasons.append(
-            f"the plan is sized {size['name']} at confidence {size['confidence']:.2f}, above one pull request"
-        )
+    for repo, size in sizes:
+        if size["level"] > ONE_PR and size["confidence"] >= too_big:
+            where = f"the slice in {repo}" if len(sizes) > 1 else "the plan"
+            reasons.append(
+                f"{where} is sized {size['name']} at confidence {size['confidence']:.2f}, above one pull request"
+            )
     return reasons
 
 
-def _verdicts(definition, state, params, answers):
+def _sizes(answers: dict, sized: list[dict], names: list[str]) -> list[tuple[str, dict]]:
+    return [(item["repo"], _size(answers[f"size{item['suffix']}"], names)) for item in sized]
+
+
+def _largest(sizes: list[tuple[str, dict]]) -> dict:
+    return max((size for _, size in sizes), key=lambda size: (size["level"], size["confidence"]))
+
+
+def _verdicts(definition: definitions.Definition, state: dict, params: dict, answers: dict) -> dict:
     if not params["sized"]:
         return {"verdict": PASS}
     off_intent = definition.thresholds["off_intent"]
@@ -203,8 +238,8 @@ def _verdicts(definition, state, params, answers):
         }
         for piece in params["pieces"]
     ]
-    size = _size(answers["size"], levels(definition))
-    return {"verdict": FAIL if failures(rows, size, definition.thresholds["too_big_confidence"]) else PASS}
+    sizes = _sizes(answers, params["sized"], levels(definition))
+    return {"verdict": FAIL if failures(rows, sizes, definition.thresholds["too_big_confidence"]) else PASS}
 
 
 RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"verdict": (PASS, FAIL)}, {"verdict": FAIL})
@@ -227,12 +262,13 @@ def _source_areas(areas: tuple) -> list[str]:
     return [area for area in areas if PurePosixPath(area).parts[:1] != ("tests",) and not is_clearance(area)]
 
 
-def trace(pieces, state, previous, now_ms=None):
+def trace(pieces: list[Piece], state: dict, previous: dict | None, now_ms: int | None = None) -> dict:
     previous, ids = previous or {}, _ids(state)
     known = _known(previous, pieces, ids, state)
     start, fresh = len(known), pieces[len(known) :]
     wire = [
         {"piece": start + i + 1, "what": p.what, "areas": _source_areas(p.areas), "why": p.why}
+        | ({"repo": p.repo} if p.repo else {})
         for i, p in enumerate(fresh)
     ]
     base = {
@@ -242,6 +278,7 @@ def trace(pieces, state, previous, now_ms=None):
         "accepted": list(previous.get("accepted", [])),
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
         "authorizations": ids,
+        "sizes": list(previous.get("sizes", [])) if known else [],
     }
     params = _params(fresh, start, not known, ids)
     try:
@@ -261,27 +298,35 @@ def trace(pieces, state, previous, now_ms=None):
     ]
     if known:
         return _record(PASS, rows, previous.get("size"), [], result.source, result.calibrated, base)
-    size = _size(result.answers["size"], levels(output.definition))
-    reasons = failures(rows, size, output.thresholds["too_big_confidence"])
+    sizes = _sizes(result.answers, params["sized"], levels(output.definition))
+    reasons = failures(rows, sizes, output.thresholds["too_big_confidence"])
     verdict = FAIL if reasons else PASS
     base["failures"] += verdict == FAIL and previous.get("plan_hash") != base["plan_hash"]
-    return _record(verdict, rows, size, reasons, result.source, result.calibrated, base)
+    if len(sizes) > 1:
+        base["sizes"] = [{"repo": repo, **size} for repo, size in sizes]
+    return _record(verdict, rows, _largest(sizes), reasons, result.source, result.calibrated, base)
 
 
-def _record(verdict, rows, size, reasons, source, calibrated, base):
-    return {
-        "verdict": verdict,
-        "plan_hash": base["plan_hash"],
-        "pieces": rows,
-        "size": size,
-        "reasons": reasons,
-        "source": source,
-        "calibrated": calibrated,
-        "failures": base["failures"],
-        "filed": base["filed"],
-        "accepted": base["accepted"],
-        "at": base["at"],
-    } | ({"authorizations": base["authorizations"]} if base["authorizations"] else {})
+def _record(
+    verdict: str, rows: list[dict], size: dict | None, reasons: list[str], source: str, calibrated: bool, base: dict
+) -> dict:
+    return (
+        {
+            "verdict": verdict,
+            "plan_hash": base["plan_hash"],
+            "pieces": rows,
+            "size": size,
+            "reasons": reasons,
+            "source": source,
+            "calibrated": calibrated,
+            "failures": base["failures"],
+            "filed": base["filed"],
+            "accepted": base["accepted"],
+            "at": base["at"],
+        }
+        | ({"sizes": base["sizes"]} if base["sizes"] else {})
+        | ({"authorizations": base["authorizations"]} if base["authorizations"] else {})
+    )
 
 
 def load(folder):

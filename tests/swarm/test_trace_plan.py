@@ -581,6 +581,7 @@ def _two_repo_trace(monkeypatch, own, other):
     return fake, trace_plan.trace(trace_plan.parse(TWO_REPOS, "t1"), INTENT, None)
 
 
+@pytest.mark.feature("trace-plan-per-repository-size")
 def test_a_two_repository_plan_with_one_pull_request_each_is_accepted(monkeypatch):
     fake, record = _two_repo_trace(monkeypatch, (1.0, 0.9), (1.0, 0.95))
     assert (record["verdict"], record["reasons"]) == ("pass", [])
@@ -605,6 +606,7 @@ def test_a_two_repository_plan_names_the_repository_whose_slice_is_too_big(monke
     assert record["size"] == {"level": 2, "name": "several pull requests", "confidence": 0.8}
 
 
+@pytest.mark.feature("trace-plan-per-repository-size")
 def test_a_single_repository_plan_sized_above_one_pull_request_is_refused(ask):
     ask(0.9, 0.9, score=2.0, confidence=0.9)
     record = trace_plan.trace(trace_plan.parse("- a | src | b\n- c | lib | d\n", "t1"), INTENT, None)
