@@ -374,6 +374,7 @@ def test_verified_outcome_completes_the_authoritative_ledger_once(fixture, tmp_p
     assert len(provider.calls) == 1
 
 
+@pytest.mark.feature("controller-done-clears-awaiting")
 def test_controller_completion_clears_awaiting_and_replays(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from scripts.swarm_ledger.api.resources import revision
     from tests import sv2_ctl05_cases
