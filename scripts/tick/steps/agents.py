@@ -33,12 +33,14 @@ def _reap(
 
     Past ``deadline`` no further agent is judged: the rest are left for the next pass, named in one closing action.
     """
+    from scripts.hub import owned_leases
     from scripts.hub.reconciler import legacy_agents
 
     live, rows = tick.timing.timed(tick._live_names, runtime), dict(rows)
 
     judging = tick._Reaping(slug, store, ledger, runtime, rows, live, now_ms)
     agents = list(tick.timing.timed(legacy_agents, store, slug))
+    tick.timing.timed(owned_leases.renew, store, slug, agents, tick.LEASE_MS)
     by_task: dict[str, list[int]] = {}
     for index, agent in enumerate(agents):
         by_task.setdefault(agent.task or agent.name, []).append(index)
