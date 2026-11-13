@@ -103,7 +103,8 @@ def _orphans(slug: Any, store: Any, ledger: Any, rows: Any) -> Any:
             and store.claimant(slug, task_id) is None
             and not tick.awaiting_merge(row)
         ):
-            if tick._reopen(slug, ledger, rows, task_id):
+            expected = {"claimed_by": row.get("claimed_by", ""), "claim_generation": row.get("claim_generation", 0)}
+            if tick._reopen(slug, ledger, rows, task_id, expected):
                 actions.append(f"task {task_id} had no agent, reopened")
     return actions
 
