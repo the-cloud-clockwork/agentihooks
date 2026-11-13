@@ -316,3 +316,18 @@ def test_recorded_harness_and_profile_win_over_the_session_environment(
     hive_join.run({"session_id": "session"}, "start")
     context = join_report.read(client.redis, agent)["context"]
     assert (context["home"], context["harness"], context["profile"]) == (str(tmp_path / "codex"), "codex", "planner")
+
+
+@pytest.mark.feature("hive-join-session-identity")
+def test_events_agent_takes_the_session_hook_target_and_no_profile_when_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from hooks.context import hive_join
+    from scripts.hive import join_report
+
+    client, agent = _events_agent(monkeypatch, tmp_path, "", "")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_PROFILE")
+    hive_join.run({"session_id": "session"}, "start")
+    context = join_report.read(client.redis, agent)["context"]
+    assert (context["home"], context["harness"], context["profile"]) == (str(tmp_path / "codex"), "codex", "")

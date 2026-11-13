@@ -4239,7 +4239,8 @@
       "seam": "hooks.context.hive_join.run",
       "tests": [
         "tests/test_hive_join_hook.py::test_events_agent_without_harness_or_profile_joins_with_its_session_home",
-        "tests/test_hive_join_hook.py::test_recorded_harness_and_profile_win_over_the_session_environment"
+        "tests/test_hive_join_hook.py::test_recorded_harness_and_profile_win_over_the_session_environment",
+        "tests/test_hive_join_hook.py::test_events_agent_takes_the_session_hook_target_and_no_profile_when_unset"
       ]
     },
     {

@@ -43,7 +43,7 @@ def run(payload: dict, event: str) -> None:
     harness = agent.harness or current_target()
     context = {
         "home": os.environ.get(HOMES.get(harness, ""), ""),
-        "profile": agent.profile or os.environ.get("AGENTIHOOKS_PROFILE"),
+        "profile": agent.profile or os.environ.get("AGENTIHOOKS_PROFILE", ""),
         "harness": harness,
         "pane": os.environ.get("HERDR_PANE_ID", agent.pane_id),
         "transcript_dir": str(Path(transcript).parent) if transcript else "",
