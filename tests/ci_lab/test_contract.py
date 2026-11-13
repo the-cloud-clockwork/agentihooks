@@ -170,17 +170,22 @@ def test_scheduler_accepts_github_app_variables(capsys: pytest.CaptureFixture[st
     assert capsys.readouterr().err == ""
 
 
-def test_self_test_flag_is_required() -> None:
+def test_self_test_flag_is_required(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         contract.run(contract.SCHEDULER, [], {})
     assert raised.value.code == 2
+    assert capsys.readouterr().err == (
+        "usage: agentihooks ci-lab-scheduler [-h] [--self-test]\n"
+        "agentihooks ci-lab-scheduler: error: only --self-test is available until the service loops land\n"
+    )
 
 
 def test_self_test_reports_a_planted_bad_metric_name() -> None:
-    service = contract.SCHEDULER._replace(metrics={"ci-lab-bad": (), "lab_units": ()})
+    service = contract.SCHEDULER._replace(metrics={"ci-lab-bad": (), "lab_units": (), "ci_lab_units bad": ()})
     assert contract.self_test(service) == [
         "metric ci-lab-bad is not a valid ci_lab_ Prometheus name",
         "metric lab_units is not a valid ci_lab_ Prometheus name",
+        "metric ci_lab_units bad is not a valid ci_lab_ Prometheus name",
     ]
 
 

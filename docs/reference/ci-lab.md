@@ -8,9 +8,9 @@ nav_order: 90
 {: .no_toc }
 
 The CI lab runs as two services, the scheduler and the worker. This page lists what each one
-exposes and reads: its entry point, environment, ports and metric names. Code reads every name
-from `scripts.ci_lab.contract`, and the platform tests import the same constants by name, so a
-rename shows up as a failing import rather than a missing series.
+exposes and reads: its entry point, environment, ports and metric names. Every name lives in
+`scripts.ci_lab.contract`; the services and the platform tests are to import these constants by
+name, so a rename fails an import instead of dropping a series.
 
 ## Entry points
 

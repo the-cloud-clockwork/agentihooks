@@ -11,7 +11,7 @@ SERVICES = {contract.SCHEDULER.name: contract.SCHEDULER, contract.WORKER.name: c
 
 def main(argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Dispatch a CI lab command and return its exit code."""
-    if argv[:1] and argv[0] in SERVICES:
+    if argv and argv[0] in SERVICES:
         return contract.run(SERVICES[argv[0]], argv[1:], environ)
     return delivery.main(argv, environ)
 

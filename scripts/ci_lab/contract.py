@@ -138,8 +138,9 @@ def describe(service: Service) -> dict[str, object]:
 def run(service: Service, argv: Sequence[str], environ: Mapping[str, str]) -> int:
     """Start a CI lab service; only the offline self test exists until the service loops land."""
     parser = argparse.ArgumentParser(prog=f"agentihooks ci-lab-{service.name}")
-    parser.add_argument("--self-test", action="store_true", required=True)
-    parser.parse_args(argv)
+    parser.add_argument("--self-test", action="store_true")
+    if not parser.parse_args(argv).self_test:
+        parser.error("only --self-test is available until the service loops land")
     granted = github_app_variables(environ)
     if granted and GITHUB_APP_PREFIX not in service.prefixes:
         print(f"ci-lab {service.name} refuses to start: {', '.join(granted)} is set", file=sys.stderr)
