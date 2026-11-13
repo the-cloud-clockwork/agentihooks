@@ -24,7 +24,10 @@ def store() -> RedisStore:
 def test_a_hub_admitted_agent_on_another_hive_outlives_the_local_startup_grace(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch, hive: str, target: dict, kept: bool
 ) -> None:
+    from scripts.hive import hive_state
+
     monkeypatch.setattr(commands, "hive_id", lambda: "hub")
+    hive_state.indexed(store.redis, hive, True)
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     (agent,) = workers(store)

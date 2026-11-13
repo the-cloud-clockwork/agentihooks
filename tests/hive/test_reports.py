@@ -1658,7 +1658,10 @@ def test_a_member_of_a_hive_that_restarted_without_it_ends_and_leaves_the_lane_c
 def test_a_hive_member_vanishes_only_from_a_beating_hive_that_lists_others(
     remote: SimpleNamespace, hive: str, names: object, since: int, vanished: bool
 ) -> None:
+    from scripts.hive import hive_state
+
     agent = replace(remote.agent, hive=hive, runtime_target={})
+    hive_state.indexed(remote.redis, "silent", True)
     _publish(remote, state="unknown")
     report = json.loads(remote.redis.get(remote.reports.key(HIVE)))
     report["names"] = names
