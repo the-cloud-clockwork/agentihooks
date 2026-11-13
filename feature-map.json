@@ -66,6 +66,16 @@
       ]
     },
     {
+      "id": "swarm-history-bounded",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t2501",
+      "behaviour": "Retiring an agent appends its history row and trims the swarm history list to the newest rows it keeps, on both the watched transaction and the compare and delete fallback, so the list and every snapshot stop growing with each retired agent.",
+      "seam": "scripts.swarm.store.RedisStore.drop_agent against the store history list",
+      "tests": [
+        "tests/swarm/test_execution_retirement.py::test_retirement_keeps_only_the_newest_history_rows"
+      ]
+    },
+    {
       "id": "failed-panes-report-hash-only",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-status-publish-share",
@@ -5302,6 +5312,19 @@
         "tests/gates/test_one_push.py::test_a_failed_status_context_on_the_head_lets_the_push_pass",
         "tests/gates/test_one_push.py::test_a_running_suite_with_no_failed_job_still_holds_the_push",
         "tests/gates/test_one_push.py::test_a_conflicting_head_lets_the_push_pass_while_its_suite_runs"
+      ]
+    },
+    {
+      "id": "swarm-agent-record-launch-decision-at-spawn",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t279",
+      "behaviour": "A detached agent launch writes its decided harness, routed account, model, effort and profile onto the agent record when the launch job is queued, and a successor retry rewrites them with its retried decision, so swarm status shows them before the pane starts instead of an empty harness and a dash for the account.",
+      "seam": "HerdrRuntime.spawn detached placement, launch_job.pending and successor_retry.relaunch",
+      "tests": [
+        "tests/swarm/test_launch_job.py::test_an_agent_record_read_right_after_a_detached_spawn_carries_its_harness_and_account",
+        "tests/swarm/test_launch_job.py::test_a_detached_spawn_returns_its_routed_account_model_and_profile",
+        "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
+        "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
       ]
     }
   ],

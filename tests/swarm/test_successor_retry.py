@@ -1,9 +1,11 @@
 import json
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import launch_job
-from scripts.swarm.store import MASTER
+from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError, tick
 from tests.swarm.test_launch_job import DetachedRuntime
 from tests.swarm.test_tick import FakeRuntime, tasks
@@ -156,6 +158,35 @@ def test_a_workstation_successor_job_retries_then_reopens_after_two_refused_rout
     assert store.launch_failure("sw", "t1") == "second route refused"
     assert [row["state"] for row in store.launches("sw")] == ["failed"]
     assert not store.redis.hgetall(store.key("sw", launch_job.KEY))
+
+
+class SteeredJobs(RoutedJobs):
+    def spawn(self, config: SwarmConfig, lane: str, name: str, task: dict) -> Placed:
+        placed = super().spawn(config, lane, name, task)
+        if task.get("avoid_harness") == "claude":
+            return replace(placed, harness="codex", account="acct-x")
+        return replace(placed, account="acct-c")
+
+
+@pytest.mark.feature("swarm-agent-record-launch-decision-at-spawn")
+def test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry(
+    store: RedisStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.swarm import runtime as runtime_module
+
+    ledger, runtime = tasks(("t1", "eng")), SteeredJobs(tmp_path)
+    monkeypatch.setattr(launch_job, "spawn", lambda job: None)
+    monkeypatch.setattr(runtime_module, "_opened_pane", lambda name, at: "")
+    store.put_handoff("sw", "t1", "pushed, waiting on checks")
+    tick("sw", store, ledger, runtime, now_ms=1000)
+    store.update("sw", state="paused")
+    name = runtime.jobs[0]
+    agent = next(agent for agent in store.agents("sw") if agent.name == name)
+    assert (agent.harness, agent.account) == ("claude", "acct-c")
+    _refused(tmp_path, name, "route refused", "claude")
+    tick("sw", store, ledger, runtime, now_ms=2000)
+    agent = next(agent for agent in store.agents("sw") if agent.name == name)
+    assert (agent.harness, agent.account) == ("codex", "acct-x")
 
 
 def test_a_retried_workstation_successor_reopens_at_the_end_of_its_first_launch_window(store, tmp_path, jobs):
