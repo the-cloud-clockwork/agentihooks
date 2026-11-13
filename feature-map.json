@@ -752,6 +752,8 @@
         "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_builds_each_task_row_from_the_cached_bytes_of_its_task",
         "tests/swarm_ledger/test_export_cost.py::test_a_scoped_export_equals_the_encoded_scoped_view",
         "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_names_only_the_events_newer_than_the_reader_holds",
+        "tests/swarm_ledger/test_export_cost.py::test_a_held_revision_the_server_no_longer_holds_gets_the_whole_events_list",
+        "tests/swarm_ledger/test_export_cost.py::test_a_reader_behind_every_held_event_gets_them_all_as_the_tail",
         "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_without_a_held_revision_still_sets_the_whole_events_list",
         "tests/swarm_ledger/test_export_cost.py::test_a_change_reply_for_parts_without_meta_names_no_events",
         "tests/swarm_ledger/test_export_cost.py::test_patching_appends_the_newer_events_and_drops_the_oldest_past_the_count",

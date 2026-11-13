@@ -363,16 +363,21 @@ def export_changes(
     if answer is not None and (not named or encode("tasks") in named):
         changes["set"].append([[live_rows.FROZEN_IDS], answer.frozen_ids])
     if events_after is not None and (not named or META in named) and not units & {(META,), (META, EVENTS)}:
-        changes["events"] = events_tail(view["_meta"].get("events", []), events_after)
+        events_change(changes, view["_meta"].get("events", []), events_after)
     return json.dumps({"changes": changes})
 
 
-def events_tail(events: list[dict[str, Any]], after: int) -> dict[str, Any]:
-    """The events newer than revision after, read back from the newest, with the count of every event held."""
+def events_change(changes: dict[str, Any], events: list[dict[str, Any]], after: int) -> None:
+    """Add to changes the events newer than revision after with the count of every event held, or the whole
+    events list when the newest event older than that tail is not at revision after, so a reader holding an
+    event the server no longer has never keeps it."""
     start = len(events)
     while start and events[start - 1].get("rev", 0) > after:
         start -= 1
-    return {"after": after, "tail": events[start:], "count": len(events)}
+    if start and events[start - 1].get("rev", 0) != after:
+        changes["set"].append([["_meta", "events"], events])
+        return
+    changes["events"] = {"after": after, "tail": events[start:], "count": len(events)}
 
 
 def handle(handler: object, services: Services) -> None:

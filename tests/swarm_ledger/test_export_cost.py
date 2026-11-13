@@ -66,6 +66,21 @@ def test_a_change_reply_names_only_the_events_newer_than_the_reader_holds() -> N
 
 
 @pytest.mark.feature("ledger-export-cost")
+def test_a_held_revision_the_server_no_longer_holds_gets_the_whole_events_list() -> None:
+    events = [EVENTS[0], EVENTS[1], EVENTS[4]]
+    state = {**STATE, "_meta": {"rev": 4, "events": events}}
+    reply = json.loads(routes.export_changes(state, {'["_meta","rev"]'}, events_after=3) or "")
+    assert reply["changes"]["set"] == [[["_meta", "rev"], 4], [["_meta", "events"], events]]
+    assert "events" not in reply["changes"]
+
+
+@pytest.mark.feature("ledger-export-cost")
+def test_a_reader_behind_every_held_event_gets_them_all_as_the_tail() -> None:
+    reply = json.loads(routes.export_changes(STATE, {'["_meta","rev"]'}, events_after=0) or "")
+    assert reply["changes"]["events"] == {"after": 0, "tail": EVENTS, "count": 5}
+
+
+@pytest.mark.feature("ledger-export-cost")
 def test_a_change_reply_without_a_held_revision_still_sets_the_whole_events_list() -> None:
     reply = json.loads(routes.export_changes(STATE, {'["_meta","rev"]'}) or "")
     assert [["_meta", "events"], EVENTS] in reply["changes"]["set"]
