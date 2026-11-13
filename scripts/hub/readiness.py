@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Callable
 
 from scripts.events.bus import Bus
@@ -27,4 +28,7 @@ class Readiness:
             view = self._source.snapshot(slug)
             if not guard():
                 return
-            readiness.publish(self._bus, view, self._clock())
+            now = self._clock()
+            placed = readiness.publish(self._bus, view, now)
+            offered = len(readiness.offers(view, now))
+            print(f"hub: readiness swarm={slug} offers={offered} placed={len(placed)}", file=sys.stderr)

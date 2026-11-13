@@ -175,7 +175,10 @@ def test_the_hub_never_admits_a_workstation_task_from_a_hive(
     assert rig.admitter.admit(SLUG, ask("desk", "hive-a")) is None
     assert rig.store.claimant(SLUG, "desk") is None
     assert rig.store.agents(SLUG) == []
-    assert f"hub: events placement swarm={SLUG} task=desk hive=hive-a" in capsys.readouterr().err
+    assert capsys.readouterr().err.splitlines() == [
+        f"hub: events placement swarm={SLUG} task=desk hive=hive-a: refused, "
+        "the task is workstation, pinned to another hive or needs what the hive lacks"
+    ]
 
 
 def test_the_hub_admits_a_hive_pinned_task_only_from_its_hive(rig: SimpleNamespace) -> None:

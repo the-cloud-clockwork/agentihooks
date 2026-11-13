@@ -596,6 +596,22 @@
       ]
     },
     {
+      "id": "hub-offer-logging",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-hub-offer-logging",
+      "behaviour": "Each hub readiness pass prints one line per events swarm with its offer count and placed count, and each refused or late hive admission prints one line naming the member hive, the task and the reason.",
+      "seam": "Readiness.poll and Admission.admit on the hub",
+      "tests": [
+        "tests/hub/test_readiness.py::test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count",
+        "tests/hub/test_admission.py::test_a_late_admission_prints_one_line_naming_the_member_the_task_and_the_wait",
+        "tests/hub/test_admission.py::test_an_admission_held_by_another_hive_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_while_claims_are_stopped_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admission_for_a_withdrawn_offer_prints_its_withdrawal_reason",
+        "tests/hub/test_admission.py::test_an_admission_whose_claim_another_holder_took_prints_one_refusal_line",
+        "tests/hub/test_admission.py::test_an_admitted_offer_prints_no_refusal_line"
+      ]
+    },
+    {
       "id": "events-failed-launch-releases-admission",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
