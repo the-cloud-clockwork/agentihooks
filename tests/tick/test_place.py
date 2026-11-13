@@ -276,7 +276,7 @@ def test_a_running_pass_ranks_remedies_preempts_and_spawns(calm: list[Any], monk
         ("bottleneck remedy", "sw", store, "ledger", "doc", 7),
         "panic read",
         ("preempt", "sw", config, store, "doc", 7, seats),
-        ("places", "tick", ROWS),
+        ("places", "tick"),
         "panic read",
         ("enter pass", calm[7][5]),
         ("spawn", "sw", config, calm[7][3], calm[7][4], calm[7][5], ROWS, "doc", 7, calm[7][-1]),
