@@ -288,7 +288,8 @@ def test_relaunch_starts_the_successor_once_and_marks_the_seat_ready(tmp_path: P
         return not started
 
     assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None) == "started"
-    assert launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, sleep=lambda s: None) == "not-pending"
+    second = launch.relaunch(tmp_path, "eng-1", {}, bare=bare, start=start, wait_s=0.0, sleep=lambda s: None)
+    assert second == "not-pending"
     assert len(started) == 1 and "the body" in paths.opening(tmp_path, "eng-1").read_text()
     loaded = registry.load(tmp_path)
     seat = loaded.seat("eng-1") if loaded else None
