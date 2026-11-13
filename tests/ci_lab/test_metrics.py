@@ -351,6 +351,10 @@ def test_served_routes_reach_a_scraper_over_http() -> None:
         with pytest.raises(urllib.error.HTTPError) as refused:
             urllib.request.urlopen(f"{base}/missing", timeout=5)
         assert refused.value.code == 404
+        with pytest.raises(urllib.error.HTTPError) as posted:
+            urllib.request.urlopen(urllib.request.Request(f"{base}/metrics", data=b"", method="POST"), timeout=5)
+        assert posted.value.code == 405
+        assert json.loads(posted.value.read()) == {"error": "method not allowed"}
     finally:
         server.shutdown()
         server.server_close()
