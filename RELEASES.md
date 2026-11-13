@@ -2,6 +2,20 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.855 · 2026-11-13
+
+### 2026-11-13 · 094549c13daa · #11034 · @agenticore-app
+
+**Ledger task update accepts the confirmed pull request number and head**
+
+This change fixes a bug where confirming a pull request via `swarm pr` silently failed to update the ledger: since #10948, that command writes `pr_number` and `pr_head` fields, but the ledger's task update allowlist didn't recognize them, so every such update was rejected as schema_invalid and the task never advanced to the pr state. The fix adds both fields to the allowlist, validating `pr_number` as a positive integer and `pr_head` as a lowercase commit hash (or empty), with regression tests confirming malformed values are refused and that a real confirmed-pull-request update now passes the ledger check end to end.
+
+### 2026-11-13 · 698e43894f38 · #10969 · @agenticore-app
+
+**Health findings list the ledger rows behind their count**
+
+This change makes health findings show their evidence, not just a count: each finding now carries the ledger rows (time, kind, target, short text) that produced it, up to the latest 20 plus a total, along with the agent's last outcome. `swarm status` and the ledger page's Swarm health row display these rows beneath every finding, labeled as required by doctrine or by the task, so operators can see exactly what triggered a finding instead of guessing. It also adds a regression test pinning that repeated parks don't falsely register as a proof loop, locking in existing scouter-verified behavior.
+
 ## v2.17.853 · 2026-11-13
 
 ### 2026-11-13 · 371b65b5cb50 · #11009 · @agenticore-app
