@@ -4562,6 +4562,17 @@
       ]
     },
     {
+      "id": "controller-survives-ledger-connection-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-ledger-failure-survives",
+      "behaviour": "A connection failure in the controller's binned or closed check ends only that pass as ledger unreachable, and the controller runs its next pass instead of exiting.",
+      "seam": "scripts.swarm.controller.tickable and scripts.swarm.ledger_client.LedgerClient._lifecycle",
+      "tests": [
+        "tests/swarm/test_controller_pass_end.py::test_a_refused_closed_check_ends_the_pass_and_the_controller_runs_the_next_pass",
+        "tests/swarm/test_controller_pass_end.py::test_an_unreachable_remote_lifecycle_read_raises_ledger_unreachable"
+      ]
+    },
+    {
       "id": "controller-ticks-cleartext-ledger",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/promo-43001784835-0",
