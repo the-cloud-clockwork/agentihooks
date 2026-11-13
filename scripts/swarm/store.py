@@ -800,9 +800,12 @@ class RedisStore:
         row = {**row, "error": row["error"] or reason, "pane_lines": lines}
         self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
-    def launches(self, slug: str) -> list[dict]:
-        rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}
-        history = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1)]
+    def launches(self, slug: str, task: str | None = None) -> list[dict]:
+        """Every launch row, or with ``task`` only rows whose raw record names that task, decoding nothing else."""
+        needle = "" if task is None else json.dumps(task)
+        launched = self.redis.hgetall(self.key(slug, "launches")).items()
+        rows = {name: json.loads(raw) for name, raw in launched if needle in raw}
+        history = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1) if needle in raw]
         for agent in [*history, *(asdict(a) for a in self.agents(slug))]:
             if agent.get("profile_decision", {}).get("validation", {}).get("state") == "validated":
                 rows.setdefault(
@@ -817,8 +820,8 @@ class RedisStore:
                 )
         return list(rows.values())
 
-    def _started_lives(self, slug, task):
-        return sum(row["task"] == task and row["state"] == "started" for row in self.launches(slug))
+    def _started_lives(self, slug: str, task: str) -> int:
+        return sum(row["task"] == task and row["state"] == "started" for row in self.launches(slug, task))
 
     def put_restored(self, slug, outcomes):
         self.redis.set(self.key(slug, "restored"), json.dumps(outcomes))
