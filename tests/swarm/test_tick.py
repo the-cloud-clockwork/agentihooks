@@ -1388,7 +1388,9 @@ def test_a_claimed_task_with_no_claimant_field_or_generation_is_reopened(store: 
 def test_an_events_claim_held_by_a_hive_agent_record_stays_claimed(store: RedisStore) -> None:
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused", engine=EVENTS_ENGINE)
-    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", started_at=1_000, hive="hive-2"))
+    store.put_agent(
+        "sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", seat="eng-1@sw", started_at=1_000, hive="hive-2")
+    )
     ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
