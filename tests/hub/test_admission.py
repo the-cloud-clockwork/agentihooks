@@ -493,7 +493,7 @@ def test_a_failure_report_without_its_admission_records_nothing(rig, fields):
 
 
 def test_the_slot_service_routes_failure_reports_to_admission():
-    assert admission.OPERATIONS == ("admit", "reopen", "failed")
+    assert admission.OPERATIONS == ("admit", "reopen", "failed", "launched")
 
 
 def test_the_slot_service_answers_admission_for_the_swarm_and_hive_of_its_subject():

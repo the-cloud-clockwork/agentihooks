@@ -199,6 +199,32 @@ def test_a_spoke_spawns_through_the_runtime_then_publishes_started_before_acknow
     assert real_take(0) is None
 
 
+@pytest.mark.feature("events-launch-decision-record")
+def test_a_failing_launch_report_never_holds_back_the_started_event(rig, capsys):
+    observed = []
+    real_publish = rig.bus.events.publish
+
+    def publish(subject, event):
+        observed.append(subject)
+        return real_publish(subject, event)
+
+    def launched(event, placed):
+        observed.append("launched")
+        raise TimeoutError("hub timeout")
+
+    rig.bus.events.publish = publish
+    rig.tasks.launched.side_effect = launched
+
+    assert rig.spoke.poll() == "started"
+    assert observed == ["swarm.rig.execution.started", "launched"]
+    rig.tasks.launched.assert_called_once_with(rig.event, rig.runtime.spawn.return_value.value)
+    assert rig.queue.take(0) is None
+    assert (
+        "hive spoke for swarm rig lane eng launch report failed (TimeoutError: hub timeout)"
+        in capsys.readouterr().err
+    )
+
+
 @pytest.mark.feature("events-failed-launch-releases-admission")
 @pytest.mark.parametrize("failure", ["request", "outcome"])
 def test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry(rig, failure):
