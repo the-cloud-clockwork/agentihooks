@@ -573,6 +573,28 @@ def test_holds_carry_the_listing_saves_out_and_write_nothing(
     assert store.redis.get(key) is None
 
 
+@pytest.mark.feature("events-admission-saved-fleet-red-listing")
+def test_holds_save_the_listing_of_every_repository_with_a_pull_request_task_not_done(
+    store: RedisStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads: list[str] = []
+    monkeypatch.setattr(fleet_red, "read", lambda repo: reads.append(repo) or SAVED)
+    rows = {
+        "busy": task("busy", state="claimed", claimed_by="engineer@1", pr_url=MINE),
+        "review": task("review", state="pr", pr_url="https://github.com/o/q/pull/2"),
+        "gone": task("gone", state="done", pr_url="https://github.com/x/y/pull/3"),
+    }
+
+    found, _, saves = fleet_red.holds("sw", store, rows, NOW_MS)
+
+    assert found == []
+    assert reads == ["o/r", "o/q"]
+    assert [save.key for save in saves] == [
+        store.key("sw", "fleet-red-pulls:o/r"),
+        store.key("sw", "fleet-red-pulls:o/q"),
+    ]
+
+
 def test_the_engine_saves_the_listing_the_notice_step_returns(
     store: RedisStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

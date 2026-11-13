@@ -4385,9 +4385,11 @@
       "id": "events-admission-saved-fleet-red-listing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-admission-saved-listing",
-      "behaviour": "The events readiness snapshot judges an open task with a pull request only from the fleet red listing the tick saved for that events swarm, admitting it when nothing is saved, so a hub admission never lists GitHub live and answers inside the hive's wait; the tick's fleet red notice step still lists and saves that listing for an events swarm.",
-      "seam": "scripts.swarm.readiness.Source.snapshot admits through scripts.swarm.fleet_red.saved_reader, and the fleet red notice step of the tick on an events swarm",
+      "behaviour": "The events readiness snapshot judges an open task with a pull request only from the fleet red listing the tick saved for that events swarm, admitting it when nothing is saved, so a hub admission never lists GitHub live and answers inside the hive's wait; the tick's fleet red notice step lists and saves the listing of every repository with a pull request task that is not done, claimed and in review ones included, for an events swarm too.",
+      "seam": "scripts.hub.admission.Admission.admit through scripts.swarm.readiness.Source.snapshot and scripts.swarm.fleet_red.saved_reader, and scripts.swarm.fleet_red.holds in the fleet red notice step of the tick on an events swarm",
       "tests": [
+        "tests/hub/test_admission.py::test_an_admission_of_a_task_with_a_pull_request_answers_inside_the_wait_while_a_live_listing_is_slow",
+        "tests/swarm/test_fleet_red.py::test_holds_save_the_listing_of_every_repository_with_a_pull_request_task_not_done",
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_admits_an_open_task_with_a_pull_request_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_events_snapshot_holds_a_task_from_the_saved_listing_without_listing_live",
         "tests/swarm/test_fleet_red.py::test_the_tick_saves_the_fleet_red_listing_of_an_events_swarm"

@@ -3,8 +3,8 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A claim filter built with fleet_red.checker() and no reader lists the repository's open pull requests live on
-      the first open task carrying a pull request url. On 13 November 19:52 to 20:03 UTC the events readiness
+      A claim filter built with fleet_red.checker() and no saved reader lists the repository's open pull requests
+      live on the first open task carrying a pull request url. On 13 November 19:52 to 20:03 UTC the events readiness
       snapshot did this inside every hub admission, 21 to 24 seconds per admission, and all fourteen admissions
       answered past the hive's eight second wait. Pass fleet_red.saved_reader(store, slug); the fleet red notice
       step owns the live listing and its save.
@@ -12,6 +12,9 @@ rules:
       include:
         - /scripts/
         - fleet-red-checker-without-saved-reader.py
-    pattern-either:
-      - pattern: fleet_red.checker()
-      - pattern: $TICK.fleet_red.checker()
+    patterns:
+      - pattern-either:
+          - pattern: fleet_red.checker(...)
+          - pattern: $TICK.fleet_red.checker(...)
+      - pattern-not: fleet_red.checker(fleet_red.saved_reader(...), ...)
+      - pattern-not: $TICK.fleet_red.checker($TICK.fleet_red.saved_reader(...), ...)

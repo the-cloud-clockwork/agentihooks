@@ -206,20 +206,12 @@ def holds(
     ]
     waiting = set(unclaimed) - store.claimed(slug, unclaimed)
     cleared = [store.key(slug, f"fleet-red:{task['id']}") for task in rows.values() if task["id"] not in waiting]
-    listings: dict[str, Pulls | None] = {}
     fetch: Callable[[str], Listed] = partial(_unsaved, reader) if reader else partial(cached, store, slug)
+    listings, saves = _listed(watched(rows), fetch)
     found: list[tuple[str, str, str]] = []
-    saves: list[Write] = []
     for task_id in [task_id for task_id in unclaimed if task_id in waiting]:
         url, key = rows[task_id]["pr_url"], store.key(slug, f"fleet-red:{task_id}")
-        repo = repository(url)
-        if repo not in listings:
-            try:
-                listings[repo], listed = fetch(repo) if repo else ([], ())
-            except ERRORS:
-                listings[repo], listed = None, ()
-            saves.extend(listed)
-        pulls = listings[repo]
+        pulls = listings[repository(url)]
         if pulls is None:
             continue
         if not held(pulls, url, now_ms):
@@ -228,6 +220,29 @@ def holds(
         if not store.redis.exists(key):
             found.append((task_id, url, ", ".join(sorted(own(pulls, url)))))
     return found, cleared, saves
+
+
+def watched(rows: dict[str, dict[str, Any]]) -> list[str]:
+    """Return the repository of every task carrying a pull request that is not done, in row order.
+
+    A claimed or in review task can reopen and be offered at once, so its repository's listing is kept saved for the
+    claim view to read before that happens.
+    """
+    urls = [task["pr_url"] for task in rows.values() if task.get("pr_url") and task.get("state") != "done"]
+    return list(dict.fromkeys(repository(url) for url in urls))
+
+
+def _listed(repos: list[str], fetch: Callable[[str], Listed]) -> tuple[dict[str, Pulls | None], list[Write]]:
+    """Return the listing of each repository, none for a failed read, and the saves of the fresh listings."""
+    listings: dict[str, Pulls | None] = {}
+    saves: list[Write] = []
+    for repo in repos:
+        try:
+            listings[repo], listed = fetch(repo) if repo else ([], ())
+        except ERRORS:
+            listings[repo], listed = None, ()
+        saves.extend(listed)
+    return listings, saves
 
 
 def post(slug: str, store: RedisStore, ledger: Any, task_id: str, url: str, checks: str) -> str:
