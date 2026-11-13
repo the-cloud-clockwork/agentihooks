@@ -1384,6 +1384,28 @@ def test_a_claimed_task_with_no_claimant_field_or_generation_is_reopened(store: 
     assert "task t1 had no agent, reopened" in actions
 
 
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_an_events_claim_held_by_a_hive_agent_record_stays_claimed(store: RedisStore) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    store.put_agent("sw", AgentRecord("engineer@a1b2c3-0009", "eng", "t1", started_at=1_000, hive="hive-2"))
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
+    assert "task t1 had no agent, reopened" not in actions
+
+
+@pytest.mark.feature("swarm-tick-events-orphans")
+def test_an_events_claim_the_hub_holds_before_its_agent_record_stays_claimed(store: RedisStore) -> None:
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.update("sw", state="paused", engine=EVENTS_ENGINE)
+    assert store.claim("sw", "t1", "engineer@a1b2c3-0009", 600_000)
+    ledger.rows["t1"].update(state="claimed", claimed_by="engineer@a1b2c3-0009")
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("claimed", "engineer@a1b2c3-0009")
+    assert "task t1 had no agent, reopened" not in actions
+
+
 def test_a_task_blocked_on_dev_red_is_reopened_once_dev_tests_passes(store, monkeypatch):
     from scripts.swarm import dev_red
 

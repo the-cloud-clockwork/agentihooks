@@ -633,6 +633,7 @@ STEPS = (
         frozenset({"reap", "drained resume"}),
         frozenset({TASKS}) | pass_domains("config", "rows"),
         frozenset({TASKS}),
+        feature="swarm-tick-events-orphans",
     ),
     CallStep("conversations", "close", _conversations_step, lane=SLOW),
     CallStep("session models", "close", _session_models_step, lane=SLOW),
