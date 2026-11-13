@@ -5,9 +5,8 @@ rules:
     message: >-
       A lock directory taken with mkdir is retried on FileExistsError and removed only in this call's finally, with
       no reclaim of a stale lock. A launch killed while holding the Claude trust lock left it in the cicd profile home
-      on hive three for seventeen hours and refused every later cicd launch, and inbox channel registration later
-      refused the urgent promotion fixer there on the same abandoned lock. Reclaim a lock past its stale bound before
-      waiting, as claude_trust._reclaim does.
+      on hive three for seventeen hours and refused every later cicd launch. Reclaim a lock past its stale bound
+      before waiting, as claude_trust._reclaim does.
     patterns:
       - pattern-inside: |
           def $F(...):

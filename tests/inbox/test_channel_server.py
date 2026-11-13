@@ -8,6 +8,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 from unittest import mock
 
 import pytest
@@ -468,7 +469,11 @@ def test_registration_reclaims_an_abandoned_native_config_lock(tmp_path: Path, m
     lock.mkdir()
     abandoned = time.time() - claude_trust.STALE_LOCK_SECONDS - 1800
     os.utime(lock, (abandoned, abandoned))
-    monkeypatch.setattr(channel.time, "sleep", lambda delay: pytest.fail("an abandoned lock must not be waited on"))
+
+    def must_not_wait(delay: float) -> NoReturn:
+        pytest.fail("an abandoned lock must not be waited on")
+
+    monkeypatch.setattr(channel.time, "sleep", must_not_wait)
     channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
     assert "inbox" in json.loads((tmp_path / ".claude.json").read_text())["mcpServers"]
     assert not lock.exists()
