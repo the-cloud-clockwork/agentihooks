@@ -98,6 +98,17 @@
       ]
     },
     {
+      "id": "started-lives-task-rows-only",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t1919-live",
+      "behaviour": "Counting a task's started lives, which the tick spawn step does for every launch and for a first life claim, decodes only the launch and history rows whose raw record names that task, never the whole swarm history list, which cost about six tenths of a second of CPU per count.",
+      "seam": "RedisStore._started_lives through claims and count_claim against the launches hash and history list",
+      "tests": [
+        "tests/swarm/test_store.py::test_counting_a_first_life_decodes_only_rows_that_name_the_task",
+        "tests/swarm/test_store.py::test_a_launch_row_reused_by_another_task_still_shadows_the_name_history"
+      ]
+    },
+    {
       "id": "replacement-missing-occupant",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t-replacement-missing-occupant",
@@ -1920,6 +1931,36 @@
         "tests/swarm/test_health_verdicts.py::test_after_the_cooldown_it_returns_only_if_its_evidence_grew",
         "tests/swarm/test_health_verdicts.py::test_a_verdict_must_be_one_of_the_five_and_name_a_known_finding",
         "tests/swarm/test_health_verdicts.py::test_it_returns_at_most_once_and_carries_its_earlier_verdict"
+      ]
+    },
+    {
+      "id": "swarm-health-corpus",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t277",
+      "behaviour": "Each health detector (ceremony, scope inflation, proof loop, idle with claim, stale claim, over monitoring) keeps a corpus of recorded agent histories labelled finding or none, with at least one of each; the replay feeds every history through the health findings the way swarm status does and fails when a labelled case flips or a detector lacks either label. The two ninth of October ceremony histories are labelled none.",
+      "seam": "scripts.swarm.health.corpus and python -m scripts.swarm.health.corpus",
+      "tests": [
+        "tests/swarm/test_health_corpus.py::test_every_detector_has_a_finding_case_and_a_none_case",
+        "tests/swarm/test_health_corpus.py::test_each_labelled_history_replays_to_its_label",
+        "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_ceremony_histories_raise_no_finding",
+        "tests/swarm/test_health_corpus.py::test_the_ninth_of_october_histories_are_red_when_talk_counts_are_dropped",
+        "tests/swarm/test_health_corpus.py::test_a_flipped_label_fails_the_replay",
+        "tests/swarm/test_health_corpus.py::test_a_detector_without_both_labels_fails_the_replay",
+        "tests/swarm/test_status_talk_wiring.py::test_status_hands_the_detectors_talk_counts_as_the_corpus_replays_them",
+        "tests/swarm/test_status_talk_wiring.py::test_the_replay_reads_the_repo_corpus_when_no_directory_is_given"
+      ]
+    },
+    {
+      "id": "swarm-health-false-positives",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t277",
+      "behaviour": "Swarm status counts, per detector, the findings whose current verdict is false positive out of all judged findings and prints one false positives line when any finding is judged.",
+      "seam": "agentihooks swarm status",
+      "tests": [
+        "tests/swarm/test_health_verdicts.py::test_false_positives_count_each_detector_s_false_verdicts_out_of_its_judged_findings",
+        "tests/swarm/test_health_report.py::test_the_false_positives_line_leads_the_findings",
+        "tests/swarm/test_health_report.py::test_no_judged_finding_prints_no_false_positives_line",
+        "tests/swarm/test_status_false_positives.py::test_status_counts_each_detector_s_false_positive_verdicts"
       ]
     },
     {
