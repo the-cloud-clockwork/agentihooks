@@ -158,13 +158,12 @@ listing save included, are applied through the group's appliers when it ends,
 so a notice step that ends within its 30 second budget keeps its save on the
 slow lane exactly as it did on the critical lane.
 
-`preempt` and `spawn` still wait for it, because `fleet red notice` is in
-`scripts.tick.steps.place.PREEMPT_NEEDS` and `spawn` needs `preempt`: the
-claim hold has to be decided before an agent is placed on a red task. Every
-other step between the notice step and `preempt` runs without waiting. When
-the notice step runs past its budget it is abandoned: its writes are dropped,
-`preempt` and `spawn` are dropped and recorded late for that pass, and the
-tick journal gets one line naming the lost writes:
+The order is the other way around now: `fleet red notice` needs `spawn`, so
+it runs after placement, not before. No step needs `fleet red notice` in
+turn, so nothing else waits on it or is dropped with it. When the notice
+step runs past its budget it is abandoned on its own: its writes are
+dropped and recorded late for that pass, and the tick journal gets one line
+naming the lost writes:
 
 ```json
 {"event": "swarm_tick_step_abandoned", "slug": "rig-grade-swarm", "step": "fleet red notice", "budget_s": 30.0, "writes": ["fleet red", "fleet red lifted", "fleet red listings"]}
@@ -258,8 +257,9 @@ The constants are code: change them through a pull request.
   step saves, each claim view pays one listing per repository.
 - The notice step budget is a checked in measurement. A live listing that
   grows past 30 seconds makes the step late again and drops its save.
-- On the slow lane the notice step still gates placement: `preempt` and
-  `spawn` wait for it, and an abandoned notice step drops both for that pass.
+- The notice step is on the slow lane and now needs `spawn` instead of gating
+  it: nothing waits on the notice step, so an abandoned notice step only
+  drops its own writes for that pass.
 
 ## Troubleshooting
 
@@ -270,7 +270,7 @@ The constants are code: change them through a pull request.
 | A task stays held after the shared checks went green | The cached listing is up to ten minutes old; delete the key to read GitHub now |
 | A task is claimed although the notice pass holds it | `GET` the cache key: `null` makes the claim filter admit every task. With no key the claim filter lists live and admits every task when that listing fails; read the tick log for `fleet red hold skipped` |
 | The cache key never appears and the notice step runs over its 30 second budget | `tick-report --passes 10` shows the step's wall time; a step still running at its budget is abandoned and its save dropped. Compare that wall time with `timing_of("fleet red notice")` and raise its floor in `budgets.FLOORS` through a pull request, or let its live budget follow its walls |
-| Preempt and spawn are late in a pass with no critical lane overrun | The notice step ran past its 30 second budget on the slow lane and both were dropped behind it. Its `swarm_tick_step_abandoned` line in the same pass confirms it. Compare the step's wall time in `tick-report --passes 10` with its 30 second budget and raise its floor in `budgets.FLOORS` through a pull request, or let its live budget follow its walls |
+| `fleet red notice` is late in a pass with no critical lane overrun | It needs `spawn`, so it starts only once `spawn` ends; a late `spawn` record in the same pass explains the delay. Compare the step's wall time in `tick-report --passes 10` with its 30 second budget and raise its floor in `budgets.FLOORS` through a pull request, or let its live budget follow its walls |
 | The quota notice step costs tens of seconds | Its capacity read builds the claim view; with no cache key every read lists GitHub. Check the cache key's `TTL` and the notice step as above |
 
 ## Tests

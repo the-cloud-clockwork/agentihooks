@@ -1,4 +1,4 @@
-"""The placement steps run the tick's hand written acks, ranking and spawn calls at their sites in today's order."""
+"""The placement steps run the tick's hand written notices, ranking and spawn calls at their sites in today's order."""
 
 import runpy
 from contextlib import contextmanager, nullcontext
@@ -41,30 +41,12 @@ class _State:
         return self.state.get(key) if domain == PASS else None
 
 
-LOCK_KEY = "sw:acks-lock"
-
-
 class _Redis:
     def __init__(self, log: list[Any]) -> None:
         self.log = log
-        self.token = ""
 
     def delete(self, key: str) -> None:
-        if key == LOCK_KEY:
-            self.token = ""
-        else:
-            self.log.append(("delete", key))
-
-    def set(self, key: str, value: str, nx: bool, px: int) -> bool:
-        assert (key, nx, px) == (LOCK_KEY, True, 30_000)
-        if self.log.count("acks held"):
-            return False
-        self.token = value
-        return True
-
-    def get(self, key: str) -> str:
-        assert key == LOCK_KEY
-        return self.token
+        self.log.append(("delete", key))
 
 
 def _store(log: list[Any]) -> SimpleNamespace:

@@ -2,6 +2,7 @@ from copy import deepcopy
 
 import pytest
 
+from scripts.swarm import readiness
 from scripts.swarm_ledger import ledger_tasks
 from scripts.swarm_ledger.ledger_core import Context
 
@@ -53,6 +54,15 @@ def test_authorized_reopen_allows_subsequent_claim(reopener):
     update(doc, ctx, reopener, state="open", claimed_by="")
     update(doc, ctx, "swarm", state="claimed", claimed_by="ci@a1b2c3-0002")
     assert doc["tasks"][0]["state"] == "claimed"
+
+
+def test_incident_worker_publication_cannot_feed_ownerless_recovery():
+    doc, ctx = ledger()
+    update(doc, ctx, "master@a1b2c3-0001", state="blocked")
+    update(doc, ctx, "ci@a1b2c3-0001", state="pr", claimed_by="")
+    rows = {"t1": deepcopy(doc["tasks"][0])}
+    assert doc["tasks"][0]["state"] == "blocked"
+    assert not readiness.ready(rows["t1"], rows, doc, {}, "")
 
 
 def test_worker_block_keeps_automatic_recovery():
