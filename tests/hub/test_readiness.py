@@ -237,6 +237,26 @@ def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
         assert queue.take(1) is None
 
 
+@pytest.mark.feature("hub-offer-logging")
+def test_each_readiness_pass_prints_one_line_per_swarm_with_its_offer_count(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    _, store, ledger = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        reactor = Readiness(bus, provider, clock=lambda: 73)
+        reactor.poll()
+        assert capsys.readouterr().err.splitlines() == ["hub: readiness swarm=rig offers=1 placed=1"]
+        reactor.poll()
+        assert capsys.readouterr().err.splitlines() == ["hub: readiness swarm=rig offers=1 placed=0"]
+        reactor.poll(lambda: False)
+        assert capsys.readouterr().err == ""
+
+
 def test_freeze_while_hive_waits_withdraws_the_delivered_offer(monkeypatch):
     from scripts.hub.readiness import Readiness
 
