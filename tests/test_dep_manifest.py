@@ -336,6 +336,40 @@ def test_the_manifest_job_builds_and_uploads_it_beside_sonar_and_nothing_caches_
     assert not any("cache/save" in step.get("uses", "") for step in job["steps"] + _job("sonar")["steps"])
 
 
+@pytest.mark.parametrize("torn", ["", "line", "database"])
+def test_a_torn_shard_download_is_caught_and_downloaded_again_before_the_build(tmp_path: Path, torn: str) -> None:
+    steps = _job("dep-manifest")["steps"]
+    names = [step.get("name") for step in steps]
+    check = _step("dep-manifest", "Check the shard coverage downloads")
+    again = _step("dep-manifest", "Download torn shard coverage again")
+    assert (
+        names.index("Download shard coverage, attempt 2")
+        < names.index(check["name"])
+        < names.index(again["name"])
+        < names.index("Build the test dependency manifest")
+    )
+    assert check["continue-on-error"] is True
+    assert again["if"] == f"steps.{check['id']}.outcome == 'failure'"
+    assert again["with"] == _step("dep-manifest", "Download shard coverage")["with"]
+    shard = tmp_path / ".coverage-shards" / "coverage-3.12-7"
+    (shard / "dep-inputs").mkdir(parents=True)
+    data = CoverageData(str(shard / ".coverage"))
+    data.add_lines({str(tmp_path / "module.py"): [1]})
+    data.write()
+    line = json.dumps({"test": "tests/test_x.py::test_x", "inputs": []})
+    (shard / "dep-inputs" / "a.jsonl").write_text(line[:9] + "\n" if torn == "line" else line + "\n")
+    if torn == "database":
+        (shard / ".coverage").write_bytes((shard / ".coverage").read_bytes()[:4096])
+    result = subprocess.run(
+        [check["shell"], "-e", "-c", check["run"]],
+        cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(ROOT)),
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) is (torn == ""), result.stdout + result.stderr
+
+
 def test_the_coverage_baseline_carries_no_dependency_manifest_step():
     baseline = _job("coverage-baseline")["steps"]
     assert not any("dependency manifest" in step.get("name", "") for step in baseline)
