@@ -5433,6 +5433,17 @@
       ]
     },
     {
+      "id": "root-hive-lane-spokes",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-root-hive-spokes",
+      "behaviour": "Every hive with a NATS bus starts its eng, ci and plan lane spokes, the workstation root hive outside a distributed deployment included, so the root hive beats presence and takes the workstation offers pinned to it; only a memory bus is refused.",
+      "seam": "scripts.hive.lanes.serve through scripts.hive.lanes.run_once",
+      "tests": [
+        "tests/hive/test_lanes.py::test_lane_spokes_start_on_the_root_hive_outside_a_distributed_deployment",
+        "tests/hive/test_lanes.py::test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why"
+      ]
+    },
+    {
       "id": "monitor-counts-registered-seats",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2506",

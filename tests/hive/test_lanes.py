@@ -226,13 +226,16 @@ def test_each_lane_pass_polls_every_spoke_with_the_given_timeout(monkeypatch):
     assert [spoke.poll.call_args.args for spoke in polled] == [(17,), (17,)]
 
 
-def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
+@pytest.mark.feature("root-hive-lane-spokes")
+@pytest.mark.parametrize(
+    "deployment",
+    [{}, {"AGENTIHOOKS_DEPLOYMENT": "local"}, {"AGENTIHOOKS_DEPLOYMENT": "distributed"}],
+)
+def test_lane_spokes_start_on_the_root_hive_outside_a_distributed_deployment(monkeypatch, deployment):
     started = []
     monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
+    environ = {**deployment, "AGENTIHOOKS_BUS": "nats", "HIVE_EXCLUDED": "master"}
 
-    assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "local"}) is None
-    assert lanes.serve({}) is None
-    environ = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_BUS": "nats", "HIVE_EXCLUDED": "master"}
     thread = lanes.serve(environ)
     thread.join(5)
 
@@ -240,12 +243,14 @@ def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
     assert started == [environ]
 
 
+@pytest.mark.feature("root-hive-lane-spokes")
+@pytest.mark.parametrize("deployment", [{}, {"AGENTIHOOKS_DEPLOYMENT": "distributed"}])
 @pytest.mark.parametrize("bus", [{}, {"AGENTIHOOKS_BUS": ""}, {"AGENTIHOOKS_BUS": "memory"}])
-def test_a_distributed_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(monkeypatch, capsys, bus):
+def test_a_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(monkeypatch, capsys, bus, deployment):
     started = []
     monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
 
-    assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "distributed", **bus}) is None
+    assert lanes.serve({**deployment, **bus}) is None
 
     assert started == []
     assert capsys.readouterr().err == (
