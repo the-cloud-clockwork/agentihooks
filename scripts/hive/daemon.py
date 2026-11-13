@@ -390,7 +390,11 @@ def unit(binary: str) -> str:
     )
 
 
-def install(binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run) -> bool:
+def install(
+    binary: str | None = None,
+    unit_dir: Path | None = None,
+    run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run,
+) -> bool:
     binary = binary or shutil.which("agentihooks")
     if not binary:
         raise registry.HiveError("agentihooks executable not found")
@@ -405,7 +409,7 @@ def install(binary: str | None = None, unit_dir: Path | None = None, run: Callab
     return result.returncode == 0
 
 
-def restart(run: Callable = subprocess.run) -> bool:
+def restart(run: Callable[..., "subprocess.CompletedProcess[str]"] = subprocess.run) -> bool:
     """Restart the hive user service so it loads its env files again."""
     result = run(["systemctl", "--user", "restart", UNIT], capture_output=True, text=True, timeout=30)
     return result.returncode == 0

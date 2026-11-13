@@ -280,10 +280,12 @@ def _nats_trust(args: argparse.Namespace) -> str:
     return "\n".join([*lines, f"wrote the public operator trust to {args.values}"])
 
 
-def _root_bus() -> str:
-    import hooks.config  # noqa: F401
+def _root_bus(_: argparse.Namespace) -> str:
+    from scripts import operator_env
     from scripts.hive import daemon, root_bus, scope
     from scripts.swarm import commands
+
+    operator_env.fill(os.environ)
 
     if member := scope.member():
         raise auth.HiveError(f"this host joined as hive member {member}, whose hive env carries its bus settings")
@@ -607,10 +609,8 @@ def _run(args: argparse.Namespace) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
-        elif args.command == "root-bus":
-            print(_root_bus())
-        elif args.command in ("setup", "nats-trust"):
-            print((_setup if args.command == "setup" else _nats_trust)(args))
+        elif args.command in ("setup", "nats-trust", "root-bus"):
+            print({"setup": _setup, "nats-trust": _nats_trust, "root-bus": _root_bus}[args.command](args))
         else:
             return _serve(args)
     except auth.HiveError as exc:

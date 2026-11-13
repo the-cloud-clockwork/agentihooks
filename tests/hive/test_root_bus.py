@@ -3,6 +3,7 @@ import stat
 import pytest
 from dotenv import dotenv_values
 
+from scripts import operator_env
 from scripts.events import nkey
 from scripts.events.config import BusConfig
 from scripts.hive import auth, cli, daemon, nats_grant, registry
@@ -47,7 +48,6 @@ def test_the_root_bus_env_resolves_to_nats_with_a_root_member_credential(tmp_pat
 
 @pytest.mark.feature("hive-root-bus-settings")
 def test_the_root_bus_settings_stay_out_of_the_env_files_every_process_loads(tmp_path):
-    from scripts import operator_env
     from scripts.hive import root_bus
 
     (tmp_path / ".env").write_text("")
@@ -80,6 +80,7 @@ def test_hive_root_bus_writes_the_settings_then_reinstalls_and_restarts_the_serv
     from scripts.swarm import commands
 
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setattr(cli, "_signer", _signer)
     monkeypatch.setattr(commands, "hive_id", lambda: "root")
@@ -100,6 +101,7 @@ def test_hive_root_bus_writes_the_settings_then_reinstalls_and_restarts_the_serv
 @pytest.mark.feature("hive-root-bus-settings")
 def test_hive_root_bus_refuses_without_the_hub_signer(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setattr(cli, "_signer", lambda: None)
 
@@ -116,6 +118,7 @@ def test_hive_root_bus_refuses_on_a_joined_member_host(tmp_path, monkeypatch, ca
     from scripts.hive import scope
 
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setattr(operator_env, "fill", lambda environ: [])
     monkeypatch.setattr(scope, "member", lambda: "hive-7")
     monkeypatch.setattr(cli, "_signer", _signer)
 
