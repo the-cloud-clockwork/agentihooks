@@ -185,7 +185,7 @@ Identity reuse is safe because a stored fragment value is never changed in
 place: a write applies its operations to a separate writer copy of thawed
 values, and the stored tree is replaced, not edited.
 
-Two paths build a new tree:
+Three cases build a new tree:
 
 | Path | Previous tree | What the change saves |
 |---|---|---|
@@ -203,7 +203,7 @@ hosted write p95 over one live hour on release 2.17.466, before the change,
 was 1.334 s against the 0.82 s baseline. The after hour on a release carrying it
 is measured with the command in
 [Measuring operations writes](#measuring-operations-writes) and recorded on
-ledger task t1871.
+ledger task t1871-measure.
 
 `tests/swarm_ledger/test_fragment_encoding.py` guards the behaviour: it builds
 a document whose state shares one row and the title with the previous one,
