@@ -179,7 +179,7 @@ class Spoke:
             self._publish(Envelope.from_dict(prior["event"]))
             self._clear_current(event)
             delivery.ack()
-            self._report_launch(event, prior.get("launch"))
+            self._report_launch(event, json.loads(entry.value).get("launch") if entry else None)
             return "started"
         if waiting := self._waiting(prior):
             delivery.nak(self.config.policy.ack_wait_ms)
