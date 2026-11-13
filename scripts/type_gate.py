@@ -170,7 +170,7 @@ def importers(head: Path, files: list[str], modules: set[str], transitive: bool 
     return found
 
 
-def graded(base: Path, head: Path, transitive: bool = True) -> set[str]:
+def graded(base: Path, head: Path, transitive: bool) -> set[str]:
     """Return the sources the gate grades for growth: changed ones and the sources that import them.
 
     Importers are followed through other sources when transitive, else only the direct ones are kept.
