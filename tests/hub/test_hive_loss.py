@@ -84,8 +84,7 @@ def rig():
     ledger.update_task = update
     returned = []
     life = lifecycle.Lifecycle(bus, store, ledger, release=lambda *args: returned.append(args))
-    loss = hive_loss.HiveLoss(bus, clock)
-    loss._store = store
+    loss = hive_loss.HiveLoss(bus, clock, store)
     hub = runner.HubRunner(bus, registry.Registry([loss.reactor(), life.reactor()]), "hub", clock)
     first = spoke("hive-a", "agent-a", "execution-a", 7)
     offer(0)

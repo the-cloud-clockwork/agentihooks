@@ -8,7 +8,9 @@ from scripts.events.bus import Bus, StateConflict
 from scripts.events.envelope import Envelope
 from scripts.hive import execution_events, presence
 from scripts.hub import lease
+from scripts.hub.reconciler import event_slugs
 from scripts.hub.registry import Reactor
+from scripts.swarm.store import RedisStore, connect
 
 BUCKET = "hub-hive-loss"
 INDEX = "started"
@@ -19,8 +21,9 @@ GAP_MS = presence.BEAT_SECONDS * 1000
 
 
 class HiveLoss:
-    def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms):
+    def __init__(self, bus: Bus, clock: lease.Clock = lease.wall_ms, store: RedisStore | None = None):
         self._bus = bus
+        self._store = store
         self._state = bus.state(BUCKET)
         self._clock = clock
         self._emit = execution_events.emit
@@ -52,11 +55,19 @@ class HiveLoss:
         by_hive = defaultdict(list)
         for key, raw in (json.loads(entry.value) if entry else {}).items():
             by_hive[(raw["swarm"], raw["data"]["hive"])].append((key, Envelope.from_dict(raw)))
+        events: set[str] = set()
+        if by_hive:
+            self._store = self._store or connect()
+            events = set(event_slugs(self._store))
         done, losses = [], []
         for (swarm, hive), starts in by_hive.items():
             if not guard():
                 break
-            lost = now - self._watching >= presence.TTL_MS and presence.lost(self._bus.for_swarm(swarm), hive, now)
+            lost = (
+                swarm in events
+                and now - self._watching >= presence.TTL_MS
+                and presence.lost(self._bus.for_swarm(swarm), hive, now)
+            )
             if lost or prune:
                 settled, ended = self._settle(starts, lost, now)
                 done += settled

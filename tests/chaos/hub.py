@@ -2,6 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import fakeredis
+
 from scripts.events.config import BusConfig, QueuePolicy
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
@@ -9,6 +11,7 @@ from scripts.events.subjects import subject
 from scripts.hub import hive_loss, runner
 from scripts.hub.registry import Reactor, Registry
 from scripts.swarm import readiness
+from scripts.swarm.store import EVENTS_ENGINE, PREFIX, RedisStore
 from tests.chaos.hive import GENERATIONS
 from tests.chaos.journal import Journal, now_ms
 
@@ -49,7 +52,11 @@ def main(argv: list[str]) -> int:
 
     bus = open_bus(BusConfig(backend="nats", url=args.url))
     reactor = Reactor(REACTOR, subject(args.swarm, "execution", "exited"), settle, singleton=True)
-    hub = runner.HubRunner(bus, Registry([hive_loss.HiveLoss(bus).reactor(), reactor]), args.name)
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.redis.sadd(f"{PREFIX}:index", args.swarm)
+    store.redis.hset(store.key(args.swarm, "config"), "engine", EVENTS_ENGINE)
+    loss = hive_loss.HiveLoss(bus, store=store)
+    hub = runner.HubRunner(bus, Registry([loss.reactor(), reactor]), args.name)
     journal.write("connected")
     try:
         return runner._run(hub, False)
