@@ -161,8 +161,9 @@ of thread CPU against 79 ms for encode and parse.
 
 The repository keeps each cached ledger as a tree of fragments (the
 `fragments` module of the ledger repository): one fragment per top level key,
-per row of a list, and per `_meta` member, with `_meta.events` as a list and
-`_meta.stamps` as a map of records. An export joins each fragment's UTF-8
+per row of a top level list, and per `_meta` member, with `_meta.events` as a
+list and `_meta.stamps` as a map of records. A list nested inside a row is
+part of that row's fragment. An export joins each fragment's UTF-8
 bytes, which are kept on the fragment once built, so the export of a later
 generation that shares a fragment joins its bytes without encoding it again.
 The stored text is encoded again from the fragments each time it is read.
