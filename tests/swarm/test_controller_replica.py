@@ -254,7 +254,7 @@ def leader() -> Any:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Leader)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_address[1]}"
+    yield f"127.0.0.1:{server.server_address[1]}"
     server.shutdown()
     server.server_close()
 
@@ -359,7 +359,7 @@ def test_a_standby_refuses_when_the_leader_is_unreachable() -> None:
     from scripts.swarm_v2 import standby as standby_api
 
     store = RedisStore(_redis())
-    standby_api.publish_leader(store, "rig", "http://127.0.0.1:9")
+    standby_api.publish_leader(store, "rig", "127.0.0.1:9")
     standby = standby_api.Standby(store, "rig")
     assert standby.route("POST", "/v2/executions", "Bearer grant", {}) == (
         503,
@@ -431,7 +431,7 @@ def test_the_leading_control_service_publishes_its_pod_address(tmp_path: Any) ->
         assert service.start() is True
         assert service.server is not None
         port = service.server.server_port
-        assert store.redis.get(store.key("rig", standby_api.LEADER_KEY)) == f"http://10.0.0.7:{port}"
+        assert store.redis.get(store.key("rig", standby_api.LEADER_KEY)) == f"10.0.0.7:{port}"
         assert store.redis.pttl(store.key("rig", standby_api.LEADER_KEY)) > 0
     finally:
         service.stop()

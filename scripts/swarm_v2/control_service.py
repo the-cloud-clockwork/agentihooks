@@ -219,7 +219,7 @@ class ControlService:
         if self.published is not None and self.secure is None:
             self.serve_published(*self.published)
         if self.server is not None and self.address:
-            standby.publish_leader(store, slug, f"http://{self.address}:{self.server.server_port}", lease.ttl_ms())
+            standby.publish_leader(store, slug, f"{self.address}:{self.server.server_port}", lease.ttl_ms())
         if self.server is not None and self.api_url and slug in store.slugs():
             config = store.config(slug)
             if config.api_url != self.api_url or config.control_url != self.control_url:

@@ -4,6 +4,7 @@ import http.client
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from scripts.swarm_v2.api import health, readiness
 from scripts.swarm_v2.auth_context import GrantRefused
 
 LEADER_KEY = "controller-api-leader"
+SCHEME = "http"
 FORWARD_S = 30
 STANDBY = "standby"
 UNAVAILABLE = "dependency_unavailable"
@@ -52,7 +54,8 @@ def forward(address: str, method: str, path: str, authorization: str, body: obje
     """Send one control API request to the leader at ``address`` and return its status and JSON reply."""
     data = None if body is None else json.dumps(body).encode()
     headers = {"Authorization": authorization, "Content-Type": "application/json"}
-    request = urllib.request.Request(address + path, data=data, method=method, headers=headers)
+    url = urllib.parse.urlunsplit((SCHEME, address, path, "", ""))
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=FORWARD_S) as response:
             return response.status, json.loads(response.read())
