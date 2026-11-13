@@ -6,6 +6,9 @@ import sys
 from types import SimpleNamespace
 from typing import Any
 
+from packaging.version import InvalidVersion, Version
+
+from scripts import updater
 from scripts.hive import account_slots
 from scripts.hub import lease
 from scripts.swarm import readiness, run_window, successor_fill
@@ -16,6 +19,14 @@ ADMITTED = "spoke-admission"
 # Long enough for every redelivery of one offer; a reopen raises the claim generation, so a new offer has a new key.
 ADMITTED_MS = 24 * 60 * 60 * 1000
 ANSWER_MS = account_slots.REQUEST_TIMEOUT_MS - 2_000
+
+
+def release_key(text: str) -> Version | None:
+    """The PEP 440 release a version string names; None for an unreported or unparsable one."""
+    try:
+        return Version(text)
+    except InvalidVersion:
+        return None
 
 
 class LateAdmission(RuntimeError):
@@ -51,6 +62,9 @@ class Admission:
 
     def admit(self, slug: str, request: dict[str, Any]) -> dict | None:
         started = self.clock()
+        if older := self._outdated(request["hive"]):
+            refused(slug, request, older)
+            return None
         held = self.store.redis.get(self._key(slug, request))
         if held:
             admitted = json.loads(held)
@@ -99,6 +113,15 @@ class Admission:
             file=sys.stderr,
         )
         raise LateAdmission(f"admission of {request['task']} finished after hive {request['hive']} stopped waiting")
+
+    def _outdated(self, hive: str) -> str:
+        """The member release below the hub release it is refused for; empty when either release is unreported."""
+        from scripts.hive import registry
+
+        record: Any = registry.show(self.store.redis, hive) or {}  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportUnknownArgumentType]
+        member, hub = str(record.get("version")), updater.installed_version()
+        reported, floor = release_key(member), release_key(hub)
+        return f"release {member} below hub release {hub}" if reported and floor and reported < floor else ""
 
     def _unplaceable(self, row: dict[str, Any], hive: str) -> str:
         """Why a draining hive, a workstation task, a task pinned to another hive or one needing what the hive lacks is
