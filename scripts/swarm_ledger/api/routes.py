@@ -5,6 +5,7 @@ import logging
 import operator
 import os
 import re
+from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -208,7 +209,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path in ("export", "swarm/export"):
         return export(handler, services, slug, path, payload)
     if path == "operations":
-        request_metrics.detailed(operation_kinds(payload))
+        request_metrics.detailed(operation_kinds(cast(dict[str, Any], payload)))
         return mutations.apply(services, slug, principal, payload, mutations.writer(handler.headers))
     if path == "architecture/actions":
         from . import architecture
@@ -253,9 +254,10 @@ def export_shape(handler: object, payload: object) -> str:
     """The export read's shape and caller, such as ``since parts scoped events by tick``: ``bare`` names a read with
     no since and ``full`` a read since zero, both of which rebuild the whole export, and ``refused`` a body that is
     no object. The caller is the server's request caller cut to one bounded token."""
-    from scripts.swarm_ledger.ledger_server import request_caller
+    from scripts.swarm_ledger import ledger_server
 
-    caller = request_caller(getattr(handler, "headers", None))
+    resolve = cast(Callable[[object], str], ledger_server.request_caller)
+    caller = resolve(getattr(handler, "headers", None))
     caller = caller if CALLER.fullmatch(caller) else "-"
     if not isinstance(payload, dict):
         return f"refused by {caller}"
