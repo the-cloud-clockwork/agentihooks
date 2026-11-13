@@ -2,6 +2,14 @@
 
 One entry per change merged into dev, newest release first. Each entry names its date, merge commit, pull request and author, so a change can be found by date and hash.
 
+## v2.17.852 · 2026-11-13
+
+### 2026-11-13 · d4fe5d5f72c8 · #11040 · @nestorcolt
+
+**Type SwarmConfig.links so scripts.swarm.store meets its type baseline**
+
+This change adds an explicit `list[Any]` type annotation to `SwarmConfig.links` in `scripts/swarm/store.py`, dropping the file's strict type errors from 742 to 740, back under the 741 recorded in `tests/TYPE_BASELINE.json`. Without this, any pull request that touches this file fails the type gate, as happened twice with #10866. Landing it as a standalone fix avoids bundling it with that larger PR, which already pushed mutation stats across hundreds of files past their budgets.
+
 ## v2.17.850 · 2026-11-13
 
 ### 2026-11-13 · a95ac2f0f362 · #11031 · @agenticore-app
