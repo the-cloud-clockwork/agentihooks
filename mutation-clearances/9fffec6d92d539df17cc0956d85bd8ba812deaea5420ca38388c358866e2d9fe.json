@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__lead:40b42662de1a304c59d0a7aa6f01e8f154f0803faf30624772da0304f68bf5f5": {
+    "reader": "standards_reader",
+    "reason": "flush=False equals the default and the image's PYTHONUNBUFFERED=1 already writes through, so the leads-the-passes line is emitted identically."
+  }
+}

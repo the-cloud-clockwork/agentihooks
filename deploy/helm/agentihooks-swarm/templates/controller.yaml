@@ -6,6 +6,10 @@
 {{- $ca := .Values.controller.terminalCa | default dict }}
 {{- $jump := .Values.controller.jump | default dict }}
 {{- $schedulerState := .Values.controller.schedulerState }}
+{{- $replicas := int .Values.controller.replicas }}
+{{- if lt $replicas 1 }}
+{{- fail "controller.replicas must be at least 1" }}
+{{- end }}
 {{- if and $schedulerState (not (has (toString $schedulerState) (list "redis" "bus"))) }}
 {{- fail "controller.schedulerState must be redis or bus: it picks where the scheduler keeps its lease and slots" }}
 {{- end }}
@@ -129,6 +133,21 @@ spec:
     {{- end }}
 ---
 {{- end }}
+{{- if gt $replicas 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -141,9 +160,16 @@ metadata:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller
 spec:
-  replicas: 1
+  replicas: {{ $replicas }}
   strategy:
+    {{- if gt $replicas 1 }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- else }}
     type: Recreate
+    {{- end }}
   selector:
     matchLabels:
       {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
@@ -249,7 +275,7 @@ spec:
             - sh
             - -c
             - >-
-              agentihooks hive controller >/dev/null
+              agentihooks hive controller --holder "$AGENTIHOOKS_CONTROLLER_REPLICA" >/dev/null
               && . "$AGENTIHOOKS_HOME/controller/credential.env"
               && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
               && exec agentihooks controller run
@@ -321,6 +347,14 @@ spec:
                   fieldPath: metadata.uid
             - name: AGENTIHOOKS_POD_CONTAINER
               value: controller
+            - name: AGENTIHOOKS_CONTROLLER_REPLICA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             {{- with .Values.controller.hostSwarms }}
             - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
               value: {{ join "," . | quote }}

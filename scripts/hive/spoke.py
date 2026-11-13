@@ -147,6 +147,8 @@ class Spoke:
         if status == "launching" and state.get("owner") == self.config.hive:
             if not self._end_leftover(state["name"]):
                 return "uncertain"
+            if record["attempt"] < self.config.policy.max_deliver:
+                self.tasks.reopen(event)
             self.bus.state("spoke-work").update(
                 claim_key(event), json.dumps({"state": "ready"}).encode(), entry.revision
             )
@@ -202,6 +204,7 @@ class Spoke:
             current = json.loads(claims.get(key).value)
             if current["state"] == "ready" and delivery.attempt < self.config.policy.max_deliver:
                 self._clear_pending(pending_revision)
+                self.tasks.reopen(event)
             raise
         if started is None:
             self._clear_pending(pending_revision)

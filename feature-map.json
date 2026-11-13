@@ -14,6 +14,53 @@
       ]
     },
     {
+      "id": "controller-standby-replica",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-controller-standby",
+      "behaviour": "Controller replicas of one hive take a Redis replica lock before running passes, so two replicas never run a pass at the same time; a standby serves health and forwards the control API to the leader, takes the lock once the leader releases it or it expires, and each replica holds its own controller credential so a second replica never retires the leader's.",
+      "seam": "replica.ReplicaLock, standby.Standby, control_service.stand_by, controller._lead, auth.issue_controller with a holder, and the controller chart replicas, rolling update and disruption budget",
+      "tests": [
+        "tests/swarm/test_controller_replica.py::test_two_replicas_never_run_a_pass_at_the_same_time",
+        "tests/swarm/test_controller_replica.py::test_the_standby_takes_over_once_the_leader_releases",
+        "tests/swarm/test_controller_replica.py::test_the_standby_takes_over_once_the_leader_lock_expires",
+        "tests/swarm/test_controller_replica.py::test_a_replica_lock_is_scoped_to_its_hive",
+        "tests/swarm/test_controller_replica.py::test_the_beat_renews_the_lock_until_stopped",
+        "tests/swarm/test_controller_replica.py::test_the_beat_reports_a_lost_lock_once_and_ends",
+        "tests/swarm/test_controller_replica.py::test_the_beat_rides_out_a_renewal_error_only_while_the_lock_cannot_have_expired",
+        "tests/swarm/test_controller_replica.py::test_a_lock_is_fresh_until_its_last_take_nears_expiry",
+        "tests/swarm/test_controller_replica.py::test_a_take_counts_from_before_its_round_trip",
+        "tests/swarm/test_controller_replica.py::test_an_unnamed_replica_has_no_lock_and_never_reaches_redis",
+        "tests/swarm/test_controller_replica.py::test_a_named_replica_locks_its_hive",
+        "tests/swarm/test_controller_replica.py::test_the_keeper_calls_its_action_until_stopped",
+        "tests/swarm/test_controller_replica.py::test_a_standby_answers_health_itself",
+        "tests/swarm/test_controller_replica.py::test_a_standby_forwards_every_other_request_to_the_leader",
+        "tests/swarm/test_controller_replica.py::test_a_standby_refuses_a_leader_reply_that_is_not_json",
+        "tests/swarm/test_controller_replica.py::test_a_published_standby_forwards_only_the_recovery_paths",
+        "tests/swarm/test_controller_replica.py::test_a_standby_refuses_while_no_replica_leads",
+        "tests/swarm/test_controller_replica.py::test_a_standby_refuses_when_the_leader_is_unreachable",
+        "tests/swarm/test_controller_replica.py::test_a_standby_bounds_each_forwarded_request_by_its_timeout",
+        "tests/swarm/test_controller_replica.py::test_a_standby_serves_its_api_and_published_ports_until_closed",
+        "tests/swarm/test_controller_replica.py::test_a_standby_without_an_api_serves_nothing",
+        "tests/swarm/test_controller_replica.py::test_the_leading_control_service_publishes_its_pod_address",
+        "tests/swarm/test_controller_replica.py::test_a_control_service_without_a_pod_address_publishes_none",
+        "tests/swarm/test_controller_replica.py::test_hosting_takes_the_pod_address_the_leader_publishes",
+        "tests/swarm/test_controller_replica.py::test_a_named_replica_stands_by_until_the_leader_releases",
+        "tests/swarm/test_controller_replica.py::test_passes_hand_the_replica_lock_to_every_pass",
+        "tests/swarm/test_controller_replica.py::test_controller_run_stands_by_then_releases_its_replica_lock",
+        "tests/swarm/test_controller_replica.py::test_controller_run_without_a_named_replica_never_stands_by",
+        "tests/swarm/test_controller_replica.py::test_a_named_replica_with_no_leader_leads_without_standing_by",
+        "tests/swarm/test_controller_replica.py::test_a_replica_that_lost_the_lead_exits_at_once",
+        "tests/swarm/test_controller_replica.py::test_a_replica_renews_its_lock_before_every_pass_and_never_runs_one_without_it",
+        "tests/swarm/test_controller_replica.py::test_a_replica_keeps_its_own_controller_credential",
+        "tests/swarm/test_controller_replica.py::test_a_shared_controller_credential_needs_no_keeping",
+        "tests/swarm_ledger/test_controller_credential.py::test_two_replica_controller_credentials_stay_valid_side_by_side",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_issues_a_replica_credential_for_a_holder",
+        "tests/test_swarm_chart_controller_rollout.py::test_the_kind_proof_checks_the_controller_rollout_before_any_cluster_starts",
+        "tests/test_swarm_chart_controller_rollout.py::test_the_chart_defaults_to_one_controller_and_rolls_more_out_with_one_always_ready",
+        "tests/swarm_ledger/test_controller_credential.py::test_the_hive_controller_command_names_no_holder_unless_given_one"
+      ]
+    },
+    {
       "id": "codex-expired-routing",
       "origin": "regression",
       "ledger_item": "ledger:rig-grade-swarm/tasks/t2490",
@@ -522,6 +569,20 @@
       "tests": [
         "tests/hub/test_admission.py::test_the_hub_admits_no_launch_for_a_hive_draining_for_a_release",
         "tests/hub/test_admission.py::test_the_hub_admits_a_launch_for_a_hive_that_is_not_draining"
+      ]
+    },
+    {
+      "id": "events-failed-launch-releases-admission",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-events-lost-claims",
+      "behaviour": "A hive whose launch fails after the hub admitted its offer releases that admission through the hub reopen, and the hub releases an admission that finished after the hive stopped waiting, so no claimed agent waits for the controller retire.",
+      "seam": "Spoke failure and own launching recovery paths, and Admission.admit answer window",
+      "tests": [
+        "tests/hive/test_spoke.py::test_failed_work_is_nacked_with_backoff_and_can_be_claimed_on_retry",
+        "tests/hive/test_spoke.py::test_a_launch_failed_on_a_harness_steers_its_task_off_that_harness",
+        "tests/hive/test_spoke.py::test_own_launching_recovery_releases_the_claim_and_takes_new_work",
+        "tests/hub/test_admission.py::test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused",
+        "tests/hub/test_admission.py::test_an_admission_finished_just_inside_the_hive_wait_is_kept"
       ]
     },
     {
@@ -1882,6 +1943,39 @@
       "tests": [
         "tests/swarm/test_health.py::test_ceremony_names_the_agent_its_transitions_and_its_outcomes",
         "tests/swarm/test_health.py::test_a_healthy_event_set_produces_no_finding"
+      ]
+    },
+    {
+      "id": "swarm-health-finding-rows",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
+      "behaviour": "Every health finding stores the ledger rows behind it with the agent's last outcome, marks rows doctrine or the task required, and swarm status and the Swarm health row print them.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health_rows.py::test_ceremony_stores_the_transitions_it_counted_and_the_last_outcome",
+        "tests/swarm/test_health_rows.py::test_rows_doctrine_or_the_task_required_are_marked",
+        "tests/swarm/test_health_rows.py::test_a_task_finding_lists_its_task_rows_and_its_claimant_outcome",
+        "tests/swarm/test_health_rows.py::test_a_seat_finding_reads_the_rows_of_the_agent_in_the_seat",
+        "tests/swarm/test_health_rows.py::test_status_text_prints_every_finding_with_its_rows_and_marks",
+        "tests/swarm/test_health_rows.py::test_status_text_says_when_a_finding_has_no_rows",
+        "tests/swarm/test_health_rows.py::test_a_row_without_a_time_reads_time_zero",
+        "tests/swarm/test_health_rows.py::test_a_task_target_keeps_every_part_after_the_tasks_prefix",
+        "tests/swarm/test_health_rows.py::test_seat_rows_keep_the_agent_events_sorted_by_time_with_their_labels",
+        "tests/swarm/test_health_rows.py::test_the_last_outcome_is_the_latest_done_task_with_an_outcome",
+        "tests/swarm/test_health_rows.py::test_status_text_prints_the_whole_block_in_utc",
+        "tests/swarm/test_health_rows.py::test_an_added_event_without_a_target_queues_nothing",
+        "tests/swarm/test_health_rows.py::test_the_verdict_record_stores_the_rows_and_the_last_outcome",
+        "tests/swarm_ledger/test_swarm_layout.py::test_alert_line_lists_each_open_finding_with_its_rows_and_required_marks"
+      ]
+    },
+    {
+      "id": "swarm-health-proof-loop-parks",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t278",
+      "behaviour": "A claim that ended in a park is no proof loop rerun; review rounds still count.",
+      "seam": "agentihooks swarm status health findings",
+      "tests": [
+        "tests/swarm/test_health_rows.py::test_a_task_claimed_four_times_with_three_parks_is_no_proof_loop"
       ]
     },
     {
@@ -5462,6 +5556,34 @@
         "tests/swarm/test_launch_job.py::test_a_detached_spawn_returns_its_routed_account_model_and_profile",
         "tests/swarm/test_launch_job.py::test_a_detached_placement_takes_the_picked_model_and_effort_or_blanks",
         "tests/swarm/test_successor_retry.py::test_a_retried_successor_record_carries_the_harness_and_account_of_its_retry"
+      ]
+    },
+    {
+      "id": "ledger-task-update-takes-confirmed-pull-request",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-swarm-pr-confirmed-fields",
+      "behaviour": "The ledger task update accepts the confirmed pull request number as a positive integer and its head as a lowercase commit hash, so swarm pr on a confirmed pull request moves the task to pr instead of being refused as schema invalid; any other type for either field is refused.",
+      "seam": "ledger_tasks.check task_update fields and swarm pr through the ledger task update",
+      "tests": [
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_records_the_confirmed_pull_request_number_and_head",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_ledger_check_takes_the_fields_swarm_pr_writes",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_a_task_update_refuses_a_malformed_pull_request_number_or_head",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_head_check_refuses_a_head_that_is_no_string",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_number_check_refuses_with_its_whole_message",
+        "tests/swarm_ledger/test_pr_confirmed_fields.py::test_the_confirmed_pull_check_takes_fields_without_a_number_or_head",
+        "tests/swarm/test_pr_confirmed_fields.py::test_swarm_pr_on_a_confirmed_pull_request_passes_the_ledger_task_update_check"
+      ]
+    },
+    {
+      "id": "ci-select-reuse-download-failure",
+      "origin": "regression",
+      "ledger_item": "ledger:rig-grade-swarm/tasks/t-select-artifact-timeout",
+      "behaviour": "When downloading a dev run's reusable test record times out or fails, test selection counts that run as having no record and moves on to older runs or to no record, so the select step never fails on a slow or broken artifact download.",
+      "seam": "scripts.ci_test_plan.find_record through scripts.ci_test_plan.main",
+      "tests": [
+        "tests/test_ci_test_plan.py::test_a_failed_record_download_names_the_github_error_and_runs_every_test",
+        "tests/test_ci_test_plan.py::test_a_failed_download_of_every_run_counts_as_no_record",
+        "tests/test_ci_test_plan.py::test_a_failed_download_of_a_newer_run_moves_on_to_an_older_record"
       ]
     }
   ],

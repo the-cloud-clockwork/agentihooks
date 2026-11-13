@@ -359,6 +359,8 @@ def _parser() -> argparse.ArgumentParser:
     drained.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to finish")
     sub.add_parser(
         "controller", help="Write a new controller service credential to a private file, retiring the previous one"
+    ).add_argument(
+        "--holder", default=auth.NO_HOLDER, help="controller replica that keeps its own credential beside the others"
     )
     serve = sub.add_parser("serve", help="Run the hive refresh endpoint")
     serve.add_argument("--host", default="127.0.0.1")
@@ -578,7 +580,7 @@ def _run(args: argparse.Namespace) -> int:
         elif args.command == "compare":
             return _compare(args.base)
         elif args.command == "controller":
-            path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
+            path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client(), args.holder))
             print(f"issued a controller credential; it is in {path}")
         elif args.command in ("set", "show", "list"):
             _registry(args)

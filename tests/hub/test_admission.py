@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -269,6 +270,43 @@ def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
         {"claimed_by": name},
     )
     assert rig.admitter.reopen(SLUG, ask()) is False
+
+
+@pytest.mark.feature("events-failed-launch-releases-admission")
+def test_an_admission_finished_after_the_hive_stopped_waiting_is_released_and_refused(rig: SimpleNamespace) -> None:
+    rig.admitter.clock = late_clock(0)
+
+    with pytest.raises(admission.LateAdmission, match="t1"):
+        rig.admitter.admit(SLUG, ask())
+
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("open", "")
+    assert rig.store.redis.get(rig.admitter._key(SLUG, ask())) is None
+
+
+@pytest.mark.feature("events-failed-launch-releases-admission")
+def test_an_admission_finished_just_inside_the_hive_wait_is_kept(rig: SimpleNamespace) -> None:
+    rig.admitter.clock = late_clock(-1)
+
+    name = rig.admitter.admit(SLUG, ask())["name"]
+
+    assert rig.store.claimant(SLUG, "t1") == name
+    assert rig.rows["t1"]["state"] == "claimed"
+
+
+def late_clock(offset: int) -> Callable[[], int]:
+    readings: list[None] = []
+
+    def clock() -> int:
+        readings.append(None)
+        return 7_000 if len(readings) == 1 else 7_000 + admission.ANSWER_MS + offset
+
+    return clock
+
+
+def test_the_hub_answers_inside_the_window_the_hive_waits_for_an_admission() -> None:
+    assert 0 < admission.ANSWER_MS < account_slots.REQUEST_TIMEOUT_MS
 
 
 def test_an_admission_carries_no_avoided_harness_until_a_launch_fails_on_one(rig):

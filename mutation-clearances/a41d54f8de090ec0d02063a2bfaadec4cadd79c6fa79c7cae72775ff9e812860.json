@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/standby.py:scripts.swarm_v2.standby.x_forward:97c523dd298c53e84570035cf9389c21362bf914ab7be8de3593eea340701e19": {
+    "reader": "standards_reader",
+    "reason": "urllib.request.Request stores header names with str.capitalize(); on this Python, a lowercase 'authorization' yields the same stored key 'Authorization' (checked with python3 -I), so the request sent on the wire is identical."
+  }
+}

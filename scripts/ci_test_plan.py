@@ -138,7 +138,13 @@ def _usable(
             tally["failed"] += 1
             continue
         try:
-            manifest = _manifest(download.result())
+            data = download.result()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            print(f"Dev run {run['id']} manifest download failed: {error}")
+            tally["unavailable"] += 1
+            continue
+        try:
+            manifest = _manifest(data)
         except UnusableRecord as error:
             raise UnusableRecord(f"Dev run {run['id']}: {error}") from error
         if manifest.get("commit") != run["head_sha"]:
