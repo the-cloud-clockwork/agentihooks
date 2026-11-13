@@ -278,10 +278,10 @@ def test_a_skipped_run_whose_download_fails_does_not_stop_the_lookup(monkeypatch
     [subprocess.TimeoutExpired(["gh"], 60), subprocess.CalledProcessError(1, ["gh"])],
     ids=["timeout", "failure"],
 )
-def test_a_failed_download_of_the_only_run_counts_as_no_record(
-    monkeypatch: pytest.MonkeyPatch, error: subprocess.SubprocessError
+def test_a_failed_download_of_every_run_counts_as_no_record(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], error: subprocess.SubprocessError
 ) -> None:
-    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    _github(monkeypatch, [_run(2), _run(1)], manifests={2: _manifest(2), 1: _manifest(1)})
     api = ci_test_plan._api
 
     def fail(endpoint: str) -> bytes:
@@ -291,6 +291,10 @@ def test_a_failed_download_of_the_only_run_counts_as_no_record(
 
     monkeypatch.setattr(ci_test_plan, "_api", fail)
     assert ci_test_plan.find_record(REPOSITORY, LATER) is None
+    out = capsys.readouterr().out
+    assert f"Dev run 2 manifest download failed: {error}\n" in out
+    assert f"Dev run 1 manifest download failed: {error}\n" in out
+    assert ": 2 kept no manifest or shard coverage, 0 failed unit shards" in out
 
 
 @pytest.mark.feature("ci-select-reuse-download-failure")
