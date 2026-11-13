@@ -211,8 +211,9 @@ def test_a_draining_hive_beats_presence_on_every_events_swarm(monkeypatch: pytes
 
     lanes.beat(configs({"a": "events", "legacy": "legacy"}), bus, "root")
 
-    beaten = json.loads(bus.for_swarm("a").state(presence.BUCKET).get("root").value)
-    assert beaten == {"heartbeat_ms": 1_000, "expires_ms": 1_000 + presence.TTL_MS}
+    entry = bus.for_swarm("a").state(presence.BUCKET).get("root")
+    assert entry is not None
+    assert json.loads(entry.value) == {"heartbeat_ms": 1_000, "expires_ms": 1_000 + presence.TTL_MS}
     assert bus.for_swarm("legacy").state(presence.BUCKET).get("root") is None
     bus.close()
 
