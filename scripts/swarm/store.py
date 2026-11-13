@@ -803,11 +803,12 @@ class RedisStore:
     def launches(self, slug: str, task: str | None = None) -> list[dict]:
         """Every launch row, or with ``task`` only rows whose raw record names that task, decoding nothing else."""
         needle = "" if task is None else json.dumps(task)
-        launched = self.redis.hgetall(self.key(slug, "launches")).items()
-        rows = {name: json.loads(raw) for name, raw in launched if needle in raw}
+        launched = self.redis.hgetall(self.key(slug, "launches"))
+        rows = {name: json.loads(raw) for name, raw in launched.items() if needle in raw}
         history = [json.loads(raw) for raw in self.redis.lrange(self.key(slug, "history"), 0, -1) if needle in raw]
         for agent in [*history, *(asdict(a) for a in self.agents(slug))]:
-            if agent.get("profile_decision", {}).get("validation", {}).get("state") == "validated":
+            validated = agent.get("profile_decision", {}).get("validation", {}).get("state") == "validated"
+            if validated and agent["name"] not in launched:
                 rows.setdefault(
                     agent["name"],
                     {
