@@ -75,7 +75,7 @@ class Finding:
     def id(self):
         return f"{self.kind.replace(' ', '-')}/{self.subject}"
 
-    def as_dict(self) -> dict[str, object]:
+    def as_dict(self) -> dict[str, Any]:
         """The finding as status and the page read it; rows appear once attached."""
         found = asdict(self)
         del found["measure"], found["basis"], found["evidence_identity"], found["metrics"]
