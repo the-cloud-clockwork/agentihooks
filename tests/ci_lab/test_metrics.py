@@ -41,7 +41,9 @@ COUNTERS = {
     "ci_lab_verdict_mismatch_total",
 }
 VALUE = r'"(?:[^"\\]|\\.)*"'
-SAMPLE = re.compile(rf"^([a-z_]+)(\{{[a-z_]+={VALUE}(,[a-z_]+={VALUE})*\}})? ([+-]Inf|-?[0-9]+\.[0-9]+(e[+-][0-9]+)?)$")
+SAMPLE = re.compile(
+    rf"^([a-z_]+)(\{{[a-z_]+={VALUE}(,[a-z_]+={VALUE})*\}})? ([+-]Inf|-?[0-9]+(\.[0-9]+)?(e[+-][0-9]+)?)$"
+)
 
 
 def test_the_contract_holds_exactly_the_architecture_names() -> None:
@@ -109,6 +111,8 @@ def test_observe_load_sets_queue_slot_budget_and_shed_gauges() -> None:
         assert f'ci_lab_units_queued{{class="{name}"}}' in text
     assert 'ci_lab_units_queued{class="pull_request"} 2.0' in text
     assert 'ci_lab_units_running{class="queue"} 2.0' in text
+    assert 'ci_lab_queue_wait_seconds{class="pull_request"} 10.0' in text
+    assert 'ci_lab_queue_wait_seconds{class="backfill"} 0.0' in text
     assert 'ci_lab_class_shed{class="backfill"} 1.0' in text
     assert 'ci_lab_class_shed{class="queue"} 0.0' in text
     assert "\nci_lab_slots_total 5.0\n" in text
