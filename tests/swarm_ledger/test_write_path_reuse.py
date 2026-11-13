@@ -163,6 +163,6 @@ def test_changed_children_of_a_list_without_ids_keeps_each_position_identity() -
 
 
 def test_changed_children_counts_an_earlier_duplicate_whose_id_is_the_word_index() -> None:
-    left = [{"id": "index", "v": 1}, {"id": "index", "v": 2}]
-    right = [left[0], {"id": "index", "v": 3}]
+    left: list[object] = [{"id": "index", "v": 1}, {"id": "index", "v": 2}]
+    right: list[object] = [left[0], {"id": "index", "v": 3}]
     assert rows._changed_children(left, right, ["items"]) == [(left[1], right[1], ["items", ["id", "index", 1]], 1)]
